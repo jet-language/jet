@@ -1,0 +1,15 @@
+Error [E2305]: returned views need a stable owner relationship
+  --> tests/ui/view_return_unknown_owner_set.jet:2:12
+    |
+  2 |     return 0
+    |            ^
+ Why: each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`
+
+Error [E0113]: `bad_view` promises to return `View`<Int>, but this returns Int (a whole number)
+  --> tests/ui/view_return_unknown_owner_set.jet:2:12
+    |
+  2 |     return 0
+    |            ^
+ Why: the value handed back must match the type after `=>`
+ Fix: use `View`<Int> here

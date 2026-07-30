@@ -174,10 +174,11 @@ impl<'a> Checker<'a> {
                     len,
                     len_symbol,
                 },
-                Type::Fn { params, ret, effect_bound } => Type::Fn {
+                Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
                     params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
                     ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
                     effect_bound,
+                    return_view_provenance,
                 },
                 Type::Tagged { marker, inner } => Type::Tagged {
                     marker,

@@ -33,6 +33,7 @@ impl<'a> Checker<'a> {
                     restore_moved.push(restored);
                 }
             }
+            self.record_condition_view_bindings(&ifs.cond);
             // D-LIN1: the `#SingleUse` bindings that outlive this `if` — declared in an
             // enclosing scope (not the `if`-cond scope just pushed) and not already
             // consumed before the `if`. These are the candidates for the

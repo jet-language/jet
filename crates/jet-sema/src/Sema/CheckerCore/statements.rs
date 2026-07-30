@@ -1338,19 +1338,24 @@ impl<'a> Checker<'a> {
                                     } else {
                                         self.report_string_view_boundary(e.span());
                                     }
-                                } else if let Some((_, place, _, access)) = self
-                                    .view_call_sources(e)
-                                    .into_iter()
-                                    .find(|(path, ..)| path.is_empty())
-                                {
-                                    self.check_named_view_return(
-                                        &place,
-                                        access,
-                                        Vec::new(),
-                                        e.span(),
-                                    );
                                 } else {
-                                    self.report_string_view_boundary(e.span());
+                                    let sources: Vec<_> = self
+                                        .view_call_sources(e)
+                                        .into_iter()
+                                        .filter(|(path, ..)| path.is_empty())
+                                        .collect();
+                                    if sources.is_empty() {
+                                        self.report_string_view_boundary(e.span());
+                                    } else {
+                                        for (_, place, _, access) in sources {
+                                            self.check_named_view_return(
+                                                &place,
+                                                access,
+                                                Vec::new(),
+                                                e.span(),
+                                            );
+                                        }
+                                    }
                                 }
                             } else if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                                 if let Expr::Ident(n, nspan) = &*e {
@@ -1359,12 +1364,24 @@ impl<'a> Checker<'a> {
                                     } else {
                                         self.report_view_return_boundary(e.span());
                                     }
-                                } else if let Some((_, place, _, access)) =
-                                    self.view_call_sources(e).into_iter().find(|(path, ..)| path.is_empty())
-                                {
-                                    self.check_named_view_return(&place, access, Vec::new(), e.span());
                                 } else {
-                                    self.report_view_return_boundary(e.span());
+                                    let sources: Vec<_> = self
+                                        .view_call_sources(e)
+                                        .into_iter()
+                                        .filter(|(path, ..)| path.is_empty())
+                                        .collect();
+                                    if sources.is_empty() {
+                                        self.report_view_return_boundary(e.span());
+                                    } else {
+                                        for (_, place, _, access) in sources {
+                                            self.check_named_view_return(
+                                                &place,
+                                                access,
+                                                Vec::new(),
+                                                e.span(),
+                                            );
+                                        }
+                                    }
                                 }
                             }
                             // D-MEM1 stage S5: no dedicated "returning a string

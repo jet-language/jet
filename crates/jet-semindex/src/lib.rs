@@ -18,7 +18,7 @@ pub use Types::{
     InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
     OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
     StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
-    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
+    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
     SCHEMA_VERSION,
 };
 pub use Symbols::{
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 11);
+        assert_eq!(SCHEMA_VERSION, 12);
     }
 
     #[test]

@@ -1,11 +1,3 @@
-Error [E2305]: this view points into `arena`, which this function owns
-  --> tests/ui/arena_view_escape.jet:8:12
-    |
-  8 |     return x
-    |            ^
- Why: `arena` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
- Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
-
 Error [E0631]: `x` cannot be shared — it does not live long enough to be returned
   --> tests/ui/arena_view_escape.jet:8:12
     |

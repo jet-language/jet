@@ -476,12 +476,20 @@ impl<'a> Parser<'a> {
                                 // separate fast-path `expr_primary` takes when the
                                 // receiver is a bare leading identifier (`incidents.
                                 // view(0..2)`), not a chained postfix expression.
-                                let start = self.expr()?;
-                                self.expect(
-                                    TokKind::DotDot,
-                                    "a `..` between the view's start and end",
-                                )?;
-                                let end = self.expr()?;
+                                let range = self.expr()?;
+                                let Expr::Range { start, end, .. } = range else {
+                                    return Err(Diagnostic::error(
+                                        "E0003",
+                                        "expected a `..` between the view's start and end"
+                                            .to_string(),
+                                        "the structure here isn't what the compiler expected"
+                                            .to_string(),
+                                        "use `..` between the view's start and end".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                };
+                                let start = *start;
+                                let end = *end;
                                 let start_span = start.span();
                                 let end_span = end.span();
                                 args.push(CallArg {

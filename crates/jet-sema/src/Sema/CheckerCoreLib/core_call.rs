@@ -1271,7 +1271,7 @@ impl<'a> Checker<'a> {
                         let fn_ty = Type::Fn {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1311,7 +1311,7 @@ impl<'a> Checker<'a> {
                         let fn_ty = Type::Fn {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1358,7 +1358,7 @@ impl<'a> Checker<'a> {
                         let key_fn = Type::Fn {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(Type::String)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 1, &key_fn, key_arg);
                     }
@@ -1367,7 +1367,7 @@ impl<'a> Checker<'a> {
                             let value_fn = Type::Fn {
                                 params: vec![row_ty],
                                 ret: Some(Box::new(Type::Float)),
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             };
                             self.expect_core_arg(name, 2, &value_fn, value_arg);
                         }
@@ -1421,7 +1421,7 @@ impl<'a> Checker<'a> {
                         let key_fn = Type::Fn {
                             params: vec![left_row.clone()],
                             ret: Some(Box::new(Type::String)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 2, &key_fn, left_key);
                     }
@@ -1429,7 +1429,7 @@ impl<'a> Checker<'a> {
                         let key_fn = Type::Fn {
                             params: vec![right_row.clone()],
                             ret: Some(Box::new(Type::String)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 3, &key_fn, right_key);
                     }
@@ -1475,7 +1475,7 @@ impl<'a> Checker<'a> {
                             let key_fn = Type::Fn {
                                 params: vec![row_ty.clone()],
                                 ret: Some(Box::new(Type::String)),
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             };
                             self.expect_core_arg(name, idx, &key_fn, arg);
                         }
@@ -1484,7 +1484,7 @@ impl<'a> Checker<'a> {
                         let value_fn = Type::Fn {
                             params: vec![row_ty],
                             ret: Some(Box::new(Type::Float)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(name, 3, &value_fn, value_arg);
                     }

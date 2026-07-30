@@ -248,6 +248,14 @@ fn type_show(ty: &Type) -> String {
         Type::Named(n) => n.clone(),
         Type::List(inner) => format!("[{}]", type_show(inner)),
         Type::Map { value, .. } => format!("Map<String, {}>", type_show(value)),
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            ..
+        } => format!(
+            "Fn {{ params: {params:?}, ret: {ret:?}, effect_bound: {effect_bound:?} }}"
+        ),
         other => format!("{other:?}"),
     }
 }

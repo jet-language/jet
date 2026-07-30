@@ -2647,19 +2647,28 @@ fn semver_break_e2601() {
 }
 
 #[test]
-fn returned_view_source_change_feeds_e1218_and_e2601() {
+fn returned_view_source_union_change_feeds_e1218_and_e2601() {
     use jet::Publish::SemVer::SemVer;
     use jet::Publish::{classify_bump, diff_public_api, e1218, e2601, ApiItem, BumpKind};
 
-    let item = |source: usize| ApiItem {
+    let item = |source: &str| ApiItem {
         kind: "fn".into(),
         name: "pick".into(),
         signature: format!(
-            "fn pick(left: [Int], right: [Int]) => View<Int> ; view_source = parameter:{source};access:read;path:range"
+            "fn pick(left: [Int], right: [Int]) => View<Int> ; view_source = {source}"
         ),
     };
-    let changes = diff_public_api(&[item(0)], &[item(1)]);
-    assert_eq!(changes.len(), 1, "owner-source drift must be breaking");
+    let changes = diff_public_api(
+        &[item("parameter:0;access:read;path:range")],
+        &[item(
+            "one_of(parameter:0;path:range,parameter:1;path:range);access:read",
+        )],
+    );
+    assert_eq!(
+        changes.len(),
+        1,
+        "adding a possible owner to a source union must be breaking"
+    );
     assert!(changes[0].description.contains("parameter:0"));
     assert!(changes[0].description.contains("parameter:1"));
 

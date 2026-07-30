@@ -1647,6 +1647,56 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 5: `[a, b, c]` → `vec![a, b, c]` (growable) or `[a, b, c]` (fixed).
         // D-FIXARR1: if the expression type is FixedList, emit a Rust array literal `[…]`.
         TExprKind::ListLit(elems) => {
+            let mut common_owner = None;
+            let mut mutable_ranges = Vec::new();
+            let mut range_values = None;
+            for elem in elems {
+                let TExprKind::BuiltinMethod {
+                    recv,
+                    op: TBuiltinOp::ViewMutNew { line },
+                    args,
+                } = &elem.kind
+                else {
+                    mutable_ranges.clear();
+                    break;
+                };
+                if !matches!(args.len(), 1 | 2)
+                    || range_values.is_some_and(|range| range != (args.len() == 1))
+                {
+                    mutable_ranges.clear();
+                    break;
+                }
+                range_values.get_or_insert(args.len() == 1);
+                let owner = emit_tir_expr(recv, cx);
+                if common_owner.as_ref().is_some_and(|seen| seen != &owner) {
+                    mutable_ranges.clear();
+                    break;
+                }
+                common_owner.get_or_insert(owner);
+                mutable_ranges.push(if args.len() == 1 {
+                    format!("({}, {})", emit_tir_expr(&args[0], cx), line)
+                } else {
+                    format!(
+                        "({}, {}, {})",
+                        emit_tir_expr(&args[0], cx),
+                        emit_tir_expr(&args[1], cx),
+                        line
+                    )
+                });
+            }
+            if !mutable_ranges.is_empty() && mutable_ranges.len() == elems.len() {
+                return format!(
+                    "{}(&mut ({}), &[{}], {:?})",
+                    if range_values == Some(true) {
+                        "jet_views_mut_range_new"
+                    } else {
+                        "jet_views_mut_new"
+                    },
+                    common_owner.expect("mutable view list has an owner"),
+                    mutable_ranges.join(", "),
+                    cx.file,
+                );
+            }
             let parts = elems
                 .iter()
                 .map(|e| emit_tir_expr(e, cx))
@@ -1764,6 +1814,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
             } else if *uninit_fixed {
                 format!("(({b})[({i}) as usize].clone())")
+            } else if matches!(
+                &e.ty,
+                Type::Apply { name, .. } if name == "ViewMut"
+            ) {
+                format!(
+                    "(&mut **jet_index_vec_mut(&mut ({}), {}, {:?}, {}))",
+                    b, i, cx.file, line
+                )
             } else {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }

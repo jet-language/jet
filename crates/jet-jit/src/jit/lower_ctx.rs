@@ -14201,7 +14201,21 @@ impl LowerCtx<'_, '_> {
                     let end = args
                         .get(1)
                         .ok_or_else(|| "jit view-mut needs end".to_string())?;
-                    (self.lower_expr(start)?, self.lower_expr(end)?)
+                    let start = self.lower_expr(start)?;
+                    let end = self.lower_expr(end)?;
+                    let inclusive = self.b.ins().iconst(types::I64, 0);
+                    let line = self.b.ins().iconst(types::I32, *line as i64);
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_range_end, self.b.func);
+                    let call = self
+                        .b
+                        .ins()
+                        .call(host, &[recv_val, start, end, inclusive, line]);
+                    let end_exclusive = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    (start, self.b.ins().isub(end_exclusive, one))
                 };
                 self.emit_view_mut_window(recv_val, start, end)
             }

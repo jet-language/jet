@@ -1316,7 +1316,13 @@ impl<'a> EvalCtx<'a> {
                         let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
                         let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
                         if start < 0 || end < start || end as usize >= xs.len() {
-                            return Err(unsupported("view-mut bounds", self.span()));
+                            return Err(super::view_bounds_diagnostic(
+                                xs.len(),
+                                start,
+                                end,
+                                false,
+                                self.span(),
+                            ));
                         }
                         (start, end + 1)
                     };
@@ -3885,8 +3891,19 @@ impl<'a> EvalCtx<'a> {
         ) {
             return Ok(self.store_stream(func, argv));
         }
+        let mut owner_rebases = HashMap::new();
+        for ((parameter, _, _), argument) in func.params.iter().zip(args.iter()) {
+            if let Some(owner) = super::raw_place_local(&argument.value) {
+                let jet_parameter = parameter
+                    .strip_prefix("user_")
+                    .unwrap_or(parameter.as_str());
+                owner_rebases.insert(parameter.clone(), owner.name.clone());
+                owner_rebases.insert(jet_parameter.to_string(), owner.name.clone());
+            }
+        }
         let mut child = HashMap::new();
-        let result = self.run_func(func, argv, &mut child)?;
+        let mut result = self.run_func(func, argv, &mut child)?;
+        super::rebase_view_mut_owners(&mut result, &owner_rebases);
         // CtValue params are copy-in/copy-out. Fragment lowering often lacks
         // `cx.sigs`, so call-site `borrow`/`mut_borrow` flags may be false —
         // use the callee's own param conventions instead (#722).

@@ -1824,7 +1824,7 @@ impl<'a> Checker<'a> {
                             let expected_fn = Type::Fn {
                                 params: vec![Type::Named("GameFrame".to_string())],
                                 ret: None,
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             };
                             let saved_esc = self.lambda_escapes;
                             let saved_exp = self.expected_type.clone();
@@ -2317,7 +2317,7 @@ impl<'a> Checker<'a> {
                                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
                                 err: Box::new(Type::Named("HTTPError".to_string())),
                             })),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                         &mut args[1],
                     );
@@ -2420,7 +2420,7 @@ impl<'a> Checker<'a> {
                         let cb = Type::Fn {
                             params: vec![Type::Named("Match".to_string())],
                             ret: Some(Box::new(Type::String)),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.expect_core_arg(method, 1, &cb, &mut args[1]);
                     }

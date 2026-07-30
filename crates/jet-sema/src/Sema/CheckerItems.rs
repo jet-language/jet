@@ -1944,6 +1944,41 @@ impl<'a> Checker<'a> {
         if bindings.values().all(type_is_copy) {
             return;
         }
+        if let Expr::Ident(name, name_span) = subject {
+            if self.is_borrowed_binding(name)
+                && self
+                    .lookup(name)
+                    .is_some_and(|info| !is_cloneable(&info.ty, self.registry))
+            {
+                if self
+                    .diags
+                    .iter()
+                    .any(|diag| diag.code == "E0120" && diag.span == Some(*name_span))
+                {
+                    return;
+                }
+                let ty = self
+                    .lookup(name)
+                    .map(|info| info.ty.show().trim_matches('`').to_string())
+                    .unwrap_or_else(|| "value".to_string());
+                self.diags.push(Diagnostic::error(
+                    "E0120",
+                    format!("`{name}` was not moved here, so its contents cannot be taken apart"),
+                    format!(
+                        "`{name}` is a read-only parameter, and `{ty}` contains a value that cannot be copied"
+                    ),
+                    format!(
+                        "change the parameter to `{name}: {}{ty}`, or inspect it without binding its contents",
+                        Syntax::SIGIL_MOVE
+                    ),
+                    Some(*name_span),
+                ));
+                return;
+            }
+        }
+        if self.transfer_mutable_pattern_subject(subject) {
+            return;
+        }
         if let Expr::Ident(n, nspan) = subject {
             if n != Syntax::KW_IT && self.lookup(n).is_some() {
                 self.mark_moved(n.clone(), *nspan);

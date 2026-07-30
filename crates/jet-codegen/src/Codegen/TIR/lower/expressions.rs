@@ -2619,6 +2619,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     params,
                     ret,
                     effect_bound: None,
+                    return_view_provenance: lam.meta.return_view_provenance.clone(),
                 },
                 kind: TExprKind::Lambda(Box::new(tl)),
             }

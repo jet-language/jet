@@ -507,6 +507,7 @@ impl<'a> Checker<'a> {
                         restore_moved.push(restored);
                     }
                 }
+                self.record_condition_view_bindings(cond);
                 self.check_block(then_body, false);
                 let then_ty = self.infer(then_value);
                 self.pop_scope();
@@ -1838,7 +1839,7 @@ impl<'a> Checker<'a> {
                             ok: Box::new(Type::Named("HTTPResponse".to_string())),
                             err: Box::new(Type::Named("HTTPError".to_string())),
                         })),
-                        effect_bound: None,
+                        effect_bound: None, return_view_provenance: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -2146,6 +2147,16 @@ impl<'a> Checker<'a> {
             // list element against it (nested `[U8]` lists, struct `.{}` forms,
             // and fixed-width scalars with range checks).
             let saved = self.expected_type.clone();
+            let saved_string_view_read = self.allow_string_view_read;
+            let string_view_elements = matches!(
+                expected_inner.as_ref(),
+                Type::Apply { name, args }
+                    if name == "View"
+                        && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+            );
+            if string_view_elements {
+                self.allow_string_view_read = true;
+            }
             self.expected_type = Some(expected_inner.as_ref().clone());
             for e in elems.iter_mut() {
                 match e {
@@ -2170,23 +2181,22 @@ impl<'a> Checker<'a> {
                     }
                     _ => {
                         if let Some(t) = self.infer(e) {
-                            if self.type_contains_view_boundary(&t) {
-                                self.diags.push(Diagnostic::error(
-                                    "E2305",
-                                    "a view cannot be stored in a list".to_string(),
-                                    "lists have no public owner-provenance slot, so moving the list could outlive the storage this element views"
-                                        .to_string(),
-                                    "store the view in a named struct field whose provenance sema can publish, or copy the viewed values into an owned list"
-                                        .to_string(),
-                                    Some(e.span()),
-                                ));
+                            let string_view_compatible = string_view_elements
+                                && t == Type::String
+                                && (matches!(
+                                    e,
+                                    Expr::Ident(name, _) if self.is_string_view(name)
+                                ) || self.string_view_call_source(e).is_some());
+                            if !string_view_compatible {
+                                self.check_type_assignable(&expected_inner, &t, e.span());
                             }
-                            self.check_type_assignable(&expected_inner, &t, e.span());
                         }
                     }
                 }
             }
             self.expected_type = saved;
+            self.allow_string_view_read = saved_string_view_read;
+            self.check_list_view_element_aliases(elems, &expected_inner);
             return Some(Type::List(expected_inner));
         }
         let mut elem_types = Vec::new();
@@ -2213,17 +2223,6 @@ impl<'a> Checker<'a> {
                 }
                 _ => {
                     if let Some(t) = self.infer(e) {
-                        if self.type_contains_view_boundary(&t) {
-                            self.diags.push(Diagnostic::error(
-                                "E2305",
-                                "a view cannot be stored in a list".to_string(),
-                                "lists have no public owner-provenance slot, so moving the list could outlive the storage this element views"
-                                    .to_string(),
-                                "store the view in a named struct field whose provenance sema can publish, or copy the viewed values into an owned list"
-                                    .to_string(),
-                                Some(e.span()),
-                            ));
-                        }
                         elem_types.push(t);
                     }
                 }
@@ -2246,6 +2245,7 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
+        self.check_list_view_element_aliases(elems, &first);
         Some(Type::List(Box::new(first)))
     }
 
@@ -2915,7 +2915,7 @@ impl<'a> Checker<'a> {
                         let ty = Type::Fn {
                             params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
                             ret: sig.return_type.clone().map(Box::new),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);

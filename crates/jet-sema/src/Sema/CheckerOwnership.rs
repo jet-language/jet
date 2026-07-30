@@ -5,8 +5,8 @@ use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Collections;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, ElseBranch, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt, Type,
-    UnOp, VariantPayload,
+    AccessConvention, BinOp, ElseBranch, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt,
+    Type, UnOp, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -315,12 +315,55 @@ impl<'a> Checker<'a> {
         access: ViewAccess,
         span: Span,
     ) {
-        if self.view_facts.bindings.iter().any(|(name, fact)| {
-            self.view_is_live_now(name)
-                && fact.invalidated.is_none()
-                && (fact.access == ViewAccess::Write || access == ViewAccess::Write)
+        self.record_view_with_exemptions(
+            name,
+            output_path,
+            place,
+            kind,
+            access,
+            span,
+            None,
+            None,
+        );
+    }
+
+    fn record_view_with_exemptions(
+        &mut self,
+        name: &str,
+        output_path: Vec<String>,
+        place: ViewPlace,
+        kind: ViewKind,
+        access: ViewAccess,
+        span: Span,
+        transfer_from: Option<&str>,
+        enum_variants: Option<&HashSet<String>>,
+    ) {
+        let conflicts = self.view_facts.bindings.iter().any(|(existing_name, fact)| {
+            if !self.view_is_live_now(existing_name) || fact.invalidated.is_some() {
+                return false;
+            }
+            if transfer_from == Some(existing_name.as_str()) {
+                return false;
+            }
+            // Several candidates for one logical output slot are alternatives,
+            // not simultaneous borrows. Enum variants are likewise mutually
+            // exclusive even though their payload paths differ.
+            if existing_name == name
+                && (fact.output_path == output_path
+                    || enum_variants.is_some_and(|variants| {
+                        Self::view_paths_are_enum_alternatives(
+                            variants,
+                            &fact.output_path,
+                            &output_path,
+                        )
+                    }))
+            {
+                return false;
+            }
+            (fact.access == ViewAccess::Write || access == ViewAccess::Write)
                 && fact.place.overlaps(&place)
-        }) {
+        });
+        if conflicts {
             let place_name = Self::place_name(&place);
             self.diags.push(Diagnostic::error(
                 "E0212",
@@ -342,6 +385,20 @@ impl<'a> Checker<'a> {
         self.view_facts.push(name.to_string(), fact);
     }
 
+    fn view_paths_are_enum_alternatives(
+        variants: &HashSet<String>,
+        left: &[String],
+        right: &[String],
+    ) -> bool {
+        let (Some(left_variant), Some(right_variant)) = (left.first(), right.first()) else {
+            return false;
+        };
+        if left_variant == right_variant {
+            return false;
+        }
+        variants.contains(left_variant) && variants.contains(right_variant)
+    }
+
     fn view_fact(&self, name: &str) -> Option<&ViewFact> {
         let binding = self.lookup(name)?;
         self.view_facts.current_for_binding(name, binding.def_span)
@@ -355,18 +412,30 @@ impl<'a> Checker<'a> {
     }
 
     fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
-        self.view_facts(name)
-            .into_iter()
-            .filter(|fact| output_path.starts_with(&fact.output_path))
-            .max_by_key(|fact| fact.output_path.len())
+        self.view_facts_at_path(name, output_path).into_iter().next()
     }
 
-    fn compose_view_source_place(
+    fn view_facts_at_path(&self, name: &str, output_path: &[String]) -> Vec<&ViewFact> {
+        let candidates: Vec<_> = self
+            .view_facts(name)
+            .into_iter()
+            .filter(|fact| output_path.starts_with(&fact.output_path))
+            .collect();
+        let Some(longest) = candidates.iter().map(|fact| fact.output_path.len()).max() else {
+            return Vec::new();
+        };
+        candidates
+            .into_iter()
+            .filter(|fact| fact.output_path.len() == longest)
+            .collect()
+    }
+
+    fn compose_view_source_places(
         &self,
         actual: &Expr,
         projections: &[crate::AST::ViewSourceProjection],
         span: Span,
-    ) -> Option<ViewPlace> {
+    ) -> Vec<ViewPlace> {
         let leading_fields: Vec<String> = projections
             .iter()
             .map_while(|projection| match projection {
@@ -375,19 +444,27 @@ impl<'a> Checker<'a> {
             })
             .collect();
         if let Expr::Ident(name, _) = actual {
-            if let Some(fact) = self.view_fact_at_path(name, &leading_fields) {
-                let mut place = fact.place.clone();
-                append_view_source_projections(
-                    &mut place,
-                    &projections[fact.output_path.len()..],
-                    span,
-                );
-                return Some(place);
+            let facts = self.view_facts_at_path(name, &leading_fields);
+            if !facts.is_empty() {
+                return facts
+                    .into_iter()
+                    .map(|fact| {
+                        let mut place = fact.place.clone();
+                        append_view_source_projections(
+                            &mut place,
+                            &projections[fact.output_path.len()..],
+                            span,
+                        );
+                        place
+                    })
+                    .collect();
             }
         }
-        let mut place = self.place_from_expr(actual)?;
+        let Some(mut place) = self.place_from_expr(actual) else {
+            return Vec::new();
+        };
         append_view_source_projections(&mut place, projections, span);
-        Some(place)
+        vec![place]
     }
 
     fn view_is_live_now(&self, name: &str) -> bool {
@@ -2114,6 +2191,20 @@ impl<'a> Checker<'a> {
         if let Expr::Copy(inner, _) | Expr::Paren(inner, _) = init {
             return self.view_call_sources(inner);
         }
+        if let Expr::Ident(name, _) = init {
+            return self
+                .view_facts(name)
+                .into_iter()
+                .map(|fact| {
+                    (
+                        fact.output_path.clone(),
+                        fact.place.clone(),
+                        fact.kind,
+                        fact.access,
+                    )
+                })
+                .collect();
+        }
         if let Expr::If {
             then_value,
             else_value,
@@ -2133,6 +2224,73 @@ impl<'a> Checker<'a> {
                 sources.extend(self.view_call_sources(value));
             }
             return sources;
+        }
+        if let Expr::ListLit(elements, _) = init {
+            let mut sources = Vec::new();
+            for element in elements {
+                for (mut path, place, kind, access) in self.view_call_sources(element) {
+                    path.insert(0, "[]".to_string());
+                    sources.push((path, place, kind, access));
+                }
+            }
+            return sources;
+        }
+        if let Expr::TupleLit(fields, ..) = init {
+            let mut sources = Vec::new();
+            for (field, value) in fields {
+                for (mut path, place, kind, access) in self.view_call_sources(value) {
+                    path.insert(0, field.clone());
+                    sources.push((path, place, kind, access));
+                }
+            }
+            return sources;
+        }
+        if let Expr::StructLit { fields, .. } = init {
+            let mut sources = Vec::new();
+            for (field, _, value) in fields {
+                for (mut path, place, kind, access) in self.view_call_sources(value) {
+                    path.insert(0, field.clone());
+                    sources.push((path, place, kind, access));
+                }
+            }
+            return sources;
+        }
+        if let Expr::EnumLit { variant, args, .. } = init {
+            let mut sources = Vec::new();
+            for (index, arg) in args.iter().enumerate() {
+                let (slot, value) = match arg {
+                    crate::AST::EnumLitArg::Positional(value) => (index.to_string(), value),
+                    crate::AST::EnumLitArg::Named { label, expr } => (label.clone(), expr),
+                };
+                for (mut path, place, kind, access) in self.view_call_sources(value) {
+                    path.insert(0, slot.clone());
+                    path.insert(0, variant.clone());
+                    sources.push((path, place, kind, access));
+                }
+            }
+            return sources;
+        }
+        if let Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Tainted(inner, _, _) = init
+        {
+            return self.view_call_sources(inner);
+        }
+        if let Expr::Index { base, .. } = init {
+            let projected: Vec<_> = self
+                .view_call_sources(base)
+                .into_iter()
+                .filter_map(|(mut path, place, kind, access)| {
+                    (path.first().map(String::as_str) == Some("[]")).then(|| {
+                        path.remove(0);
+                        (path, place, kind, access)
+                    })
+                })
+                .collect();
+            if !projected.is_empty() {
+                return projected;
+            }
         }
         if let Expr::Field(base, field, _) = init {
             let projected: Vec<_> = self
@@ -2162,10 +2320,54 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Call(call) = init {
+            if let Some(Type::Fn {
+                params,
+                ret,
+                return_view_provenance,
+                ..
+            }) = self.lookup(&call.name).map(|info| info.ty.clone())
+            {
+                if !ret
+                    .as_deref()
+                    .is_some_and(|ty| self.type_contains_view_boundary(ty))
+                {
+                    return Vec::new();
+                }
+                let map = return_view_provenance.unwrap_or_else(|| {
+                    ret.as_deref()
+                        .map(|ret| self.conservative_callback_view_provenance(&params, ret))
+                        .unwrap_or_default()
+                });
+                let mut sources = Vec::new();
+                for (output_path, provenance) in map {
+                    for source in provenance.sources {
+                        let crate::AST::ViewSource::Parameter(index) = source.source else {
+                            continue;
+                        };
+                        let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
+                            continue;
+                        };
+                        for place in self.compose_view_source_places(
+                            actual,
+                            &source.projections,
+                            init.span(),
+                        ) {
+                            let kind = self.view_kind_for_place(&place);
+                            let access = if provenance.mutable {
+                                ViewAccess::Write
+                            } else {
+                                ViewAccess::Read
+                            };
+                            sources.push((output_path.clone(), place, kind, access));
+                        }
+                    }
+                }
+                return sources;
+            }
             let Some(sig) = self.funcs.get(&call.name) else {
                 return Vec::new();
             };
-            let Some(map) = sig.return_view_provenance.get().cloned() else {
+            let Some(map) = sig.return_view_provenance.get() else {
                 return Vec::new();
             };
             let string_view = sig.return_type.as_ref().is_some_and(|ty| {
@@ -2185,29 +2387,120 @@ impl<'a> Checker<'a> {
             });
             let mut sources = Vec::new();
             for (output_path, provenance) in map {
-                let crate::AST::ViewSource::Parameter(index) = provenance.source else {
-                    continue;
-                };
-                let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
-                    continue;
-                };
-                let Some(place) = self.compose_view_source_place(
-                    actual,
-                    &provenance.projections,
-                    init.span(),
-                ) else {
-                    self.report_temporary_view_source(actual.span(), string_view);
-                    continue;
-                };
-                let kind = self.view_kind_for_place(&place);
-                let access = if provenance.mutable {
-                    ViewAccess::Write
-                } else {
-                    ViewAccess::Read
-                };
-                sources.push((output_path, place, kind, access));
+                for source in provenance.sources {
+                    let crate::AST::ViewSource::Parameter(index) = source.source else {
+                        continue;
+                    };
+                    let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
+                        continue;
+                    };
+                    let places = self.compose_view_source_places(
+                        actual,
+                        &source.projections,
+                        init.span(),
+                    );
+                    if places.is_empty() {
+                        self.report_temporary_view_source(actual.span(), string_view);
+                        continue;
+                    }
+                    let access = if provenance.mutable {
+                        ViewAccess::Write
+                    } else {
+                        ViewAccess::Read
+                    };
+                    for place in places {
+                        let kind = self.view_kind_for_place(&place);
+                        sources.push((output_path.clone(), place, kind, access));
+                    }
+                }
             }
             return sources;
+        }
+        if let Expr::CallValue { callee, args, .. } = init {
+            let Some(Type::Fn {
+                params,
+                ret,
+                return_view_provenance,
+                ..
+            }) = (match callee.as_ref() {
+                Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+                _ => None,
+            }) else {
+                return Vec::new();
+            };
+            if !ret
+                .as_deref()
+                .is_some_and(|ty| self.type_contains_view_boundary(ty))
+            {
+                return Vec::new();
+            }
+            let map = return_view_provenance.unwrap_or_else(|| {
+                ret.as_deref()
+                    .map(|ret| self.conservative_callback_view_provenance(&params, ret))
+                    .unwrap_or_default()
+            });
+            let mut sources = Vec::new();
+            for (output_path, provenance) in map {
+                for source in provenance.sources {
+                    let crate::AST::ViewSource::Parameter(index) = source.source else {
+                        continue;
+                    };
+                    let Some(actual) = args.get(index).map(|arg| &arg.expr) else {
+                        continue;
+                    };
+                    for place in self.compose_view_source_places(
+                        actual,
+                        &source.projections,
+                        init.span(),
+                    ) {
+                        let kind = self.view_kind_for_place(&place);
+                        let access = if provenance.mutable {
+                            ViewAccess::Write
+                        } else {
+                            ViewAccess::Read
+                        };
+                        sources.push((output_path.clone(), place, kind, access));
+                    }
+                }
+            }
+            return sources;
+        }
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = init
+        {
+            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                if let Some(payload) = self
+                    .resolve_enum_variants_cloned(enum_name)
+                    .and_then(|variants| variants.get(method).cloned())
+                    .map(|(_, payload)| payload)
+                {
+                    let mut sources = Vec::new();
+                    for (index, arg) in args.iter().enumerate() {
+                        let slot = match &payload {
+                            VariantPayload::Unit => continue,
+                            VariantPayload::Single(_, _) => index.to_string(),
+                            VariantPayload::Named(fields) => arg
+                                .label
+                                .as_ref()
+                                .map(|(label, _)| label.clone())
+                                .or_else(|| fields.get(index).map(|field| field.name.clone()))
+                                .unwrap_or_else(|| index.to_string()),
+                        };
+                        for (mut path, place, kind, access) in
+                            self.view_call_sources(&arg.expr)
+                        {
+                            path.insert(0, slot.clone());
+                            path.insert(0, method.clone());
+                            sources.push((path, place, kind, access));
+                        }
+                    }
+                    return sources;
+                }
+            }
         }
         if let Expr::MethodCall {
             receiver,
@@ -2228,34 +2521,38 @@ impl<'a> Checker<'a> {
                         .and_then(|info| info.methods.get(method))
                         .and_then(|sig| sig.return_view_provenance.get())
                 })
-                .cloned()
             else {
                 return Vec::new();
             };
             let mut sources = Vec::new();
             for (output_path, provenance) in map {
-                let actual = match provenance.source {
-                    crate::AST::ViewSource::Receiver => receiver.as_ref(),
-                    crate::AST::ViewSource::Parameter(index) => {
-                        let Some(arg) = args.get(index) else { continue };
-                        &arg.expr
+                for source in provenance.sources {
+                    let actual = match source.source {
+                        crate::AST::ViewSource::Receiver => receiver.as_ref(),
+                        crate::AST::ViewSource::Parameter(index) => {
+                            let Some(arg) = args.get(index) else { continue };
+                            &arg.expr
+                        }
+                        crate::AST::ViewSource::Static { .. } => continue,
+                    };
+                    let places = self.compose_view_source_places(
+                        actual,
+                        &source.projections,
+                        init.span(),
+                    );
+                    if places.is_empty() {
+                        continue;
                     }
-                    crate::AST::ViewSource::Static { .. } => continue,
-                };
-                let Some(place) = self.compose_view_source_place(
-                    actual,
-                    &provenance.projections,
-                    init.span(),
-                ) else {
-                    continue;
-                };
-                let kind = self.view_kind_for_place(&place);
-                let access = if provenance.mutable {
-                    ViewAccess::Write
-                } else {
-                    ViewAccess::Read
-                };
-                sources.push((output_path, place, kind, access));
+                    let access = if provenance.mutable {
+                        ViewAccess::Write
+                    } else {
+                        ViewAccess::Read
+                    };
+                    for place in places {
+                        let kind = self.view_kind_for_place(&place);
+                        sources.push((output_path.clone(), place, kind, access));
+                    }
+                }
             }
             return sources;
         }
@@ -2296,6 +2593,46 @@ impl<'a> Checker<'a> {
         vec![(Vec::new(), place, kind, ViewAccess::Read)]
     }
 
+    pub(crate) fn check_list_view_element_aliases(
+        &mut self,
+        elements: &[Expr],
+        element_ty: &Type,
+    ) {
+        let direct_mutable =
+            matches!(element_ty, Type::Apply { name, .. } if name == "ViewMut");
+        let mut previous: Vec<(ViewPlace, ViewAccess)> = Vec::new();
+        for element in elements {
+            let mut sources: Vec<_> = self
+                .view_call_sources(element)
+                .into_iter()
+                .map(|(_, place, _, access)| (place, access))
+                .collect();
+            if sources.is_empty() && direct_mutable {
+                if let Some(place) = self.place_from_expr(element) {
+                    sources.push((place, ViewAccess::Write));
+                }
+            }
+            for (place, access) in sources {
+                if previous.iter().any(|(existing_place, existing_access)| {
+                    (*existing_access == ViewAccess::Write || access == ViewAccess::Write)
+                        && existing_place.overlaps(&place)
+                }) {
+                    let place_name = Self::place_name(&place);
+                    self.diags.push(Diagnostic::error(
+                        "E0212",
+                        format!("list elements create overlapping views of `{place_name}`"),
+                        "list elements coexist, so an exclusive mutable view cannot overlap another element's view"
+                            .to_string(),
+                        "use disjoint ranges, keep only one mutable view, or store owned values"
+                            .to_string(),
+                        Some(element.span()),
+                    ));
+                }
+                previous.push((place, access));
+            }
+        }
+    }
+
     fn report_temporary_view_source(&mut self, span: Span, string_view: bool) {
         self.diags.push(Diagnostic::error(
             if string_view { "E2307" } else { "E2305" },
@@ -2317,8 +2654,331 @@ impl<'a> Checker<'a> {
         kind: ViewKind,
         access: ViewAccess,
         span: Span,
+        binding_ty: &Type,
+        transfer_from: Option<&str>,
     ) {
-        self.record_view(name, output_path, place, kind, access, span);
+        let enum_variants = match binding_ty {
+            Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
+                .resolve_enum_variants_cloned(type_name)
+                .map(|variants| variants.into_keys().collect::<HashSet<_>>()),
+            _ => None,
+        };
+        self.record_view_with_exemptions(
+            name,
+            output_path,
+            place,
+            kind,
+            access,
+            span,
+            transfer_from,
+            enum_variants.as_ref(),
+        );
+    }
+
+    /// Transfer the hidden view relation from a matched aggregate into the
+    /// names bound by that pattern. Call this only after the arm bindings have
+    /// entered their lexical scope.
+    pub(crate) fn record_condition_view_bindings(&mut self, condition: &Expr) {
+        match condition {
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => self.record_pattern_view_bindings(subject, pattern),
+            Expr::Binary(BinOp::And, left, right, _) => {
+                self.record_condition_view_bindings(left);
+                self.record_condition_view_bindings(right);
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn record_pattern_view_bindings(
+        &mut self,
+        subject: &Expr,
+        pattern: &Pattern,
+    ) {
+        let sources = self.view_call_sources(subject);
+        let transfer_from = sources
+            .iter()
+            .any(|(_, _, _, access)| *access == ViewAccess::Write)
+            .then(|| match subject {
+                Expr::Ident(name, _) => Some(name.as_str()),
+                _ => None,
+            })
+            .flatten();
+        let mut bound_slots = Vec::new();
+
+        match pattern {
+            Pattern::Present {
+                binding,
+                binding_span,
+                ..
+            }
+            | Pattern::Ok {
+                binding,
+                binding_span,
+                ..
+            }
+            | Pattern::Err {
+                binding,
+                binding_span,
+                ..
+            } => {
+                bound_slots.push((binding.clone(), *binding_span, Vec::new()));
+            }
+            Pattern::Variant {
+                variant,
+                bindings: slots,
+                ..
+            } => {
+                let slot_names = self.pattern_variant_slot_names(subject, variant, slots.len());
+                for (index, slot) in slots.iter().enumerate() {
+                    if let crate::AST::PatSlot::Bind { name, span } = slot {
+                        let slot_name = slot_names
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(|| index.to_string());
+                        bound_slots.push((
+                            name.clone(),
+                            *span,
+                            vec![variant.clone(), slot_name],
+                        ));
+                    }
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    if let crate::AST::StructPatField::Bind {
+                        field,
+                        local,
+                        local_span,
+                        ..
+                    } = field
+                    {
+                        bound_slots.push((
+                            local.clone(),
+                            *local_span,
+                            vec![field.clone()],
+                        ));
+                    }
+                }
+            }
+            Pattern::Or(alternatives, _) => {
+                for alternative in alternatives {
+                    self.record_pattern_view_bindings(subject, alternative);
+                }
+                return;
+            }
+            Pattern::Absent(_)
+            | Pattern::Range { .. }
+            | Pattern::StrMatch { .. }
+            | Pattern::BinMatch { .. } => {}
+        }
+
+        for (name, span, source_prefix) in bound_slots {
+            let binding_span = self
+                .lookup(&name)
+                .map(|info| info.def_span)
+                .unwrap_or(span);
+            let mut matched = false;
+            for (path, place, kind, access) in &sources {
+                if !path.starts_with(&source_prefix) {
+                    continue;
+                }
+                matched = true;
+                self.record_view_with_exemptions(
+                    &name,
+                    path[source_prefix.len()..].to_vec(),
+                    place.clone(),
+                    *kind,
+                    *access,
+                    binding_span,
+                    transfer_from,
+                    None,
+                );
+            }
+            if matched {
+                continue;
+            }
+
+            // A view-bearing aggregate parameter has no concrete owner fact
+            // inside its callee. Treat the matched payload as a projection of
+            // that parameter; call-site composition later reconnects the
+            // abstract path to every concrete source in the argument.
+            let Some(base) = self.place_from_expr(subject) else {
+                continue;
+            };
+            let Some(binding_ty) = self.lookup(&name).map(|info| info.ty.clone()) else {
+                continue;
+            };
+            for (output_path, access) in self.view_leaf_paths(&binding_ty) {
+                let mut place = base.clone();
+                for projection in source_prefix.iter().chain(output_path.iter()) {
+                    place.projections.push(if projection == "[]" {
+                        ViewProjection::Index {
+                            value: None,
+                            span,
+                        }
+                    } else {
+                        ViewProjection::Field(projection.clone())
+                    });
+                }
+                let kind = self.view_kind_for_place(&place);
+                self.record_view_with_exemptions(
+                    &name,
+                    output_path,
+                    place,
+                    kind,
+                    access,
+                    binding_span,
+                    transfer_from,
+                    None,
+                );
+            }
+        }
+    }
+
+    fn view_leaf_paths(&self, ty: &Type) -> Vec<(Vec<String>, ViewAccess)> {
+        fn walk(
+            checker: &Checker<'_>,
+            ty: &Type,
+            path: &mut Vec<String>,
+            seen: &mut HashSet<String>,
+            out: &mut Vec<(Vec<String>, ViewAccess)>,
+        ) {
+            match ty {
+                Type::Apply { name, .. } if name == "View" || name == "ViewMut" => {
+                    out.push((
+                        path.clone(),
+                        if name == "ViewMut" {
+                            ViewAccess::Write
+                        } else {
+                            ViewAccess::Read
+                        },
+                    ));
+                }
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                    path.push("[]".to_string());
+                    walk(checker, inner, path, seen, out);
+                    path.pop();
+                }
+                Type::Tuple(fields) => {
+                    for (field, field_ty) in fields {
+                        path.push(field.clone());
+                        walk(checker, field_ty, path, seen, out);
+                        path.pop();
+                    }
+                }
+                Type::Option(inner) | Type::Tagged { inner, .. } => {
+                    walk(checker, inner, path, seen, out);
+                }
+                Type::Result { ok, err } => {
+                    walk(checker, ok, path, seen, out);
+                    walk(checker, err, path, seen, out);
+                }
+                Type::Named(name) | Type::Apply { name, .. } if seen.insert(name.clone()) => {
+                    if let Some(fields) = checker.registry.struct_fields(name) {
+                        for (field, _, field_ty, _) in fields {
+                            path.push(field.clone());
+                            walk(checker, field_ty, path, seen, out);
+                            path.pop();
+                        }
+                    } else if let Some(variants) = checker.resolve_enum_variants_cloned(name) {
+                        for (variant, (_, payload)) in variants {
+                            match payload {
+                                VariantPayload::Unit => {}
+                                VariantPayload::Single(inner, _) => {
+                                    path.push(variant);
+                                    path.push("0".to_string());
+                                    walk(checker, &inner, path, seen, out);
+                                    path.pop();
+                                    path.pop();
+                                }
+                                VariantPayload::Named(fields) => {
+                                    for field in fields {
+                                        path.push(variant.clone());
+                                        path.push(field.name);
+                                        walk(checker, &field.ty, path, seen, out);
+                                        path.pop();
+                                        path.pop();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    seen.remove(name);
+                }
+                _ => {}
+            }
+        }
+
+        let mut out = Vec::new();
+        walk(
+            self,
+            ty,
+            &mut Vec::new(),
+            &mut HashSet::new(),
+            &mut out,
+        );
+        out
+    }
+
+    fn conservative_callback_view_provenance(
+        &self,
+        params: &[Type],
+        ret: &Type,
+    ) -> crate::AST::ViewProvenanceMap {
+        let sources = params
+            .iter()
+            .enumerate()
+            .filter(|(_, ty)| !ty.is_scalar())
+            .map(|(index, _)| crate::AST::ViewSourcePath {
+                source: crate::AST::ViewSource::Parameter(index),
+                projections: Vec::new(),
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        self.view_leaf_paths(ret)
+            .into_iter()
+            .map(|(output_path, access)| {
+                (
+                    output_path,
+                    crate::AST::ViewProvenance {
+                        sources: sources.clone(),
+                        mutable: access == ViewAccess::Write,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn pattern_variant_slot_names(
+        &self,
+        subject: &Expr,
+        variant: &str,
+        slot_count: usize,
+    ) -> Vec<String> {
+        fn subject_type(checker: &Checker<'_>, subject: &Expr) -> Option<Type> {
+            match subject {
+                Expr::Ident(name, _) => checker.lookup(name).map(|info| info.ty.clone()),
+                Expr::Copy(inner, _) | Expr::Paren(inner, _) => subject_type(checker, inner),
+                _ => None,
+            }
+        }
+
+        let named = subject_type(self, subject)
+            .and_then(|ty| match ty {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name),
+                _ => None,
+            })
+            .and_then(|name| self.resolve_enum_variants_cloned(&name))
+            .and_then(|variants| variants.get(variant).cloned())
+            .and_then(|(_, payload)| match payload {
+                VariantPayload::Named(fields) => {
+                    Some(fields.into_iter().map(|field| field.name).collect())
+                }
+                _ => None,
+            });
+
+        named.unwrap_or_else(|| (0..slot_count).map(|index| index.to_string()).collect())
     }
 
     pub(crate) fn transfer_named_view(&mut self, target: &str, source: &str, span: Span) -> bool {
@@ -2339,12 +2999,90 @@ impl<'a> Checker<'a> {
         true
     }
 
+    /// Moving a mutable view out of a view-bearing aggregate transfers the
+    /// exclusive loan. Retire the carrier name without treating that transfer
+    /// as a mutation of the underlying owner.
+    pub(crate) fn mutable_view_aggregate_root(&self, expr: &Expr) -> Option<String> {
+        let expr = match expr {
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => inner.as_ref(),
+            _ => expr,
+        };
+        let (Expr::Field(..) | Expr::Index { .. }) = expr else {
+            return None;
+        };
+        let root = expr_root_ident(expr)?;
+        self.view_facts(root)
+            .iter()
+            .any(|fact| fact.access == ViewAccess::Write)
+            .then(|| root.to_string())
+    }
+
+    pub(crate) fn finish_mutable_view_aggregate_transfer(
+        &mut self,
+        root: Option<&str>,
+        span: Span,
+    ) {
+        if let Some(root) = root {
+            self.moved.insert(root.to_string(), span);
+        }
+    }
+
+    pub(crate) fn transfer_mutable_pattern_subject(&mut self, subject: &Expr) -> bool {
+        let Expr::Ident(name, span) = subject else {
+            return false;
+        };
+        if self
+            .view_facts(name)
+            .iter()
+            .all(|fact| fact.access == ViewAccess::Read)
+        {
+            return false;
+        }
+        self.moved.insert(name.clone(), *span);
+        true
+    }
+
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
         self.view_kind(name).is_some_and(ViewKind::is_named_window)
     }
 
     pub(crate) fn type_contains_view_boundary(&self, ty: &Type) -> bool {
+        fn payload_contains(
+            registry: &TypeRegistry,
+            payload: &VariantPayload,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => contains(registry, ty, seen),
+                VariantPayload::Named(fields) => fields
+                    .iter()
+                    .any(|field| contains(registry, &field.ty, seen)),
+            }
+        }
+
+        fn named_contains(
+            registry: &TypeRegistry,
+            name: &str,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            let found = registry.struct_fields(name).is_some_and(|fields| {
+                fields
+                    .iter()
+                    .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
+            }) || registry.enum_variants(name).is_some_and(|variants| {
+                variants
+                    .values()
+                    .any(|(_, payload)| payload_contains(registry, payload, seen))
+            });
+            seen.remove(name);
+            found
+        }
+
         fn contains(
             registry: &TypeRegistry,
             ty: &Type,
@@ -2356,15 +3094,10 @@ impl<'a> Checker<'a> {
                 {
                     true
                 }
-                Type::Named(name) | Type::Apply { name, .. } => {
-                    if !seen.insert(name.clone()) {
-                        return false;
-                    }
-                    registry.struct_fields(name).is_some_and(|fields| {
-                        fields
-                            .iter()
-                            .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
-                    })
+                Type::Named(name) => named_contains(registry, name, seen),
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(registry, arg, seen))
+                        || named_contains(registry, name, seen)
                 }
                 Type::Option(inner)
                 | Type::List(inner)
@@ -2427,7 +3160,7 @@ impl<'a> Checker<'a> {
 
     /// D-MEM-VIEWRET1=B: accept a returned named view only when its source is
     /// stable at the public boundary. Parameter position, never spelling, is
-    /// the canonical identity. Multiple return paths must agree exactly.
+    /// the canonical identity. Compatible return paths form a source union.
     pub(crate) fn check_named_view_return(
         &mut self,
         place: &ViewPlace,
@@ -2455,46 +3188,57 @@ impl<'a> Checker<'a> {
                 }
             });
         }
-        let provenance = crate::AST::ViewProvenance {
+        let source = crate::AST::ViewSourcePath {
             source,
             projections,
-            mutable: access == ViewAccess::Write,
         };
         let map = self.return_view_provenance.get_or_insert_with(Default::default);
-        if map.get(&output_path).is_some_and(|existing| existing != &provenance) {
+        let provenance = map
+            .entry(output_path)
+            .or_insert_with(|| crate::AST::ViewProvenance {
+                sources: Default::default(),
+                mutable: access == ViewAccess::Write,
+            });
+        if provenance.mutable != (access == ViewAccess::Write) {
             self.diags.push(Diagnostic::error(
                 "E2305",
-                "returned view paths disagree about their owner".to_string(),
-                "each public output slot must name one stable owner source on every return path".to_string(),
-                "for this output field, return views derived from the same parameter and place shape on every path, or return an owned copy".to_string(),
+                "returned view paths disagree about read or write access".to_string(),
+                "one public output slot cannot sometimes be a read view and sometimes be an exclusive write view".to_string(),
+                "return the same view capability on every path".to_string(),
                 Some(span),
             ));
             return;
         }
-        map.insert(output_path, provenance);
+        provenance.sources.insert(source);
     }
 
     pub(crate) fn check_named_view_binding_return(&mut self, name: &str, span: Span) {
-        let Some(fact) = self.view_fact(name).cloned() else {
+        let facts: Vec<_> = self.view_facts(name).into_iter().cloned().collect();
+        if facts.is_empty() {
             self.report_view_return_boundary(span);
             return;
-        };
-        self.check_named_view_return(&fact.place, fact.access, Vec::new(), span);
+        }
+        for fact in facts {
+            self.check_named_view_return(&fact.place, fact.access, fact.output_path, span);
+        }
     }
 
     pub(crate) fn check_named_string_view_binding_return(&mut self, name: &str, span: Span) {
-        let Some(fact) = self.view_fact(name).cloned() else {
+        let facts: Vec<_> = self.view_facts(name).into_iter().cloned().collect();
+        if facts.is_empty() {
             self.report_string_view_boundary(span);
             return;
-        };
-        if !matches!(
-            fact.place.owner.origin,
-            ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_)
-        ) {
-            self.report_string_view_unsupported_use(name, "be returned", span);
-            return;
         }
-        self.check_named_view_return(&fact.place, fact.access, Vec::new(), span);
+        for fact in facts {
+            if !matches!(
+                fact.place.owner.origin,
+                ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_)
+            ) {
+                self.report_string_view_unsupported_use(name, "be returned", span);
+                return;
+            }
+            self.check_named_view_return(&fact.place, fact.access, fact.output_path, span);
+        }
     }
 
     pub(crate) fn check_aggregate_view_return(&mut self, expr: &Expr) {
@@ -2516,6 +3260,30 @@ impl<'a> Checker<'a> {
                         walk(checker, value, path);
                         path.pop();
                     }
+                }
+                Expr::ListLit(elements, _) => {
+                    path.push("[]".to_string());
+                    for value in elements {
+                        walk(checker, value, path);
+                    }
+                    path.pop();
+                }
+                Expr::EnumLit { variant, args, .. } => {
+                    path.push(variant.clone());
+                    for (index, arg) in args.iter().enumerate() {
+                        let (slot, value) = match arg {
+                            crate::AST::EnumLitArg::Positional(value) => {
+                                (index.to_string(), value)
+                            }
+                            crate::AST::EnumLitArg::Named { label, expr } => {
+                                (label.clone(), expr)
+                            }
+                        };
+                        path.push(slot);
+                        walk(checker, value, path);
+                        path.pop();
+                    }
+                    path.pop();
                 }
                 Expr::Present(inner, _)
                 | Expr::Ok(inner, _)
@@ -2555,9 +3323,9 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E2305",
             "returned views need a stable owner relationship".to_string(),
-            "each public `View`/`ViewMut` slot must name one receiver, parameter, or static source that stays live; this return did not prove that source"
+            "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from one parameter or receiver on every path, keep the view local, or return an owned copy with `~`"
+            "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`"
                 .to_string(),
             Some(span),
         ));
@@ -2567,9 +3335,9 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E2307",
             "returned string views need a stable owner relationship".to_string(),
-            "each public `View<str>` slot must name one receiver, parameter, or static `String` source that stays live; this return did not prove that source"
+            "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from one parameter or receiver on every path, or return an owned `String` copy with `~`"
+            "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`"
                 .to_string(),
             Some(span),
         ));
@@ -3753,7 +4521,7 @@ impl<'a> Checker<'a> {
         let expected = Type::Fn {
             params: vec![inner.clone()],
             ret: expected_return.map(Box::new),
-            effect_bound: None,
+            effect_bound: None, return_view_provenance: None,
         };
         let saved_exp = self.expected_type.clone();
         self.expected_type = Some(expected);

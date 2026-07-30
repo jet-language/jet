@@ -101,7 +101,27 @@ pub(super) fn range_window(
     };
     let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
     range_semantics::jet_range_bounds(start, end, exclusive, len as i64)
-        .ok_or_else(|| unsupported("Range window bounds", span))
+        .ok_or_else(|| view_bounds_diagnostic(len, start, end, exclusive, span))
+}
+
+pub(super) fn view_bounds_diagnostic(
+    len: usize,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        "your comptime code stopped the build".to_string(),
+        format!(
+            "while computing this value at compile time, the program panicked: can't view {len} items from {start} to {end} ({})",
+            if exclusive { "exclusive" } else { "inclusive" }
+        ),
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+            .to_string(),
+        Some(span),
+    )
 }
 
 pub(super) fn range_contains(
@@ -278,6 +298,47 @@ pub(super) fn materialize_view_mut_window(
         Ok(CtValue::List(Vec::new()))
     } else {
         Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
+    }
+}
+
+fn rebase_view_mut_owners(
+    value: &mut CtValue,
+    owners: &HashMap<String, String>,
+) {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
+            if let Some((_, CtValue::Str(base))) =
+                fields.iter_mut().find(|(name, _)| name == "base")
+            {
+                if let Some(owner) = owners.get(base) {
+                    *base = owner.clone();
+                }
+            }
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                rebase_view_mut_owners(field, owners);
+            }
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                rebase_view_mut_owners(arg, owners);
+            }
+        }
+        CtValue::List(values) => {
+            for value in values {
+                rebase_view_mut_owners(value, owners);
+            }
+        }
+        CtValue::Map(values) => {
+            for value in values.values_mut() {
+                rebase_view_mut_owners(value, owners);
+            }
+        }
+        CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+            rebase_view_mut_owners(value, owners);
+        }
+        _ => {}
     }
 }
 
@@ -1112,7 +1173,7 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     })
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
-                effect_bound: None,
+                effect_bound: None, return_view_provenance: None,
             },
         );
     }

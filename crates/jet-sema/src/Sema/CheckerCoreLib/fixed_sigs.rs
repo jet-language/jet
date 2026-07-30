@@ -300,7 +300,7 @@ pub fn core_fixed_sig(
                 Type::Fn {
                     params: vec![],
                     ret: None,
-                    effect_bound: None,
+                    effect_bound: None, return_view_provenance: None,
                 },
             )],
             None,
@@ -2062,7 +2062,7 @@ pub fn core_fixed_sig(
                     Type::Fn {
                         params: vec![Type::Named("WebEvent".to_string())],
                         ret: None,
-                        effect_bound: None,
+                        effect_bound: None, return_view_provenance: None,
                     },
                 ),
             ],

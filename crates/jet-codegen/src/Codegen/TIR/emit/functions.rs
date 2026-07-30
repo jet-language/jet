@@ -38,7 +38,8 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let view_owner_params = view_provenance
         .into_iter()
         .flat_map(|map| map.values())
-        .filter_map(|p| match p.source {
+        .flat_map(|provenance| provenance.sources.iter())
+        .filter_map(|source| match source.source {
             ViewSource::Parameter(index) => Some(index),
             _ => None,
         })
@@ -226,7 +227,12 @@ pub(crate) fn emit_tir_method(
     let view_provenance = tir.return_view_provenance.as_ref();
     let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
     let borrows_receiver = view_provenance.is_some_and(|map| {
-        map.values().any(|p| matches!(p.source, ViewSource::Receiver))
+        map.values().any(|provenance| {
+            provenance
+                .sources
+                .iter()
+                .any(|source| matches!(source.source, ViewSource::Receiver))
+        })
     });
     let ret_clause = match &tir.ret {
         Some(t) => {
@@ -267,8 +273,10 @@ pub(crate) fn emit_tir_method(
     }
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
-        let rust = if view_provenance.is_some_and(|map| map.values().any(|p| {
-            matches!(p.source, ViewSource::Parameter(source) if source == index)
+        let rust = if view_provenance.is_some_and(|map| map.values().any(|provenance| {
+            provenance.sources.iter().any(
+                |source| matches!(source.source, ViewSource::Parameter(owner) if owner == index),
+            )
         })) {
             add_hidden_view_lifetime(rust)
         } else {
@@ -342,7 +350,12 @@ pub(crate) fn emit_tir_trait_method(
     let view_provenance = tir.return_view_provenance.as_ref();
     let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
     let borrows_receiver = view_provenance.is_some_and(|map| {
-        map.values().any(|p| matches!(p.source, ViewSource::Receiver))
+        map.values().any(|provenance| {
+            provenance
+                .sources
+                .iter()
+                .any(|source| matches!(source.source, ViewSource::Receiver))
+        })
     });
     let ret_clause = match &tir.ret {
         // `emit_trait_method` computes `ret = rust_return_type(...)` then, if non-empty,
@@ -382,8 +395,10 @@ pub(crate) fn emit_tir_trait_method(
     let mut params: Vec<String> = vec![self_recv.to_string()];
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
-        let rust = if view_provenance.is_some_and(|map| map.values().any(|p| {
-            matches!(p.source, ViewSource::Parameter(source) if source == index)
+        let rust = if view_provenance.is_some_and(|map| map.values().any(|provenance| {
+            provenance.sources.iter().any(
+                |source| matches!(source.source, ViewSource::Parameter(owner) if owner == index),
+            )
         })) {
             add_hidden_view_lifetime(rust)
         } else {

@@ -289,11 +289,12 @@ fn is_cloneable_rec(
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
-                "MutationPlan" | "VaultWrite" | Syntax::TYPE_SHARED_GUARD
+                "MutationPlan" | "VaultWrite" | "ViewMut" | Syntax::TYPE_SHARED_GUARD
             ) =>
         {
             false
         }
+        Type::Apply { name, .. } if name == "View" => true,
         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
         Type::Apply { args, .. } => args
             .iter()
@@ -646,10 +647,11 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             len,
             len_symbol,
         },
-        Type::Fn { params, ret, effect_bound } => Type::Fn {
+        Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
             params: params.into_iter().map(core_crypto_nominal).collect(),
             ret: ret.map(|ty| Box::new(core_crypto_nominal(*ty))),
             effect_bound,
+            return_view_provenance,
         },
         Type::Apply { name, args } => Type::Apply {
             name,
@@ -1407,6 +1409,7 @@ mod tests {
                 ),
             ]))),
             effect_bound: None,
+            return_view_provenance: None,
         };
 
         let resolved = core_crypto_nominal(wrapped);

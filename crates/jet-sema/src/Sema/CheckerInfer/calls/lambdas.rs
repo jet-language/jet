@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Lambda, LambdaBody, Stmt, Type};
+use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerInfer::is_reactive_handle_ty;
@@ -316,6 +316,11 @@ use std::collections::HashSet;
             }
     
             self.push_scope();
+            let saved_param_names = std::mem::replace(
+                &mut self.current_param_names,
+                lam.params.iter().map(|param| param.name.clone()).collect(),
+            );
+            let saved_return_view_provenance = self.return_view_provenance.take();
             for (p, pty) in lam.params.iter().zip(param_types.iter()) {
                 self.scopes.last_mut().unwrap().insert(
                     p.name.clone(),
@@ -326,9 +331,7 @@ use std::collections::HashSet;
                         // builtin-closure shape that binds its param mutable with no
                         // `&` sigil — the exclusive write lock IS the API contract.
                         mutable: self.lambda_param_mutable,
-                        param_conv: self
-                            .lambda_param_is_secret_loan
-                            .then_some(AccessConvention::Read),
+                        param_conv: Some(AccessConvention::Read),
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
                         reactive_local: false,
@@ -363,6 +366,24 @@ use std::collections::HashSet;
             let saved_inferred_mut_captures =
                 std::mem::take(&mut self.inferred_lambda_mut_captures);
             self.in_lambda_body = true;
+            if matches!(
+                exp_ret.map(|ret| ret.as_ref()),
+                Some(Type::Apply { name, .. }) if name == "View"
+            ) {
+                if let LambdaBody::Expr(expr) = &mut lam.body {
+                    if !matches!(expr.as_ref(), Expr::Copy(..) | Expr::Place(..))
+                        && self.place_from_expr(expr).is_some()
+                    {
+                        let span = expr.span();
+                        let inner = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+                        *expr = Box::new(Expr::Place(
+                            inner,
+                            crate::AST::PlaceAccess::Read,
+                            span,
+                        ));
+                    }
+                }
+            }
             if inline_loop {
                 if let Some((label, span)) = lam.meta.loop_label.clone() {
                     install_inline_loop_label(&mut lam.body, &label, span);
@@ -540,16 +561,14 @@ use std::collections::HashSet;
                 .as_ref()
                 .is_some_and(|ty| self.type_contains_view_boundary(ty))
             {
-                self.diags.push(Diagnostic::error(
-                    "E2305",
-                    "a lambda cannot return a stored or borrowed view".to_string(),
-                    "a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure"
-                        .to_string(),
-                    "use a named function or method whose returned-view provenance can be inferred and published"
-                        .to_string(),
-                    Some(lam.span),
-                ));
+                if let LambdaBody::Expr(expr) = &lam.body {
+                    self.check_aggregate_view_return(expr);
+                }
             }
+            let lambda_return_view_provenance = self.return_view_provenance.take();
+            lam.meta.return_view_provenance = lambda_return_view_provenance.clone();
+            self.return_view_provenance = saved_return_view_provenance;
+            self.current_param_names = saved_param_names;
     
             Some(Type::Fn {
                 params: param_types,
@@ -558,6 +577,7 @@ use std::collections::HashSet;
                 // carries no effect bound (D-EFF2 bounds ride callback *parameter*
                 // types, checked against this value at the call site).
                 effect_bound: None,
+                return_view_provenance: lambda_return_view_provenance,
             })
         }
     

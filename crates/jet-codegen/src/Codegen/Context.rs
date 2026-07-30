@@ -281,7 +281,7 @@ pub(crate) struct Cx {
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -781,57 +781,102 @@ impl Cx {
             _ => None,
         }
     }
-    pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
-        let base = self.rust_type(ty);
-        if self
-            .boxed_edges
-            .contains(&(owner.to_string(), edge.to_string()))
-        {
-            format!("Box<{}>", base)
-        } else {
-            base
-        }
+    pub(crate) fn type_contains_view(&self, ty: &Type) -> bool {
+        self.type_contains_view_matching(ty, false)
     }
 
-    pub(crate) fn type_contains_view(&self, ty: &Type) -> bool {
-        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+    pub(crate) fn type_contains_mutable_view(&self, ty: &Type) -> bool {
+        self.type_contains_view_matching(ty, true)
+    }
+
+    fn type_contains_view_matching(&self, ty: &Type, mutable_only: bool) -> bool {
+        fn payload_contains(
+            cx: &Cx,
+            payload: &VariantPayload,
+            seen: &mut HashSet<String>,
+            mutable_only: bool,
+        ) -> bool {
+            match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => contains(cx, ty, seen, mutable_only),
+                VariantPayload::Named(fields) => {
+                    fields
+                        .iter()
+                        .any(|field| contains(cx, &field.ty, seen, mutable_only))
+                }
+            }
+        }
+
+        fn named_contains(
+            cx: &Cx,
+            name: &str,
+            seen: &mut HashSet<String>,
+            mutable_only: bool,
+        ) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                fields
+                    .iter()
+                    .any(|(_, ty)| contains(cx, ty, seen, mutable_only))
+            }) || cx.enum_variants.get(name).is_some_and(|variants| {
+                variants
+                    .iter()
+                    .any(|(_, payload)| payload_contains(cx, payload, seen, mutable_only))
+            });
+            seen.remove(name);
+            found
+        }
+
+        fn contains(
+            cx: &Cx,
+            ty: &Type,
+            seen: &mut HashSet<String>,
+            mutable_only: bool,
+        ) -> bool {
             match ty {
                 Type::Apply { name, args }
                     if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
                 {
-                    true
+                    !mutable_only || name == "ViewMut"
                 }
-                Type::Named(name) => {
-                    seen.insert(name.clone())
-                        && cx.struct_fields.get(name).is_some_and(|fields| {
-                            fields.iter().any(|(_, ty)| contains(cx, ty, seen))
-                        })
-                }
+                Type::Named(name) => named_contains(cx, name, seen, mutable_only),
                 Type::Apply { name, args } => {
-                    args.iter().any(|arg| contains(cx, arg, seen))
-                        || (seen.insert(name.clone())
-                            && cx.struct_fields.get(name).is_some_and(|fields| {
-                                fields.iter().any(|(_, ty)| contains(cx, ty, seen))
-                            }))
+                    args.iter()
+                        .any(|arg| contains(cx, arg, seen, mutable_only))
+                        || named_contains(cx, name, seen, mutable_only)
                 }
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
-                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen, mutable_only),
                 Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen) || contains(cx, value, seen)
+                    contains(cx, key, seen, mutable_only)
+                        || contains(cx, value, seen, mutable_only)
                 }
-                Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
-                Type::FixedList { elem, .. } => contains(cx, elem, seen),
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, ty)| contains(cx, ty, seen, mutable_only)),
+                Type::FixedList { elem, .. } => contains(cx, elem, seen, mutable_only),
                 Type::Fn { params, ret, .. } => {
-                    params.iter().any(|ty| contains(cx, ty, seen))
-                        || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
+                    params
+                        .iter()
+                        .any(|ty| contains(cx, ty, seen, mutable_only))
+                        || ret
+                            .as_deref()
+                            .is_some_and(|ty| contains(cx, ty, seen, mutable_only))
                 }
                 _ => false,
             }
         }
 
-        contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
+        contains(
+            self,
+            &self.expand_type_aliases(ty),
+            &mut HashSet::new(),
+            mutable_only,
+        )
     }
 
     pub(crate) fn type_contains_shared_guard(&self, ty: &Type) -> bool {
@@ -933,9 +978,18 @@ impl Cx {
         }
 
         fn definition_contains_view(cx: &Cx, name: &str) -> bool {
-            cx.struct_fields.get(name).is_some_and(|fields| {
-                fields.iter().any(|(_, ty)| cx.type_contains_view(ty))
-            })
+            cx.struct_fields
+                .get(name)
+                .is_some_and(|fields| fields.iter().any(|(_, ty)| cx.type_contains_view(ty)))
+                || cx.enum_variants.get(name).is_some_and(|variants| {
+                    variants.iter().any(|(_, payload)| match payload {
+                        VariantPayload::Unit => false,
+                        VariantPayload::Single(ty, _) => cx.type_contains_view(ty),
+                        VariantPayload::Named(fields) => {
+                            fields.iter().any(|field| cx.type_contains_view(&field.ty))
+                        }
+                    })
+                })
         }
 
         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
@@ -1022,6 +1076,27 @@ impl Cx {
         }
     }
 
+    pub(crate) fn enum_field_rust_with_view_lifetime(
+        &self,
+        owner: &str,
+        edge: &str,
+        ty: &Type,
+    ) -> String {
+        let base = if self.type_contains_view(ty) {
+            self.rust_type_with_view_lifetime(ty)
+        } else {
+            self.rust_type(ty)
+        };
+        if self
+            .boxed_edges
+            .contains(&(owner.to_string(), edge.to_string()))
+        {
+            format!("Box<{base}>")
+        } else {
+            base
+        }
+    }
+
     /// D-SOA1: is `name` a `#layout(columnar)` struct (local or imported)? The
     /// columnar set only carries local structs; an imported columnar struct is
     /// not tracked, so `[ImportedColumnar]` still lowers AoS — acceptable for v1
@@ -1083,10 +1158,12 @@ impl Cx {
                 params,
                 ret,
                 effect_bound,
+                return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
+                return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
                 fields
@@ -1875,7 +1952,17 @@ impl Cx {
                     .collect::<Vec<_>>()
                     .join(" + ")
             ),
-            Type::Fn { params, ret, .. } => self.rust_fn_trait(params, ret.as_deref(), false),
+            Type::Fn {
+                params,
+                ret,
+                return_view_provenance,
+                ..
+            } => self.rust_fn_trait(
+                params,
+                ret.as_deref(),
+                return_view_provenance.as_ref(),
+                false,
+            ),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
@@ -1893,28 +1980,87 @@ impl Cx {
         &self,
         params: &[Type],
         ret: Option<&Type>,
+        return_view_provenance: Option<&crate::AST::ViewProvenanceMap>,
         mut_capture: bool,
     ) -> String {
         let thread_safe = params.len() == 1
             && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
             && matches!(ret, Some(Type::Named(name)) if name == "HTTPHandler");
+        let has_view_return = ret.is_some_and(|ty| self.type_contains_view(ty));
+        let owner_params: HashSet<usize> = return_view_provenance
+            .map(|map| {
+                map.values()
+                    .flat_map(|provenance| provenance.sources.iter())
+                    .filter_map(|source| match source.source {
+                        crate::AST::ViewSource::Parameter(index) => Some(index),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                has_view_return
+                    .then(|| {
+                        params
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, ty)| (!ty.is_scalar()).then_some(index))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+        let mut independent_lifetimes = Vec::new();
         let ps = params
             .iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(index, p)| {
                 if thread_safe {
                     self.rust_type(p)
                 } else {
-                    rust_param_type(self, AccessConvention::Read, p)
+                    let rust = rust_param_type(self, AccessConvention::Read, p);
+                    if owner_params.contains(&index) {
+                        if let Some(rest) = rust.strip_prefix("&mut ") {
+                            format!("&'__jet_view mut {rest}")
+                        } else if let Some(rest) = rust.strip_prefix('&') {
+                            format!("&'__jet_view {rest}")
+                        } else {
+                            rust
+                        }
+                    } else if has_view_return {
+                        let lifetime = format!("'__jet_arg{index}");
+                        if let Some(rest) = rust.strip_prefix("&mut ") {
+                            independent_lifetimes.push(lifetime.clone());
+                            format!("&{lifetime} mut {rest}")
+                        } else if let Some(rest) = rust.strip_prefix('&') {
+                            independent_lifetimes.push(lifetime.clone());
+                            format!("&{lifetime} {rest}")
+                        } else {
+                            rust
+                        }
+                    } else {
+                        rust
+                    }
                 }
             })
             .collect::<Vec<_>>()
             .join(", ");
         let r = ret
-            .map(|t| self.rust_type(t))
+            .map(|t| {
+                if has_view_return {
+                    self.rust_type_with_view_lifetime(t)
+                } else {
+                    self.rust_type(t)
+                }
+            })
             .unwrap_or_else(|| "()".to_string());
         let trait_name = if mut_capture { "FnMut" } else { "Fn" };
         if thread_safe {
             format!("Box<dyn {}({}) -> {} + Send + Sync>", trait_name, ps, r)
+        } else if has_view_return {
+            let lifetimes = std::iter::once("'__jet_view".to_string())
+                .chain(independent_lifetimes)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
         } else {
             format!("Box<dyn {}({}) -> {}>", trait_name, ps, r)
         }
@@ -2688,6 +2834,7 @@ pub(crate) fn build_cx_items(
                             .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
+                        return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
                 // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
@@ -2811,7 +2958,7 @@ pub(crate) fn build_cx_items(
                         Type::Fn {
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                     );
                 }
@@ -2832,7 +2979,7 @@ pub(crate) fn build_cx_items(
                         Type::Fn {
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                     );
                 }
@@ -2931,7 +3078,7 @@ pub(crate) fn build_cx_items(
                                 Type::Fn {
                                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                                     ret: f.return_type.clone().map(Box::new),
-                                    effect_bound: None,
+                                    effect_bound: None, return_view_provenance: None,
                                 },
                             );
                         }
@@ -3390,7 +3537,12 @@ pub(crate) fn field_type_cloneable(
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
-        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => false,
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "ViewMut") || name == Syntax::TYPE_SHARED_GUARD =>
+        {
+            false
+        }
+        Type::Apply { name, .. } if name == "View" => true,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_cloneable(a, types, param_names)),

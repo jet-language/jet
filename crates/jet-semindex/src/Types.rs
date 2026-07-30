@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewSourceFact {
@@ -21,39 +21,60 @@ pub enum ViewProjectionFact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ViewProvenanceFact {
-    pub output_path: Vec<String>,
+pub struct ViewSourcePathFact {
     pub source: ViewSourceFact,
     pub projections: Vec<ViewProjectionFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewProvenanceFact {
+    pub output_path: Vec<String>,
+    pub sources: Vec<ViewSourcePathFact>,
     pub mutable: bool,
 }
 
 impl ViewProvenanceFact {
     pub fn canonical(&self) -> String {
-        let source = match &self.source {
-            ViewSourceFact::Receiver => "receiver".to_string(),
-            ViewSourceFact::Parameter(index) => format!("parameter:{index}"),
-            ViewSourceFact::Static { module_path, name } => {
-                format!("static:{module_path}::{name}")
-            }
-        };
         let access = if self.mutable { "write" } else { "read" };
-        let path = self
-            .projections
+        let source_paths = self
+            .sources
             .iter()
-            .map(|projection| match projection {
-                ViewProjectionFact::Field(name) => format!("field:{name}"),
-                ViewProjectionFact::Index => "index".to_string(),
-                ViewProjectionFact::Range => "range".to_string(),
+            .map(|source_path| {
+                let source = match &source_path.source {
+                    ViewSourceFact::Receiver => "receiver".to_string(),
+                    ViewSourceFact::Parameter(index) => format!("parameter:{index}"),
+                    ViewSourceFact::Static { module_path, name } => {
+                        format!("static:{module_path}::{name}")
+                    }
+                };
+                let path = source_path
+                    .projections
+                    .iter()
+                    .map(|projection| match projection {
+                        ViewProjectionFact::Field(name) => format!("field:{name}"),
+                        ViewProjectionFact::Index => "index".to_string(),
+                        ViewProjectionFact::Range => "range".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+                (source, path)
             })
-            .collect::<Vec<_>>()
-            .join("/");
+            .collect::<Vec<_>>();
         let slot = if self.output_path.is_empty() {
             "$".to_string()
         } else {
             self.output_path.join(".")
         };
-        format!("slot:{slot};{source};access:{access};path:{path}")
+        if let [(source, path)] = source_paths.as_slice() {
+            format!("slot:{slot};{source};access:{access};path:{path}")
+        } else {
+            let sources = source_paths
+                .iter()
+                .map(|(source, path)| format!("{source};path:{path}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("slot:{slot};one_of({sources});access:{access}")
+        }
     }
 }
 

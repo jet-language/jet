@@ -322,6 +322,7 @@ impl<'a> Checker<'a> {
                             restore_moved.push(restored);
                         }
                     }
+                    self.record_condition_view_bindings(l);
                     let mut right_bindings = self.check_condition_with_bindings(r);
                     self.pop_scope();
                     for (name, at) in restore_moved {
@@ -469,6 +470,7 @@ impl<'a> Checker<'a> {
                                 restore_moved.push(restored);
                             }
                         }
+                        self.record_pattern_view_bindings(subject, &pattern);
                         self.check_block(&mut arm.body, false);
                         self.pop_scope();
                         for (name, at) in restore_moved {
@@ -493,6 +495,7 @@ impl<'a> Checker<'a> {
                             restore_moved.push(restored);
                         }
                     }
+                    self.record_condition_view_bindings(&arm.cond);
                     self.check_block(&mut arm.body, false);
                     self.pop_scope();
                     for (name, at) in restore_moved {

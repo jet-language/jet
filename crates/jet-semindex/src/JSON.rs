@@ -6,7 +6,7 @@ use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
     SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
-    ViewProvenanceFact, ViewSourceFact,
+    ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
@@ -45,31 +45,39 @@ fn json_span(span: SourceSpan) -> String {
 }
 
 fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
-    let source = match &provenance.source {
-        ViewSourceFact::Receiver => "{\"kind\":\"receiver\"}".to_string(),
-        ViewSourceFact::Parameter(index) => {
-            format!("{{\"kind\":\"parameter\",\"index\":{index}}}")
-        }
-        ViewSourceFact::Static { module_path, name } => format!(
-            "{{\"kind\":\"static\",\"module\":{},\"name\":{}}}",
-            json_str(module_path),
-            json_str(name),
-        ),
-    };
-    let projections = provenance
-        .projections
+    let sources = provenance
+        .sources
         .iter()
-        .map(|projection| match projection {
-            ViewProjectionFact::Field(name) => {
-                format!("{{\"kind\":\"field\",\"name\":{}}}", json_str(name))
-            }
-            ViewProjectionFact::Index => "{\"kind\":\"index\"}".to_string(),
-            ViewProjectionFact::Range => "{\"kind\":\"range\"}".to_string(),
+        .map(|source_path| {
+            let source = match &source_path.source {
+                ViewSourceFact::Receiver => "{\"kind\":\"receiver\"}".to_string(),
+                ViewSourceFact::Parameter(index) => {
+                    format!("{{\"kind\":\"parameter\",\"index\":{index}}}")
+                }
+                ViewSourceFact::Static { module_path, name } => format!(
+                    "{{\"kind\":\"static\",\"module\":{},\"name\":{}}}",
+                    json_str(module_path),
+                    json_str(name),
+                ),
+            };
+            let projections = source_path
+                .projections
+                .iter()
+                .map(|projection| match projection {
+                    ViewProjectionFact::Field(name) => {
+                        format!("{{\"kind\":\"field\",\"name\":{}}}", json_str(name))
+                    }
+                    ViewProjectionFact::Index => "{\"kind\":\"index\"}".to_string(),
+                    ViewProjectionFact::Range => "{\"kind\":\"range\"}".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{\"source\":{source},\"projections\":[{projections}]}}")
         })
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"output_path\":[{}],\"source\":{source},\"projections\":[{projections}],\"mutable\":{}}}",
+        "{{\"output_path\":[{}],\"sources\":[{sources}],\"mutable\":{}}}",
         provenance
             .output_path
             .iter()
@@ -481,21 +489,29 @@ fn convert_view_provenance(
 
     ViewProvenanceFact {
         output_path: output_path.to_vec(),
-        source: match &provenance.source {
-            ViewSource::Receiver => ViewSourceFact::Receiver,
-            ViewSource::Parameter(index) => ViewSourceFact::Parameter(*index),
-            ViewSource::Static { module_path, name } => ViewSourceFact::Static {
-                module_path: module_path.clone(),
-                name: name.clone(),
-            },
-        },
-        projections: provenance
-            .projections
+        sources: provenance
+            .sources
             .iter()
-            .map(|projection| match projection {
-                ViewSourceProjection::Field(name) => ViewProjectionFact::Field(name.clone()),
-                ViewSourceProjection::Index => ViewProjectionFact::Index,
-                ViewSourceProjection::Range => ViewProjectionFact::Range,
+            .map(|source_path| ViewSourcePathFact {
+                source: match &source_path.source {
+                    ViewSource::Receiver => ViewSourceFact::Receiver,
+                    ViewSource::Parameter(index) => ViewSourceFact::Parameter(*index),
+                    ViewSource::Static { module_path, name } => ViewSourceFact::Static {
+                        module_path: module_path.clone(),
+                        name: name.clone(),
+                    },
+                },
+                projections: source_path
+                    .projections
+                    .iter()
+                    .map(|projection| match projection {
+                        ViewSourceProjection::Field(name) => {
+                            ViewProjectionFact::Field(name.clone())
+                        }
+                        ViewSourceProjection::Index => ViewProjectionFact::Index,
+                        ViewSourceProjection::Range => ViewProjectionFact::Range,
+                    })
+                    .collect(),
             })
             .collect(),
         mutable: provenance.mutable,

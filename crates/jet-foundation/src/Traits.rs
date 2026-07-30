@@ -2109,10 +2109,14 @@ pub fn emit_trait_def(
     }
     for m in &t.methods {
         let view_provenance = m.return_view_provenance.get();
-        let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
-        let borrows_receiver = view_provenance.is_some_and(|map| {
-            map.values()
-                .any(|p| matches!(p.source, crate::AST::ViewSource::Receiver))
+        let has_view_return = view_provenance.as_ref().is_some_and(|map| !map.is_empty());
+        let borrows_receiver = view_provenance.as_ref().is_some_and(|map| {
+            map.values().any(|provenance| {
+                provenance
+                    .sources
+                    .iter()
+                    .any(|source| matches!(source.source, crate::AST::ViewSource::Receiver))
+            })
         });
         let ret = m
             .return_type
@@ -2161,8 +2165,14 @@ pub fn emit_trait_def(
                         AccessConvention::Write => format!("&mut {}", base),
                         AccessConvention::Move => base,
                     };
-                    if view_provenance.is_some_and(|map| map.values().any(|p| {
-                        matches!(p.source, crate::AST::ViewSource::Parameter(index) if index == param_index)
+                    if view_provenance.as_ref().is_some_and(|map| map.values().any(|provenance| {
+                        provenance.sources.iter().any(|source| {
+                            matches!(
+                                source.source,
+                                crate::AST::ViewSource::Parameter(index)
+                                    if index == param_index
+                            )
+                        })
                     })) {
                         rust_ty = add_view_lifetime(rust_ty);
                     }

@@ -24,6 +24,16 @@ fn struct_has_view_field(cx: &Cx, s: &StructDef) -> bool {
     s.fields.iter().any(|f| cx.type_contains_view(&f.ty))
 }
 
+fn enum_has_view_payload(cx: &Cx, e: &EnumDef) -> bool {
+    e.variants.iter().any(|variant| match &variant.payload {
+        VariantPayload::Unit => false,
+        VariantPayload::Single(ty, _) => cx.type_contains_view(ty),
+        VariantPayload::Named(fields) => {
+            fields.iter().any(|field| cx.type_contains_view(&field.ty))
+        }
+    })
+}
+
 fn add_view_lifetime_generic(generics: String) -> String {
     if generics.is_empty() {
         "<'__jet_view>".to_string()
@@ -72,6 +82,10 @@ fn structural_trait_bounds(
 
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     let has_view_field = struct_has_view_field(cx, s);
+    let has_mutable_view_field = s
+        .fields
+        .iter()
+        .any(|field| cx.type_contains_mutable_view(&field.ty));
     let clone_extra = if !s.type_params.is_empty() && cx.cloneable.contains(&s.name) {
         Generics::rust_extra_clone_bounds(&s.type_params)
     } else {
@@ -94,7 +108,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     if !has_fn_field && !has_shared_guard_field && s.type_params.is_empty() {
         derives.push("Debug");
     }
-    if cx.cloneable.contains(&s.name) && !has_shared_guard_field {
+    if cx.cloneable.contains(&s.name)
+        && !has_shared_guard_field
+        && !has_mutable_view_field
+    {
         derives.push("Clone");
     }
     if cx.comparable.contains(&s.name) && !has_shared_guard_field {
@@ -1214,6 +1231,14 @@ fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
+    let has_view_payload = enum_has_view_payload(cx, e);
+    let has_mutable_view_payload = e.variants.iter().any(|variant| match &variant.payload {
+        VariantPayload::Unit => false,
+        VariantPayload::Single(ty, _) => cx.type_contains_mutable_view(ty),
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .any(|field| cx.type_contains_mutable_view(&field.ty)),
+    });
     let has_shared_guard = e.variants.iter().any(|variant| match &variant.payload {
         VariantPayload::Unit => false,
         VariantPayload::Single(ty, _) => cx.type_contains_shared_guard(ty),
@@ -1225,7 +1250,10 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if !has_shared_guard {
         derives.push("Debug");
     }
-    if !has_shared_guard && cx.cloneable.contains(&e.name) {
+    if !has_shared_guard
+        && !has_mutable_view_payload
+        && cx.cloneable.contains(&e.name)
+    {
         derives.push("Clone");
     }
     if !has_shared_guard && cx.comparable.contains(&e.name) {
@@ -1252,7 +1280,12 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if !derives.is_empty() {
         out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
     }
-    out.push_str(&format!("pub enum user_{} {{\n", e.name));
+    let view_generic = if has_view_payload {
+        "<'__jet_view>"
+    } else {
+        ""
+    };
+    out.push_str(&format!("pub enum user_{}{view_generic} {{\n", e.name));
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
@@ -1263,7 +1296,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
                 }
             }
             VariantPayload::Single(t, _) => {
-                let ty = cx.field_rust_type(&e.name, &v.name, t);
+                let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &v.name, t);
                 let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
                 out.push_str(&format!("    {}({}){},\n", mangle_variant(&v.name), ty, d));
             }
@@ -1271,7 +1304,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
                 out.push_str(&format!("    {} {{\n", mangle_variant(&v.name)));
                 for f in fs {
                     let key = format!("{}.{}", v.name, f.name);
-                    let ty = cx.field_rust_type(&e.name, &key, &f.ty);
+                    let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &key, &f.ty);
                     out.push_str(&format!("        {}: {},\n", mangle(&f.name), ty));
                 }
                 let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
@@ -1280,6 +1313,12 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
+    let impl_generic = if has_view_payload {
+        "<'__jet_view>"
+    } else {
+        ""
+    };
+    let type_arg = impl_generic;
     if !has_shared_guard
         && (cx.auto_equatable.contains(&e.name) || cx.partial_ord.contains(&e.name))
         && !cx
@@ -1287,7 +1326,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             .contains(&(e.name.clone(), "equal".to_string()))
     {
         out.push_str(&format!(
-            "impl user_Equatable for user_{0} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
+            "impl{impl_generic} user_Equatable for user_{0}{type_arg} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
             e.name
         ));
     }
@@ -1298,20 +1337,20 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             .contains(&(e.name.clone(), "compare".to_string()))
     {
         out.push_str(&format!(
-            "impl user_Comparable for user_{0} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
+            "impl{impl_generic} user_Comparable for user_{0}{type_arg} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
             e.name
         ));
     }
     if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
-            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            "impl{impl_generic} JetShow for user_{}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
             e.name,
             enum_jet_render_body(e)
         ));
     }
     if !has_shared_guard && cx.auto_debug.contains(&e.name) {
         out.push_str(&format!(
-            "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            "impl{impl_generic} JetDebug for user_{}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
             e.name,
             enum_jet_render_body(e)
         ));
@@ -1321,7 +1360,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         && !cx.display_types.contains(&e.name)
     {
         out.push_str(&format!(
-            "impl JetDisplay for user_{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+            "impl{impl_generic} JetDisplay for user_{}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
             e.name
         ));
     }

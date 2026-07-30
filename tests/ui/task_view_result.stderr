@@ -1,26 +1,10 @@
-Error [E0119]: there's no type called `View`
-  --> tests/ui/task_view_result.jet:3:23
-    |
-  3 | fn peek(xs: [Int]) => View<Int> = xs[0..2]
-    |                       ^^^^^^^^^
- Why: generic types must name a struct or enum you defined
- Fix: check the spelling, or define the type first
-
-Error [E0119]: `View` isn't generic
-  --> tests/ui/task_view_result.jet:3:23
-    |
-  3 | fn peek(xs: [Int]) => View<Int> = xs[0..2]
-    |                       ^^^^^^^^^
- Why: only types declared with type parameters accept `<…>`
- Fix: use `View` without type arguments
-
-Error [E2305]: a lambda cannot return a stored or borrowed view
-  --> tests/ui/task_view_result.jet:5:22
+Error [E2305]: a returned view cannot borrow from a temporary argument
+  --> tests/ui/task_view_result.jet:5:33
     |
   5 |     t :: tasks.spawn(() => peek([1, 2, 3]))
-    |                      ^^^^^^^^^^
- Why: a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure
- Fix: use a named function or method whose returned-view provenance can be inferred and published
+    |                                 ^^^^^^^^^
+ Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
+ Fix: store the owner in a named binding first, then pass that binding to the view-returning call
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --> tests/ui/task_view_result.jet:5:22

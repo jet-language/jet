@@ -198,6 +198,9 @@ pub struct LambdaMeta {
     /// `map`/`split` projection. Lowering consumes this fact without
     /// re-validating the source lambda.
     pub guard_projection: Option<Vec<String>>,
+    /// Sema-inferred relation between callback inputs and any returned views.
+    /// TIR and codegen consume this fact without widening the owner set.
+    pub return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

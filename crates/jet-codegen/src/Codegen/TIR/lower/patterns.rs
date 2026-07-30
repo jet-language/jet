@@ -729,7 +729,35 @@ pub(crate) fn lower_enum_arg(
         .boxed_edges
         .contains(&(type_name.to_string(), edge.to_string()));
     let _ = variant;
-    let mut value = lower_expr(e, cx, env);
+    let mutable_view_payload = matches!(
+        payload_ty,
+        Some(Type::Apply { name, .. }) if name == "ViewMut"
+    );
+    let mutable_place;
+    let payload_expr = if mutable_view_payload {
+        match e {
+            Expr::Place(inner, _, span) => {
+                mutable_place = Expr::Place(
+                    inner.clone(),
+                    crate::AST::PlaceAccess::Write,
+                    *span,
+                );
+                &mutable_place
+            }
+            Expr::Slice { span, .. } => {
+                mutable_place = Expr::Place(
+                    Box::new(e.clone()),
+                    crate::AST::PlaceAccess::Write,
+                    *span,
+                );
+                &mutable_place
+            }
+            _ => e,
+        }
+    } else {
+        e
+    };
+    let mut value = lower_expr(payload_expr, cx, env);
     if let Some(want) = payload_ty {
         value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
     }

@@ -1881,7 +1881,7 @@ pub(crate) fn lower_method_call(
                             ty: Type::Fn {
                                 params,
                                 ret: expected_hook_result.clone().map(Box::new),
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -1938,7 +1938,7 @@ pub(crate) fn lower_method_call(
                             ty: Type::Fn {
                                 params,
                                 ret: None,
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -2411,7 +2411,7 @@ pub(crate) fn lower_method_call(
                             ty: Type::Fn {
                                 params: params.clone(),
                                 ret: Some(Box::new(ret)),
-                                effect_bound: None,
+                                effect_bound: None, return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lower_lambda_expecting_value(
                                 lam, cx, env, &params,
@@ -2712,7 +2712,7 @@ pub(crate) fn lower_method_call(
                         ty: Type::Fn {
                             params: vec![inner],
                             ret: None,
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -2777,7 +2777,7 @@ pub(crate) fn lower_method_call(
                         ty: Type::Fn {
                             params: vec![inner],
                             ret: None,
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -2911,7 +2911,7 @@ pub(crate) fn lower_method_call(
                         ty: Type::Fn {
                             params: params.clone(),
                             ret: None,
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     };
@@ -3202,7 +3202,7 @@ pub(crate) fn lower_method_call(
                                 ty: Type::Fn {
                                     params: params.clone(),
                                     ret: Some(Box::new(Type::String)),
-                                    effect_bound: None,
+                                    effect_bound: None, return_view_provenance: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(
                                     lower_lambda_expecting_value(lam, cx, env, &params),
@@ -3925,7 +3925,7 @@ pub(crate) fn lower_method_call(
                         ty: Type::Fn {
                             params: Vec::new(),
                             ret: None,
-                            effect_bound: None,
+                            effect_bound: None, return_view_provenance: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }

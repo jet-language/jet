@@ -168,7 +168,13 @@ pub(super) fn eval_builtin(
                     return Err(unsupported("view end", span));
                 };
                 if a < 0 || z < a || z as usize >= xs.len() {
-                    return Err(unsupported("view bounds", span));
+                    return Err(super::view_bounds_diagnostic(
+                        xs.len(),
+                        a,
+                        z,
+                        false,
+                        span,
+                    ));
                 }
                 (a, z + 1)
             } else {

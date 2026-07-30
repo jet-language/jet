@@ -2435,7 +2435,12 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("disjoint constant indexes must compile");
-    assert_eq!(out.rust.matches(".split_at_mut(").count(), 4, "{}", out.rust);
+    assert_eq!(
+        out.rust.matches(").split_at_mut(").count(),
+        4,
+        "{}",
+        out.rust
+    );
     assert!(
         out.rust.contains("let user_left = &mut __jet_place_plan_")
             && out.rust.contains("let user_right = &mut __jet_place_plan_"),
@@ -3347,7 +3352,7 @@ fn zero_copy_parser_example_covers_production_pipeline() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
-        "7\nexample.com\nname\nvalue\n"
+        "7\nexample.com\nname\nvalue\na longer value\nleft\nright\nmessage\nhello\n"
     );
 }
 
@@ -3521,7 +3526,7 @@ fn run() { print(0) }
 }
 
 #[test]
-fn trait_view_contract_rejects_disagreeing_implementations() {
+fn trait_view_contract_unions_compatible_implementation_sources() {
     let src = r#"
 trait Select {
     fn select(self, left: [Int], right: [Int]) => View<Int>
@@ -3543,8 +3548,7 @@ impl Last.Select {
 
 fn run() { print(0) }
 "#;
-    let diags = jet::compile(src).expect_err("one trait method needs one stable view source");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+    jet::compile(src).expect("trait dispatch may choose any compatible implementation owner");
 }
 
 #[test]
@@ -3591,7 +3595,7 @@ impl Last.Select {
 }
 
 #[test]
-fn aggregate_trait_view_contract_rejects_disagreement_in_either_impl_order() {
+fn aggregate_trait_view_contract_unions_sources_in_either_impl_order() {
     let template = r#"
 struct Pair { left: View<Int>, right: View<Int> }
 
@@ -3625,9 +3629,8 @@ impl Last.Select {
 "#;
     for implementations in [format!("{first}{last}"), format!("{last}{first}")] {
         let src = template.replace("$IMPLS", &implementations);
-        let diags = jet::compile(&src)
-            .expect_err("aggregate trait implementations must agree per output slot");
-        assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+        jet::compile(&src)
+            .expect("aggregate trait implementations union compatible slot sources");
     }
 }
 
@@ -3731,6 +3734,460 @@ fn run() { print(0) }
     assert!(out.rust.contains("pub user_maybe: Option<user_Window<'__jet_view>>"), "{}", out.rust);
     assert!(!out.rust.contains("Option<'__jet_view"), "{}", out.rust);
     assert!(!out.rust.contains("Result<'__jet_view"), "{}", out.rust);
+}
+
+#[test]
+fn enums_and_mutable_aggregates_carry_view_provenance() {
+    let src = r#"
+enum Selection {
+    One(View<Int>)
+    Pair(PairViews)
+}
+
+struct PairViews { left: View<Int>, right: View<Int> }
+struct Edit { values: ViewMut<Int> }
+
+fn select(left: [Int], right: [Int], pair: Bool) => Selection {
+    if pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Selection.Pair(PairViews.{ left: left_view, right: right_view })
+    }
+    selected :: right[0..1]
+    return Selection.One(selected)
+}
+
+fn first(selection: Selection) => View<Int> {
+    if selection == {
+        .One(values) -> { return values }
+        .Pair(values) -> { return values.left }
+    }
+}
+
+fn edit(values: &[Int]) => Edit {
+    selected :: &values[0..1]
+    return Edit.{ values: selected }
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    chosen :: select(left, right, true)
+    print(first(chosen)[0])
+    target := [1, 2]
+    borrowed :: edit(&target)
+    borrowed.values[0] = 3
+    print(borrowed.values[0])
+}
+"#;
+    let out = jet::compile(src).expect("enum and mutable aggregate views must reach codegen");
+    assert!(
+        out.rust.contains("pub enum user_Selection<'__jet_view>")
+            && out.rust.contains("user_One(&'__jet_view [i64])")
+            && out
+                .rust
+                .contains("user_Pair(user_PairViews<'__jet_view>)")
+            && out
+                .rust
+                .contains("pub user_left: &'__jet_view [i64],")
+            && out
+                .rust
+                .contains("pub user_right: &'__jet_view [i64],"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("pub struct user_Edit<'__jet_view>")
+            && out
+                .rust
+                .contains("pub user_values: &'__jet_view mut [i64]"),
+        "{}",
+        out.rust
+    );
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_view_enum", "view_enum_aggregate", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "7\n3\n");
+    }
+
+    let root = common::unique_tmp("jet_view_enum_quick_run");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run mutable aggregate views through the default tier");
+    assert!(
+        output.status.success(),
+        "default mutable aggregate run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "7\n3\n");
+}
+
+#[test]
+fn mutable_view_aggregates_are_not_cloneable() {
+    let src = r#"
+struct Edit { values: ViewMut<Int> }
+
+fn edit(values: &[Int]) => Edit {
+    selected :: &values[0..1]
+    return Edit.{ values: selected }
+}
+
+fn run() {
+    target := [1, 2]
+    borrowed :: edit(&target)
+    duplicate :: ~borrowed
+    print(duplicate.values[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("copying an exclusive view would duplicate it");
+    assert!(diags.iter().any(|diag| diag.code == "E0211"), "{diags:?}");
+}
+
+#[test]
+fn disjoint_mutable_views_can_travel_in_a_list_and_write_through() {
+    let src = r#"
+fn edits(values: &[Int]) => [ViewMut<Int>] {
+    return [&values[0..1], &values[2..3]]
+}
+
+fn run() {
+    values := [7, 8, 9, 10]
+    selected :: edits(&values)
+    selected[0][0] = 11
+    selected[1][0] = 12
+    print(selected[0][0])
+    print(selected[1][0])
+}
+"#;
+    let out = jet::compile(src).expect("disjoint mutable view lists must pass sema");
+    assert!(out.rust.contains("jet_views_mut_new"), "{}", out.rust);
+    assert!(out.rust.contains("jet_index_vec_mut"), "{}", out.rust);
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_view_mut_list", "view_mut_list", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "11\n12\n");
+    }
+
+    let root = common::unique_tmp("jet_view_mut_list_quick_run");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run mutable view lists through the default tier");
+    assert!(
+        output.status.success(),
+        "default mutable view list run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "11\n12\n");
+}
+
+#[test]
+fn mutable_view_bounds_fail_at_construction_in_every_tier() {
+    use jet::Interpreter::RunOutcome;
+    use jet::JitBackend::JitBackend;
+
+    let src = r#"
+fn run() {
+    values := [1]
+    outside :: [&values[0..0], &values[2..2]]
+}
+"#;
+    jet::compile(src).expect("dynamic view bounds must reach runtime validation");
+    if common::have_rustc() {
+        let (code, _stdout, stderr) =
+            common::build_and_run("jet_view_mut_bounds_aot", "view_mut_bounds_aot", src);
+        assert_ne!(code, 0, "AOT accepted an invalid mutable view");
+        assert!(stderr.contains("can't view 1 items from 2 to 2"), "{stderr}");
+    }
+
+    let root = common::unique_tmp("jet_view_mut_bounds_tiers");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    if jet_jit::cranelift_host_supported() {
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "{}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+        jet_jit::try_compile_bundle(&bundle).expect("mutable view bounds must lower to JIT");
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { exit_code, .. } => {
+                assert_ne!(exit_code, 0, "resident JIT accepted an invalid mutable view");
+            }
+            RunOutcome::Problems(diags) => assert!(
+                diags
+                    .iter()
+                    .any(|diag| diag.code == "E0953"
+                        && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
+                "resident JIT reported the wrong runtime failure: {diags:?}"
+            ),
+        }
+    }
+
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+        RunOutcome::Ran { exit_code, .. } => {
+            assert_ne!(exit_code, 0, "forced interpreter accepted an invalid mutable view");
+        }
+        RunOutcome::Problems(diags) => assert!(
+            diags
+                .iter()
+                .any(|diag| diag.code == "E0953"
+                    && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
+            "forced interpreter reported the wrong runtime failure: {diags:?}"
+        ),
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run invalid mutable view through the default tier");
+    assert!(!output.status.success(), "default tier accepted an invalid mutable view");
+}
+
+#[test]
+fn mutable_view_extraction_transfers_struct_option_and_enum_loans() {
+    let src = r#"
+struct Edit { values: ViewMut<Int> }
+enum Choice {
+    First(ViewMut<Int>)
+    Second(ViewMut<Int>)
+}
+
+fn edit(values: &[Int]) => Edit {
+    return Edit.{ values: &values[0..1] }
+}
+
+fn maybe(values: &[Int]) => ViewMut<Int>? {
+    return Val(&values[0..1])
+}
+
+fn choose(values: &[Int], first: Bool) => Choice {
+    if first { return Choice.First(&values[0..1]) }
+    return Choice.Second(&values[0..1])
+}
+
+fn run() {
+    struct_values := [1, 2]
+    aggregate :: edit(&struct_values)
+    struct_part :: aggregate.values
+    struct_part[0] = 3
+    print(struct_part[0])
+
+    option_values := [4, 5]
+    optional :: maybe(&option_values)
+    if optional == Val(option_part) {
+        option_part[0] = 6
+        print(option_part[0])
+    }
+
+    enum_values := [7, 8]
+    selected :: choose(&enum_values, false)
+    if selected == {
+        .First(enum_part) -> {
+            enum_part[0] = 9
+            print(enum_part[0])
+        }
+        .Second(enum_part) -> {
+            enum_part[0] = 10
+            print(enum_part[0])
+        }
+    }
+}
+"#;
+    jet::compile(src).expect("mutable aggregate extraction must transfer the exclusive loan");
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_view_mut_extract", "view_mut_extract", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "3\n6\n10\n");
+    }
+
+    let root = common::unique_tmp("jet_view_mut_extract_quick_run");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run mutable aggregate extraction through the default tier");
+    assert!(
+        output.status.success(),
+        "default mutable aggregate extraction failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "3\n6\n10\n");
+}
+
+#[test]
+fn mutable_view_extraction_retires_the_source_aggregate() {
+    let struct_src = r#"
+struct Edit { values: ViewMut<Int> }
+
+fn edit(values: &[Int]) => Edit {
+    return Edit.{ values: &values[0..1] }
+}
+
+fn run() {
+    values := [1, 2]
+    aggregate :: edit(&values)
+    selected :: aggregate.values
+    print(aggregate.values[0])
+    print(selected[0])
+}
+"#;
+    let diags = jet::compile(struct_src)
+        .expect_err("extracting an exclusive view must retire its source aggregate");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+
+    let option_src = r#"
+fn maybe(values: &[Int]) => ViewMut<Int>? {
+    return Val(&values[0..1])
+}
+
+fn run() {
+    values := [1, 2]
+    optional :: maybe(&values)
+    if optional == Val(selected) {
+        print(optional)
+        print(selected[0])
+    }
+}
+"#;
+    let diags =
+        jet::compile(option_src).expect_err("extracting an exclusive option payload must retire its subject");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+}
+
+#[test]
+fn borrowed_mutable_view_enum_requires_take_before_destructuring() {
+    let src = r#"
+enum Choice {
+    First(ViewMut<Int>)
+    Second(ViewMut<Int>)
+}
+
+fn inspect(choice: Choice) {
+    if choice == {
+        .First(selected) -> print(selected[0])
+        .Second(selected) -> print(selected[0])
+    }
+}
+
+fn run() {
+    values := [1, 2]
+    choice :: Choice.First(&values[0..1])
+    inspect(choice)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("a borrowed non-cloneable enum cannot move out its payload");
+    let matching: Vec<_> = diags.iter().filter(|diag| diag.code == "E0120").collect();
+    assert_eq!(matching.len(), 1, "{diags:?}");
+    assert!(matching[0].fix.contains("choice: ^Choice"), "{diags:?}");
+
+    let take_src = src
+        .replace("fn inspect(choice: Choice)", "fn inspect(choice: ^Choice)")
+        .replace("inspect(choice)", "inspect(^choice)");
+    jet::compile(&take_src).expect("taking the enum must permit moving out its exclusive view");
+    if common::have_rustc() {
+        let (code, _stdout, stderr) =
+            common::build_and_run("jet_view_mut_enum_take", "view_mut_enum_take", &take_src);
+        assert_eq!(code, 0, "{stderr}");
+    }
+}
+
+#[test]
+fn mutable_view_list_elements_must_be_disjoint() {
+    let src = r#"
+fn duplicate(values: &[Int]) => [ViewMut<Int>] {
+    return [&values[0..1], &values[0..1]]
+}
+
+fn run() { print(0) }
+"#;
+    let diags =
+        jet::compile(src).expect_err("coexisting list elements cannot alias one mutable range");
+    assert!(diags.iter().any(|diag| diag.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn enum_pattern_payload_keeps_its_original_owner_live() {
+    let src = r#"
+enum Selection { One(View<Int>) }
+
+fn select(values: [Int]) => Selection {
+    selected :: values[0..1]
+    return Selection.One(selected)
+}
+
+fn run() {
+    values := [7, 8]
+    selected :: select(values)
+    if selected == {
+        .One(part) -> {
+            values.push(9)
+            print(part[0])
+        }
+    }
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("a matched payload must keep the source owner borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn recursive_view_summaries_converge_to_every_possible_owner() {
+    let src = r#"
+fn alpha(left: [Int], right: [Int], choose_left: Bool) => View<Int> {
+    if choose_left {
+        selected :: left[0..1]
+        return selected
+    }
+    return beta(left, right, choose_left)
+}
+
+fn beta(left: [Int], right: [Int], choose_left: Bool) => View<Int> {
+    if !choose_left {
+        selected :: right[0..1]
+        return selected
+    }
+    return alpha(left, right, choose_left)
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    selected :: alpha(left, right, false)
+    right.push(11)
+    print(selected[0])
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("recursive summaries must retain the right-owner path");
+    assert!(diags.iter().any(|diag| diag.code == "E0212"), "{diags:?}");
 }
 
 #[test]
@@ -3870,7 +4327,7 @@ fn run() {
 }
 
 #[test]
-fn returned_view_paths_with_different_sources_are_rejected() {
+fn returned_view_paths_form_a_safe_source_union() {
     let src = r#"
 fn choose(left: [Int], right: [Int], first: Bool) => View<Int> {
     if first {
@@ -3879,10 +4336,21 @@ fn choose(left: [Int], right: [Int], first: Bool) => View<Int> {
     return right[0..1]
 }
 
-fn run() { print(0) }
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    print(choose(left, right, true)[0])
+    print(choose(left, right, false)[0])
+}
 "#;
-    let diags = jet::compile(src).expect_err("returned-view paths need one stable owner source");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
+    let out = jet::compile(src).expect("both compatible parameter owners form one source union");
+    assert!(
+        out.rust.contains("user_left: &'__jet_view Vec<i64>")
+            && out.rust.contains("user_right: &'__jet_view Vec<i64>")
+            && out.rust.contains("-> &'__jet_view [i64]"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -4000,7 +4468,7 @@ fn run() {
 }
 
 #[test]
-fn function_value_returning_view_is_rejected_before_codegen() {
+fn function_value_returning_view_preserves_owner_provenance() {
     let src = r#"
 fn first(values: [Int]) => View<Int> {
     return values[0..1]
@@ -4010,11 +4478,82 @@ fn run() {
     callback :: first
     values := [7, 8]
     result :: callback(values)
+    values.push(9)
     print(result[0])
 }
 "#;
-    let diags = jet::compile(src).expect_err("function-value provenance is erased");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+    let diags = jet::compile(src).expect_err("callback result must keep its owner live");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn parameter_rooted_lambda_and_generic_callback_preserve_view_provenance() {
+    let src = r#"
+fn apply(callback: fn([Int]) => View<Int>, values: [Int]) => View<Int> {
+    return callback(values)
+}
+
+fn run() {
+    values := [7, 8]
+    selected :: apply((items: [Int]) => items[0..1], values)
+    print(selected[0])
+}
+"#;
+    let out = jet::compile(src).expect("callback provenance is hidden in the function value");
+    assert!(
+        out.rust.contains("for<'__jet_view> Fn(&'__jet_view Vec<i64>)")
+            && out.rust.contains("-> &'__jet_view [i64]"),
+        "{}",
+        out.rust
+    );
+}
+
+#[test]
+fn function_values_keep_exact_view_owner_identity() {
+    let src = r#"
+fn first(left: [Int], right: [Int]) => View<Int> {
+    return left[0..1]
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9]
+    callback :: first
+    selected :: callback(left, right)
+    right.push(10)
+    print(selected[0])
+    print(right[1])
+}
+"#;
+    jet::compile(src).expect("unrelated callback arguments must not borrow the returned view");
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_exact_callback_view_owner", "exact_callback_view_owner", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "7\n10\n");
+    }
+}
+
+#[test]
+fn lambdas_keep_exact_view_owner_identity() {
+    let src = r#"
+fn run() {
+    left := [7, 8]
+    right := [9]
+    callback :: (first: [Int], second: [Int]) => first[0..1]
+    selected :: callback(left, right)
+    right.push(10)
+    print(selected[0])
+    print(right[1])
+}
+"#;
+    jet::compile(src).expect("unrelated lambda arguments must not borrow the returned view");
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_exact_lambda_view_owner", "exact_lambda_view_owner", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "7\n10\n");
+    }
 }
 
 #[test]
@@ -4143,7 +4682,7 @@ fn run() {
 }
 
 #[test]
-fn returned_view_cannot_escape_into_untracked_list() {
+fn returned_view_can_be_carried_in_a_list() {
     let src = r#"
 fn first(values: [Int]) => View<Int> {
     return values[0..1]
@@ -4155,8 +4694,7 @@ fn run() {
     print(windows[0][0])
 }
 "#;
-    let diags = jet::compile(src).expect_err("list container has no owner provenance slot");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+    jet::compile(src).expect("list element provenance remains attached to its owner");
 }
 
 #[test]

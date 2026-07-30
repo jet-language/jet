@@ -187,6 +187,11 @@ fn ui_snapshots() {
         // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
         let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
         let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
+        // Runtime/interpreter diagnostics still use the same exact snapshot
+        // product contract as front-end diagnostics.
+        let dev_interpreter = src
+            .lines()
+            .any(|l| l.trim() == "// @dev_interpreter");
         // Compiler/tool-generated Jet may use the reserved `__name` lane.
         // Ordinary fixtures never take this path.
         let generated_source = src.lines().any(|l| l.trim() == "// @generated_source")
@@ -245,6 +250,13 @@ fn ui_snapshots() {
             match result {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else if dev_interpreter {
+            match jet::Interpreter::dev_iteration(&file_arg, false, true) {
+                jet::Interpreter::RunOutcome::Problems(diags) => {
+                    jet::render_diagnostics(&shown_path, &src, &diags)
+                }
+                jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
             }
         } else if repl_deny {
             let input = src

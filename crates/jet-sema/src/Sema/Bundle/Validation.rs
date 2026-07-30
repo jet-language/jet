@@ -1355,7 +1355,12 @@ pub(crate) fn check_module_bodies(
             let Some(first) = candidates.first() else {
                 continue;
             };
-            if !candidates.iter().all(|candidate| candidate == first) {
+            let mut contract = first.clone();
+            if !candidates
+                .iter()
+                .skip(1)
+                .all(|candidate| merge_view_provenance(&mut contract, candidate))
+            {
                 continue;
             }
             if let Some(signature) = st
@@ -1364,7 +1369,7 @@ pub(crate) fn check_module_bodies(
                 .get(&key.0)
                 .and_then(|info| info.methods.get(&key.1))
             {
-                let _ = signature.return_view_provenance.set(first.clone());
+                let _ = signature.return_view_provenance.set(contract);
             }
         }
     }
@@ -1901,8 +1906,8 @@ pub(crate) fn check_module_bodies(
             _ => {}
         }
     }
-    // D-MEM-VIEWRET1=B: a trait method has one public owner contract. Infer
-    // it from checked implementations and reject disagreement before TIR.
+    // D-MEMPROVENANCE2=A: a trait method publishes the union of every
+    // compatible implementation source before TIR.
     let mut trait_view_contracts: HashMap<
         (String, String),
         (crate::AST::ViewProvenanceMap, crate::Diagnostics::Span),
@@ -1917,17 +1922,14 @@ pub(crate) fn check_module_bodies(
                     continue;
                 }
                 let key = (trait_name.to_string(), method.name.clone());
-                if let Some((existing, _)) = trait_view_contracts.get(&key) {
-                    if existing != &provenance {
+                if let Some((existing, _)) = trait_view_contracts.get_mut(&key) {
+                    if !merge_view_provenance(existing, &provenance) {
                         diags.push(Diagnostic::error(
                             "E2305",
-                            format!(
-                                "implementations of `{}.{}` disagree about the returned view owner",
-                                trait_name, method.name
-                            ),
-                            "one trait method has one public owner contract for every static or dynamic call"
+                            format!("implementations of `{}.{}` disagree about returned view slots", trait_name, method.name),
+                            "dynamic dispatch can union possible owners, but every implementation must return the same view-bearing shape and access capability"
                                 .to_string(),
-                            "return each view-bearing output slot from the same receiver or parameter position in every implementation"
+                            "return the same read or write view slots in every implementation"
                                 .to_string(),
                             Some(method.name_span),
                         ));
@@ -1977,6 +1979,23 @@ pub(crate) fn check_module_bodies(
     }
     let _ = st;
     diags
+}
+
+fn merge_view_provenance(
+    into: &mut crate::AST::ViewProvenanceMap,
+    from: &crate::AST::ViewProvenanceMap,
+) -> bool {
+    if into.len() != from.len() || !into.keys().all(|path| from.contains_key(path)) {
+        return false;
+    }
+    for (path, candidate) in from {
+        let existing = into.get_mut(path).expect("view paths were checked above");
+        if existing.mutable != candidate.mutable {
+            return false;
+        }
+        existing.sources.extend(candidate.sources.iter().cloned());
+    }
+    true
 }
 
 pub(crate) fn check_func_body_bundle(
@@ -2293,6 +2312,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
+        return_view_provenance: sig.return_view_provenance.get(),
     }
 }
 

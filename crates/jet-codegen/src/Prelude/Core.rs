@@ -1514,6 +1514,25 @@ fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     }
     xs[i as usize].clone()
 }
+fn jet_index_vec_mut<'a, T>(
+    xs: &'a mut [T],
+    i: i64,
+    file: &str,
+    line: u32,
+) -> &'a mut T {
+    let len = xs.len() as i64;
+    if i < 0 || i >= len {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "the list has {} items, so position {} doesn't exist",
+                len, i
+            ),
+        );
+    }
+    &mut xs[i as usize]
+}
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
         jet_panic(
@@ -1606,6 +1625,61 @@ fn jet_view_mut_new<'a, T>(
         );
     }
     &mut xs[a as usize..=b as usize]
+}
+
+fn jet_views_mut_new<'a, T>(
+    xs: &'a mut [T],
+    ranges: &[(i64, i64, u32)],
+    file: &str,
+) -> Vec<&'a mut [T]> {
+    let len = xs.len() as i64;
+    let mut ordered = Vec::with_capacity(ranges.len());
+    for (index, &(start, end, line)) in ranges.iter().enumerate() {
+        if start < 0 || end < 0 || start > end || end >= len {
+            jet_panic(
+                file,
+                line,
+                &format!(
+                    "can't view {} items from {} to {} (inclusive)",
+                    len, start, end
+                ),
+            );
+        }
+        ordered.push((start as usize, end as usize + 1, index));
+    }
+    ordered.sort_by_key(|&(start, end, _)| (start, end));
+    if ordered.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+        jet_panic(file, 0, "mutable view ranges overlap");
+    }
+
+    let mut pieces = Vec::with_capacity(ordered.len());
+    let mut tail = xs;
+    let mut offset = 0usize;
+    for (start, end, index) in ordered {
+        let (_, from_start) = tail.split_at_mut(start - offset);
+        let (selected, after) = from_start.split_at_mut(end - start);
+        pieces.push((index, selected));
+        tail = after;
+        offset = end;
+    }
+    pieces.sort_by_key(|(index, _)| *index);
+    pieces.into_iter().map(|(_, selected)| selected).collect()
+}
+
+fn jet_views_mut_range_new<'a, T>(
+    xs: &'a mut [T],
+    ranges: &[(JetRange, u32)],
+    file: &str,
+) -> Vec<&'a mut [T]> {
+    let bounds = ranges
+        .iter()
+        .map(|(range, line)| {
+            let checked =
+                jet_checked_range_bounds(xs.len() as i64, range, "view", file, *line);
+            (checked.start as i64, checked.end as i64 - 1, *line)
+        })
+        .collect::<Vec<_>>();
+    jet_views_mut_new(xs, &bounds, file)
 }
 
 fn jet_view_range_new<'a, T>(

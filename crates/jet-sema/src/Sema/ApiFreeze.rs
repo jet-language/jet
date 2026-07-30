@@ -183,7 +183,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             canonical_api_type_name(ok, dimensions),
             canonical_api_type_name(err, dimensions)
         ),
-        Type::Fn { params, ret, effect_bound } => {
+        Type::Fn { params, ret, effect_bound, .. } => {
             let params = params.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ");
             let effects = effect_bound.as_ref().map(|row| row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
             match (effects, ret) {
@@ -868,8 +868,10 @@ mod tests {
         f.return_view_provenance = Some(std::collections::BTreeMap::from([(
             Vec::new(),
             crate::AST::ViewProvenance {
-                source: crate::AST::ViewSource::Parameter(0),
-                projections: vec![crate::AST::ViewSourceProjection::Range],
+                sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+                    source: crate::AST::ViewSource::Parameter(0),
+                    projections: vec![crate::AST::ViewSourceProjection::Range],
+                }]),
                 mutable: false,
             },
         )]));
@@ -891,8 +893,10 @@ mod tests {
             f.return_view_provenance = Some(std::collections::BTreeMap::from([(
                 Vec::new(),
                 crate::AST::ViewProvenance {
-                    source: crate::AST::ViewSource::Parameter(source_index),
-                    projections: vec![crate::AST::ViewSourceProjection::Range],
+                    sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+                        source: crate::AST::ViewSource::Parameter(source_index),
+                        projections: vec![crate::AST::ViewSourceProjection::Range],
+                    }]),
                     mutable: false,
                 },
             )]));
@@ -924,16 +928,20 @@ mod tests {
                 (
                     vec!["left".into()],
                     crate::AST::ViewProvenance {
-                        source: crate::AST::ViewSource::Parameter(0),
-                        projections: vec![crate::AST::ViewSourceProjection::Range],
+                        sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+                            source: crate::AST::ViewSource::Parameter(0),
+                            projections: vec![crate::AST::ViewSourceProjection::Range],
+                        }]),
                         mutable: false,
                     },
                 ),
                 (
                     vec!["right".into()],
                     crate::AST::ViewProvenance {
-                        source: crate::AST::ViewSource::Parameter(right_source),
-                        projections: vec![crate::AST::ViewSourceProjection::Range],
+                        sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+                            source: crate::AST::ViewSource::Parameter(right_source),
+                            projections: vec![crate::AST::ViewSourceProjection::Range],
+                        }]),
                         mutable: false,
                     },
                 ),
@@ -947,6 +955,42 @@ mod tests {
         assert_ne!(distinct.capability_digest(), changed.capability_digest());
         assert!(distinct.funcs[0].signature.contains(
             "view_sources = left=parameter:0;access:read;path:range|right=parameter:1;access:read;path:range"
+        ));
+    }
+
+    #[test]
+    fn source_union_is_public_and_identity_bearing() {
+        let snapshot = |sources: &[usize]| {
+            let mut f = func(
+                "choose",
+                true,
+                vec![
+                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                ],
+                Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+            );
+            f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+                Vec::new(),
+                crate::AST::ViewProvenance {
+                    sources: sources
+                        .iter()
+                        .map(|index| crate::AST::ViewSourcePath {
+                            source: crate::AST::ViewSource::Parameter(*index),
+                            projections: vec![crate::AST::ViewSourceProjection::Range],
+                        })
+                        .collect(),
+                    mutable: false,
+                },
+            )]));
+            snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+        };
+
+        let one = snapshot(&[0]);
+        let union = snapshot(&[0, 1]);
+        assert_ne!(one.capability_digest(), union.capability_digest());
+        assert!(union.funcs[0].signature.contains(
+            "view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read"
         ));
     }
 

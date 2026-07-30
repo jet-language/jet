@@ -72,7 +72,9 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     let Some(variants) = cx.enum_variants.get(name) else {
         return false;
     };
-    if !is_foreign && !cx.cloneable.contains(name) {
+    let carries_mutable_view =
+        cx.type_contains_mutable_view(&Type::Named(name.to_string()));
+    if !is_foreign && !cx.cloneable.contains(name) && !carries_mutable_view {
         return false;
     }
     // A recursive edge back to this enum admits it (already under check) — the box
@@ -95,13 +97,21 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
 }
 
 /// c109 Phase 16: an enum-variant payload field type the subset can lower —
-/// scalar/Char/String, a covered struct, a covered collection, or another covered
-/// enum (recursion permitted; the boxed edge is reproduced at the literal site).
+/// scalar/Char/String, a sema-proved View/ViewMut, a covered struct, a covered
+/// collection, or another covered enum (recursion permitted; the boxed edge is
+/// reproduced at the literal site).
 /// The `seen` set is threaded through every enum reference (including ones reached
 /// via a nested collection element) so a `[Self]` / recursive-through-collection
 /// payload terminates instead of looping.
 pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
+        return true;
+    }
+    // D-MEMPROVENANCE2=A: sema already proved every stored view's bounded owner
+    // set. TIR carries the slice value unchanged; the hidden Rust lifetime is
+    // rendered on the enum declaration and containing signatures.
+    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1)
+    {
         return true;
     }
     // c109 Phase 24: a FOREIGN (imported) struct/enum payload (`Query.Kind(NoteType)`

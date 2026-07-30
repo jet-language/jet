@@ -275,7 +275,7 @@ This section uses a strict test.
 An actual gap means safe Rust can preserve an essential memory property that safe Jet cannot preserve today.
 A copy, a different representation, or a required unsafe call does not close that gap.
 
-### G1 — Provenance-polymorphic views
+### G1 — Provenance-polymorphic views — closed by #1197
 
 Rust can return a reference chosen from several input owners.
 Its lifetime relation keeps all possible owners live.
@@ -284,13 +284,14 @@ The standard `longest` example shows this exact form.
 Rust can also put references in lists, tuples, options, results, enums, closures, and trait APIs.
 This supports borrowing parsers, lending iterators, and zero-copy decoded trees.
 
-Jet requires one stable source for each returned view slot.
-It rejects source choice, list or tuple storage, view-returning function values, and open trait dispatch.
-E2305 and E2307 report these cases.
+Jet now records a bounded owner-path union for each view slot under
+D-MEMPROVENANCE2=A. Branches, aggregates, function values, lambdas, generic
+callbacks, and compatible trait implementations preserve that relation.
+Public API snapshots expose source unions and report provenance changes.
+E2305 and E2307 remain for temporary owners, unbounded dispatch, and
+incompatible access paths.
 
-This is one root gap in Jet's public provenance algebra.
-Tower card #1197 records it at P0.
-Ballot D-MEMPROVENANCE2 asks how the user surface should express it.
+Tower card #1197 contains the implementation and verification evidence.
 
 ### G2 — Runtime-proven disjoint writes
 

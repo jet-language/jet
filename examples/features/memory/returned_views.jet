@@ -9,7 +9,23 @@ struct Token {
     rest: View<str>
 }
 
+struct BorrowedRecord {
+    kind: View<str>
+    body: View<str>
+}
+
 fn first(values: [Int]) => View<Int> = values[0..1]
+
+// The result safely borrows whichever input wins at runtime. Both possible
+// owners remain live at the call site.
+fn longer(left: String, right: String) => View<str> {
+    if left.len() >= right.len() {
+        winner :: left.trim()
+        return winner
+    }
+    winner :: right.trim()
+    return winner
+}
 
 fn domain(email: String) => Domain {
     value :: email.after("@")
@@ -26,13 +42,40 @@ fn scan(source: String) => Token {
 
 fn parse(source: String) => Token = scan(source)
 
+// A parser can return a list of tokens borrowed from different input buffers.
+fn tokenize(left: String, right: String) => [View<str>] {
+    left_token :: left.before(":")
+    right_token :: right.before(":")
+    return [left_token, right_token]
+}
+
+// A borrowing deserializer can also keep one field from each input buffer.
+fn deserialize(header: String, payload: String) => BorrowedRecord {
+    kind :: header.after(":")
+    body :: payload.after(":")
+    return BorrowedRecord.{ kind: kind, body: body }
+}
+
 fn run() {
     values :: [7, 8]
     email :: "user@example.com"
     source :: "name:value"
     token :: parse(source)
+    left :: "short"
+    right :: "a longer value"
+    left_source :: "left:1"
+    right_source :: "right:2"
+    header :: "kind:message"
+    payload :: "body:hello"
+    tokens :: tokenize(left_source, right_source)
+    record :: deserialize(header, payload)
     print(first(values)[0])
     print(domain(email).value)
     print(token.text)
     print(token.rest)
+    print(longer(left, right))
+    print(tokens[0])
+    print(tokens[1])
+    print(record.kind)
+    print(record.body)
 }

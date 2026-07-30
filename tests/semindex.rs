@@ -233,7 +233,7 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 #[test]
 fn semindex_schema_version() {
     // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
-    assert_eq!(SCHEMA_VERSION, 11);
+    assert_eq!(SCHEMA_VERSION, 12);
 }
 
 #[test]
@@ -393,7 +393,7 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":11"));
+    assert!(json.contains("\"schema_version\":12"));
     assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"instances\""));
@@ -516,41 +516,50 @@ fn run() {
 fn returned_view_provenance_is_structured_and_changes_signature_id() {
     let path = temp_fixture(
         "view_provenance.jet",
-        "fn pick(left: [Int], right: [Int]) => View<Int> { return left[0..1] }\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int], first: Bool) => View<Int> {\n    if first { return left[0..1] }\n    return right[0..1]\n}\nfn run() {}\n",
     );
-    let left = open(&path).expect("parameter-0 view provenance indexes");
-    let pick = left.lookup("pick").expect("pick definition");
+    let union = open(&path).expect("multi-source view provenance indexes");
+    let pick = union.lookup("pick").expect("pick definition");
     assert!(matches!(pick.kind, SymbolKind::Function { .. }));
     assert_eq!(pick.view_provenance.len(), 1);
     let provenance = &pick.view_provenance[0];
     assert!(provenance.output_path.is_empty());
-    assert_eq!(provenance.source, ViewSourceFact::Parameter(0));
-    assert_eq!(provenance.projections, vec![ViewProjectionFact::Range]);
+    assert_eq!(provenance.sources.len(), 2);
+    assert_eq!(provenance.sources[0].source, ViewSourceFact::Parameter(0));
+    assert_eq!(provenance.sources[0].projections, vec![ViewProjectionFact::Range]);
+    assert_eq!(provenance.sources[1].source, ViewSourceFact::Parameter(1));
+    assert_eq!(provenance.sources[1].projections, vec![ViewProjectionFact::Range]);
     assert!(!provenance.mutable);
-    let left_signature = left
+    let union_signature = union
         .definition_facts()
         .iter()
         .find(|fact| fact.name == "pick")
         .unwrap()
         .signature_id
         .clone();
-    let json = left.to_json();
-    assert!(json.contains("\"view_provenance\":[{\"output_path\":[],\"source\":{\"kind\":\"parameter\",\"index\":0}"));
+    let json = union.to_json();
+    assert!(json.contains("\"view_provenance\":[{\"output_path\":[],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"));
+    assert!(json.contains("\"source\":{\"kind\":\"parameter\",\"index\":1}"));
     assert!(json.contains("\"projections\":[{\"kind\":\"range\"}]"));
 
     fs::write(
         &path,
-        "fn pick(left: [Int], right: [Int]) => View<Int> { return right[0..1] }\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int], first: Bool) => View<Int> { return right[0..1] }\nfn run() {}\n",
     )
     .unwrap();
     let right = open(&path).expect("parameter-1 view provenance indexes");
+    let right_pick = right.lookup("pick").expect("pick definition");
+    assert_eq!(
+        right_pick.view_provenance[0].canonical(),
+        "slot:$;parameter:1;access:read;path:range"
+    );
     let right_signature = &right
         .definition_facts()
         .iter()
         .find(|fact| fact.name == "pick")
         .unwrap()
         .signature_id;
-    assert_ne!(&left_signature, right_signature);
+    assert_ne!(&union_signature, right_signature);
 }
 
 #[test]
@@ -571,9 +580,9 @@ fn run() {{}}
     let pair = distinct.lookup("pair").expect("pair definition");
     assert_eq!(pair.view_provenance.len(), 2);
     assert_eq!(pair.view_provenance[0].output_path, vec!["left"]);
-    assert_eq!(pair.view_provenance[0].source, ViewSourceFact::Parameter(0));
+    assert_eq!(pair.view_provenance[0].sources[0].source, ViewSourceFact::Parameter(0));
     assert_eq!(pair.view_provenance[1].output_path, vec!["right"]);
-    assert_eq!(pair.view_provenance[1].source, ViewSourceFact::Parameter(1));
+    assert_eq!(pair.view_provenance[1].sources[0].source, ViewSourceFact::Parameter(1));
     let distinct_signature = distinct
         .definition_facts()
         .iter()
@@ -582,8 +591,8 @@ fn run() {{}}
         .signature_id
         .clone();
     let json = distinct.to_json();
-    assert!(json.contains("\"output_path\":[\"left\"],\"source\":{\"kind\":\"parameter\",\"index\":0}"));
-    assert!(json.contains("\"output_path\":[\"right\"],\"source\":{\"kind\":\"parameter\",\"index\":1}"));
+    assert!(json.contains("\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"));
+    assert!(json.contains("\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}"));
 
     fs::write(&path, source("left")).unwrap();
     let changed = open(&path).expect("changed aggregate view provenance indexes");
@@ -1020,7 +1029,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":11"));
+    assert!(text.contains("\"schema_version\":12"));
 }
 
 #[test]

@@ -625,24 +625,34 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // D-SHAPE-PLACE1=A: local place windows are references with no
             // written Rust type clause. Range windows already behave as slices;
             // whole/field/index windows bind a dereferenced transparent slot.
-            if let Expr::Place(inner, _, _) = &b.init {
-                let range = matches!(inner.as_ref(), Expr::Slice { .. });
-                let init = lower_expr(&b.init, cx, env);
-                let slot = if range {
-                    TLocal::user(&b.name)
+            let moved_view = if let Expr::Place(inner, _, _) = &b.init {
+                let moved = lower_owned_expr(inner, cx, env);
+                if matches!(
+                    &moved.ty,
+                    Type::Apply { name, .. } if name == "ViewMut"
+                ) {
+                    Some(moved)
                 } else {
-                    TLocal::user(&b.name).through_ref()
-                };
-                env.bind(&b.name, slot, b.ty.clone());
-                return TStmt::Let {
-                    name: b.name.clone(),
-                    kw: "let",
-                    let_ty: TLetTy::Inferred,
-                    init,
-                gc_promotion: None,
-                gc_transferred: false,
-                };
-            }
+                    let range = matches!(inner.as_ref(), Expr::Slice { .. });
+                    let init = lower_expr(&b.init, cx, env);
+                    let slot = if range {
+                        TLocal::user(&b.name)
+                    } else {
+                        TLocal::user(&b.name).through_ref()
+                    };
+                    env.bind(&b.name, slot, b.ty.clone());
+                    return TStmt::Let {
+                        name: b.name.clone(),
+                        kw: "let",
+                        let_ty: TLetTy::Inferred,
+                        init,
+                        gc_promotion: None,
+                        gc_transferred: false,
+                    };
+                }
+            } else {
+                None
+            };
             // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
             // `x :: s.after(sep)` / `x :: s.before(sep)`; sema set `string_view`
             // after proving E2307-safety — see `CheckerCore.rs`'s binding check).
@@ -696,7 +706,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
                 };
             }
-            let mut init = lower_owned_expr(&b.init, cx, env);
+            let mut init =
+                moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
             if let Some(want) = &b.ty {
                 init = preserve_typed_list_shape(init, want, cx);
             }
@@ -738,11 +749,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
             );
             if mut_fn {
-                if let Some(Type::Fn { params, ret, .. }) = &b.ty {
+                if let Some(Type::Fn {
+                    params,
+                    ret,
+                    return_view_provenance,
+                    ..
+                }) = &b.ty {
                     let coerced = format!(
                         "{} as {}",
                         emit_tir_expr(&init, cx),
-                        cx.rust_fn_trait(params, ret.as_deref(), true)
+                        cx.rust_fn_trait(
+                            params,
+                            ret.as_deref(),
+                            return_view_provenance.as_ref(),
+                            true,
+                        )
                     );
                     init = TExpr {
                         ty: init.ty.clone(),
@@ -808,7 +829,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 if name == Syntax::TYPE_SHARED_GUARD
                         )
             );
-            let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
+            let kw = if (b.mutable && !b.is_comptime)
+                || mut_fn
+                || is_file_handle
+                || cx.type_contains_mutable_view(&ty)
+            {
                 "let mut"
             } else {
                 "let"

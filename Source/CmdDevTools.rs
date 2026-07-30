@@ -2244,7 +2244,11 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         return_view_provenance: f
                             .return_view_provenance
                             .clone()
-                            .map(std::sync::OnceLock::from)
+                            .map(|provenance| {
+                                let cell = jet::AST::ViewProvenanceCell::new();
+                                cell.set(provenance);
+                                cell
+                            })
                             .unwrap_or_default(),
                         is_extern: false,
                         is_c_abi: false,

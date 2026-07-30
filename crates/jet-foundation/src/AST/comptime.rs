@@ -1,5 +1,5 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, Type};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 /// D-MEM-VIEWRET1=B: compiler-inferred public owner of a returned/stored view.
@@ -19,9 +19,17 @@ pub enum ViewSourceProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ViewProvenance {
+pub struct ViewSourcePath {
     pub source: ViewSource,
     pub projections: Vec<ViewSourceProjection>,
+}
+
+/// D-MEMPROVENANCE2=A: one returned-view slot may come from any source path
+/// in this bounded, deterministic set. Access stays a property of the slot:
+/// every path must provide the same read or write capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewProvenance {
+    pub sources: BTreeSet<ViewSourcePath>,
     pub mutable: bool,
 }
 
@@ -29,6 +37,34 @@ pub struct ViewProvenance {
 /// view. An empty path is a direct `View` return; aggregate slots use their
 /// nested field path. BTreeMap makes API fingerprints and fixed points stable.
 pub type ViewProvenanceMap = BTreeMap<Vec<String>, ViewProvenance>;
+
+/// Shared, replaceable view summary used by the body-analysis fixed point.
+/// A plain `OnceLock` freezes the first partial result in recursive call
+/// graphs; this cell publishes each larger iteration until convergence.
+#[derive(Debug, Clone, Default)]
+pub struct ViewProvenanceCell(
+    std::sync::Arc<std::sync::RwLock<Option<ViewProvenanceMap>>>,
+);
+
+impl ViewProvenanceCell {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self) -> Option<ViewProvenanceMap> {
+        self.0
+            .read()
+            .expect("view provenance lock poisoned")
+            .clone()
+    }
+
+    pub fn set(&self, provenance: ViewProvenanceMap) {
+        *self
+            .0
+            .write()
+            .expect("view provenance lock poisoned") = Some(provenance);
+    }
+}
 
 pub fn canonical_view_provenance_map(map: &ViewProvenanceMap) -> String {
     map.iter()
@@ -46,18 +82,37 @@ pub fn canonical_view_provenance_map(map: &ViewProvenanceMap) -> String {
 
 impl ViewProvenance {
     pub fn canonical(&self) -> String {
+        let access = if self.mutable { "write" } else { "read" };
+        if let Some(source) = self.sources.iter().next().filter(|_| self.sources.len() == 1) {
+            let canonical = source.canonical();
+            let (owner, path) = canonical
+                .split_once(";path:")
+                .expect("view source canonical form includes a path");
+            return format!("{owner};access:{access};path:{path}");
+        }
+        let sources = self
+            .sources
+            .iter()
+            .map(ViewSourcePath::canonical)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("one_of({sources});access:{access}")
+    }
+}
+
+impl ViewSourcePath {
+    pub fn canonical(&self) -> String {
         let source = match &self.source {
             ViewSource::Receiver => "receiver".to_string(),
             ViewSource::Parameter(index) => format!("parameter:{index}"),
             ViewSource::Static { module_path, name } => format!("static:{module_path}::{name}"),
         };
-        let access = if self.mutable { "write" } else { "read" };
         let path = self.projections.iter().map(|projection| match projection {
             ViewSourceProjection::Field(name) => format!("field:{name}"),
             ViewSourceProjection::Index => "index".to_string(),
             ViewSourceProjection::Range => "range".to_string(),
         }).collect::<Vec<_>>().join("/");
-        format!("{source};access:{access};path:{path}")
+        format!("{source};path:{path}")
     }
 }
 
@@ -70,7 +125,7 @@ pub struct FuncSig {
     pub return_type: Option<Type>,
     /// Sema-proved stable source for a returned view. Callers compose the
     /// parameter index onto the corresponding actual argument place.
-    pub return_view_provenance: std::sync::OnceLock<ViewProvenanceMap>,
+    pub return_view_provenance: ViewProvenanceCell,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
     /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`
@@ -526,7 +581,7 @@ impl CtValue {
             CtValue::Closure(_) => Type::Fn {
                 params: Vec::new(),
                 ret: None,
-                effect_bound: None,
+                effect_bound: None, return_view_provenance: None,
             },
         }
     }

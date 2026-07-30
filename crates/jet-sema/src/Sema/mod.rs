@@ -72,8 +72,7 @@ pub(crate) struct MethodSig {
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
     /// D-MUSTUSE1 (c18iwxqx): `#MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
-    pub(crate) return_view_provenance:
-        std::sync::Arc<std::sync::OnceLock<crate::AST::ViewProvenanceMap>>,
+    pub(crate) return_view_provenance: crate::AST::ViewProvenanceCell,
 }
 
 #[derive(Debug, Clone)]
@@ -424,7 +423,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     // param_info and defaults exclude `self` — they parallel the args a
     // caller provides (no `self` in the call-site arg list).
     let non_self_params = f.params.iter().filter(|p| p.name != "self");
-    let return_view_provenance = std::sync::Arc::new(std::sync::OnceLock::new());
+    let return_view_provenance = crate::AST::ViewProvenanceCell::new();
     if let Some(provenance) = &f.return_view_provenance {
         let _ = return_view_provenance.set(provenance.clone());
     }
@@ -453,7 +452,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
 
 fn func_to_sig(f: &Func) -> FuncSig {
     let param_variadic: Vec<bool> = f.params.iter().map(|p| p.variadic).collect();
-    let return_view_provenance = std::sync::OnceLock::new();
+    let return_view_provenance = crate::AST::ViewProvenanceCell::new();
     if let Some(provenance) = &f.return_view_provenance {
         let _ = return_view_provenance.set(provenance.clone());
     }
@@ -515,7 +514,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
-        return_view_provenance: std::sync::OnceLock::new(),
+        return_view_provenance: crate::AST::ViewProvenanceCell::new(),
         is_extern: true,
         is_c_abi,
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),

@@ -751,17 +751,14 @@ impl<'a> EvalCtx<'a> {
                 value,
                 ..
             } => {
-                let base_name = match &base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
-                    _ => return Err(unsupported("index assign base", self.span())),
-                };
+                let base_value = self.eval_expr(base, scope)?;
                 let idx_v = self.eval_expr(index, scope)?;
                 let rhs = self.eval_expr(value, scope)?;
                 // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).
-                if let Some(CtValue::Struct {
+                if let CtValue::Struct {
                     type_name,
                     fields,
-                }) = scope.get(&base_name).cloned()
+                } = base_value
                 {
                     if type_name == "__JetViewMut" {
                         let mut base_s = None;
@@ -793,6 +790,10 @@ impl<'a> EvalCtx<'a> {
                         return Ok(Flow::Normal);
                     }
                 }
+                let base_name = match &base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
+                    _ => return Err(unsupported("index assign base", self.span())),
+                };
                 if *is_map {
                     let Some(CtValue::Map(mut entries)) = scope.get(&base_name).cloned() else {
                         return Err(unsupported("index assign map", self.span()));

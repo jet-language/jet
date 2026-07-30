@@ -771,6 +771,7 @@ impl<'a> Parser<'a> {
             params,
             ret,
             effect_bound,
+            return_view_provenance: None,
         })
     }
 

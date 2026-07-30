@@ -192,6 +192,9 @@ pub enum Type {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
+        /// Hidden relation from returned view slots to possible parameter
+        /// owners. It is inferred by sema and never appears in source syntax.
+        return_view_provenance: Option<super::ViewProvenanceMap>,
     },
     /// User-defined monomorphic type name.
     Named(String),
@@ -461,10 +464,11 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
+                return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
                 name: name.clone(),
@@ -523,7 +527,7 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound } => {
+            Type::Fn { params, ret, effect_bound, .. } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())
@@ -608,7 +612,7 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound } => {
+            Type::Fn { params, ret, effect_bound, .. } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())

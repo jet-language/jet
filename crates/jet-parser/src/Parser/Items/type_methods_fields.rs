@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
                 default_body,
                 is_pure,
                 declared_effects,
-                return_view_provenance: std::sync::Arc::new(std::sync::OnceLock::new()),
+                return_view_provenance: crate::AST::ViewProvenanceCell::new(),
             })
         }
     

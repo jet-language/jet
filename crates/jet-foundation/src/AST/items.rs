@@ -694,7 +694,7 @@ pub struct TraitMethodSig {
     pub declared_effects: Option<Vec<(String, Span)>>,
     /// D-MEM-VIEWRET1=B: inferred owner contract shared by the declaration,
     /// every implementation, and dynamic dispatch.
-    pub return_view_provenance: std::sync::Arc<std::sync::OnceLock<super::ViewProvenanceMap>>,
+    pub return_view_provenance: super::ViewProvenanceCell,
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.

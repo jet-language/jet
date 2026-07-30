@@ -120,12 +120,14 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             params,
             ret,
             effect_bound,
+            return_view_provenance,
         } => Type::Fn {
             params: params.iter().map(|p| substitute_type(p, subst)).collect(),
             ret: ret.as_ref().map(|r| Box::new(substitute_type(r, subst))),
             // D-EFF2: the callback effect bound is a plain annotation, not a
             // generic-substitutable type — carry it through unchanged.
             effect_bound: effect_bound.clone(),
+            return_view_provenance: return_view_provenance.clone(),
         },
         Type::Tuple(fields) => Type::Tuple(
             fields

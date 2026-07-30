@@ -321,8 +321,18 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
             }
         }
         TLetTy::Annotated { ty, mut_fn, wrapper } => {
-            let base = if let Type::Fn { params, ret, .. } = ty {
-                cx.rust_fn_trait(params, ret.as_deref(), *mut_fn)
+            let base = if let Type::Fn {
+                params,
+                ret,
+                return_view_provenance,
+                ..
+            } = ty {
+                cx.rust_fn_trait(
+                    params,
+                    ret.as_deref(),
+                    return_view_provenance.as_ref(),
+                    *mut_fn,
+                )
             } else {
                 cx.rust_type(ty)
             };

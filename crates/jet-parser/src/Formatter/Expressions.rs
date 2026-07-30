@@ -350,6 +350,7 @@ impl<'a> Fmt<'a> {
                 params,
                 ret,
                 effect_bound,
+                ..
             } => {
                 self.write("fn(");
                 for (i, p) in params.iter().enumerate() {

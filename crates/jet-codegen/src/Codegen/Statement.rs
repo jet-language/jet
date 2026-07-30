@@ -329,6 +329,13 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let middleware = params.len() == 1
         && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
         && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HTTPHandler");
+    if !middleware
+        && ret
+            .as_deref()
+            .is_some_and(|ret| cx.type_contains_view(ret))
+    {
+        return format!("Box::new({rust_name}) as {}", cx.rust_type(ft));
+    }
     let arg_decls: Vec<String> = params
         .iter()
         .enumerate()

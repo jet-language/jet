@@ -113,12 +113,20 @@ impl<'a> Parser<'a> {
                                 // `expr .. expr` directly; the two ends become the
                                 // constructor's two Int arguments, exactly like a
                                 // bracket slice's `start`/`end`.
-                                let start = self.expr()?;
-                                self.expect(
-                                    TokKind::DotDot,
-                                    "a `..` between the view's start and end",
-                                )?;
-                                let end = self.expr()?;
+                                let range = self.expr()?;
+                                let Expr::Range { start, end, .. } = range else {
+                                    return Err(Diagnostic::error(
+                                        "E0003",
+                                        "expected a `..` between the view's start and end"
+                                            .to_string(),
+                                        "the structure here isn't what the compiler expected"
+                                            .to_string(),
+                                        "use `..` between the view's start and end".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                };
+                                let start = *start;
+                                let end = *end;
                                 let start_span = start.span();
                                 let end_span = end.span();
                                 args.push(CallArg {

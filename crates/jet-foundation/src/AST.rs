@@ -62,7 +62,7 @@ pub use expressions::{
 mod comptime;
 pub use comptime::{
     canonical_view_provenance_map, ClosureData, CtFloat, CtKey, CtValue, FuncSig, ViewProvenance,
-    ViewProvenanceMap, ViewSource,
+    ViewProvenanceCell, ViewProvenanceMap, ViewSource, ViewSourcePath,
     ViewSourceProjection,
 };
 

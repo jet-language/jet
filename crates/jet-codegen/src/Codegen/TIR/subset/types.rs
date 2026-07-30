@@ -551,6 +551,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_enum_ty(ty, cx)
         || is_covered_generic_struct_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
+        || is_covered_view_ty(ty, cx)
         || is_covered_data_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type payload (`Note?` on a `ParsedResult` field —
         // `Note` is an imported struct). It renders via `cx.rust_type` to its own Rust
@@ -584,9 +585,8 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 /// A list/map element, key, or value type the subset can lower: a scalar, Char,
-/// String, a covered distinct/struct/enum, or a nested covered collection. Anything else
-/// (option, trait object, fn, tuple, generic var, foreign type) excludes the
-/// owning collection.
+/// String, a sema-proved view, a covered distinct/struct/enum, or a nested
+/// covered collection. Anything else excludes the owning collection.
 pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
@@ -600,6 +600,7 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
+        || is_covered_view_ty(ty, cx)
         // c109 Phase 21: a `[Task<Unit>]` worker list (34_parallel_scan) — a concurrency
         // handle element renders via `cx.rust_type` (`Vec<Jet…<…>>`) like any value type.
         || is_covered_concurrency_ty(ty, cx)

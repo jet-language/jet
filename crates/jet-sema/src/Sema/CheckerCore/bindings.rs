@@ -677,13 +677,36 @@ impl<'a> Checker<'a> {
                     self.record_fixed_backing(&b.name, owner, b.name_span);
                 }
             }
+            let direct_mutable_view =
+                matches!(&final_ty, Type::Apply { name, .. } if name == "ViewMut");
+            let transferred_view_root = direct_mutable_view
+                .then(|| self.mutable_view_aggregate_root(&b.init))
+                .flatten();
             // D-SHAPE-PLACE1: `x :: list[a..b]` makes `x` a scope-bound window
             // into `list`. E2305 fires the same way E0631 does for arena views —
             // rebinding a live view to a second name is itself an escape (views
             // are non-reassignable non-escaping locals, I8), not re-tracked.
             for (output_path, place, kind, access) in self.view_call_sources(&b.init) {
-                self.record_list_view(&b.name, output_path, place, kind, access, b.name_span);
+                let access = if direct_mutable_view && output_path.is_empty() {
+                    crate::Sema::ViewAccess::Write
+                } else {
+                    access
+                };
+                self.record_list_view(
+                    &b.name,
+                    output_path,
+                    place,
+                    kind,
+                    access,
+                    b.name_span,
+                    &final_ty,
+                    transferred_view_root.as_deref(),
+                );
             }
+            self.finish_mutable_view_aggregate_transfer(
+                transferred_view_root.as_deref(),
+                b.init.span(),
+            );
             if let Expr::Ident(src, src_span) = &b.init {
                 let _ = src_span;
                 self.transfer_named_view(&b.name, src, b.name_span);

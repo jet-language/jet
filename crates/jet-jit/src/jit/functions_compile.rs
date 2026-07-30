@@ -264,6 +264,7 @@ pub(crate) fn lower_callable_lambda(
         params: lam.param_types.clone(),
         ret: lam.ret.clone().map(Box::new),
         effect_bound: None,
+        return_view_provenance: None,
     };
     let block_returns_value = match &lam.executable {
         TLambdaBody::Block(stmts) => block_has_valued_return(stmts),
