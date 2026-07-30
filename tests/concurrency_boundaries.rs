@@ -163,7 +163,15 @@ fn cross(guard: {guard}) {{
 fn run() {{}}
 "#
         );
-        assert_rejected(&source, "E1102");
+        let codes = error_codes(&source);
+        assert!(
+            codes.iter().any(|code| code == "E1102"),
+            "task capture must keep the task-boundary diagnostic: {codes:?}"
+        );
+        assert!(
+            codes.iter().all(|code| code != "E0215"),
+            "aggregate-storage E0215 must not shadow task-boundary E1102: {codes:?}"
+        );
     }
 }
 
