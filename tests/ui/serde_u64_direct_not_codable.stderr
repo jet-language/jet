@@ -1,7 +1,7 @@
 Error [E2411]: U64 can't be serialized
   --> tests/ui/serde_u64_direct_not_codable.jet:5:19
     |
-  5 |     cbor.to_bytes(value)
+  5 |     cbor.to_bytes(value).drop("this fixture only pins E2411")
     |                   ^^^^^
  Why: Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value
  Fix: convert the U64 to Int after checking it fits, or encode it as Text explicitly
@@ -9,7 +9,7 @@ Error [E2411]: U64 can't be serialized
 Error [E2411]: U64 can't be decoded
   --> tests/ui/serde_u64_direct_not_codable.jet:6:10
     |
-  6 |     cbor.decode<U64>([U8].{ 0x01 })
+  6 |     cbor.decode<U64>([U8].{ 0x01 }).drop("this fixture only pins E2411")
     |          ^^^^^^
  Why: Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value
  Fix: decode an Int or Text and convert it to U64 explicitly

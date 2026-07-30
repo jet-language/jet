@@ -121,13 +121,23 @@ fn validate_rule_arguments(
                     variant_segments.last().copied().unwrap_or(path)
                 }
             });
-            if !declaration.variants.is_empty()
-                && candidate.is_some_and(|candidate| !declaration.variants.contains(&candidate))
-            {
-                return Err(crate::Policy::marker_argument_shape_error(
-                    &marker_name,
-                    marker_span,
-                ));
+            // `#FFI` and `#RenameAll` teach their own menus downstream (E3220 /
+            // E2409); a generic signature error here would preempt them.
+            let owns_its_menu = matches!(
+                marker_name.as_str(),
+                Syntax::ATTR_FFI | Syntax::ATTR_RENAME_ALL
+            );
+            if !owns_its_menu && !declaration.variants.is_empty() {
+                if let Some(written) =
+                    candidate.filter(|candidate| !declaration.variants.contains(candidate))
+                {
+                    return Err(crate::Policy::marker_argument_unknown_variant(
+                        &marker_name,
+                        *declaration,
+                        written,
+                        marker_span,
+                    ));
+                }
             }
         }
         let observation = if binding.ty == crate::Policy::RuleArgType::Ident

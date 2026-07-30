@@ -460,6 +460,30 @@ pub fn marker_argument_shape_error(
     )
 }
 
+/// A marker argument whose shape is right but whose value is outside the
+/// declared menu. Naming the menu is the whole point: the writer typed a name
+/// the compiler knows nothing about.
+pub fn marker_argument_unknown_variant(
+    name: &str,
+    declaration: RuleArgDeclaration,
+    written: &str,
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    let menu = declaration
+        .variants
+        .iter()
+        .map(|variant| format!("`{variant}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::Diagnostics::Diagnostic::error(
+        "E0930",
+        format!("`#{name}` has no `{}` called `{written}`", declaration.name),
+        format!("`{}` is a closed menu: {menu}", declaration.name),
+        format!("pick one of {menu}"),
+        Some(span),
+    )
+}
+
 pub fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
     let mut lo = i64::MIN;
     let mut hi = i64::MAX;
