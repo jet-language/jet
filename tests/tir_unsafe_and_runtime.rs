@@ -539,8 +539,16 @@ fn run() {
                 assert_eq!(tier_stdout, stdout, "{tier} ordered output drift");
                 if !force_interpreter {
                     assert!(
+                        jet_jit::jit_executed_for_test(),
+                        "join_all must execute native resident JIT code"
+                    );
+                    assert!(
+                        !jet_jit::fallback_invoked_for_test(),
+                        "join_all resident JIT must not invoke fallback"
+                    );
+                    assert!(
                         !jet_jit::deopt_invoked_for_test(),
-                        "join_all resident JIT must not fall back"
+                        "join_all resident JIT must not deopt"
                     );
                 }
             }

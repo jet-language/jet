@@ -18,48 +18,91 @@ pub(crate) fn expand(
     let mut diags = Vec::new();
     let mut segment_start = 0usize;
     let mut brace_depth = 0usize;
+    let mut nested_brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
 
     for (index, token) in toks.iter().enumerate() {
-        let boundary = matches!(
-            token.kind,
-            TokKind::Semi | TokKind::LBrace | TokKind::RBrace | TokKind::Eof
-        );
-        if !boundary {
+        let nested_expression_brace = matches!(token.kind, TokKind::LBrace)
+            && (nested_brace_depth > 0
+                || paren_depth > 0
+                || bracket_depth > 0
+                || index
+                    .checked_sub(1)
+                    .is_some_and(|previous| {
+                        matches!(toks[previous].kind, TokKind::LambdaArrow | TokKind::Dot)
+                    }));
+        let boundary = matches!(token.kind, TokKind::Eof)
+            || (matches!(token.kind, TokKind::Semi)
+                && nested_brace_depth == 0
+                && paren_depth == 0
+                && bracket_depth == 0)
+            || (matches!(token.kind, TokKind::LBrace) && !nested_expression_brace)
+            || (matches!(token.kind, TokKind::RBrace)
+                && nested_brace_depth == 0
+                && paren_depth == 0
+                && bracket_depth == 0);
+
+        if boundary {
+            flush_segment(
+                &toks[segment_start..index],
+                brace_depth,
+                &mut out,
+                &mut facts,
+                &mut diags,
+            );
+            out.push(token.clone());
+            match token.kind {
+                TokKind::LBrace => brace_depth += 1,
+                TokKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                _ => {}
+            }
+            segment_start = index + 1;
             continue;
         }
 
-        let segment = &toks[segment_start..index];
-        if segment
-            .iter()
-            .any(|token| matches!(token.kind, TokKind::FenceOpen | TokKind::FenceClose))
-        {
-            match expand_segment(segment, brace_depth) {
-                Ok((expanded, fact)) => {
-                    out.extend(expanded);
-                    facts.push(fact);
-                }
-                Err(mut errors) => {
-                    out.extend_from_slice(segment);
-                    diags.append(&mut errors);
-                }
-            }
-        } else {
-            out.extend_from_slice(segment);
-        }
-
-        out.push(token.clone());
         match token.kind {
-            TokKind::LBrace => brace_depth += 1,
-            TokKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+            TokKind::LParen => paren_depth += 1,
+            TokKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+            TokKind::LBracket => bracket_depth += 1,
+            TokKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+            TokKind::LBrace => nested_brace_depth += 1,
+            TokKind::RBrace => nested_brace_depth = nested_brace_depth.saturating_sub(1),
             _ => {}
         }
-        segment_start = index + 1;
     }
 
     if diags.is_empty() {
         Ok((out, facts))
     } else {
         Err(diags)
+    }
+}
+
+fn flush_segment(
+    segment: &[Token],
+    brace_depth: usize,
+    out: &mut Vec<Token>,
+    facts: &mut Vec<FencedStatement>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if !segment
+        .iter()
+        .any(|token| matches!(token.kind, TokKind::FenceOpen | TokKind::FenceClose))
+    {
+        out.extend_from_slice(segment);
+        return;
+    }
+
+    match expand_segment(segment, brace_depth) {
+        Ok((expanded, fact)) => {
+            out.extend(expanded);
+            facts.push(fact);
+        }
+        Err(mut errors) => {
+            out.extend_from_slice(segment);
+            diags.append(&mut errors);
+        }
     }
 }
 
@@ -452,6 +495,18 @@ mod tests {
     }
 
     #[test]
+    fn formatter_preserves_whitespace_inside_fenced_string_literals() {
+        let source =
+            "fn run() {\n    show(<: first, second :>, \"keep  two   spaces\")\n}\n";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let comments = Lexer::comments(&tokens);
+        let program = crate::Parser::parse_for_fmt(&tokens).expect("parse fenced string");
+        let formatted = crate::Formatter::format_program(&program, source, &comments);
+        assert!(formatted.contains("\"keep  two   spaces\""));
+    }
+
+    #[test]
     fn formatter_wraps_a_wide_fence_one_name_per_line() {
         let source = "fn run() {\n    <: this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three :> :: work()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
@@ -480,5 +535,23 @@ mod tests {
             })
             .expect("run function");
         assert_eq!(run.body.len(), 6);
+    }
+
+    #[test]
+    fn nested_lambda_and_struct_braces_stay_inside_fenced_statements() {
+        let source = "fn run() {\n    <: first, second :> :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: <: first, second :> })\n}\n";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse nested fenced statements");
+        assert_eq!(program.fenced_statements.len(), 2);
+        let run = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(function) if function.name == "run" => Some(function),
+                _ => None,
+            })
+            .expect("run function");
+        assert_eq!(run.body.len(), 4);
     }
 }

@@ -58,8 +58,16 @@ fn fenced_names_match_on_aot_jit_and_interpreter() {
                 assert_eq!(stdout, expected, "{tier} expansion order drift");
                 if !force_interpreter {
                     assert!(
+                        jet_jit::jit_executed_for_test(),
+                        "fenced names must execute native resident JIT code"
+                    );
+                    assert!(
+                        !jet_jit::fallback_invoked_for_test(),
+                        "fenced names resident JIT must not invoke fallback"
+                    );
+                    assert!(
                         !jet_jit::deopt_invoked_for_test(),
-                        "fenced names resident JIT must not fall back"
+                        "fenced names resident JIT must not deopt"
                     );
                 }
             }

@@ -58,15 +58,11 @@ impl<'a> Fmt<'a> {
     fn fmt_fenced_statement(&mut self, fact: &crate::AST::FencedStatement) {
         let mut cursor = fact.span.start;
         for fence in &fact.fences {
-            if let Some(fragment) = self.src.get(cursor..fence.span.start) {
-                self.write_normalized_fence_fragment(fragment);
-            }
+            self.write_normalized_fence_fragment(cursor, fence.span.start);
             self.fmt_fenced_names(fence);
             cursor = fence.span.end;
         }
-        if let Some(fragment) = self.src.get(cursor..fact.span.end) {
-            self.write_normalized_fence_fragment(fragment);
-        }
+        self.write_normalized_fence_fragment(cursor, fact.span.end);
     }
 
     fn fmt_fenced_names(&mut self, fence: &crate::AST::FencedNames) {
@@ -111,7 +107,33 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::SIGIL_FENCE_CLOSE);
     }
 
-    fn write_normalized_fence_fragment(&mut self, fragment: &str) {
+    fn write_normalized_fence_fragment(&mut self, start: usize, end: usize) {
+        let literal_spans = self
+            .source_toks
+            .iter()
+            .filter(|token| {
+                token.span.start >= start
+                    && token.span.end <= end
+                    && matches!(token.kind, TokKind::Str(_) | TokKind::Char(_))
+            })
+            .map(|token| token.span)
+            .collect::<Vec<_>>();
+        let mut cursor = start;
+        for span in literal_spans {
+            if let Some(fragment) = self.src.get(cursor..span.start) {
+                self.write_normalized_source_fragment(fragment);
+            }
+            if let Some(literal) = self.src.get(span.start..span.end) {
+                self.write(literal);
+            }
+            cursor = span.end;
+        }
+        if let Some(fragment) = self.src.get(cursor..end) {
+            self.write_normalized_source_fragment(fragment);
+        }
+    }
+
+    fn write_normalized_source_fragment(&mut self, fragment: &str) {
         let starts_with_space = fragment.chars().next().is_some_and(char::is_whitespace);
         let ends_with_space = fragment.chars().next_back().is_some_and(char::is_whitespace);
         let words = fragment.split_whitespace().collect::<Vec<_>>();
