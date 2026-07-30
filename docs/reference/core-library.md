@@ -2599,6 +2599,12 @@ Mapped and split guards release the original loan only after the last derived
 guard drops. Runtime conflicts stop with `Cell borrow conflict`. Use
 `cell.read(value => result)` when `T` does not support copying.
 
+A function can pass or return a guard directly. Named tuples can contain guards
+recursively, which lets split guards cross a named helper boundary. A guard
+cannot be stored in a user struct, enum, list, fixed list, map, `Option`,
+`Result`, `Shared`, another `Cell`, a union, or a lambda. Keep it in a
+local name or tuple and use `map` or `split` for projections.
+
 ---
 
 ### `core.mem` — arenas and regions

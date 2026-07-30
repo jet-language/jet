@@ -315,6 +315,31 @@ impl<'a> Checker<'a> {
 
         let borrowed = std::mem::take(&mut self.borrow_ctx);
         let ty = self.infer_inner(e);
+        if let Some(aggregate_ty) = ty.as_ref() {
+            let constructs_value = matches!(
+                e,
+                Expr::ListLit(..)
+                    | Expr::MapLit(..)
+                    | Expr::TupleLit(..)
+                    | Expr::Call(..)
+                    | Expr::MethodCall { .. }
+                    | Expr::CallValue { .. }
+                    | Expr::StructLit { .. }
+                    | Expr::EnumLit { .. }
+                    | Expr::Present(..)
+                    | Expr::Ok(..)
+                    | Expr::Err(..)
+            );
+            if constructs_value && self.cell_guard_storage_is_unsupported(aggregate_ty) {
+                self.report_cell_guard_storage(
+                    format!(
+                        "a Cell guard cannot be stored inside `{}`",
+                        aggregate_ty.show()
+                    ),
+                    e.span(),
+                );
+            }
+        }
         if !borrowed {
             if let Some(t) = &ty {
                 let borrowed_param_place = !type_is_copy(t)

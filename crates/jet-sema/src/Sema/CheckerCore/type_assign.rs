@@ -44,6 +44,12 @@ impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
             self.check_declared_type_rules(ty, span);
+            if self.cell_guard_storage_is_unsupported(ty) {
+                self.report_cell_guard_storage(
+                    format!("a Cell guard cannot be stored in `{}`", ty.show()),
+                    span,
+                );
+            }
         }
 
         pub(crate) fn warn_soft_public_declared_type(&mut self, ty: &Type, span: Span) {

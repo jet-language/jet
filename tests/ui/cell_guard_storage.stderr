@@ -1,0 +1,23 @@
+Error [E0215]: a Cell guard cannot be stored in struct field `guard`
+  --> tests/ui/cell_guard_storage.jet:2:5
+    |
+  2 |     guard: CellReadGuard<Int>,
+    |     ^^^^^
+ Why: a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
+ Fix: keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections
+
+Error [E0215]: a Cell guard cannot be stored in enum variant `Guard`
+  --> tests/ui/cell_guard_storage.jet:6:11
+    |
+  6 |     Guard(CellEditGuard<Int>)
+    |           ^^^^^^^^^^^^^^^^^^
+ Why: a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
+ Fix: keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections
+
+Error [E0215]: a Cell guard cannot be stored inside `[CellReadGuard<Int>]`
+  --> tests/ui/cell_guard_storage.jet:12:13
+    |
+ 12 |     held :: [guard]
+    |             ^^^^^^^
+ Why: a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
+ Fix: keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections

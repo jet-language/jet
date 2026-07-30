@@ -291,7 +291,30 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
         ty,
         Type::Tuple(fields)
             if !fields.is_empty()
-                && fields.iter().all(|(_, t)| jit_value_type(t))
+                && fields.iter().all(|(_, t)| {
+                    matches!(
+                        t.as_ref(),
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::Float32
+                            | Type::Bool
+                            | Type::Char
+                            | Type::String
+                            | Type::Option(_)
+                            | Type::Named(_)
+                            | Type::Tuple(_)
+                            | Type::List(_)
+                    )
+                        || matches!(
+                            t.as_ref(),
+                            Type::Apply { name, .. }
+                                if matches!(
+                                    name.as_str(),
+                                    "CellReadGuard" | "CellEditGuard"
+                                )
+                        )
+                })
     )
 }
 

@@ -3085,6 +3085,132 @@ impl<'a> Checker<'a> {
         self.type_contains_local_cell_inner(ty, &mut HashSet::new())
     }
 
+    pub(crate) fn type_contains_cell_guard(&self, ty: &Type) -> bool {
+        self.type_contains_cell_guard_inner(ty, &mut HashSet::new())
+    }
+
+    pub(crate) fn cell_guard_storage_is_unsupported(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+            {
+                false
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.cell_guard_storage_is_unsupported(field)),
+            _ => self.type_contains_cell_guard(ty),
+        }
+    }
+
+    pub(crate) fn report_cell_guard_storage(
+        &mut self,
+        what: String,
+        span: Span,
+    ) {
+        self.diags.push(Diagnostic::error(
+            "E0215",
+            what,
+            "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends"
+                .to_string(),
+            "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"
+                .to_string(),
+            Some(span),
+        ));
+    }
+
+    fn type_contains_cell_guard_inner(
+        &self,
+        ty: &Type,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        match ty {
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+            {
+                true
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                self.type_contains_cell_guard_inner(inner, seen)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                self.type_contains_cell_guard_inner(key, seen)
+                    || self.type_contains_cell_guard_inner(value, seen)
+            }
+            Type::Fn { params, ret, .. } => {
+                params
+                    .iter()
+                    .any(|param| self.type_contains_cell_guard_inner(param, seen))
+                    || ret
+                        .as_deref()
+                        .is_some_and(|ret| self.type_contains_cell_guard_inner(ret, seen))
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.type_contains_cell_guard_inner(field, seen)),
+            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                self.type_contains_cell_guard_inner(elem, seen)
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|member| self.type_contains_cell_guard_inner(member, seen)),
+            Type::Named(name) => self.named_type_contains_cell_guard(name, &[], seen),
+            Type::Apply { name, args } => {
+                self.named_type_contains_cell_guard(name, args, seen)
+            }
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::TraitObject(_)
+            | Type::IntN { .. }
+            | Type::Float32 => false,
+        }
+    }
+
+    fn named_type_contains_cell_guard(
+        &self,
+        name: &str,
+        args: &[Type],
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(name.to_string()) {
+            return false;
+        }
+        let subst = if args.is_empty() {
+            HashMap::new()
+        } else {
+            self.struct_subst(name, args)
+        };
+        let found = match self.registry.types.get(name) {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+                let actual = self.trait_reg.instantiate_type(ty, &subst);
+                self.type_contains_cell_guard_inner(&actual, seen)
+            }),
+            Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, payload)| {
+                match payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(ty, _) => {
+                        let actual = self.trait_reg.instantiate_type(ty, &subst);
+                        self.type_contains_cell_guard_inner(&actual, seen)
+                    }
+                    VariantPayload::Named(fields) => fields.iter().any(|field| {
+                        let actual = self.trait_reg.instantiate_type(&field.ty, &subst);
+                        self.type_contains_cell_guard_inner(&actual, seen)
+                    }),
+                }
+            }),
+            Some(TypeDef::Alias { target, .. }) => {
+                let actual = self.trait_reg.instantiate_type(target, &subst);
+                self.type_contains_cell_guard_inner(&actual, seen)
+            }
+            Some(TypeDef::Distinct { .. }) | None => false,
+        };
+        seen.remove(name);
+        found
+    }
+
     fn type_contains_local_cell_inner(
         &self,
         ty: &Type,

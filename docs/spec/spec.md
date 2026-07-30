@@ -528,6 +528,13 @@ guard releases its loan on normal return, early return, and panic unwind.
 original loan. Sema accepts direct field paths and proves the two edit paths
 disjoint. The loan ends only after both guards drop.
 
+Cell guards are temporary loan handles. A function can pass or return one
+directly, and named tuples can contain guards recursively. This keeps mapped
+and split guards useful across named helpers. A guard cannot be stored in a
+user struct, enum, list, fixed list, map, `Option`, `Result`, `Shared`, another
+`Cell`, a union, or a lambda. Keep it in a local name or tuple and use
+`map` or `split` to project it.
+
 `Cell<T>`, `CellReadGuard<T>`, and `CellEditGuard<T>` are local types. Sema
 rejects them across task, task-group, channel, `Shared<T>`, and parallel
 adapter boundaries. Use `Shared<T>` when state must cross one of these

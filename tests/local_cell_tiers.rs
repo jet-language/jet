@@ -205,3 +205,96 @@ fn run() {
         "expected E0211 for explicit Cell guard copy: {diagnostics:?}"
     );
 }
+
+#[test]
+fn local_cell_guard_storage_boundary_reports_once_per_site() {
+    let cases = [
+        (
+            "struct field",
+            r#"
+struct Held {
+    guard: CellReadGuard<Int>,
+}
+
+fn run() {}
+"#,
+        ),
+        (
+            "enum payload",
+            r#"
+enum Held {
+    Guard(CellReadGuard<Int>)
+}
+
+fn run() {}
+"#,
+        ),
+        (
+            "list binding",
+            r#"
+fn run() {
+    cell :: Cell.new(1)
+    guard :: cell.guard_read()
+    held :: [guard]
+}
+"#,
+        ),
+        (
+            "lambda capture",
+            r#"
+fn hold(cell: Cell<Int>) => fn() => Int {
+    guard :: cell.guard_read()
+    return () => guard.get()
+}
+
+fn run() {}
+"#,
+        ),
+        (
+            "immediate lambda capture",
+            r#"
+fn run() {
+    cell :: Cell.new(1)
+    guard :: cell.guard_read()
+    read :: (() => guard.get())()
+}
+"#,
+        ),
+        (
+            "generic struct temporary",
+            r#"
+struct Held<T> {
+    value: T,
+}
+
+fn consume<T>(held: Held<T>) {}
+
+fn run() {
+    cell :: Cell.new(1)
+    consume(Held<CellReadGuard<Int>>.{ value: cell.guard_read() })
+}
+"#,
+        ),
+        (
+            "list call argument",
+            r#"
+fn consume<T>(held: T) {}
+
+fn run() {
+    cell :: Cell.new(1)
+    consume([cell.guard_read()])
+}
+"#,
+        ),
+    ];
+
+    for (case, source) in cases {
+        let diagnostics = jet::compile(source)
+            .expect_err("unsupported Cell guard storage must be rejected before codegen");
+        let count = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E0215")
+            .count();
+        assert_eq!(count, 1, "{case} must report one E0215: {diagnostics:?}");
+    }
+}
