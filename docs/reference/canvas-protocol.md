@@ -229,6 +229,8 @@ Successful response:
 
 The response keeps observed locals, watches, call frames, and trace entries as
 history. It clears active source and graph IDs after the scripted run finishes.
+Each request currently runs its script to `finished` or a diagnostic. The
+endpoint does not keep a resumable process.
 
 Unsupported interpreter/native boundaries return Jet diagnostics through the
 same protocol. They never expose rustc output.

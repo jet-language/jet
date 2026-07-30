@@ -391,6 +391,7 @@ fn run() {
 const CANVAS_DEBUG_FIXTURE: &str = r#"fn run() {
     total := 1
     print(total)
+    print("program finished")
 }
 "#;
 
@@ -3245,6 +3246,10 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
     ] {
         assert!(out.contains(field), "debug overlay missing {field}: {out}");
     }
+    assert!(
+        out.matches("program finished").count() >= 2,
+        "trace must retain program output and the debugger completion marker: {out}"
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), src);
 }
 

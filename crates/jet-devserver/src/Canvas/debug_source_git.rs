@@ -11,13 +11,13 @@ pub(super) fn debug_ok(
     src: &str,
     graph_json: &str,
     transcript: &str,
+    status: jet_debug::SessionStatus,
     breakpoint_lines: &[usize],
     watches: &[String],
 ) -> String {
-    let active_line = if transcript.lines().any(|line| line == "program finished") {
-        None
-    } else {
-        active_line_from_transcript(transcript)
+    let active_line = match status {
+        jet_debug::SessionStatus::Running => active_line_from_transcript(transcript),
+        jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => None,
     };
     let active_span = active_line
         .map(|line| line_span(src, line))
@@ -29,10 +29,9 @@ pub(super) fn debug_ok(
         .and_then(|_| record_id_for_span(graph_json, "wire_id", active_span))
         .unwrap_or_default();
     let active_graph = graph_id_from_node_id(&active_node).unwrap_or_default();
-    let overlay = if active_line.is_some() {
-        "running"
-    } else {
-        "finished"
+    let overlay = match status {
+        jet_debug::SessionStatus::Running => "running",
+        jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => "finished",
     };
     format!(
         "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":\"local-source-span\",\"state\":{},\"persistence\":\"local-source-span\"}},\"overlay\":{{\"debug_overlay\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
@@ -320,4 +319,43 @@ pub(super) fn untracked_diff(rel: &str, src: &str) -> String {
         diff.push('\n');
     }
     diff
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_state_ignores_spoofed_completion_output() {
+        let src = "fn run() {\n    print(\"program finished\")\n}\n";
+        let active = line_span(src, 2);
+        let graph = format!(
+            "{{\"node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\",\"source_span\":{},\"wire_id\":\"fn:main.jet::run@3-6:wire:1\",\"source_span\":{}}}",
+            span_json(active),
+            span_json(active),
+        );
+        let transcript = "breakpoint hit  main.jet:2  in main()\n   2 |     print(\"program finished\")        <- here\nprogram finished\n";
+
+        let out = debug_ok(
+            src,
+            &graph,
+            transcript,
+            jet_debug::SessionStatus::Running,
+            &[],
+            &[],
+        );
+
+        assert!(out.contains("\"state\":\"running\""), "{out}");
+        assert!(out.contains("\"debug_overlay\":\"running\""), "{out}");
+        assert!(out.contains("\"active_line\":2"), "{out}");
+        assert!(out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""), "{out}");
+        assert!(
+            out.contains("\"active_node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\""),
+            "{out}"
+        );
+        assert!(
+            out.contains("\"active_wire_id\":\"fn:main.jet::run@3-6:wire:1\""),
+            "{out}"
+        );
+    }
 }

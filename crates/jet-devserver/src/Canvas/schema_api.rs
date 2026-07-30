@@ -1107,10 +1107,9 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
     }
     inputs.push("bt".to_string());
     let refs = inputs.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    let transcript = jet_debug::run_session(&path.display().to_string(), &refs);
-    if transcript.contains("Error [") || transcript.contains("\n[E") || transcript.starts_with("[E")
-    {
-        return Err(debug_error("diagnostic", &transcript));
+    let result = jet_debug::run_session_result(&path.display().to_string(), &refs);
+    if result.status == jet_debug::SessionStatus::Failed {
+        return Err(debug_error("diagnostic", &result.transcript));
     }
 
     let projection =
@@ -1118,7 +1117,8 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
     Ok(debug_ok(
         &src,
         &projection.json,
-        &transcript,
+        &result.transcript,
+        result.status,
         &breakpoint_lines,
         &watches,
     ))

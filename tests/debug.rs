@@ -51,6 +51,26 @@ fn run() {
 }
 ";
 
+#[test]
+fn structured_session_status_ignores_program_output() {
+    let file = fixture(
+        "structured_status",
+        "fn run() {\n    print(\"program finished\")\n}\n",
+    );
+    let result = jet::Debug::run_session_result(&file, &["c"]);
+
+    assert_eq!(result.status, jet::Debug::SessionStatus::Finished);
+    assert_eq!(
+        result
+            .transcript
+            .lines()
+            .filter(|line| *line == "program finished")
+            .count(),
+        2,
+        "transcript must retain program output and the debugger completion marker"
+    );
+}
+
 /// `step`/`s` stops on the very first statement of `main`, with the right Jet
 /// line, a `<- here` caret, and a `locals:` dump — all in Jet terms.
 #[test]

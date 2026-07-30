@@ -566,10 +566,23 @@ pub fn run_debug(file: &str) -> i32 {
     code
 }
 
-/// Scripted debug session for tests and golden transcripts. Feeds `inputs` to
-/// the `(jet)` prompt in order and returns the captured transcript (banners,
-/// `locals:` dumps, command echoes, program output, and the final marker).
-pub fn run_session(file: &str, inputs: &[&str]) -> String {
+/// Machine-readable state for a scripted debug session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionStatus {
+    Running,
+    Finished,
+    Failed,
+}
+
+/// Structured result for embedders that must not infer state from program output.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionResult {
+    pub status: SessionStatus,
+    pub transcript: String,
+}
+
+/// Scripted debug session with a machine-readable outcome.
+pub fn run_session_result(file: &str, inputs: &[&str]) -> SessionResult {
     jet_driver::run_compiler_work(|| {
         let queue: std::collections::VecDeque<String> =
             inputs.iter().map(|s| s.to_string()).collect();
@@ -577,9 +590,21 @@ pub fn run_session(file: &str, inputs: &[&str]) -> String {
             inputs: queue,
             out: String::new(),
         };
-        let (_code, captured) = run_with_io(file, io);
-        captured
+        let (code, transcript) = run_with_io(file, io);
+        let status = if code == ExitCodes::OK {
+            SessionStatus::Finished
+        } else {
+            SessionStatus::Failed
+        };
+        SessionResult { status, transcript }
     })
+}
+
+/// Scripted debug session for tests and golden transcripts. Feeds `inputs` to
+/// the `(jet)` prompt in order and returns the captured transcript (banners,
+/// `locals:` dumps, command echoes, program output, and the final marker).
+pub fn run_session(file: &str, inputs: &[&str]) -> String {
+    run_session_result(file, inputs).transcript
 }
 
 /// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend
