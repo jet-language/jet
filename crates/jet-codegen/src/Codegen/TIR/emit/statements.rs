@@ -506,18 +506,25 @@ fn emit_tir_stmt(
             tmp,
             init,
             kw,
+            move_fields,
             binds,
         } => {
             out.push_str(&format!(
-                "{}let {} = &({});\n",
+                "{}let {} = {}({});\n",
                 pad,
                 tmp,
+                if *move_fields { "" } else { "&" },
                 emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (elem_rust, field_rust) in binds {
                 out.push_str(&format!(
-                    "{}{} {} = ({}).{}.clone();\n",
-                    pad, kw, elem_rust, tmp, field_rust
+                    "{}{} {} = ({}).{}{};\n",
+                    pad,
+                    kw,
+                    elem_rust,
+                    tmp,
+                    field_rust,
+                    if *move_fields { "" } else { ".clone()" }
                 ));
             }
         }

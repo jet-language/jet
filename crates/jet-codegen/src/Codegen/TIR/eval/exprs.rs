@@ -10,7 +10,24 @@ use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
+use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
+
+fn local_cell_handle(type_name: &str, index: usize) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+    }
+}
+
+fn local_cell_index(value: &CtValue, expected: &str) -> Option<usize> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    (type_name == expected)
+        .then(|| internal_index(fields))
+        .flatten()
+}
 
 fn range_parts(value: &CtValue) -> Option<(i64, i64, bool)> {
     let CtValue::Struct { type_name, fields } = value else {
@@ -2227,8 +2244,261 @@ impl<'a> EvalCtx<'a> {
                         .find_map(|(name, value)| (name == field).then(|| value.clone()))
                         .ok_or_else(|| unsupported(&format!("switch subject field `{field}`"), self.span()))
                 }
+                crate::Codegen::TIR::THostCall::CellGuardProject {
+                    recv,
+                    paths,
+                    result_ty: _,
+                    editable,
+                    edit_paths_disjoint,
+                } => {
+                    let handle = self.eval_expr(recv, scope)?;
+                    let field_paths = paths;
+                    if *editable {
+                        let index = local_cell_index(&handle, "__JetTirCellEditGuard")
+                            .ok_or_else(|| unsupported("Cell edit guard projection", self.span()))?;
+                        let (guard, owner) = self
+                            .local_cells
+                            .take_edit_guard(index)
+                            .map_err(|message| unsupported(&message, self.span()))?;
+                        match field_paths.as_slice() {
+                            [path] => {
+                                let projected = guard.map(|value| {
+                                    project_mut(value, path)
+                                        .expect("sema validated Cell edit guard projection")
+                                });
+                                let index =
+                                    self.local_cells.insert_edit_guard_for(projected, owner);
+                                Ok(local_cell_handle("__JetTirCellEditGuard", index))
+                            }
+                            [first, second] => {
+                                debug_assert!(*edit_paths_disjoint);
+                                let (first_guard, second_guard) = guard.split(|value| {
+                                    project_pair_mut(value, first, second)
+                                        .expect("sema proved disjoint Cell edit guard projections")
+                                });
+                                let first_index =
+                                    self.local_cells.insert_edit_guard_for(first_guard, owner);
+                                let second_index =
+                                    self.local_cells.insert_edit_guard_for(second_guard, owner);
+                                Ok(CtValue::Struct {
+                                    type_name: "tuple".to_string(),
+                                    fields: vec![
+                                        (
+                                            "first".to_string(),
+                                            local_cell_handle(
+                                                "__JetTirCellEditGuard",
+                                                first_index,
+                                            ),
+                                        ),
+                                        (
+                                            "second".to_string(),
+                                            local_cell_handle(
+                                                "__JetTirCellEditGuard",
+                                                second_index,
+                                            ),
+                                        ),
+                                    ],
+                                })
+                            }
+                            _ => Err(unsupported("Cell edit guard projection shape", self.span())),
+                        }
+                    } else {
+                        let index = local_cell_index(&handle, "__JetTirCellReadGuard")
+                            .ok_or_else(|| unsupported("Cell read guard projection", self.span()))?;
+                        let (guard, owner) = self
+                            .local_cells
+                            .take_read_guard(index)
+                            .map_err(|message| unsupported(&message, self.span()))?;
+                        match field_paths.as_slice() {
+                            [path] => {
+                                let projected = guard.map(|value| {
+                                    project_ref(value, path)
+                                        .expect("sema validated Cell read guard projection")
+                                });
+                                let index =
+                                    self.local_cells.insert_read_guard_for(projected, owner);
+                                Ok(local_cell_handle("__JetTirCellReadGuard", index))
+                            }
+                            [first, second] => {
+                                let (first_guard, second_guard) = guard.split(|value| {
+                                    (
+                                        project_ref(value, first)
+                                            .expect("sema validated Cell read projection"),
+                                        project_ref(value, second)
+                                            .expect("sema validated Cell read projection"),
+                                    )
+                                });
+                                let first_index =
+                                    self.local_cells.insert_read_guard_for(first_guard, owner);
+                                let second_index =
+                                    self.local_cells.insert_read_guard_for(second_guard, owner);
+                                Ok(CtValue::Struct {
+                                    type_name: "tuple".to_string(),
+                                    fields: vec![
+                                        (
+                                            "first".to_string(),
+                                            local_cell_handle(
+                                                "__JetTirCellReadGuard",
+                                                first_index,
+                                            ),
+                                        ),
+                                        (
+                                            "second".to_string(),
+                                            local_cell_handle(
+                                                "__JetTirCellReadGuard",
+                                                second_index,
+                                            ),
+                                        ),
+                                    ],
+                                })
+                            }
+                            _ => Err(unsupported("Cell read guard projection shape", self.span())),
+                        }
+                    }
+                }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
+                    if let Some(index) = local_cell_index(&r, "__JetTirCell") {
+                        let cell = self
+                            .local_cells
+                            .cell(index)
+                            .ok_or_else(|| unsupported("Cell handle", self.span()))?;
+                        return match method.as_str() {
+                            "get" => Ok(cell.get()),
+                            "set" => {
+                                let value = self.eval_expr(
+                                    args.first().ok_or_else(|| {
+                                        unsupported("Cell.set argument", self.span())
+                                    })?,
+                                    scope,
+                                )?;
+                                cell.set(value);
+                                Ok(CtValue::Unit)
+                            }
+                            "replace" => {
+                                let value = self.eval_expr(
+                                    args.first().ok_or_else(|| {
+                                        unsupported("Cell.replace argument", self.span())
+                                    })?,
+                                    scope,
+                                )?;
+                                Ok(cell.replace(value))
+                            }
+                            "read" | "edit" => {
+                                let Some(TExpr {
+                                    kind: TExprKind::Lambda(lambda),
+                                    ..
+                                }) = args.first()
+                                else {
+                                    return Err(unsupported("Cell callback", self.span()));
+                                };
+                                if method == "read" {
+                                    cell.read(|value| {
+                                        self.eval_tlambda(lambda, vec![value.clone()], scope)
+                                    })
+                                } else {
+                                    cell.edit(|value| {
+                                        let (result, updated) = self
+                                            .eval_tlambda_mut_arg(lambda, value.clone(), scope)?;
+                                        *value = updated;
+                                        Ok(result)
+                                    })
+                                }
+                            }
+                            "guard_read" => {
+                                let guard = cell.guard_read();
+                                let index = self.local_cells.insert_read_guard(guard);
+                                Ok(local_cell_handle("__JetTirCellReadGuard", index))
+                            }
+                            "guard_edit" => {
+                                let guard = cell.guard_edit();
+                                let index = self.local_cells.insert_edit_guard(guard);
+                                Ok(local_cell_handle("__JetTirCellEditGuard", index))
+                            }
+                            "get_or_set" => {
+                                let Some(TExpr {
+                                    kind: TExprKind::Lambda(lambda),
+                                    ..
+                                }) = args.first()
+                                else {
+                                    return Err(unsupported("Cell.get_or_set callback", self.span()));
+                                };
+                                cell.try_get_or_set(|| {
+                                    self.eval_tlambda(lambda, Vec::new(), scope)
+                                })
+                            }
+                            _ => Err(unsupported(&format!("Cell.{method}"), self.span())),
+                        };
+                    }
+                    if let Some(index) = local_cell_index(&r, "__JetTirCellReadGuard") {
+                        let guard = self
+                            .local_cells
+                            .read_guard(index)
+                            .ok_or_else(|| unsupported("Cell read guard", self.span()))?;
+                        return match method.as_str() {
+                            "get" => Ok(guard.get()),
+                            "read" => {
+                                let Some(TExpr {
+                                    kind: TExprKind::Lambda(lambda),
+                                    ..
+                                }) = args.first()
+                                else {
+                                    return Err(unsupported("Cell guard callback", self.span()));
+                                };
+                                guard.read(|value| {
+                                    self.eval_tlambda(lambda, vec![value.clone()], scope)
+                                })
+                            }
+                            _ => Err(unsupported(
+                                &format!("CellReadGuard.{method}"),
+                                self.span(),
+                            )),
+                        };
+                    }
+                    if let Some(index) = local_cell_index(&r, "__JetTirCellEditGuard") {
+                        let guard = self
+                            .local_cells
+                            .edit_guard(index)
+                            .ok_or_else(|| unsupported("Cell edit guard", self.span()))?;
+                        return match method.as_str() {
+                            "get" => Ok(guard.get()),
+                            "set" => {
+                                let value = self.eval_expr(
+                                    args.first().ok_or_else(|| {
+                                        unsupported("Cell guard set argument", self.span())
+                                    })?,
+                                    scope,
+                                )?;
+                                guard.set(value);
+                                Ok(CtValue::Unit)
+                            }
+                            "read" | "edit" => {
+                                let Some(TExpr {
+                                    kind: TExprKind::Lambda(lambda),
+                                    ..
+                                }) = args.first()
+                                else {
+                                    return Err(unsupported("Cell guard callback", self.span()));
+                                };
+                                if method == "read" {
+                                    guard.read(|value| {
+                                        self.eval_tlambda(lambda, vec![value.clone()], scope)
+                                    })
+                                } else {
+                                    guard.edit(|value| {
+                                        let (result, updated) = self
+                                            .eval_tlambda_mut_arg(lambda, value.clone(), scope)?;
+                                        *value = updated;
+                                        Ok(result)
+                                    })
+                                }
+                            }
+                            _ => Err(unsupported(
+                                &format!("CellEditGuard.{method}"),
+                                self.span(),
+                            )),
+                        };
+                    }
                     if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirExpiring")
                         && method == "with"
                     {
@@ -3006,6 +3276,16 @@ impl<'a> EvalCtx<'a> {
                                 type_name: "__JetTirShared".to_string(),
                                 fields: vec![("index".to_string(), CtValue::Int(index as i64))],
                             });
+                        }
+                        if matches!(
+                            path.as_str(),
+                            "jet_std::JetCell" | "jet_std::jet_cell::JetCell"
+                        )
+                            && method.name == "new"
+                            && argv.len() == 1
+                        {
+                            let index = self.local_cells.insert_cell(argv.remove(0));
+                            return Ok(local_cell_handle("__JetTirCell", index));
                         }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             path,

@@ -1218,7 +1218,7 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
             )
         }
         SendProblemKind::ThreadConfined(name) => format!(
-            "`{}` owns thread-local allocator state and must stay on the thread that created it",
+            "`{}` owns thread-local state and must stay on the thread that created it",
             name
         ),
         SendProblemKind::ViewBorrow => "a view is a borrow, not an owned value".to_string(),
@@ -1258,6 +1258,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
+        "Cell" => Some(Type::Named("Cell".to_string())),
         _ => None,
     }
 }

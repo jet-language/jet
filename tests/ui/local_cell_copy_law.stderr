@@ -1,0 +1,15 @@
+Error [E0112]: `Cell<fn() => Int>.get()` cannot copy its value
+  --> tests/ui/local_cell_copy_law.jet:2:15
+    |
+  2 |     _ :: cell.get()
+    |               ^^^
+ Why: `get` returns an independent owned value, so the stored type must support copying
+ Fix: use `.read(value => ...)` to inspect it without making a copy
+
+Error [E0112]: `Cell<[fn() => Int]?>.get_or_set()` cannot copy its value
+  --> tests/ui/local_cell_copy_law.jet:6:15
+    |
+  6 |     _ :: cell.get_or_set(() => [() => 1])
+    |               ^^^^^^^^^^
+ Why: `get_or_set` returns an independent owned value, so `T` must support copying
+ Fix: use `.edit(value => ...)` when the cached value cannot be copied

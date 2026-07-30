@@ -946,8 +946,15 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr(recv, callees)
                 && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
         }
-        TExprKind::StaticCall { args, .. } => {
-            args.iter().all(|a| resident_safe_call_arg(a, callees))
+        TExprKind::StaticCall { owner, args, .. } => {
+            !matches!(
+                owner,
+                TIR::TStaticOwner::Prelude { path, .. }
+                    if matches!(
+                        path.as_str(),
+                        "jet_std::JetCell" | "jet_std::jet_cell::JetCell"
+                    )
+            ) && args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
         TExprKind::AllocNew { .. } => true,
         TExprKind::PoolSlot { pool, id, .. } => {
@@ -1173,8 +1180,16 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
             THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
+            THostCall::CellGuardProject { .. } => false,
             THostCall::Method { recv, args, .. } => {
-                resident_safe_expr(recv, callees)
+                !matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. }
+                        if matches!(
+                            name.as_str(),
+                            "Cell" | "CellReadGuard" | "CellEditGuard"
+                        )
+                ) && resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
             }
             THostCall::Helper { helper, args }

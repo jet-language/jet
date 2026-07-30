@@ -36,6 +36,10 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_BUILD_TOOLCHAIN,
     Syntax::TYPE_BUILD_PROBE,
     Syntax::TYPE_PROGRAM_INFO,
+    // D-LOCALCELL1=A: built-in local mutation and guard handles.
+    "Cell",
+    "CellReadGuard",
+    "CellEditGuard",
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
     // `Deque`) — `View` is already a widely-used user type name across the
     // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
@@ -246,6 +250,16 @@ pub fn builtin_method_return(
         // `finish_pool_add`/`finish_pool_remove`/the `("Pool","ids")` arm fully
         // recompute it from the receiver's real element type.
         Type::Apply { name, args } if name == "Pool" => pool_method_return(args, method, arg_count),
+        // D-LOCALCELL1=A: one-thread cell and dynamic guard surface.
+        Type::Apply { name, args } if name == "Cell" => {
+            cell_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args } if name == "CellReadGuard" => {
+            cell_guard_method_return(args, method, arg_count, false)
+        }
+        Type::Apply { name, args } if name == "CellEditGuard" => {
+            cell_guard_method_return(args, method, arg_count, true)
+        }
         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>.read(f)`/`.edit(f)`. Same
         // placeholder-gate note as `Pool` above — `finish_shared_read`/
         // `finish_shared_edit` compute the real (closure-derived) return type.
@@ -929,6 +943,76 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
     }
 }
 
+fn cell_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("get", 0) | ("replace", 1) => Some(Some(t.clone())),
+        ("set", 1) => Some(None),
+        ("get_or_set", 1) => match t {
+            Type::Option(inner) => Some(Some(*inner)),
+            _ => Some(Some(t)),
+        },
+        ("read", 1) | ("edit", 1) => Some(Some(t.clone())),
+        ("guard_read", 0) => Some(Some(Type::Apply {
+            name: "CellReadGuard".to_string(),
+            args: vec![t],
+        })),
+        ("guard_edit", 0) => Some(Some(Type::Apply {
+            name: "CellEditGuard".to_string(),
+            args: vec![t],
+        })),
+        _ => None,
+    }
+}
+
+fn cell_guard_method_return(
+    args: &[Type],
+    method: &str,
+    nargs: usize,
+    editable: bool,
+) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("get", 0) => Some(Some(t.clone())),
+        ("set", 1) if editable => Some(None),
+        ("read", 1) => Some(Some(t.clone())),
+        ("edit", 1) if editable => Some(Some(t.clone())),
+        ("map", 1) => Some(Some(Type::Apply {
+            name: if editable {
+                "CellEditGuard".to_string()
+            } else {
+                "CellReadGuard".to_string()
+            },
+            args: vec![t],
+        })),
+        ("split", 2) => Some(Some(Type::Tuple(vec![
+            (
+                "first".to_string(),
+                Box::new(Type::Apply {
+                    name: if editable {
+                        "CellEditGuard".to_string()
+                    } else {
+                        "CellReadGuard".to_string()
+                    },
+                    args: vec![t.clone()],
+                }),
+            ),
+            (
+                "second".to_string(),
+                Box::new(Type::Apply {
+                    name: if editable {
+                        "CellEditGuard".to_string()
+                    } else {
+                        "CellReadGuard".to_string()
+                    },
+                    args: vec![t],
+                }),
+            ),
+        ]))),
+        _ => None,
+    }
+}
+
 /// D-REACT1=B: `Signal<T>` methods. `.get()` reads the current value (and, inside a
 /// derived/effect body, subscribes); `.set(v)` writes a new value and notifies.
 fn signal_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -1491,6 +1575,55 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
+        Type::Apply { name, args } if name == "Cell" => {
+            let t = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "set" | "replace" => Some(vec![t.clone()]),
+                "get_or_set" => {
+                    let value = match t {
+                        Type::Option(inner) => *inner,
+                        other => other,
+                    };
+                    Some(vec![Type::Fn {
+                        params: vec![],
+                        ret: Some(Box::new(value)),
+                        effect_bound: None,
+                    }])
+                }
+                "read" | "edit" => Some(vec![Type::Fn {
+                    params: vec![t],
+                    ret: None,
+                    effect_bound: None,
+                }]),
+                _ => Some(vec![]),
+            }
+        }
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+        {
+            let t = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "set" => Some(vec![t.clone()]),
+                "read" | "edit" | "map" => Some(vec![Type::Fn {
+                    params: vec![t],
+                    ret: None,
+                    effect_bound: None,
+                }]),
+                "split" => Some(vec![
+                    Type::Fn {
+                        params: vec![t.clone()],
+                        ret: None,
+                        effect_bound: None,
+                    },
+                    Type::Fn {
+                        params: vec![t],
+                        ret: None,
+                        effect_bound: None,
+                    },
+                ]),
+                _ => Some(vec![]),
+            }
+        }
         Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => match method {
             "add" | "remove" | "has" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
             "union" => Some(vec![Type::Apply {

@@ -213,6 +213,40 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 1
             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
     }
+    if matches!(
+        recv_type.as_deref(),
+        Some("Cell" | "CellReadGuard" | "CellEditGuard")
+    ) {
+        let plain = match (recv_type.as_deref(), method, args.len()) {
+            (Some("Cell"), "get" | "guard_read" | "guard_edit", 0)
+            | (Some("Cell"), "set" | "replace", 1)
+            | (Some("CellReadGuard" | "CellEditGuard"), "get", 0)
+            | (Some("CellEditGuard"), "set", 1) => true,
+            _ => false,
+        };
+        if plain {
+            return expr_in_subset(receiver, cx, locals)
+                && args
+                    .iter()
+                    .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
+        }
+        let closure = matches!(
+            (recv_type.as_deref(), method),
+            (Some("Cell"), "get_or_set" | "read" | "edit")
+                | (Some("CellReadGuard"), "read" | "map" | "split")
+                | (Some("CellEditGuard"), "read" | "edit" | "map" | "split")
+        );
+        if closure {
+            return expr_in_subset(receiver, cx, locals)
+                && !args.is_empty()
+                && args.iter().all(|arg| {
+                    arg.label.is_none()
+                        && matches!(&arg.expr, Expr::Lambda(lambda)
+                            if lambda_in_subset(lambda, cx, locals))
+                });
+        }
+        return false;
+    }
     if recv_type.as_deref() == Some("ExpiringSecret") {
         if method == "new"
             && args.len() == 3
@@ -420,6 +454,11 @@ pub(crate) fn method_call_in_subset(
                     // type-name static-constructor shape as `Deque.new()` above.
                     ("Pool", "new", 0) => return true,
                     ("Shared", "new", 1) => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
+                    ("Cell", "new", 1) => {
                         return args
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));

@@ -685,6 +685,12 @@
         }
     }
 
+    impl<T> super::JetShow for JetCell<T> {
+        fn jet_show(&self) -> String {
+            "Cell(..)".to_string()
+        }
+    }
+
     // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — a generational arena. `Id<T>` is
     // a lightweight index+generation handle: plain data, `Copy`, comparable,
     // regardless of whether `T` itself is (it never touches `T` at runtime —

@@ -1875,6 +1875,14 @@ pub enum THostCall {
         method: String,
         args: Vec<TExpr>,
     },
+    /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
+    CellGuardProject {
+        recv: Box<TExpr>,
+        paths: Vec<Vec<String>>,
+        result_ty: Type,
+        editable: bool,
+        edit_paths_disjoint: bool,
+    },
     /// `(({base})[({index}).0 as usize].clone())` FixedList index.
     FixedListIndex {
         base: Box<TExpr>,
@@ -2168,6 +2176,8 @@ pub enum TStmt {
         tmp: String,
         init: TExpr,
         kw: &'static str,
+        /// Move fields out of a one-shot tuple containing linear Cell guards.
+        move_fields: bool,
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },

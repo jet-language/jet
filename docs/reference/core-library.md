@@ -2551,6 +2551,41 @@ reads an input value or text content. `web.storage.local` and
 
 ---
 
+### `Cell<T>` — local interior mutability
+
+`Cell<T>` stores private state that read-only code can update on one task.
+It uses no `Arc` and no operating-system lock. Use `Shared<T>` when state must
+cross a task, task group, channel, or parallel adapter.
+
+```jet
+cache := Cell.new(0)
+cache.set(1)
+old :: cache.replace(2)
+current :: cache.get()
+cache.edit(value => value += 1)
+```
+
+| Method | Returns | What it does |
+|--------|---------|--------------|
+| `Cell.new(value)` | `Cell<T>` | Create a local cell and infer `T` |
+| `cell.get()` | `T` | Copy the current value; `T` must support Jet's copy law |
+| `cell.set(value)` | nothing | Replace the value |
+| `cell.replace(value)` | `T` | Replace the value and return the old value |
+| `cell.get_or_set(init)` | `T` | Initialize an empty `Cell<T?>` once and copy the value |
+| `cell.read(value => result)` | `R` | Run a closure under one read loan |
+| `cell.edit(value => result)` | `R` | Run a closure under one edit loan |
+| `cell.guard_read()` | `CellReadGuard<T>` | Keep a read loan across calls |
+| `cell.guard_edit()` | `CellEditGuard<T>` | Keep an edit loan across calls |
+| `guard.map(project)` | projected guard | Keep the same loan for one projection |
+| `guard.split(first, second)` | two projected guards | Share the same loan across two disjoint field projections |
+
+Many read guards can coexist. One edit guard excludes all other guards.
+Mapped and split guards release the original loan only after the last derived
+guard drops. Runtime conflicts stop with `Cell borrow conflict`. Use
+`cell.read(value => result)` when `T` does not support copying.
+
+---
+
 ### `core.mem` — arenas and regions
 
 Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`

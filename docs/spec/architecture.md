@@ -96,6 +96,9 @@ snapshots):
 - `Shared<T>` is the explicit shared-mutation path. Its `read` and `edit`
   closures use a lock-scoped view. `#Transact` uses the same handles and commits
   their changes atomically.
+- `Cell<T>` is the private local-mutation path. It uses one-thread dynamic
+  loans without `Arc` or operating-system locks. Sema rejects cells and their
+  guards across task, channel, `Shared<T>`, and parallel boundaries.
 - `Signal<T>`, `Derived<T>`, and `Computed<T>` use lock-ordered `Arc` storage
   with the same public API. A handle may cross a task, task group, channel, or
   parallel adapter without a data race and without a rustc `Send` ICE.

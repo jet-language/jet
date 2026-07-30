@@ -506,6 +506,27 @@ nothing — the write happens at commit — so its closure ends in a statement.
 An irreversible effect (`Net`/`FS`/`Exec`) directly in the block is still
 E0746: move it after the block or register it with `tx.on_commit(…)`.
 
+**`Cell<T>`** (D-LOCALCELL1=A) is the local interior-mutation path. It lets a
+read receiver update private state without an `Arc` or an operating-system
+lock. `Cell.new(value)` infers `T`. Value methods are `get`, `set`, `replace`,
+and `get_or_set` for `Cell<T?>`. Closure methods `read` and `edit` keep the
+dynamic loan inside one call. `get` and `get_or_set` copy their result, so the
+stored result type must support Jet's copy law. Use `read` when it does not.
+
+`guard_read()` and `guard_edit()` keep a dynamic loan across calls. Any number
+of read guards can coexist. An edit guard conflicts with every other guard.
+A conflict stops at runtime with a `Cell borrow conflict` panic. Dropping a
+guard releases its loan on normal return, early return, and panic unwind.
+`guard.map(project)` keeps the same loan for one projected field.
+`guard.split(first, second)` returns two projected guards that share the
+original loan. Sema accepts direct field paths and proves the two edit paths
+disjoint. The loan ends only after both guards drop.
+
+`Cell<T>`, `CellReadGuard<T>`, and `CellEditGuard<T>` are local types. Sema
+rejects them across task, task-group, channel, `Shared<T>`, and parallel
+adapter boundaries. Use `Shared<T>` when state must cross one of these
+boundaries.
+
 **`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
 lives in one shared table, and other values point at it by `Id<T>` — plain
 copyable, comparable index+generation data, never touching `T` itself:

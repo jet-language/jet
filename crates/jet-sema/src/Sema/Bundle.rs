@@ -2559,6 +2559,8 @@ fn check_bundle_opts_for_output_inner(
         m.source.contains("Pool<")
             || m.source.contains("Shared<")
             || m.source.contains("Shared.new(")
+            || m.source.contains("Cell<")
+            || m.source.contains("Cell.new(")
             || m.source.contains("Id<")
     }) {
         used_core.insert("core.mem::pool_shared".to_string());

@@ -1532,6 +1532,33 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            // D-LOCALCELL1=A: local interior-mutability handles and their
+            // dynamically checked projected guards.
+            Type::Apply { name, args } if name == "Cell" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetCell<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "CellReadGuard" && !args.is_empty() =>
+            {
+                format!(
+                    "{}jet_std::JetCellReadGuard<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "CellEditGuard" && !args.is_empty() =>
+            {
+                format!(
+                    "{}jet_std::JetCellEditGuard<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
             // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
             // which is exactly `loop x; stream { }`'s pull-one-block-until-ready

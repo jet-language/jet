@@ -552,10 +552,21 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
 }
 
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
-    let mut derives = vec!["Clone"];
+    let move_only_guard = fields.iter().any(|(_, ty)| {
+        matches!(
+            ty,
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+        )
+    });
+    let mut derives = Vec::new();
+    if !move_only_guard {
+        derives.push("Clone");
+    }
     // Tuples are structural types with no type-parameter scope of their own.
     let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if fields
+    if !move_only_guard
+        && fields
         .iter()
         .all(|(_, t)| field_type_comparable(t, &cx.type_names, &no_params))
     {
@@ -566,12 +577,10 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         .any(|(_, ty)| cx.type_contains_view(ty))
         .then_some("<'__jet_view>")
         .unwrap_or("");
-    out.push_str(&format!(
-        "#[derive({})]\nstruct {}{} {{\n",
-        derives.join(", "),
-        name,
-        view_lifetime,
-    ));
+    if !derives.is_empty() {
+        out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+    }
+    out.push_str(&format!("struct {}{} {{\n", name, view_lifetime));
     for (fname, fty) in fields {
         out.push_str(&format!(
             "    pub {}: {},\n",

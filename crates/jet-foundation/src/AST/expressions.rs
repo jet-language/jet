@@ -194,6 +194,10 @@ pub struct LambdaMeta {
     pub result_loop: bool,
     pub loop_result_type: Option<Type>,
     pub loop_label: Option<(String, Span)>,
+    /// D-LOCALCELL1=A: sema-proved path for a `guard.map` / `guard.split`
+    /// projector. Later tiers consume this fact instead of reinterpreting the
+    /// lambda body.
+    pub cell_projection_path: Option<Vec<String>>,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

@@ -82,6 +82,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_event_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
+        || is_covered_cell_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
         || is_covered_vault_ty(&ty, cx)
 }
@@ -158,6 +159,21 @@ pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
         "Pool" => concurrency_elem_covered(elem, cx),
         _ => false,
     }
+}
+
+/// D-LOCALCELL1=A: local cell values and projected guards use one covered
+/// element type. `cx.rust_type` maps each handle to the matching Prelude type.
+pub(crate) fn is_covered_cell_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(
+                name.as_str(),
+                "Cell" | "CellReadGuard" | "CellEditGuard"
+            )
+                && args.len() == 1
+                && is_subset_param_ty(&args[0], cx)
+    )
 }
 
 /// c109 Phase 6b: a `Shared<T>` (`Type::Shared`) usable as a param/return/local value

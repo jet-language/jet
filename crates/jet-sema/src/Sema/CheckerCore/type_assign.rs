@@ -289,6 +289,8 @@ impl<'a> Checker<'a> {
                             | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
+                            // D-LOCALCELL1=A: one-thread cell and projected guard types.
+                            | "Cell" | "CellReadGuard" | "CellEditGuard"
                             // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
                             // secret-lifetime wrapper.
                             | "ExpiringSecret"
