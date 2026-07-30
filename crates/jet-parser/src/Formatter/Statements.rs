@@ -18,19 +18,117 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_block_stmts(&mut self, body: &[Stmt]) {
-        for (i, stmt) in body.iter().enumerate() {
-            if i > 0 {
+        let mut index = 0usize;
+        let mut previous_end = None;
+        while index < body.len() {
+            let stmt = &body[index];
+            let fence = self.fenced_statement_for(stmt);
+            let source_start = fence
+                .as_ref()
+                .map_or_else(|| stmt_start(stmt), |fact| fact.span.start);
+            if let Some(end) = previous_end {
                 self.newline();
-                self.emit_leading_statement_gap(
-                    stmt_end(&body[i - 1]),
-                    stmt_start(stmt),
-                );
+                self.emit_leading_statement_gap(end, source_start);
             } else {
-                self.emit_leading(stmt_start(stmt));
+                self.emit_leading(source_start);
             }
-            self.fmt_stmt(stmt);
-            self.emit_trailing(self.statement_source_end(stmt));
+            if let Some(fact) = fence {
+                self.fmt_fenced_statement(&fact);
+                self.emit_trailing(fact.span.end);
+                previous_end = Some(fact.span.end);
+                index += fact.copies;
+            } else {
+                self.fmt_stmt(stmt);
+                let end = self.statement_source_end(stmt);
+                self.emit_trailing(end);
+                previous_end = Some(end);
+                index += 1;
+            }
         }
+    }
+
+    fn fenced_statement_for(&self, stmt: &Stmt) -> Option<crate::AST::FencedStatement> {
+        let start = stmt_start(stmt);
+        self.fenced_statements
+            .iter()
+            .find(|fact| fact.span.start <= start && start <= fact.span.end)
+            .cloned()
+    }
+
+    fn fmt_fenced_statement(&mut self, fact: &crate::AST::FencedStatement) {
+        let mut cursor = fact.span.start;
+        for fence in &fact.fences {
+            if let Some(fragment) = self.src.get(cursor..fence.span.start) {
+                self.write_normalized_fence_fragment(fragment);
+            }
+            self.fmt_fenced_names(fence);
+            cursor = fence.span.end;
+        }
+        if let Some(fragment) = self.src.get(cursor..fact.span.end) {
+            self.write_normalized_fence_fragment(fragment);
+        }
+    }
+
+    fn fmt_fenced_names(&mut self, fence: &crate::AST::FencedNames) {
+        if let Some((start, end)) = &fence.range {
+            self.write(&format!(
+                "{} {}..{} {}",
+                Syntax::SIGIL_FENCE_OPEN,
+                start,
+                end,
+                Syntax::SIGIL_FENCE_CLOSE
+            ));
+            return;
+        }
+
+        let names = fence
+            .names
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        let inline = format!(
+            "{} {} {}",
+            Syntax::SIGIL_FENCE_OPEN,
+            names.join(", "),
+            Syntax::SIGIL_FENCE_CLOSE
+        );
+        if self.col + inline.chars().count() <= MAX_WIDTH {
+            self.write(&inline);
+            return;
+        }
+
+        self.write(Syntax::SIGIL_FENCE_OPEN);
+        self.newline();
+        self.with_indent(|formatter| {
+            for (index, name) in names.iter().enumerate() {
+                formatter.write(name);
+                if index + 1 != names.len() {
+                    formatter.write(",");
+                }
+                formatter.newline();
+            }
+        });
+        self.write(Syntax::SIGIL_FENCE_CLOSE);
+    }
+
+    fn write_normalized_fence_fragment(&mut self, fragment: &str) {
+        let starts_with_space = fragment.chars().next().is_some_and(char::is_whitespace);
+        let ends_with_space = fragment.chars().next_back().is_some_and(char::is_whitespace);
+        let words = fragment.split_whitespace().collect::<Vec<_>>();
+        if words.is_empty() {
+            if starts_with_space {
+                self.write(" ");
+            }
+            return;
+        }
+        let mut normalized = words.join(" ");
+        if starts_with_space {
+            normalized.insert(0, ' ');
+        }
+        if ends_with_space {
+            normalized.push(' ');
+        }
+        self.write(&normalized);
     }
 
     /// Emit leading comments and preserve section breaks on either side of,

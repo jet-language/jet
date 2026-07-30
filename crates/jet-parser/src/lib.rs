@@ -5,6 +5,7 @@ pub use jet_lexer::{
     CanonicalAST, Collections, Diagnostics, Generics, Lexer, Numeric, Syntax, TargetProfile,
     Traits, Policy, AST, SHA256,
 };
+mod FencedNames;
 pub mod Formatter;
 pub mod Parser;
 

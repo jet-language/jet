@@ -9,6 +9,9 @@ pub struct Program {
     /// Parser-owned inner boundaries for statement blocks. Each span starts
     /// immediately after `{` and ends immediately before `}`.
     pub block_spans: Vec<Span>,
+    /// D-EACH1=C: authored fenced statements retained for formatter emission.
+    /// Sema and tooling consume the ordinary expanded statements in `items`.
+    pub fenced_statements: Vec<FencedStatement>,
     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
@@ -43,6 +46,20 @@ pub struct Program {
     /// D-MARKSIG1=A: every source-order applied rule, retained unchanged for
     /// sema's shared signature-conformance pass.
     pub rule_facts: Vec<AppliedRuleApplication>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FencedStatement {
+    pub span: Span,
+    pub fences: Vec<FencedNames>,
+    pub copies: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct FencedNames {
+    pub span: Span,
+    pub names: Vec<(String, Span)>,
+    pub range: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]

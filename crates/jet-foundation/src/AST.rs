@@ -14,8 +14,9 @@ pub use types::{
 #[path = "AST/program_imports.rs"]
 mod program_imports;
 pub use program_imports::{
-    AppliedRuleApplication, Program, ImportDecl, InlineVersion, ForeignLanguage, ForeignNamespace, ImportKind,
-    ProgramBundle, LoadedModule, TryConvert, ErrorConvDef, MigrationDecl, MigrationOp,
+    AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
+    ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
+    MigrationOp, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]

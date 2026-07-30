@@ -82,6 +82,10 @@ pub enum TokKind {
     RBrace,
     LBracket,
     RBracket,
+    /// D-EACH1=C: open a fenced-name statement expansion.
+    FenceOpen,
+    /// D-EACH1=C: close a fenced-name statement expansion.
+    FenceClose,
     Colon,
     /// D-BIND4: `::` immutable binding sigil.
     ColonColon,
@@ -234,6 +238,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::RBrace => "`}`".to_string(),
         TokKind::LBracket => "`[`".to_string(),
         TokKind::RBracket => "`]`".to_string(),
+        TokKind::FenceOpen => format!("`{}`", Syntax::SIGIL_FENCE_OPEN),
+        TokKind::FenceClose => format!("`{}`", Syntax::SIGIL_FENCE_CLOSE),
         TokKind::Colon => "`:`".to_string(),
         TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),

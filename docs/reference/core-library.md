@@ -2161,6 +2161,7 @@ there's no combined channel value).
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
+| `tasks.join_all(handles)` | `[T]` | Consume `[Task<T>]`, wait in list order, and return results in that order |
 | `task.join()` | `T` | Wait for the task and consume the task handle |
 | `task.wait()` | `T` | Alias of `.join()` |
 | `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
@@ -2186,11 +2187,13 @@ With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
-`taskgroup` owns child tasks until scope exit. `g.all`, `g.race`, and `g.any`
-join task lists on the scheduler; `race`/`any` cancel losers. `g.select()` races
-receivers and timers: `.recv(rx)` waits for a channel value, `.after(ms: N)` is a
-unit timer arm, and `.after(ms: N, value: fallback)` is a typed timeout arm that
-can be mixed with same-`T` receive arms.
+Use `tasks.join_all([first, second])` when code already owns free task handles
+and needs every result in handle-list order. The list and each handle are
+consumed. `taskgroup` remains the structured default: it owns child tasks until
+scope exit. Inside one, use `g.all`, `g.race`, and `g.any`; `race`/`any` cancel
+losers. `g.select()` races receivers and timers: `.recv(rx)` waits for a channel
+value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
+is a typed timeout arm that can be mixed with same-`T` receive arms.
 
 ### `core.testing` — fixtures under `#Test`
 

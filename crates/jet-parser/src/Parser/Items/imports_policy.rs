@@ -1419,6 +1419,7 @@ impl<'a> Parser<'a> {
                 imports,
                 items,
                 block_spans: std::mem::take(&mut self.block_spans),
+                fenced_statements: Vec::new(),
                 web_target_ceiling,
                 pub_file,
                 no_prelude,

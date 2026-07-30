@@ -87,6 +87,10 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 /// D-BIND-BARE1 retires typed bindings (`name: Type := expr`).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
+/// D-EACH1=C: open/close a lock-step statement-name fence.
+pub const SIGIL_FENCE_OPEN: &str = "<:";
+pub const SIGIL_FENCE_CLOSE: &str = ":>";
+
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const ATTR_TRACK: &str = "Track";

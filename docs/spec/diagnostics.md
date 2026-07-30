@@ -330,6 +330,10 @@ renumbered, and no new `W` code may be allocated.
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
+| E0368 | parse | fenced-name expansion has no entries (D-EACH1=C) |
+| E0369 | parse | one fenced-name expansion repeats a name (D-EACH1=C) |
+| E0370 | parse | lock-step fenced names have different entry counts (D-EACH1=C) |
+| E0371 | parse | fenced name appears outside a binding target or expression statement (D-EACH1=C) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1311,6 +1315,10 @@ already-freed arena), these track the views themselves.
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 | E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
+| E0368 | This fenced name is empty. | A fenced statement needs at least one name to expand. | Write one or more names between `<:` and `:>`. |
+| E0369 | `{name}` appears twice in this fenced name. | One expansion fence must name each generated copy once. | Remove the second name or give it a different name. |
+| E0370 | Fenced names on one statement have different counts. | Multiple fences expand in lock-step, so every fence needs one name for each copy. | Give every fence the same number of names. |
+| E0371 | This fenced name is not in an allowed statement position. | D-EACH1 expands complete binding or expression statements, not headers, items, or nested syntax. | Move the fence to a binding target or a complete expression statement. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

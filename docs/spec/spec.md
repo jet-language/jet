@@ -69,7 +69,7 @@ block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
 // terminator-based. A leading `.` or binary/logical operator on the next line
 // suppresses insertion (continuation). A callable arrow, `=`, or `{` stays
 // attached to the declaration head. `NL` denotes that synthetic terminator.
-stmt     = binding | assign | if | loop
+stmt     = binding | assign | if | loop | fenced-stmt
          | break | next | "return" [ expr ] NL
          | expr NL ;
 binding  = [ "#Track" ] ( ident "::" expr     // immutable
@@ -79,6 +79,9 @@ binding  = [ "#Track" ] ( ident "::" expr     // immutable
 // Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
+fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C
+fence    = "<:" fence-entry { "," fence-entry } ":>"
+         | "<:" numbered-name ".." numbered-name ":>" ;
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
@@ -135,6 +138,9 @@ expr     = precedence climbing over:
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
   Types never annotate the binding name — use `Type.{ … }` or a signature/field.
+- `<: a, b :>` expands one complete binding or expression statement per name.
+  Multiple fences advance in lock-step. `<: task1..task8 :>` generates or
+  reuses the ascending numbered names. A fence is not a list or destructure.
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() => String`; untracked Floats return `"untracked"`.

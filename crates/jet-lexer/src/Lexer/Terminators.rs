@@ -121,7 +121,8 @@ fn ends_statement(kind: &TokKind) -> bool {
 fn suppresses_terminator(kind: &TokKind) -> bool {
     matches!(
         kind,
-        TokKind::Dot
+        TokKind::FenceClose
+            | TokKind::Dot
             | TokKind::QuestionDot
             | TokKind::AndAnd
             | TokKind::OrOr

@@ -5221,3 +5221,15 @@ the trait/derive namespace. Serde internal tagging is
 `#Discriminant("field")`, and a scheduled project entry is `#Job fn`.
 `#Tag` and `#Task` are retired with fixes. D-TAG1 prose calls nested enum
 families “variant groups.” Card #1300.
+
+**2026-07-29 — D-EACH1=C / D-FANOUT3=C**: `<: a, b :>` expands one complete
+binding or expression statement per name. Multiple fences on the same statement
+advance in lock-step. An ascending numbered-name range such as
+`<: task1..task8 :>` may bind names and reuse them in a later expression fence.
+The fence is statement expansion, not a list,
+destructure, or S75 fan-out. `<:` and `:>` are longest-match digraphs; `:>`
+suppresses line termination and neither digraph ends a statement. The formatter
+retains one authored fence and wraps wide explicit fences one name per line.
+`tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
+returns their results in list order; taskgroup combinators remain the structured
+ownership surface. Card #1239.
