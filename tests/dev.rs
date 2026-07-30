@@ -5902,6 +5902,65 @@ fn run() {
 }
 
 #[test]
+fn shared_scalar_edit_matches_interpreter_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let source = r#"
+fn run() {
+    value :: Shared.new(0)
+    value.edit(current => current += 1)
+    print(value.read(current => current))
+}
+"#;
+    let file = std::env::temp_dir().join(format!(
+        "jet_shared_scalar_edit_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let expected = ProgramOutput::ran("1\n".to_string(), String::new(), 0);
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter failed: {diags:?}"),
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "shared_scalar_edit");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "Shared<Int>.edit did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "Shared<Int>.edit used deopt or fallback"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_shared_scalar_edit_aot_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "shared_scalar_edit", 0, "shared_scalar_edit", &shown);
+
+    assert_eq!(interpreted, expected, "forced interpreter output drifted");
+    assert_eq!(resident, expected, "resident JIT output drifted");
+    assert_eq!(aot, expected, "AOT output drifted");
+    assert_eq!(resident, interpreted, "JIT and interpreter output differ");
+    assert_eq!(resident, aot, "JIT and AOT output differ");
+
+    let _ = fs::remove_file(file);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

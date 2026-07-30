@@ -5930,7 +5930,7 @@ impl LowerCtx<'_, '_> {
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit Shared callback must be a lambda".to_string());
                 };
-                let result = self.lower_inline_lambda(lambda, payload)?;
+                let (result, updated) = self.lower_inline_lambda(lambda, payload)?;
                 let host_id = if transactional {
                     self.host.memory.shared_txn_set
                 } else if method == "read" {
@@ -5942,7 +5942,7 @@ impl LowerCtx<'_, '_> {
                 if method == "read" {
                     self.b.ins().call(end, &[handle]);
                 } else {
-                    self.b.ins().call(end, &[handle, payload]);
+                    self.b.ins().call(end, &[handle, updated]);
                 }
                 Ok(result)
             }
@@ -5979,7 +5979,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(available);
                 self.b.seal_block(available);
-                let callback = self.lower_inline_lambda(lambda, payload)?;
+                let (callback, _) = self.lower_inline_lambda(lambda, payload)?;
                 let callback_plus_one = self.b.ins().iadd(callback, one);
                 self.b.ins().jump(merge, &[callback_plus_one]);
 
@@ -6441,7 +6441,11 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn lower_inline_lambda(&mut self, lambda: &TLambda, argument: Value) -> Result<Value, String> {
+    fn lower_inline_lambda(
+        &mut self,
+        lambda: &TLambda,
+        argument: Value,
+    ) -> Result<(Value, Value), String> {
         let name = lambda
             .source_params
             .first()
@@ -6464,10 +6468,41 @@ impl LowerCtx<'_, '_> {
                 "jit inline callback parameter ABI mismatch: {ty:?} expects {expected}, got {actual}"
             ));
         }
-        let var = self.fresh_var(expected);
-        self.b.def_var(var, argument);
+        let scalar_slot = matches!(
+            &ty,
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::Char
+        )
+        .then(|| {
+            let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                u32::from(expected.bytes()),
+                0,
+            ));
+            self.b.ins().stack_store(argument, slot, 0);
+            slot
+        });
+        let stored_ty = if scalar_slot.is_some() {
+            Type::Apply {
+                name: "__JetScalarMut".to_string(),
+                args: vec![ty],
+            }
+        } else {
+            ty
+        };
+        let bound = scalar_slot.map_or(argument, |slot| {
+            self.b
+                .ins()
+                .stack_addr(self.module.target_config().pointer_type(), slot, 0)
+        });
+        let var = self.fresh_var(self.b.func.dfg.value_type(bound));
+        self.b.def_var(var, bound);
         self.vars.insert(key.clone(), var);
-        self.var_tys.insert(key.clone(), ty);
+        self.var_tys.insert(key.clone(), stored_ty);
         let result = match &lambda.executable {
             TLambdaBody::Expr(expr) => self.lower_expr(expr)?,
             TLambdaBody::Block(body) => {
@@ -6477,6 +6512,10 @@ impl LowerCtx<'_, '_> {
                 }
                 self.b.ins().iconst(types::I64, 0)
             }
+        };
+        let updated = match scalar_slot {
+            Some(slot) => self.b.ins().stack_load(expected, slot, 0),
+            None => self.b.use_var(var),
         };
         match old_var {
             Some(var) => {
@@ -6494,7 +6533,7 @@ impl LowerCtx<'_, '_> {
                 self.var_tys.remove(&key);
             }
         }
-        Ok(result)
+        Ok((result, updated))
     }
 
     /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
