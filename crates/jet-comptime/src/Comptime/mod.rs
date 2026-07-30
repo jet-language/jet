@@ -67,7 +67,7 @@ pub use Methods::{
 pub use Methods::apply_seeded_rng_method;
 #[doc(hidden)]
 pub use Methods::{
-    eval_net_fetch, is_tier2_core_call, vault_comptime_denied,
+    eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,
 };
 
 /// D-DATAFLOW1=A / #778: TIR deopt path for `core.data.csv` reuses the same
@@ -90,7 +90,7 @@ pub fn data_status_rows() -> Vec<(
     DataLite::status_rows()
 }
 pub use Methods::apply_dollar_splices;
-pub use Purity::walk_calls;
+pub use Purity::{check_build_time_io, walk_calls};
 pub use Reflect::{
     build_program_info, build_struct_type_info, build_struct_type_info_with_states,
     ProgramSemanticFacts,

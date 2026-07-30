@@ -238,6 +238,11 @@ pub(crate) fn eval_comptime_items(
         for item in items.iter() {
             if let Item::Const(c) = item {
                 if c.is_comptime {
+                    // D-CTIO1: report a bad embed path against the call itself,
+                    // then skip evaluation so the law isn't reported twice.
+                    if !crate::Comptime::check_build_time_io(&c.value, base_dir, diags) {
+                        continue;
+                    }
                     // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
                     match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                         &c.value,

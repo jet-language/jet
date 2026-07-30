@@ -590,7 +590,11 @@ impl<'a> Checker<'a> {
                     Some(b.name_span),
                 ));
             }
-            if b.is_comptime {
+            if b.is_comptime
+                && !crate::Comptime::check_build_time_io(&b.init, self.ct_base_dir, &mut self.diags)
+            {
+                // D-CTIO1: the path law already reported against the call.
+            } else if b.is_comptime {
                 let globals = self.current_ct_globals();
                 // D-CTCORE1: pass core_imports so the interpreter can evaluate
                 // whitelisted pure Core calls (e.g. `math.sqrt(x)`).

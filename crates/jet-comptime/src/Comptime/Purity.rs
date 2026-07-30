@@ -88,6 +88,42 @@ fn check_purity_stmt(
     result
 }
 
+/// D-CTIO1: run every build-time IO call in an initializer through the one
+/// shared implementation before evaluation, using the call's own span. The
+/// evaluator repeats the call for its value, but it carries no spans, so this
+/// pre-pass is what makes `embed_file`/`embed_bytes`/`find` diagnostics point
+/// at the call. Returns false when it reported at least one problem.
+pub fn check_build_time_io(
+    e: &Expr,
+    base_dir: &std::path::Path,
+    diags: &mut Vec<crate::Diagnostics::Diagnostic>,
+) -> bool {
+    let before = diags.len();
+    walk_expr_nodes(e, false, &mut |expr| {
+        let Expr::Call(call) = expr else { return };
+        if !matches!(
+            call.name.as_str(),
+            crate::Syntax::BUILTIN_EMBED_FILE
+                | crate::Syntax::BUILTIN_EMBED_BYTES
+                | crate::Syntax::BUILTIN_FIND
+        ) {
+            return;
+        }
+        let Some(arg) = call.args.first() else { return };
+        // Lock inputs are recorded by the evaluating pass, not here.
+        if let Err(diagnostic) = crate::Comptime::eval_build_time_io(
+            &call.name,
+            base_dir,
+            crate::Comptime::Methods::arg_string_literal(arg),
+            None,
+            call.name_span,
+        ) {
+            diags.push(diagnostic);
+        }
+    });
+    diags.len() == before
+}
+
 /// Visit every direct `Call` name in an expression tree (shallow over
 /// nested functions — recursion is driven by the purity walker).
 pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {

@@ -385,6 +385,67 @@ pub(crate) fn find_glob(
     Ok(out)
 }
 
+/// D-CTIO1: the one implementation of `embed_file` / `embed_bytes` / `find`.
+/// `literal` is the argument's source string literal, or `None` when the
+/// argument was computed (E0957). Both the AST dispatcher below and the
+/// canonical TIR evaluator call this, so the path law and its diagnostics live
+/// in exactly one place.
+pub fn eval_build_time_io(
+    builtin: &str,
+    base_dir: &Path,
+    literal: Option<&str>,
+    mut embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Some(literal) = literal else {
+        return Err(embed_path_err(builtin, "literal", span));
+    };
+    let rel = check_literal_embed_path(builtin, literal, span)?;
+    if builtin == crate::Syntax::BUILTIN_FIND {
+        return eval_locked_find(base_dir, &rel, embed_inputs, span);
+    }
+    let bytes = std::fs::read(base_dir.join(&rel)).map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`{builtin}` can't open `{rel}`"),
+            format!("{error} (looked next to the file doing the embedding)"),
+            "check the path — it is relative to the file's own directory".to_string(),
+            Some(span),
+        )
+    })?;
+    // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
+    if let Some(inputs) = embed_inputs.as_deref_mut() {
+        inputs.push(crate::AST::ComptimeInput {
+            path: rel.clone(),
+            hash: crate::SHA256::sha256_hex(&bytes),
+        });
+    }
+    if builtin == crate::Syntax::BUILTIN_EMBED_BYTES {
+        return Ok(CtValue::Bytes(bytes));
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(CtValue::Str(text)),
+        Err(_) => Err(Diagnostic::error(
+            "E0955",
+            format!("`{builtin}` can't read `{rel}` as text"),
+            format!("the file isn't valid UTF-8; `{builtin}` returns a String"),
+            "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`".to_string(),
+            Some(span),
+        )),
+    }
+}
+
+/// The source string literal of a call argument, or `None` when computed.
+pub(crate) fn arg_string_literal(arg: &CallArg) -> Option<&str> {
+    match &arg.expr {
+        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(value) => Some(value.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub fn eval_locked_find(
     base_dir: &Path,
     glob: &str,
@@ -1444,18 +1505,7 @@ impl<'a> Interp<'a> {
     }
 
     fn eval_embed_file(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
-        let builtin = crate::Syntax::BUILTIN_EMBED_FILE;
-        let (rel, bytes) = self.read_embed(builtin, args, span)?;
-        match String::from_utf8(bytes) {
-            Ok(text) => Ok(CtValue::Str(text)),
-            Err(_) => Err(Diagnostic::error(
-                "E0955",
-                format!("`{builtin}` can't read `{rel}` as text"),
-                format!("the file isn't valid UTF-8; `{builtin}` returns a String"),
-                "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`".to_string(),
-                Some(span),
-            )),
-        }
+        self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_FILE, args, span)
     }
 
     /// D-CTIO1 + D-ARROW-CONTROL1: `embed_bytes("path") => [U8]` — the
@@ -1463,9 +1513,7 @@ impl<'a> Interp<'a> {
     /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
     /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
     fn eval_embed_bytes(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
-        let builtin = crate::Syntax::BUILTIN_EMBED_BYTES;
-        let (_rel, bytes) = self.read_embed(builtin, args, span)?;
-        Ok(CtValue::Bytes(bytes))
+        self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_BYTES, args, span)
     }
 
     /// D-CTFIND1/2 + D-ARROW-CONTROL1: `find(glob) => [String]` walks inside
@@ -1473,18 +1521,38 @@ impl<'a> Interp<'a> {
     /// directory, returns sorted relative file paths, and records each match's
     /// hash as Tier-1 lock evidence.
     fn eval_find(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
-        let builtin = crate::Syntax::BUILTIN_FIND;
+        self.eval_build_time_io(crate::Syntax::BUILTIN_FIND, args, span)
+    }
+
+    /// Arity and literal extraction for the three build-time IO builtins; the
+    /// path law, the reads, and every diagnostic live in `eval_build_time_io`.
+    fn eval_build_time_io(
+        &mut self,
+        builtin: &str,
+        args: &[CallArg],
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let noun = if builtin == crate::Syntax::BUILTIN_FIND {
+            "glob"
+        } else {
+            "path"
+        };
         let arg = args
             .first()
-            .ok_or_else(|| unsupported(&format!("{builtin} with no glob"), span))?;
-        let glob = check_embed_path(builtin, arg, span)?;
+            .ok_or_else(|| unsupported(&format!("{builtin} with no {noun}"), span))?;
         if args.len() != 1 {
             return Err(unsupported(
                 &format!("{builtin} with extra arguments"),
                 span,
             ));
         }
-        eval_locked_find(self.base_dir, &glob, Some(&mut self.embed_inputs), span)
+        eval_build_time_io(
+            builtin,
+            self.base_dir,
+            arg_string_literal(arg),
+            Some(&mut self.embed_inputs),
+            span,
+        )
     }
 
     /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)

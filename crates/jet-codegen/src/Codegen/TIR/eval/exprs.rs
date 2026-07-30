@@ -4294,6 +4294,33 @@ impl<'a> EvalCtx<'a> {
             }
             return Ok(CtValue::Unit);
         }
+        // D-CTIO1: the sanctioned build-time IO builtins. The path law, the
+        // reads, and every diagnostic (E0955/E0957) stay in the one Comptime
+        // implementation; this arm only marshals the literal and the sink.
+        if matches!(
+            name,
+            crate::Syntax::BUILTIN_EMBED_FILE
+                | crate::Syntax::BUILTIN_EMBED_BYTES
+                | crate::Syntax::BUILTIN_FIND
+        ) && self.funcs.get(name).is_none()
+        {
+            let literal = args.first().and_then(|arg| match &arg.value.kind {
+                TExprKind::StrLit(parts) => match parts.as_slice() {
+                    [super::super::TStrPart::Lit(text)] => Some(text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let span = self.span();
+            let base_dir = self.base_dir.clone();
+            return crate::Comptime::eval_build_time_io(
+                name,
+                &base_dir,
+                literal.as_deref(),
+                self.embed_inputs.as_deref_mut(),
+                span,
+            );
+        }
         let func = self.funcs.get(name).copied();
         // Codec-sensitive named deopts must retain the canonical migration
         // plan. Other deopts keep ordinary cross-tier native dispatch.
