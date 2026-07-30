@@ -65,6 +65,9 @@ pub enum Severity {
 /// (LSP, fix engine) gate on this field.
 pub const JSON_SCHEMA_VERSION: u32 = 1;
 
+/// Source nesting accepted by sema and the canonical TIR evaluator.
+pub const MAX_SOURCE_NESTING: usize = 256;
+
 /// How the renderer decides whether to emit ANSI color (E2-M3, D-DX*).
 ///
 /// Resolution order, highest priority first:
@@ -197,6 +200,19 @@ impl Diagnostic {
         };
         d.attach_teaching_edit();
         d
+    }
+
+    pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
+        Self::error(
+            "E1403",
+            format!(
+                "this code nests {depth} levels deep; the limit is {MAX_SOURCE_NESTING}"
+            ),
+            "each nested source form needs one compiler checking frame, and unbounded depth could overflow the compiler stack"
+                .to_string(),
+            "pull inner parts out into named bindings or helper functions".to_string(),
+            Some(span),
+        )
     }
 
     pub fn lint(

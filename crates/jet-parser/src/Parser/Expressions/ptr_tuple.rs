@@ -190,27 +190,46 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-            let open = self.bump().span;
+            let mut opens = vec![self.bump().span];
             if self.looks_like_named_tuple(true) {
+                let open = opens[0];
                 return self.parse_tuple_lit(open);
             }
             if self.after_lparen_is_positional_tuple() {
+                let open = opens[0];
                 self.emit_positional_tuple_error(open);
                 self.sync_to_rparen();
                 return Ok(Expr::Int(0, open, None, None));
             }
-            let inner = self.expr()?;
-            if matches!(self.peek().kind, TokKind::Comma) {
-                self.emit_positional_tuple_error(open);
-                self.sync_to_rparen();
-                return Ok(Expr::Int(0, open, None, None));
+
+            while matches!(self.peek().kind, TokKind::LParen)
+                && !self.after_lparen_is_lambda()
+                && !self.looks_like_named_tuple(false)
+            {
+                let candidate_pos = self.pos;
+                let candidate = self.bump().span;
+                if self.after_lparen_is_positional_tuple() {
+                    self.pos = candidate_pos;
+                    break;
+                }
+                opens.push(candidate);
             }
-            self.expect(TokKind::RParen, "to close this `(`")?;
-            let close_span = self.toks[self.pos - 1].span;
-            let span = Span::new(open.start, close_span.end);
-            // D-FMTPARENS1=A: preserve author parens as a distinct AST node so
-            // the formatter can always re-emit them, even when redundant.
-            Ok(Expr::Paren(Box::new(inner), span))
+
+            let mut inner = self.expr()?;
+            for open in opens.into_iter().rev() {
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.emit_positional_tuple_error(open);
+                    self.sync_to_rparen();
+                    return Ok(Expr::Int(0, open, None, None));
+                }
+                self.expect(TokKind::RParen, "to close this `(`")?;
+                let close_span = self.toks[self.pos - 1].span;
+                let span = Span::new(open.start, close_span.end);
+                // D-FMTPARENS1=A: preserve author parens as distinct AST nodes so
+                // the formatter can always re-emit them, even when redundant.
+                inner = Expr::Paren(Box::new(inner), span);
+            }
+            Ok(inner)
         }
     
         /// True when `(` starts `( expr , … )` without member names — rejected (S73).

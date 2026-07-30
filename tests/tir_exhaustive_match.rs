@@ -197,7 +197,7 @@ fn eval_exec_stmt_is_exhaustive_over_tstmt() {
     let root = root();
     let source =
         fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs")).unwrap();
-    let body = fn_body(&source, "exec_stmt");
+    let body = fn_body(&source, "exec_stmt_inner");
     assert_no_wildcard_at_indent(body, 12, "eval exec_stmt (TStmt)");
 }
 
@@ -206,7 +206,7 @@ fn eval_expr_is_exhaustive_over_texprkind() {
     let root = root();
     let source =
         fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs")).unwrap();
-    let body = fn_body(&source, "eval_expr");
+    let body = fn_body(&source, "eval_expr_inner");
     assert_no_wildcard_at_indent(body, 12, "eval_expr (TExprKind)");
 }
 
@@ -386,7 +386,7 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
     )
     .unwrap();
     let exec_stmts = fn_body(&eval_stmts, "exec_stmts");
-    let exec_stmt = fn_body(&eval_stmts, "exec_stmt");
+    let exec_stmt = fn_body(&eval_stmts, "exec_stmt_inner");
     assert_contains_all(
         exec_stmts,
         "canonical TIR statement list",
@@ -401,7 +401,7 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
         root.join("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs"),
     )
     .unwrap();
-    let eval_expr = fn_body(&eval_exprs, "eval_expr");
+    let eval_expr = fn_body(&eval_exprs, "eval_expr_inner");
     assert_contains_all(eval_expr, "canonical TIR expression", &["match &expr.kind"]);
 
     let deopt = fs::read_to_string(root.join("crates/jet-jit/src/jit/deopt.rs")).unwrap();

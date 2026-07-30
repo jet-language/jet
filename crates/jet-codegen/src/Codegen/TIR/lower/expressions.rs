@@ -168,6 +168,10 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 }
 
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let mut e = e;
+    while let Expr::Paren(inner, _) = e {
+        e = inner;
+    }
     thread_local! {
         static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
@@ -2844,7 +2848,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             t
         },
-        Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         Expr::PatternTest {
             subject, pattern, ..
         } if is_binding_free_user_variant_pattern_test(pattern, cx) => {

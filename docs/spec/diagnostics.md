@@ -268,6 +268,7 @@ renumbered, and no new `W` code may be allocated.
 | L0206 | sema  | a `SharedGuard` lock spans a long lexical scope (D-SHAREDGUARD1) |
 | L1401 | jet   | compiler-extension finding from a configured component (D-DX5-HOOK1) |
 | E1402 | jet   | compiler-extension host failure (load/analyze/validate fail-closed, D-DX5-HOOK1) |
+| E1403 | compiler | source nesting exceeds the shared parser, sema, and TIR evaluator limit of 256 (D-COMPILE-STACK1=A) |
 | E0301 | sema  | `impl` for unknown type                   |
 | E0302 | sema  | unknown field (with suggestion)           |
 | E0303 | sema  | struct/variant construction field errors  |
@@ -1710,6 +1711,7 @@ front-end `.jet` diagnostics).
 | E0216 | `` `SharedGuard.split` needs two disjoint field projections ``. | Two child guards must preserve non-overlapping provenance under one original lock. Equal, enclosing, nested, or computed projections cannot prove that law. | Project two stored sibling fields, such as `value.left` and `value.right`. |
 | L1401 | `` compiler-extension `{rule}` ({severity}): {message} `` | A configured compiler-extension component (`JET_COMPILER_EXTENSION`) reported this finding after type checking (D-DX5-HOOK1). V1 surfaces findings as lints; wall with `policy.lints.deny`. | Address the finding, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
 | E1402 | `` compiler-extension failed: {message} `` | The configured compiler-extension component could not complete `analyze`, or returned an invalid response (D-DX5-HOOK1). Guests are sandboxed; failures stay Jet-owned (I2). | Fix the component, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
+| E1403 | `` this code nests {depth} levels deep; the limit is 256 `` | Each nested source form needs one compiler checking frame, and unbounded depth could overflow the compiler stack. The parser, sema, and TIR evaluator enforce the same published limit (D-COMPILE-STACK1=A). | Pull inner parts out into named bindings or helper functions. |
 
 ## Programmable-build diagnostics (D-BUILDENTRY1 and D-BUILDACTION1)
 

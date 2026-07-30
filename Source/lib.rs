@@ -111,6 +111,42 @@ pub mod Store;
 
 use Diagnostics::Diagnostic;
 
+const COMPILER_STACK_SIZE: usize = 32 * 1024 * 1024;
+
+thread_local! {
+    static ON_COMPILER_STACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    if ON_COMPILER_STACK.with(std::cell::Cell::get) {
+        return work();
+    }
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("jet-compiler".to_string())
+            .stack_size(COMPILER_STACK_SIZE)
+            .spawn_scoped(scope, || {
+                ON_COMPILER_STACK.with(|active| active.set(true));
+                boot_tir_eval();
+                work()
+            })
+            .unwrap_or_else(|error| {
+                jet_foundation::ice!(None, "could not start compiler worker: {error}")
+            });
+        worker
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    })
+}
+
+/// Run a custom low-level compiler session on Jet's fixed compiler stack.
+///
+/// Root compile and check APIs do this automatically. Embedders need this only
+/// when composing lower-level loader, sema, TIR, or JIT compiler seams directly.
+pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    with_compiler_stack(work)
+}
+
 /// Run the full front end on source text. All lex errors (then all parse
 /// errors) surface in one run — M1 error recovery.
 pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
@@ -140,8 +176,10 @@ pub fn compile_with_target(
 /// Front-end check for a file on disk (and its imports). Library modules
 /// need not define `main`; use `compile_with_path` when building or running.
 pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
-    let mut queries = jet_driver::QueryService::CompilerQueries::new();
-    queries.check_disk(file, true).diagnostics.as_ref().clone()
+    with_compiler_stack(|| {
+        let mut queries = jet_driver::QueryService::CompilerQueries::new();
+        queries.check_disk(file, true).diagnostics.as_ref().clone()
+    })
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
@@ -149,7 +187,12 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
 /// while all other diagnostics (type errors, unknown identifiers, etc.) still
 /// fire. Returns the error diagnostics, or an empty vec on success.
 pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
-    Driver::check_eval(src, file)
+    with_compiler_stack(|| Driver::check_eval(src, file))
+}
+
+/// Check an already loaded bundle on the compiler-owned stack.
+pub fn check_bundle(bundle: &mut AST::ProgramBundle, mode: Sema::CompileMode) -> Vec<Diagnostic> {
+    with_compiler_stack(|| Sema::check_bundle(bundle, mode))
 }
 
 fn compile_bundle_path(
@@ -191,26 +234,28 @@ pub fn compile_programmable_build_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let grants = resolve_build_grants(file, grants)?;
-    let grants = grants
-        .iter()
-        .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
-        .collect();
-    Driver::compile_bundle_path_build(
-        file,
-        Driver::BuildRunOptions {
-            grants,
-            execute: true,
-            allow_impure,
-            inspect_only: false,
-            locked,
-            freestanding,
-            web_target,
-            plugin_target,
-            cross_target: cross_target.map(str::to_string),
-        },
-    )
-    .map(|output| output.compile)
+    with_compiler_stack(|| {
+        let grants = resolve_build_grants(file, grants)?;
+        let grants = grants
+            .iter()
+            .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+            .collect();
+        Driver::compile_bundle_path_build(
+            file,
+            Driver::BuildRunOptions {
+                grants,
+                execute: true,
+                allow_impure,
+                inspect_only: false,
+                locked,
+                freestanding,
+                web_target,
+                plugin_target,
+                cross_target: cross_target.map(str::to_string),
+            },
+        )
+        .map(|output| output.compile)
+    })
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
@@ -272,14 +317,16 @@ fn compile_bundle_path_opts(
     web_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts(
-        file,
-        mode,
-        freestanding,
-        allow_impure,
-        web_target,
-        cross_target,
-    )
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts(
+            file,
+            mode,
+            freestanding,
+            allow_impure,
+            web_target,
+            cross_target,
+        )
+    })
 }
 
 /// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
@@ -293,26 +340,30 @@ pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 /// executable), so the "no `run`" requirement (E0101, `Run`/`Eval`-only) never
 /// applies here; every other check still runs in full.
 pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts_plugin(
-        file,
-        Sema::CompileMode::Check,
-        Some(Syntax::TARGET_PLUGIN),
-    )
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_plugin(
+            file,
+            Sema::CompileMode::Check,
+            Some(Syntax::TARGET_PLUGIN),
+        )
+    })
 }
 
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
 pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts_dbg(
-        file,
-        Sema::CompileMode::Run,
-        false,
-        false,
-        false,
-        true,
-        None,
-    )
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_dbg(
+            file,
+            Sema::CompileMode::Run,
+            false,
+            false,
+            false,
+            true,
+            None,
+        )
+    })
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
@@ -320,12 +371,12 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 /// swapped in as the program's real entry point instead of `run()` (see
 /// `Driver::compile_bundle_path_with_entry`).
 pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_with_entry(file, entry_fn)
+    with_compiler_stack(|| Driver::compile_bundle_path_with_entry(file, entry_fn))
 }
 
 /// Compile one explicitly addressed runnable Output.
 pub fn compile_with_output(file: &str, output: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_output(file, output)
+    with_compiler_stack(|| Driver::compile_bundle_path_output(file, output))
 }
 
 pub fn compile_output_with_options(
@@ -337,25 +388,29 @@ pub fn compile_output_with_options(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_output_opts(
-        file,
-        output,
-        freestanding,
-        allow_impure,
-        web_target,
-        plugin_target,
-        cross_target,
-    )
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_output_opts(
+            file,
+            output,
+            freestanding,
+            allow_impure,
+            web_target,
+            plugin_target,
+            cross_target,
+        )
+    })
 }
 
 /// In-memory web-target compile (used by integration tests).
 pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_src_with_options(
-        src,
-        file,
-        Sema::CompileMode::Run,
-        Driver::CompileSrcOptions { web_target: true },
-    )
+    with_compiler_stack(|| {
+        Driver::compile_src_with_options(
+            src,
+            file,
+            Sema::CompileMode::Run,
+            Driver::CompileSrcOptions { web_target: true },
+        )
+    })
 }
 
 /// Resolve native C-library link args for a built program (S59 / E2-M14),
@@ -370,16 +425,18 @@ pub fn resolve_c_links_for_target(
     file: &str,
     target: Option<&str>,
 ) -> Result<Vec<String>, Vec<Diagnostic>> {
-    let bundle = Loader::load_entry_with_overlay(file, None, false)?;
-    if !bundle.cffi.links_c() {
-        return Ok(Vec::new());
-    }
-    match target {
-        Some(target) => {
-            crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
+    with_compiler_stack(|| {
+        let bundle = Loader::load_entry_with_overlay(file, None, false)?;
+        if !bundle.cffi.links_c() {
+            return Ok(Vec::new());
         }
-        None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
-    }
+        match target {
+            Some(target) => {
+                crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
+            }
+            None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
+        }
+    })
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.
@@ -399,7 +456,7 @@ pub fn compile_tests_with_path_cov(
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    Driver::compile_tests(file, coverage)
+    with_compiler_stack(|| Driver::compile_tests(file, coverage))
 }
 
 /// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.
@@ -409,7 +466,7 @@ pub fn compile_fuzz_with_path(
     file: &str,
     test_name: Option<&str>,
 ) -> Result<(String, Option<FFI::FfiLink>), FuzzCompileError> {
-    Driver::compile_fuzz(file, test_name)
+    with_compiler_stack(|| Driver::compile_fuzz(file, test_name))
 }
 
 /// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
@@ -418,7 +475,7 @@ pub fn compile_fuzz_with_path(
 pub fn compile_benches_with_path(
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    Driver::compile_benches(file)
+    with_compiler_stack(|| Driver::compile_benches(file))
 }
 
 /// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`
@@ -426,13 +483,13 @@ pub fn compile_benches_with_path(
 /// otherwise. A load failure returns `false` so the caller surfaces the real
 /// compile error on its normal path.
 pub fn has_bench_blocks(file: &str) -> bool {
-    match Loader::load_entry_with_overlay(file, None, false) {
+    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
         Ok(bundle) => bundle.modules[bundle.entry]
             .items
             .iter()
             .any(|i| matches!(i, AST::Item::Bench(_))),
         Err(_) => false,
-    }
+    })
 }
 
 /// Does the entry file declare any `#Test` block? `jet test` runs the test
@@ -440,13 +497,13 @@ pub fn has_bench_blocks(file: &str) -> bool {
 /// a file with only doctests is still testable. A load failure returns `true` so
 /// the caller surfaces the real compile error on the normal harness path.
 pub fn has_test_blocks(file: &str) -> bool {
-    match Loader::load_entry_with_overlay(file, None, false) {
+    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
         Ok(bundle) => bundle.modules[bundle.entry]
             .items
             .iter()
             .any(|i| matches!(i, AST::Item::Test(_))),
         Err(_) => true,
-    }
+    })
 }
 
 /// D-COV1: every user function the `jet test --coverage` probes can record, as
@@ -455,6 +512,10 @@ pub fn has_test_blocks(file: &str) -> bool {
 /// never probed). The runner diffs the recorded hit lines against this set to
 /// report per-function / per-line coverage.
 pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
+    with_compiler_stack(|| coverable_functions_inner(file))
+}
+
+fn coverable_functions_inner(file: &str) -> Vec<(String, usize)> {
     let bundle = match Loader::load_entry_with_overlay(file, None, false) {
         Ok(b) => b,
         Err(_) => return Vec::new(),
@@ -513,7 +574,7 @@ fn compile_with_mode(
     file: &str,
     mode: Sema::CompileMode,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_src(src, file, mode)
+    with_compiler_stack(|| Driver::compile_src(src, file, mode))
 }
 
 /// Back-compat: compile and return only Rust (drops lints).
@@ -528,12 +589,12 @@ pub use Sema::check_pure_program_root;
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
-    Formatter::format_source(src)
+    with_compiler_stack(|| Formatter::format_source(src))
 }
 
 /// Front-end check for one document (LSP / editor integration).
 pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
-    LSP::check_document(path, text)
+    with_compiler_stack(|| LSP::check_document(path, text))
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
@@ -543,6 +604,10 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 ///
 /// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
 pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
+    with_compiler_stack(|| eval_pure_program_value_inner(src, file))
+}
+
+fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
     use std::collections::HashMap;
 
     let (toks, lex_diags) = Lexer::lex(src);
@@ -589,6 +654,10 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
 ///
 /// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
 pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
+    with_compiler_stack(|| eval_pure_program_inner(src, file))
+}
+
+fn eval_pure_program_inner(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     use std::collections::HashMap;
 
     let (toks, lex_diags) = Lexer::lex(src);

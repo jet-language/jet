@@ -18,6 +18,10 @@ use crate::Syntax;
 use std::collections::HashSet;
 
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
+    let mut e = e;
+    while let Expr::Paren(inner, _) = e {
+        e = inner;
+    }
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,
         Expr::ComptimeSplice { value, .. } => value.is_some(),
@@ -803,7 +807,6 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // D-CAP2 (D-MEM1/S4): `copy x` — in-subset whenever `x` is.
         Expr::Copy(inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Place(inner, _, _) => expr_in_subset(inner, cx, locals),
-        Expr::Paren(inner, _) => expr_in_subset(inner, cx, locals),
         // Everything else (tuples, …) is out.
         _ => false,
     }

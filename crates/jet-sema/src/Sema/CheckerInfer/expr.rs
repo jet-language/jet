@@ -205,6 +205,15 @@ impl<'a> Checker<'a> {
     /// rewritten to `.clone()` so the generated Rust never moves a field out
     /// of its struct.
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        if !self.enter_source_nesting(e.span()) {
+            return None;
+        }
+        let result = self.infer_checked(e);
+        self.leave_source_nesting();
+        result
+    }
+
+    fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
         // fallible at runtime; the explicit `_rounded` spelling carries the
         // ratified mode and destination decimal precision. Codegen emits these
@@ -1924,7 +1933,28 @@ impl<'a> Checker<'a> {
                 None
             }
             // D-FMTPARENS1=A: parenthesized expressions are transparent to type checking.
-            Expr::Paren(inner, _) => self.infer(inner),
+            Expr::Paren(inner, _) => {
+                let mut inner = inner.as_mut();
+                let mut entered = 0;
+                while matches!(inner, Expr::Paren(..)) {
+                    if !self.enter_source_nesting(inner.span()) {
+                        for _ in 0..entered {
+                            self.leave_source_nesting();
+                        }
+                        return None;
+                    }
+                    entered += 1;
+                    let Expr::Paren(next, _) = inner else {
+                        unreachable!("checked parenthesized expression")
+                    };
+                    inner = next;
+                }
+                let result = self.infer(inner);
+                for _ in 0..entered {
+                    self.leave_source_nesting();
+                }
+                result
+            }
             // D-INCR1: `++`/`--` on a mutable integer lvalue.
             Expr::IncDec {
                 op,

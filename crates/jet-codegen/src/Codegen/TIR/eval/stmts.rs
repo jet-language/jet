@@ -178,12 +178,15 @@ impl<'a> EvalCtx<'a> {
         stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
-        match self.exec_stmt_inner(stmt, scope) {
+        self.enter_source_nesting()?;
+        let result = match self.exec_stmt_inner(stmt, scope) {
             Err(_) if self.pending_flow.is_some() => {
                 Ok(self.pending_flow.take().expect("checked pending loop control"))
             }
             result => result,
-        }
+        };
+        self.leave_source_nesting();
+        result
     }
 
     fn exec_stmt_inner(

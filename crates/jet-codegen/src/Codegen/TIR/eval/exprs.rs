@@ -1097,6 +1097,17 @@ impl<'a> EvalCtx<'a> {
         expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        self.enter_source_nesting()?;
+        let result = self.eval_expr_inner(expr, scope);
+        self.leave_source_nesting();
+        result
+    }
+
+    fn eval_expr_inner(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
         self.burn()?;
         match &expr.kind {
             TExprKind::IntLit(n, _) => Ok(CtValue::Int(*n)),

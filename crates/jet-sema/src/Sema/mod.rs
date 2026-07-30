@@ -1136,6 +1136,28 @@ pub(crate) struct ModuleState {
     reexports: HashMap<String, (String, usize)>,
 }
 
+thread_local! {
+    static SOURCE_NESTING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn enter_source_nesting(diags: &mut Vec<Diagnostic>, span: Span) -> bool {
+    let depth = SOURCE_NESTING.with(|current| {
+        let depth = current.get() + 1;
+        current.set(depth);
+        depth
+    });
+    if depth <= crate::Diagnostics::MAX_SOURCE_NESTING {
+        return true;
+    }
+    diags.push(Diagnostic::source_nesting_exceeded(depth, span));
+    SOURCE_NESTING.with(|current| current.set(depth - 1));
+    false
+}
+
+fn leave_source_nesting() {
+    SOURCE_NESTING.with(|current| current.set(current.get() - 1));
+}
+
 pub(crate) struct Checker<'a> {
     funcs: &'a HashMap<String, FuncSig>,
     registry: &'a TypeRegistry,
@@ -1387,6 +1409,14 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
+        enter_source_nesting(&mut self.diags, span)
+    }
+
+    pub(crate) fn leave_source_nesting(&mut self) {
+        leave_source_nesting();
+    }
+
     fn concrete_unit_value(&self, expr: &Expr) -> Option<f64> {
         match expr {
             Expr::Ident(name, _) => self
@@ -1749,6 +1779,30 @@ impl<'a> Checker<'a> {
             ),
             Some(span),
         )
+    }
+}
+
+#[cfg(test)]
+mod source_nesting_tests {
+    use super::*;
+
+    #[test]
+    fn sema_source_nesting_accepts_256_and_rejects_257() {
+        SOURCE_NESTING.with(|current| current.set(0));
+        let mut diagnostics = Vec::new();
+        let span = Span::new(0, 1);
+
+        for _ in 0..crate::Diagnostics::MAX_SOURCE_NESTING {
+            assert!(enter_source_nesting(&mut diagnostics, span));
+        }
+        assert!(!enter_source_nesting(&mut diagnostics, span));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1403");
+
+        for _ in 0..crate::Diagnostics::MAX_SOURCE_NESTING {
+            leave_source_nesting();
+        }
+        SOURCE_NESTING.with(|current| assert_eq!(current.get(), 0));
     }
 }
 

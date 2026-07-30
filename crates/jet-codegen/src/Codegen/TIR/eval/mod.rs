@@ -143,6 +143,16 @@ pub(super) fn view_bounds_diagnostic(
     )
 }
 
+fn enter_source_nesting(depth: &mut usize, span: Span) -> Result<(), Diagnostic> {
+    *depth += 1;
+    if *depth <= crate::Diagnostics::MAX_SOURCE_NESTING {
+        return Ok(());
+    }
+    let exceeded = *depth;
+    *depth -= 1;
+    Err(Diagnostic::source_nesting_exceeded(exceeded, span))
+}
+
 pub(super) fn range_contains(
     value: &CtValue,
     needle: &CtValue,
@@ -405,6 +415,7 @@ pub(super) struct EvalCtx<'a> {
     /// fragments. Fully checked programs rewrite these sends to `List.push`.
     pub(super) collecting_items: Vec<Vec<CtValue>>,
     pub(super) call_depth: usize,
+    pub(super) source_nesting: usize,
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
@@ -735,6 +746,7 @@ impl<'a> EvalCtx<'a> {
             pending_flow: None,
             collecting_items: Vec::new(),
             call_depth: 0,
+            source_nesting: 0,
             emitted_fragments: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
@@ -998,6 +1010,15 @@ impl<'a> EvalCtx<'a> {
         Ok(())
     }
 
+    pub(super) fn enter_source_nesting(&mut self) -> Result<(), Diagnostic> {
+        let span = self.span();
+        enter_source_nesting(&mut self.source_nesting, span)
+    }
+
+    pub(super) fn leave_source_nesting(&mut self) {
+        self.source_nesting -= 1;
+    }
+
     pub(crate) fn run_func(
         &mut self,
         func: &'a TFunc,
@@ -1135,6 +1156,25 @@ impl<'a> EvalCtx<'a> {
             .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
         let mut child = HashMap::new();
         self.run_func(func, args, &mut child)
+    }
+}
+
+#[cfg(test)]
+mod source_nesting_tests {
+    use super::*;
+
+    #[test]
+    fn tir_source_nesting_accepts_256_and_rejects_257() {
+        let mut depth = 0;
+        let span = Span::new(0, 1);
+
+        for _ in 0..crate::Diagnostics::MAX_SOURCE_NESTING {
+            enter_source_nesting(&mut depth, span).expect("depth 256 is allowed");
+        }
+        let diagnostic =
+            enter_source_nesting(&mut depth, span).expect_err("depth 257 is rejected");
+        assert_eq!(diagnostic.code, "E1403");
+        assert_eq!(depth, crate::Diagnostics::MAX_SOURCE_NESTING);
     }
 }
 
@@ -1424,6 +1464,7 @@ pub fn run_program_with_structs(
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
+        source_nesting: 0,
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields,
@@ -1491,6 +1532,7 @@ pub fn run_named_func(
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
+        source_nesting: 0,
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
@@ -1666,6 +1708,7 @@ fn eval_expr_hook(
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
+        source_nesting: 0,
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
@@ -1754,6 +1797,7 @@ fn eval_block_hook(
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
+        source_nesting: 0,
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),

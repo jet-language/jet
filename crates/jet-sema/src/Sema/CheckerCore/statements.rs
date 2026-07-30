@@ -241,6 +241,14 @@ impl<'a> Checker<'a> {
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).
         pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
+            if !self.enter_source_nesting(stmt.span()) {
+                return;
+            }
+            self.check_stmt_inner(stmt);
+            self.leave_source_nesting();
+        }
+
+        fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
             if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
                 if let Some(arguments) = self.validate_rule_signature(&mut marker) {
                     let text = match arguments.constant_for_source(0) {

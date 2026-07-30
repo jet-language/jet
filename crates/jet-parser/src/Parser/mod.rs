@@ -6,7 +6,7 @@
 //! errors. Narrow, separately ratified teaching diagnostics still live at their
 //! specific parser sites.
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, MAX_SOURCE_NESTING};
 use crate::Generics;
 use crate::Lexer::{describe, StrTokPart, TokKind, Token};
 use crate::Syntax;
@@ -187,8 +187,7 @@ fn retired_s14_teaching_enabled() -> bool {
 /// literals-with-expressions, generic types). Recursive descent here — and
 /// the recursive passes downstream (sema, codegen, fmt) — use the call
 /// stack, so unbounded nesting in adversarial input would abort the compiler
-/// with a stack overflow instead of a diagnostic (E0035).
-const MAX_NESTING: usize = 128;
+/// with a stack overflow instead of the shared source-nesting diagnostic.
 
 struct Parser<'a> {
     toks: &'a [Token],
@@ -231,27 +230,14 @@ struct Parser<'a> {
     block_spans: Vec<Span>,
 }
 
-fn too_deep(span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0035",
-        "this code is nested too deeply".to_string(),
-        format!(
-            "the compiler keeps things simple by allowing at most {} levels of nesting",
-            MAX_NESTING
-        ),
-        "split the nested code into smaller steps with `val` bindings".to_string(),
-        Some(span),
-    )
-}
-
 fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
     let mut depth = 0usize;
     for t in toks {
         match t.kind {
             TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
                 depth += 1;
-                if depth > MAX_NESTING {
-                    return Err(vec![too_deep(t.span)]);
+                if depth > MAX_SOURCE_NESTING {
+                    return Err(vec![Diagnostic::source_nesting_exceeded(depth, t.span)]);
                 }
             }
             TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
@@ -321,8 +307,11 @@ impl<'a> Parser<'a> {
         span: Span,
         f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
-        if self.depth >= MAX_NESTING {
-            return Err(too_deep(span));
+        if self.depth >= MAX_SOURCE_NESTING {
+            return Err(Diagnostic::source_nesting_exceeded(
+                self.depth + 1,
+                span,
+            ));
         }
         self.depth += 1;
         let result = f(self);
