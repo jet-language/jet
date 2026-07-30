@@ -1682,6 +1682,36 @@ fn jet_views_mut_range_new<'a, T>(
     jet_views_mut_new(xs, &bounds, file)
 }
 
+// D-MEMDISJOINT1=A: runtime disjointness is proved once, before any mutable
+// view exists. These helpers return the same Error family for bounds and
+// overlap failures; engines only marshal their arguments and results.
+fn jet_split_write<T>(
+    xs: &mut [T],
+    mid: i64,
+) -> Result<(&mut [T], &mut [T]), String> {
+    jet_disjoint_split_bounds(xs.len(), mid)?;
+    Ok(xs.split_at_mut(mid as usize))
+}
+
+fn jet_get_disjoint_write<'a, T>(
+    xs: &'a mut [T],
+    indices: &[i64],
+) -> Result<Vec<&'a mut [T]>, String> {
+    let ordered = jet_disjoint_index_bounds(xs.len(), indices)?;
+    let mut views = Vec::with_capacity(ordered.len());
+    let mut tail = xs;
+    let mut offset = 0usize;
+    for (start, end, position) in ordered {
+        let (_, from_index) = tail.split_at_mut(start - offset);
+        let (selected, after) = from_index.split_at_mut(end - start);
+        views.push((position, selected));
+        tail = after;
+        offset = end;
+    }
+    views.sort_by_key(|(position, _)| *position);
+    Ok(views.into_iter().map(|(_, view)| view).collect())
+}
+
 fn jet_view_range_new<'a, T>(
     xs: &'a [T],
     range: &JetRange,

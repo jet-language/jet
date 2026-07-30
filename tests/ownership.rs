@@ -3966,6 +3966,70 @@ fn run() {
 }
 
 #[test]
+fn runtime_disjoint_split_and_indexes_write_through() {
+    let src = r#"
+fn run() {
+    split_values := [1, 2, 3, 4]
+    parts :: split_values.split_write(2) ?? panic("split failed")
+    parts.left[0] = 10
+    parts.right[0] = 30
+    print(split_values)
+
+    indexed_values := [5, 6, 7, 8]
+    edits :: indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
+    edits[0][0] = 50
+    edits[1][0] = 80
+    print(indexed_values)
+}
+"#;
+    let out = jet::compile(src).expect("checked runtime disjoint views must compile");
+    assert!(out.rust.contains("jet_split_write"), "{}", out.rust);
+    assert!(out.rust.contains("jet_get_disjoint_write"), "{}", out.rust);
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_runtime_disjoint", "runtime_disjoint", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "[10, 2, 30, 4]\n[50, 6, 7, 80]\n");
+    }
+}
+
+#[test]
+fn runtime_disjoint_proof_reports_bounds_and_duplicates_before_mutation() {
+    let bounds = r#"
+fn run() {
+    values := [1, 2]
+    result := values.get_disjoint_write([0, 2])
+    if result == {
+        .Ok(_) -> panic("accepted invalid bounds")
+        .Err(error) -> print(error)
+    }
+}
+"#;
+    let duplicate = r#"
+fn run() {
+    values := [1, 2]
+    result := values.get_disjoint_write([0, 0])
+    if result == {
+        .Ok(_) -> panic("accepted duplicate index")
+        .Err(error) -> print(error)
+    }
+}
+"#;
+    for (name, src, message) in [
+        ("bounds", bounds, "outside"),
+        ("duplicate", duplicate, "duplicate"),
+    ] {
+        jet::compile(src).expect("checked runtime proof failures are typed values");
+        if common::have_rustc() {
+            let (code, stdout, stderr) =
+                common::build_and_run("jet_runtime_disjoint_error", name, src);
+            assert_eq!(code, 0, "{stderr}");
+            assert!(stdout.contains(message), "{stdout}");
+        }
+    }
+}
+
+#[test]
 fn mutable_view_extraction_transfers_struct_option_and_enum_loans() {
     let src = r#"
 struct Edit { values: ViewMut<Int> }

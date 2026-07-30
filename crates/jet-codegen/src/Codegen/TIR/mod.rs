@@ -3870,6 +3870,12 @@ pub enum TBuiltinOp {
     ViewMutNew {
         line: usize,
     },
+    /// D-MEMDISJOINT1=A: checked runtime split into two tracked mutable views.
+    SplitWrite {
+        tuple_struct: String,
+    },
+    /// D-MEMDISJOINT1=A: checked runtime selection of distinct one-item views.
+    GetDisjointWrite,
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of

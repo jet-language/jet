@@ -184,5 +184,8 @@ pub(super) fn eval_builtin(
                 xs[a as usize..end_exclusive as usize].to_vec(),
             ))
         }
+        TBuiltinOp::SplitWrite { .. } | TBuiltinOp::GetDisjointWrite => {
+            Err(unsupported("disjoint mutable view builtin", span))
+        }
     }
 }

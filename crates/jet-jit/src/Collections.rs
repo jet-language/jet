@@ -8,6 +8,24 @@ mod range_semantics {
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 
+mod disjoint_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
+
+    pub(super) fn split(
+        len: usize,
+        mid: i64,
+    ) -> Result<((usize, usize), (usize, usize)), String> {
+        jet_disjoint_split_bounds(len, mid)
+    }
+
+    pub(super) fn indexes(
+        len: usize,
+        indices: &[i64],
+    ) -> Result<Vec<(usize, usize, usize)>, String> {
+        jet_disjoint_index_bounds(len, indices)
+    }
+}
+
 fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     crate::runtime_host::alloc_jit_result(
         rt,
@@ -310,6 +328,81 @@ extern "C" fn jet_jit_list_range_end(
                 0
             }
         }
+    })
+}
+
+fn alloc_view_mut(
+    rt: &mut crate::JitRuntime,
+    list: i64,
+    start: usize,
+    end_exclusive: usize,
+) -> i64 {
+    let view = rt.heap.alloc_record(3);
+    let _ = rt.heap.record_set_int(view, 0, list);
+    let _ = rt.heap.record_set_int(view, 1, start as i64);
+    let _ = rt
+        .heap
+        .record_set_int(view, 2, end_exclusive as i64 - 1);
+    view
+}
+
+fn alloc_disjoint_result(
+    rt: &mut crate::JitRuntime,
+    result: Result<i64, String>,
+) -> i64 {
+    match result {
+        Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+        Err(error) => {
+            let error = rt.heap.alloc_string(error);
+            crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+        }
+    }
+}
+
+extern "C" fn jet_jit_split_write(list: i64, mid: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            jet_foundation::ice!(None, "jit split_write: bad list handle");
+        };
+        let result = disjoint_semantics::split(len as usize, mid).map(
+            |((left_start, left_end), (right_start, right_end))| {
+                let pair = rt.heap.alloc_record(2);
+                let left = alloc_view_mut(rt, list, left_start, left_end);
+                let right = alloc_view_mut(rt, list, right_start, right_end);
+                let _ = rt.heap.record_set_int(pair, 0, left);
+                let _ = rt.heap.record_set_int(pair, 1, right);
+                pair
+            },
+        );
+        alloc_disjoint_result(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_get_disjoint_write(list: i64, targets: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            jet_foundation::ice!(None, "jit get_disjoint_write: bad list handle");
+        };
+        let Some(target_len) = rt.heap.list_len(targets) else {
+            jet_foundation::ice!(None, "jit get_disjoint_write: bad targets handle");
+        };
+        let indices = (0..target_len)
+            .map(|index| rt.heap.list_get_int(targets, index).unwrap_or_default())
+            .collect::<Vec<_>>();
+        let result = disjoint_semantics::indexes(len as usize, &indices).map(|ordered| {
+            let mut views = vec![0; indices.len()];
+            for (start, end, position) in ordered {
+                views[position] = alloc_view_mut(rt, list, start, end);
+            }
+            let output = rt.heap.alloc_empty_list();
+            for view in views {
+                rt.heap
+                    .list_push_int(output, view)
+                    .expect("jit get_disjoint_write output");
+            }
+            output
+        });
+        alloc_disjoint_result(rt, result)
     })
 }
 
@@ -1579,6 +1672,8 @@ pub(crate) struct CollectionsHostFns {
     pub list_clone: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
     pub list_range_end: cranelift_module::FuncId,
+    pub split_write: cranelift_module::FuncId,
+    pub get_disjoint_write: cranelift_module::FuncId,
     pub range_contains: cranelift_module::FuncId,
     pub range_show: cranelift_module::FuncId,
     pub range_equal: cranelift_module::FuncId,
@@ -1705,6 +1800,11 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
     builder.symbol("jet_jit_list_range_end", jet_jit_list_range_end as *const u8);
+    builder.symbol("jet_jit_split_write", jet_jit_split_write as *const u8);
+    builder.symbol(
+        "jet_jit_get_disjoint_write",
+        jet_jit_get_disjoint_write as *const u8,
+    );
     builder.symbol("jet_jit_range_contains", jet_jit_range_contains as *const u8);
     builder.symbol("jet_jit_range_show", jet_jit_range_show as *const u8);
     builder.symbol("jet_jit_range_equal", jet_jit_range_equal as *const u8);
@@ -1884,6 +1984,7 @@ pub(crate) fn declare_collections_host_fns(
         sig_range_contains.params.push(AbiParam::new(types::I64));
     }
     sig_range_contains.returns.push(AbiParam::new(types::I8));
+    let sig_disjoint = sig_list_eq.clone();
     let mut sig_range_show = Signature::new(cc);
     for _ in 0..3 {
         sig_range_show.params.push(AbiParam::new(types::I64));
@@ -1950,6 +2051,8 @@ pub(crate) fn declare_collections_host_fns(
         list_clone: import("jet_jit_list_clone", &sig_len)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
         list_range_end: import("jet_jit_list_range_end", &sig_range_end)?,
+        split_write: import("jet_jit_split_write", &sig_disjoint)?,
+        get_disjoint_write: import("jet_jit_get_disjoint_write", &sig_disjoint)?,
         range_contains: import("jet_jit_range_contains", &sig_range_contains)?,
         range_show: import("jet_jit_range_show", &sig_range_show)?,
         range_equal: import("jet_jit_range_equal", &sig_range_equal)?,

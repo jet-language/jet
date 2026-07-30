@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1319,
-    "rev": 20189,
+    "rev": 20192,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "radar:e5"
       ]
     },
-    "completionCursor": "2026-07-30T01:14:44.382Z"
+    "completionCursor": "2026-07-30T10:22:51.378Z"
   },
   "epochs": [
     {
@@ -46516,11 +46516,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Goal\nClose field-audit G2 under D-MEMDISJOINT1=A: one checked disjointness proof with beginner `edit_disjoint`, expert `get_disjoint_write` / `split_write`, and lending mutable iteration.\n\n## Law (ratified)\n- Ordinary range syntax stays compile-time only; never hide runtime overlap failure in bare loans.\n- All forms lower to one sema-visible proof for one owner.\n- Normalize regions and finish every bounds/duplicate/overlap check before any view is created.\n- Explicit forms return tracked `ViewMut` under existing loan rules.\n- One typed bounds-or-overlap error family.\n\n## Scope\nIn: slice split, multi-index/key disjoint APIs, lending mutable iterators, JIT/dev/AOT parity.\nOut: multi-owner provenance (#1197) except consuming its aggregate-view ability; taskgroup (#1199); pin/Cell/Shared.\n\n## Owned paths\n- ownership checker + corelib method lowering for collections/slices\n- codegen/TIR paths that mint multiple `ViewMut`s\n- `tests/ownership.rs` and differential cases vs Rust `split_at_mut` / `get_disjoint_mut`\n- examples under `examples/features/memory/`\n- docs for the three entry points (teach closure first)\n\n## Steps\n1. Add runtime region normalization + pairwise overlap/duplicate checks as one proof helper.\n2. Ship `split_write(mid)` (one bounds check → two views).\n3. Ship `edit_disjoint(targets, closure)` as beginner default; auto-release loans on all exits.\n4. Ship `get_disjoint_write` for views that cross helpers.\n5. Extend lending mutable iteration to one exclusive element loan at a time.\n6. Reject overlap before mutation; shared error type; identical behavior across JIT/dev/AOT.\n7. Differential tests against Rust class programs; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: ownership + concurrency tests; runtime overlap/duplicate cases; example that updates two physics bodies by index.\n\n## Blockers\nblockedBy: none. D-MEMDISJOINT1 ratified (=A). Natural dependency: #1197 if disjoint results must live in tuples/lists.\n",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-memory-wave",
       "log": [
         {
           "at": "2026-07-28",
@@ -46583,11 +46583,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.490Z",
-      "updated": "2026-07-28T21:37:48.650Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T10:16:25.835Z",
+      "updatedBy": "codex-memory-wave",
       "workOrder": 500,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T10:16:25.835Z"
     },
     {
       "id": "c0q59qu0",
@@ -75587,6 +75588,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-30T10:22:51.378Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-30T10:22:51.378Z"
+    },
+    {
+      "at": "2026-07-30T10:16:25.836Z",
+      "by": "codex-memory-wave",
+      "action": "card.update",
+      "ref": "c0muyoc2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T10:09:52.542Z",
+      "by": "codex-memory-wave",
+      "action": "card.claim",
+      "ref": "c0muyoc2",
+      "note": ""
+    },
+    {
       "at": "2026-07-30T10:08:51.299Z",
       "by": "codex-memory-wave",
       "action": "card.update",
@@ -79062,27 +79084,6 @@
       "at": "2026-07-29T12:56:45.286Z",
       "by": "e3-review-1307-final",
       "action": "card.criteria-verify",
-      "ref": "c08z8u2c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T12:56:31.632Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
-      "ref": "c08z8u2c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T12:56:26.075Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
-      "ref": "c08z8u2c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T12:56:21.274Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
       "ref": "c08z8u2c",
       "note": "#1"
     }

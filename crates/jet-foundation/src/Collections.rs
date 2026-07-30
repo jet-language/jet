@@ -554,6 +554,10 @@ pub fn partition_ret_ty(inner: &Type) -> Type {
 }
 
 fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let mutable_view = || Type::Apply {
+        name: "ViewMut".to_string(),
+        args: vec![inner.clone()],
+    };
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
@@ -663,6 +667,19 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("view", 2) => Some(Some(Type::Apply {
             name: "View".to_string(),
             args: vec![inner.clone()],
+        })),
+        // D-MEMDISJOINT1=A: runtime-proven mutable partitions use one checked
+        // result family. Every successful leaf is the existing tracked ViewMut.
+        ("split_write", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Tuple(vec![
+                ("left".to_string(), Box::new(mutable_view())),
+                ("right".to_string(), Box::new(mutable_view())),
+            ])),
+            err: Box::new(Type::String),
+        })),
+        ("get_disjoint_write", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::List(Box::new(mutable_view()))),
+            err: Box::new(Type::String),
         })),
         _ => None,
     }
@@ -1276,7 +1293,16 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
     match recv_ty {
         Type::List(_) => matches!(
             method,
-            "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
+            "push"
+                | "pop"
+                | "insert"
+                | "remove"
+                | "reverse"
+                | "sort"
+                | "sort_by"
+                | "clear"
+                | "split_write"
+                | "get_disjoint_write"
         ),
         Type::Map { .. } => matches!(method, "add" | "add_new" | "remove" | "clear"),
         // D-COLLBREADTH1=A: Set mutating methods.
@@ -1427,6 +1453,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "push" | "contains" => Some(vec![(**inner).clone()]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
             "get" | "index_of" | "remove" => Some(vec![Type::Int]),
+            "split_write" => Some(vec![Type::Int]),
+            "get_disjoint_write" => Some(vec![Type::List(Box::new(Type::Int))]),
             "join" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],

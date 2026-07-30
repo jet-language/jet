@@ -1146,6 +1146,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         )
                     }
                 }
+                TBuiltinOp::SplitWrite { tuple_struct } => format!(
+                    "jet_split_write(&mut ({}), {}).map(|(left, right)| {} {{ user_left: left, user_right: right }})",
+                    recv,
+                    a(0),
+                    tuple_struct
+                ),
+                TBuiltinOp::GetDisjointWrite => format!(
+                    "jet_get_disjoint_write(&mut ({}), &({}))",
+                    recv,
+                    a(0)
+                ),
                 // D-ITERTOOLS1=A: non-closure lazy adapters return JetIter (no eager Vec).
                 TBuiltinOp::Take => format!("jet_iter_take({as_iter}, {})", a(0)),
                 TBuiltinOp::Skip => format!("jet_iter_skip({as_iter}, {})", a(0)),

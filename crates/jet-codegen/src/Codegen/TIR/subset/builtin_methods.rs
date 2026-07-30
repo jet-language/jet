@@ -68,6 +68,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // receiver type for those (a `&[T]` receiver satisfies them exactly
         // as a `Vec<T>` does — see `Context::rust_type`'s `View` arm).
         | ("view", 2)
+        | ("split_write", 1)
+        | ("get_disjoint_write", 1)
     )
     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no

@@ -41,6 +41,13 @@ fn option_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     }
 }
 
+fn result_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
+    match ty {
+        Some(Type::Result { ok, .. }) => tuple_fields(Some(ok.as_ref())),
+        _ => None,
+    }
+}
+
 /// D-MEM1 S6: `pool[id].field`'s type — needed so a MUTATING method call on it
 /// (`tree[root].children.push(child)`) is recognized as needing a real mutable
 /// place (`builtin_needs_mut_receiver`), not the ordinary `jet_pool_get` value
@@ -259,6 +266,26 @@ pub(crate) fn resolve_builtin_op(
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::ViewNew { line }
         }
+        ("split_write", 1) => {
+            let fields = result_tuple_fields(resolved_ret).unwrap_or_else(|| {
+                let elem = match &rty {
+                    Some(Type::List(inner)) => (**inner).clone(),
+                    _ => Type::Int,
+                };
+                let view = Type::Apply {
+                    name: "ViewMut".to_string(),
+                    args: vec![elem],
+                };
+                vec![
+                    ("left".to_string(), view.clone()),
+                    ("right".to_string(), view),
+                ]
+            });
+            TBuiltinOp::SplitWrite {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        ("get_disjoint_write", 1) => TBuiltinOp::GetDisjointWrite,
         ("keys", 0) if is_lru => TBuiltinOp::LruKeys,
         ("keys", 0) => TBuiltinOp::Keys,
         ("values", 0) => TBuiltinOp::Values,
@@ -443,7 +470,9 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::DequePushFront
             | TBuiltinOp::DequePushBack
             | TBuiltinOp::DequePopFront
-            | TBuiltinOp::DequePopBack => {
+            | TBuiltinOp::DequePopBack
+            | TBuiltinOp::SplitWrite { .. }
+            | TBuiltinOp::GetDisjointWrite => {
                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
             }
             _ => crate::Collections::BuiltinReceiverBorrow::Read,

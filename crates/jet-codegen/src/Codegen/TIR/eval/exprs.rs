@@ -1336,6 +1336,88 @@ impl<'a> EvalCtx<'a> {
                         ],
                     });
                 }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::TBuiltinOp::SplitWrite { .. }
+                        | crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite
+                ) {
+                    let base_name = match &recv.kind {
+                        TExprKind::Local(local) => local.name.clone(),
+                        TExprKind::Borrow { place, .. } => match &place.kind {
+                            TExprKind::Local(local) => local.name.clone(),
+                            _ => return Err(unsupported("disjoint-view base", self.span())),
+                        },
+                        _ => return Err(unsupported("disjoint-view base", self.span())),
+                    };
+                    let CtValue::List(xs) = scope
+                        .get(&base_name)
+                        .cloned()
+                        .ok_or_else(|| unsupported("disjoint-view unbound base", self.span()))?
+                    else {
+                        return Err(unsupported("disjoint-view list base", self.span()));
+                    };
+                    let view = |start: i64, end: i64| CtValue::Struct {
+                        type_name: "__JetViewMut".into(),
+                        fields: vec![
+                            ("base".into(), CtValue::Str(base_name.clone())),
+                            ("start".into(), CtValue::Int(start)),
+                            ("end".into(), CtValue::Int(end)),
+                        ],
+                    };
+                    match op {
+                        crate::Codegen::TIR::TBuiltinOp::SplitWrite { tuple_struct } => {
+                            let mid =
+                                as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                            let ((left_start, left_end), (right_start, right_end)) =
+                                match super::disjoint_semantics::split(xs.len(), mid) {
+                                    Ok(bounds) => bounds,
+                                    Err(error) => {
+                                        return Ok(CtValue::ResErr(Box::new(CtValue::Str(error))));
+                                    }
+                                };
+                            return Ok(CtValue::ResOk(Box::new(CtValue::Struct {
+                                type_name: tuple_struct.clone(),
+                                fields: vec![
+                                    (
+                                        "left".into(),
+                                        view(left_start as i64, left_end as i64 - 1),
+                                    ),
+                                    (
+                                        "right".into(),
+                                        view(right_start as i64, right_end as i64 - 1),
+                                    ),
+                                ],
+                            })));
+                        }
+                        crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite => {
+                            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+                                return Err(unsupported("disjoint-view targets", self.span()));
+                            };
+                            let mut indexes = Vec::with_capacity(targets.len());
+                            for target in targets {
+                                indexes.push(as_int(&target, self.span())?);
+                            }
+                            let ordered =
+                                match super::disjoint_semantics::indexes(xs.len(), &indexes) {
+                                    Ok(bounds) => bounds,
+                                    Err(error) => {
+                                        return Ok(CtValue::ResErr(Box::new(CtValue::Str(error))));
+                                    }
+                                };
+                            let mut views = ordered
+                                .into_iter()
+                                .map(|(start, end, position)| {
+                                    (position, view(start as i64, end as i64 - 1))
+                                })
+                                .collect::<Vec<_>>();
+                            views.sort_by_key(|(position, _)| *position);
+                            return Ok(CtValue::ResOk(Box::new(CtValue::List(
+                                views.into_iter().map(|(_, view)| view).collect(),
+                            ))));
+                        }
+                        _ => unreachable!(),
+                    }
+                }
                 let mut r = self.eval_expr(recv, scope)?;
                 // `__JetViewMut` is a write-through handle; read builtins see the
                 // inclusive window as a List (same surface as View after ViewNew).

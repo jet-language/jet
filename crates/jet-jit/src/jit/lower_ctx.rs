@@ -14219,6 +14219,22 @@ impl LowerCtx<'_, '_> {
                 };
                 self.emit_view_mut_window(recv_val, start, end)
             }
+            TBuiltinOp::SplitWrite { .. } => {
+                let mid = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.coll.split_write, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, mid]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::GetDisjointWrite => {
+                let targets = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.coll.get_disjoint_write, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, targets]);
+                Ok(self.b.inst_results(call)[0])
+            }
             // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
             // (String.split, list adapters) already return list handles of the same
             // pieces AOT would yield lazily — to_list / collect is identity.

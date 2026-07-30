@@ -51,6 +51,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
+    include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
@@ -1361,6 +1362,8 @@ mod tests {
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
         let range_bounds =
             std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
+        let disjoint =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Disjoint.rs")).unwrap();
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
@@ -1378,6 +1381,7 @@ mod tests {
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
+            ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
             (
                 "src/Prelude/Core/ExpiringSecret.rs",
                 expiring_secret.as_str(),
@@ -1419,6 +1423,9 @@ mod tests {
         let range_bounds_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
             .unwrap();
+        let disjoint_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Disjoint.rs\")")
+            .unwrap();
         let expiring_secret_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
             .unwrap();
@@ -1443,7 +1450,8 @@ mod tests {
         assert!(
             unicode_pos < values_pos
                 && values_pos < range_bounds_pos
-                && range_bounds_pos < expiring_secret_pos
+                && range_bounds_pos < disjoint_pos
+                && disjoint_pos < expiring_secret_pos
                 && expiring_secret_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
@@ -1460,6 +1468,7 @@ mod tests {
                 unicode.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
+                disjoint.as_str(),
                 expiring_secret.as_str(),
                 core.as_str(),
                 collections.as_str(),
@@ -1477,6 +1486,7 @@ mod tests {
             unicode.as_str(),
             values.as_str(),
             range_bounds.as_str(),
+            disjoint.as_str(),
             expiring_secret.as_str(),
             core.as_str(),
             collections.as_str(),

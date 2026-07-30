@@ -2188,7 +2188,7 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) = init {
+        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) | Expr::Try(inner, _, _) = init {
             return self.view_call_sources(inner);
         }
         if let Expr::Ident(name, _) = init {
@@ -2500,6 +2500,49 @@ impl<'a> Checker<'a> {
                     }
                     return sources;
                 }
+            }
+        }
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            method_span,
+            ..
+        } = init
+        {
+            if method == "split_write" || method == "get_disjoint_write" {
+                let Some(place) = self.place_from_expr(receiver) else {
+                    return Vec::new();
+                };
+                let kind = self.view_kind_for_place(&place);
+                let mut source = |output_path: Vec<String>, proof_span: Span| {
+                    let mut proved = place.clone();
+                    proved.projections.push(ViewProjection::Fresh(proof_span));
+                    (output_path, proved, kind, ViewAccess::Write)
+                };
+                if method == "split_write" {
+                    let right_span = args
+                        .first()
+                        .map(|arg| arg.expr.span())
+                        .unwrap_or_else(|| init.span());
+                    return vec![
+                        source(vec!["left".to_string()], *method_span),
+                        source(vec!["right".to_string()], right_span),
+                    ];
+                }
+                let proof_spans = args
+                    .first()
+                    .and_then(|arg| match &arg.expr {
+                        Expr::ListLit(elements, _) => {
+                            Some(elements.iter().map(Expr::span).collect::<Vec<_>>())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| vec![init.span()]);
+                return proof_spans
+                    .into_iter()
+                    .map(|span| source(vec!["[]".to_string()], span))
+                    .collect();
             }
         }
         if let Expr::MethodCall {

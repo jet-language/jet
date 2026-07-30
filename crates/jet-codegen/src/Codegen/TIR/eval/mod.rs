@@ -15,6 +15,24 @@ mod range_semantics {
     include!("../../../Prelude/Core/RangeBounds.rs");
 }
 
+mod disjoint_semantics {
+    include!("../../../Prelude/Core/Disjoint.rs");
+
+    pub(super) fn split(
+        len: usize,
+        mid: i64,
+    ) -> Result<((usize, usize), (usize, usize)), String> {
+        jet_disjoint_split_bounds(len, mid)
+    }
+
+    pub(super) fn indexes(
+        len: usize,
+        indices: &[i64],
+    ) -> Result<Vec<(usize, usize, usize)>, String> {
+        jet_disjoint_index_bounds(len, indices)
+    }
+}
+
 #[allow(dead_code)]
 mod uninit_semantics {
     include!("../../../Prelude/Uninit.rs");
