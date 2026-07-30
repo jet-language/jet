@@ -201,6 +201,40 @@ fn run() {{
 }
 
 #[test]
+fn parenthesized_approximate_crossings_match_aot_jit_and_interpreter() {
+    let source = r#"
+fn take_float(value: Float) => Float {
+    return value
+}
+
+fn return_float(value: Int) => Float {
+    return ((approx(value)))
+}
+
+fn run() {
+    lossy :: Int.{9007199254740993}
+    expected :: 9007199254740992.0
+
+    print((((approx(lossy))) + 0.0) == expected)
+    print(take_float(((approx(lossy)))) == expected)
+
+    assigned := Float.{0.0}
+    assigned = ((approx(lossy)))
+    print(assigned == expected)
+
+    print(return_float(lossy) == expected)
+}
+"#;
+
+    assert_all_tiers(
+        "numeric_widen_parenthesized_approx",
+        source,
+        0,
+        "true\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
 fn widening_does_not_search_for_a_third_type_or_narrow() {
     let no_join = compile_error(
         r#"

@@ -9,6 +9,22 @@ use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
+        match expr {
+            Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
+            Expr::Call(call)
+                if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER
+                    && call.args.len() == 1 =>
+            {
+                Some(std::mem::replace(
+                    &mut call.args[0].expr,
+                    Expr::Absent(span),
+                ))
+            }
+            _ => None,
+        }
+    }
+
     fn contextualize_numeric_literal(
         &mut self,
         expr: &mut Expr,
@@ -111,12 +127,10 @@ impl<'a> Checker<'a> {
             return;
         };
         let span = expr.span();
-        let approximate = matches!(
-            expr,
-            Expr::Call(call) if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER
-        );
+        let approximate = Self::take_numeric_approx_operand(expr, span);
+        let checked = approximate.is_none();
 
-        if !approximate {
+        if checked {
             if let Expr::Float(_, _, is_f32) = expr {
                 if *target == Type::Float32 {
                     *is_f32 = true;
@@ -125,14 +139,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let old = if approximate {
-            let Expr::Call(call) = expr else {
-                unreachable!()
-            };
-            std::mem::replace(&mut call.args[0].expr, Expr::Absent(span))
-        } else {
-            std::mem::replace(expr, Expr::Absent(span))
-        };
+        let old = approximate.unwrap_or_else(|| std::mem::replace(expr, Expr::Absent(span)));
         *expr = Expr::MethodCall {
             receiver: Box::new(Expr::Ident(target.name(), span)),
             method: Syntax::conversion_method_for_source(&source.name()),
@@ -146,7 +153,7 @@ impl<'a> Checker<'a> {
                 label: None,
                 spread: false,
             }],
-            recv_type: (widening && !approximate)
+            recv_type: (widening && checked)
                 .then(|| Type::CHECKED_NUMERIC_WIDEN_MARKER.to_string()),
             resolved_ret: Some(target.clone()),
         };
