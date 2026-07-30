@@ -783,11 +783,26 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Str(out))
             }
-            TExprKind::Local(local) => scope
+            TExprKind::Local(local) => {
+                let value = scope
                 .get(&local.name)
                 .cloned()
                 .or_else(|| self.globals.get(&local.name).cloned())
-                .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span())),
+                    .ok_or_else(|| {
+                        unsupported(&format!("unbound `{}`", local.name), self.span())
+                    })?;
+                if local.uninit_fixed {
+                    if matches!(value, CtValue::List(_)) {
+                        Ok(value)
+                    } else {
+                        super::uninit_fixed_materialize(&value).ok_or_else(|| {
+                            unsupported("uninitialized fixed-list local read", self.span())
+                        })
+                    }
+                } else {
+                    Ok(value)
+                }
+            }
             TExprKind::InlineBlock(stmts) => {
                 // Raw comptime fragments reach TIR before sema rewrites the
                 // private yielding-loop sends to `List.push`. Collect them
@@ -860,7 +875,11 @@ impl<'a> EvalCtx<'a> {
                     },
                 }
             }
-            TExprKind::Unit | TExprKind::DefaultLit | TExprKind::Uninit => Ok(CtValue::Unit),
+            TExprKind::Uninit => match &expr.ty {
+                Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(*len as usize)),
+                _ => Ok(CtValue::Unit),
+            },
+            TExprKind::Unit | TExprKind::DefaultLit => Ok(CtValue::Unit),
             TExprKind::CtLit(v) => Ok(v.clone()),
             TExprKind::ConstRef(name) => self
                 .globals
@@ -1621,6 +1640,19 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                     match b {
+                        ref value @ CtValue::Struct { ref type_name, .. }
+                            if type_name == super::UNINIT_FIXED_CARRIER =>
+                        {
+                            super::uninit_fixed_read(
+                                value,
+                                usize::try_from(idx).map_err(|_| {
+                                    unsupported("negative uninit index", self.span())
+                                })?,
+                            )
+                            .ok_or_else(|| {
+                                unsupported("uninit fixed-list index", self.span())
+                            })
+                        }
                         CtValue::List(xs) => {
                             if idx < 0 || idx as usize >= xs.len() {
                                 Err(unsupported("list index oob", self.span()))

@@ -211,6 +211,63 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
     Some(name.to_string())
 }
 
+pub fn resolve_effect_name(
+    name: &str,
+    facts: &jet_foundation::Facts::FactRegistry,
+) -> Result<String, Option<String>> {
+    let root = effect_root(name);
+    Effect::parse(root).ok_or(None)?;
+    let Some(member) = name.strip_prefix(root).and_then(|suffix| suffix.strip_prefix('.')) else {
+        return Ok(name.to_string());
+    };
+    let Some(declaration) =
+        facts.get(jet_foundation::Facts::FactKind::Effect, root)
+    else {
+        return Ok(name.to_string());
+    };
+    if declaration.members.is_empty() || declaration.members.contains(member) {
+        return Ok(name.to_string());
+    }
+    let suggestion = declaration
+        .members
+        .iter()
+        .map(|candidate| {
+            (
+                crate::Syntax::edit_distance(member, candidate),
+                format!("{root}.{candidate}"),
+            )
+        })
+        .min_by(|left, right| left.cmp(right))
+        .filter(|(distance, _)| *distance <= 3)
+        .map(|(_, candidate)| candidate);
+    Err(suggestion)
+}
+
+pub fn undeclared_effect(name: &str, suggestion: Option<&str>, span: Option<Span>) -> Diagnostic {
+    Diagnostic::error(
+        "E0750",
+        format!("`{name}` isn't a declared effect"),
+        format!(
+            "the `{}` root has declared leaves, so every leaf under it must resolve to one declared name",
+            effect_root(name)
+        ),
+        suggestion
+            .map(|candidate| format!("did you mean `{candidate}`?"))
+            .unwrap_or_else(|| format!("declare it with `effect {name}`, or use a declared leaf")),
+        span,
+    )
+}
+
+pub fn effect_leaf_required(root: &str, span: Option<Span>) -> Diagnostic {
+    Diagnostic::error(
+        "E0750",
+        format!("`{root}` names an effect root, not a leaf"),
+        "an effect declaration must name one leaf beneath its root".to_string(),
+        format!("write `effect {root}.Name`"),
+        span,
+    )
+}
+
 /// D-EFFTREE1: does `bound` (one entry of a declared/granted/prohibited set)
 /// cover `e`? Exact match, or `bound` is a dot-path ancestor of `e` — ancestor
 /// subsumption, the same rule as D-TAG1's tag-tree subtree matching. A

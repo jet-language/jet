@@ -22,6 +22,8 @@ mod jet_mem {
     use std::cell::RefCell;
     use std::ptr::NonNull;
 
+    pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
+
     const DEFAULT_ARENA_BYTES: usize = 4096;
     const DEFAULT_BUMP_BYTES: usize = 64 * 1024;
     const DEFAULT_POOL_SLOTS: usize = 64;
@@ -440,6 +442,12 @@ mod jet_mem {
 
         pub fn over_uninit(bytes: &mut [std::mem::MaybeUninit<u8>]) -> Self {
             Self::over_raw(bytes.as_mut_ptr().cast::<u8>(), bytes.len())
+        }
+
+        pub fn over_uninit_fixed<const N: usize>(
+            bytes: &mut JetUninitFixed<u8, N>,
+        ) -> Self {
+            Self::over_uninit(bytes.uninit_bytes())
         }
 
         fn over_raw(ptr: *mut u8, capacity: usize) -> Self {

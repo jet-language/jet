@@ -1361,6 +1361,36 @@ fn cli_build_enforces_effect_budget_e1220() {
 }
 
 #[test]
+fn cli_build_rejects_undeclared_effect_budget_leaf() {
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_build_rejects_undeclared_effect_budget_leaf (run `cargo build` first)"
+        );
+        return;
+    }
+    let tmp = tmp_dir("effbudget_leaf_typo");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(
+        &tmp,
+        "pkg.jet",
+        &(min_manifest("app", "0.1.0")
+            + "\neffects: {\n    allow: [FS.Raed],\n}\n"),
+    );
+    write(&tmp, "main.jet", "fn run() {}\n");
+
+    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("E0750") && stderr.contains("FS.Read"),
+        "budget typo should resolve against Prelude effect leaves:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn cli_build_lint_never_blocks_by_default() {
     // D-LINTPOLICY1=A (the override law, card #505): warnings never fail a
     // build by default. A money-named `Float` field fires lint L0504, but

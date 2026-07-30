@@ -156,6 +156,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
+        text: KW_EFFECT_DECL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
         text: KW_DERIVE,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -1019,7 +1023,7 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
 use super::{
     ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
-    KW_COMPTIME, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
+    KW_COMPTIME, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
     KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF,

@@ -4,6 +4,7 @@
 mod common;
 
 use std::fs;
+use std::process::Command;
 
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
@@ -484,6 +485,139 @@ fn run() { work(); }
         "unknown name should suppress E0740: {:?}",
         c
     );
+}
+
+#[test]
+fn declared_effect_leaf_is_checked_everywhere() {
+    let valid = r#"
+effect Log.Audit
+fn audit() =[Log.Audit]=> {}
+fn run() {
+    #Caps(Log.Audit) { audit() }
+    #Grant(caps: Log.Audit) { audit() }
+}
+"#;
+    assert!(
+        codes(valid).is_empty(),
+        "declared leaves should work in rows, caps, and grants: {:?}",
+        codes(valid)
+    );
+
+    for source in [
+        "effect Log.Audit\nfn audit() =[Log.Aduut]=> {}\nfn run() {}\n",
+        "effect Log.Audit\nfn run() { #Caps(Log.Aduut) {} }\n",
+        "effect Log.Audit\nfn run() { #Grant(caps: Log.Aduut) {} }\n",
+    ] {
+        let diagnostics = jet::compile(source).expect_err("typo under a checked root must fail");
+        let error = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0750")
+            .unwrap_or_else(|| panic!("expected E0750, got {diagnostics:#?}"));
+        assert!(
+            error.fix.contains("Log.Audit"),
+            "nearest declared leaf should be suggested: {error:#?}"
+        );
+    }
+}
+
+#[test]
+fn undeclared_effect_root_remains_open() {
+    let source = "fn network() =[Net.Custom]=> {}\nfn run() { network() }\n";
+    assert!(
+        codes(source).is_empty(),
+        "a root with no declared leaves remains open: {:?}",
+        codes(source)
+    );
+}
+
+#[test]
+fn effect_declaration_requires_a_leaf() {
+    let diagnostics =
+        jet::compile("effect Log\nfn run() {}\n").expect_err("a root alone declares no leaf");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code == "E0750"
+                    && diagnostic.fix.contains("effect Log.Name")
+            }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn declared_effect_leaf_checks_enum_and_trait_type_surfaces() {
+    for source in [
+        "effect Log.Audit\nenum Callback { One(fn() =[Log.Aduut]=>) }\nfn run() {}\n",
+        "effect Log.Audit\ntrait Callback { fn get(self) => fn() =[Log.Aduut]=>; }\nfn run() {}\n",
+    ] {
+        let diagnostics =
+            jet::compile(source).expect_err("an effect typo in a nested type must fail");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0750"),
+            "{diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn dependency_effect_declaration_joins_the_package_view() {
+    let root = common::unique_tmp("jet_effect_leaf_dependency");
+    let dependency = root.join("audit");
+    let app = root.join("app");
+    fs::create_dir_all(&dependency).unwrap();
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        dependency.join("pkg.jet"),
+        "payload: { name: \"audit\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("audit.jet"),
+        "effect Log.Audit\npub fn record() =[Log.Audit]=> {}\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { audit: ../audit }\n",
+    )
+    .unwrap();
+    let entry = app.join("main.jet");
+    fs::write(
+        &entry,
+        "use audit\nfn run() { audit.record() }\n",
+    )
+    .unwrap();
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "main.jet"])
+        .current_dir(&app)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    fs::write(
+        &entry,
+        "use audit\nfn typo() =[Log.Aduut]=> {}\nfn run() { audit.record() }\n",
+    )
+    .unwrap();
+    let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "main.jet"])
+        .current_dir(&app)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(!checked.status.success(), "{stderr}");
+    assert!(stderr.contains("E0750"), "{stderr}");
+    assert!(stderr.contains("Log.Audit"), "{stderr}");
 }
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────

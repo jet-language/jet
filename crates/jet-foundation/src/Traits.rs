@@ -1594,6 +1594,10 @@ impl TraitRegistry {
         ] {
             self.register_synthetic_binary_trait(trait_name, method, ret);
         }
+        // D-POOLID-API1=A: Id<T> compares only its index and generation.
+        // Its phantom T does not take part in equality.
+        self.trait_impls
+            .insert(("Id".to_string(), Syntax::TRAIT_EQUATABLE.to_string()));
     }
 
     /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the

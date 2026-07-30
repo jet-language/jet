@@ -61,6 +61,7 @@ impl<'a> Parser<'a> {
     /// the body as arms so the rest of the file still checks. Multi-arm `if`
     /// lowers to the same `Stmt::Switch` IR the former `when` used.
     pub(super) fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
+        let branch_start = self.pos;
         let span = self.bump().span; // `if`
 
         // D-IFGUARD1=A: a leading `{` selects ordered Boolean guards. Reuse the
@@ -114,11 +115,17 @@ impl<'a> Parser<'a> {
             ));
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
+            if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
+                self.prefer_arm_table_lint(span);
+            }
             return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
         }
         if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
+            if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
+                self.prefer_arm_table_lint(span);
+            }
             return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
         }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
@@ -147,14 +154,21 @@ impl<'a> Parser<'a> {
         // Conventional `if`: the condition gates a statement body.
         let then_body = self.block_stmts();
         let mut else_branch = None;
+        let mut chained = false;
         if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
             if matches!(self.peek().kind, TokKind::KwIf) {
+                chained = true;
                 else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?)));
             } else {
                 self.expect(TokKind::LBrace, "to open the `else` body")?;
                 else_branch = Some(ElseBranch::Else(self.block_stmts()));
             }
+        }
+        if else_branch.is_some()
+            && (chained || self.span_has_authored_line_break(branch_start, self.pos))
+        {
+            self.prefer_arm_table_lint(span);
         }
         Ok(Stmt::If(IfStmt {
             cond,
@@ -813,6 +827,11 @@ impl<'a> Parser<'a> {
     /// Each branch is a value block; `else` is required (an `if` with no value
     /// is a statement, parsed elsewhere).
     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
+        self.parse_if_expr_inner(true)
+    }
+
+    fn parse_if_expr_inner(&mut self, lint_style: bool) -> Result<Expr, Diagnostic> {
+        let branch_start = self.pos;
         let start = self.bump().span; // `if`
         if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
@@ -845,13 +864,19 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // `else`
         // `else if …` nests directly; a final selected value uses `else ->`.
-        let (else_body, else_value) = if matches!(self.peek().kind, TokKind::KwIf) {
-            (Vec::new(), self.parse_if_expr()?)
+        let chained = matches!(self.peek().kind, TokKind::KwIf);
+        let (else_body, else_value) = if chained {
+            (Vec::new(), self.parse_if_expr_inner(false)?)
         } else {
             self.expect(TokKind::Arrow, "after `else` in a value-producing `if`")?;
             self.parse_selected_value()?
         };
         let span = Span::new(start.start, else_value.span().end);
+        if lint_style
+            && (chained || self.span_has_authored_line_break(branch_start, self.pos))
+        {
+            self.prefer_arm_table_lint(start);
+        }
         Ok(Expr::If {
             cond: Box::new(cond),
             then_body,

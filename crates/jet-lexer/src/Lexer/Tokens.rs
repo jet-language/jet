@@ -36,6 +36,8 @@ pub enum TokKind {
     KwTrait,
     /// D-QUAL2: `tag` — marker qualifier declaration keyword.
     KwTag,
+    /// D-EFFECT-DECL1=A: package-scoped effect-leaf declaration.
+    KwEffect,
     KwDerive,
     KwSelf,
     KwNull,
@@ -206,6 +208,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwImpl => format!("the keyword `{}`", Syntax::KW_IMPL),
         TokKind::KwTrait => format!("the keyword `{}`", Syntax::KW_TRAIT),
         TokKind::KwTag => format!("the keyword `{}`", Syntax::KW_TAG),
+        TokKind::KwEffect => format!("the keyword `{}`", Syntax::KW_EFFECT_DECL),
         TokKind::KwDerive => format!("the keyword `{}`", Syntax::KW_DERIVE),
         TokKind::KwSelf => format!("the keyword `{}`", Syntax::KW_SELF),
         TokKind::KwNull => format!("the keyword `{}`", Syntax::LIT_NULL),

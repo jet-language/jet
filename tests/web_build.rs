@@ -2053,14 +2053,14 @@ use core.reactive as reactive
 #Target(JS)
 fn run() {
     value := reactive.signal(1)
-    effect := reactive.effect(() => {
+    subscription := reactive.effect(() => {
         print(value.get())
     })
-    print(effect.is_active())
+    print(subscription.is_active())
     value.set(2)
-    effect.unsubscribe()
-    print(effect.is_active())
-    effect.unsubscribe()
+    subscription.unsubscribe()
+    print(subscription.is_active())
+    subscription.unsubscribe()
     value.set(3)
 }
 "#;

@@ -1031,6 +1031,9 @@ pub(crate) fn is_equatable(
         }
         Type::Named(name) => trait_reg.implements_trait(name, Generics::EQUATABLE),
         Type::Apply { name, .. } if name == "KeyRef" => true,
+        Type::Apply { name, .. } if name == "Id" => {
+            trait_reg.implements_trait(name, Generics::EQUATABLE)
+        }
         Type::Apply { name, .. }
             if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
         {

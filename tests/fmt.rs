@@ -2750,6 +2750,17 @@ fn fmt_preserves_dotted_effect_paths() {
 }
 
 #[test]
+fn fmt_preserves_effect_leaf_declarations() {
+    let src =
+        "effect Log.Audit\n\neffect Metrics.Emit\n\nfn run() =[Log.Audit]=> {}\n";
+    let once = jet::format_source(src).expect("effect declarations should format");
+    assert!(once.contains("effect Log.Audit"));
+    assert!(once.contains("effect Metrics.Emit"));
+    let twice = jet::format_source(&once).expect("formatted effect declarations should parse");
+    assert_eq!(once, twice, "effect declaration formatting must be stable");
+}
+
+#[test]
 fn fmt_preserves_int_literal_radix() {
     // S34/S67: `0x`/`0o`/`0b` prefixes and `_` digit separators are ratified
     // author-facing spelling. fmt used to re-emit every integer literal from

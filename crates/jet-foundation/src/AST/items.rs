@@ -27,6 +27,9 @@ pub enum Item {
     /// A method in a tag body is E0732; using a tag where dispatch is expected
     /// is E0731.
     Tag(TagDef),
+    /// D-EFFECT-DECL1=A: `effect FS.Read` declares one package-scoped
+    /// compile-time fact. It erases before TIR.
+    EffectDecl(EffectDecl),
     Impl(ImplDef),
     Const(ConstDef),
     /// S43 (M6): `#Test "name" { … }` — only at file top level.
@@ -74,6 +77,13 @@ pub enum Item {
     /// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
     /// Expanded to a `CodeModule` by sema before registration and body-checking.
     ModuleAlias(ModuleAliasDef),
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub span: Span,
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.

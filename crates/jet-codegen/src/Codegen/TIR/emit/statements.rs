@@ -11,6 +11,7 @@ use crate::Codegen::TIR::tir_range_guard;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::AST::Type;
 
@@ -252,7 +253,11 @@ fn emit_tir_stmt(
             gc_promotion,
             gc_transferred: _,
         } => {
-            let ty_clause = emit_let_ty_clause(let_ty, cx);
+            let ty_clause = if matches!(&init.kind, crate::Codegen::TIR::TExprKind::Uninit) {
+                String::new()
+            } else {
+                emit_let_ty_clause(let_ty, cx)
+            };
             let fixed_bytes = match &init.kind {
                 crate::Codegen::TIR::TExprKind::AllocNew { ctor } => {
                     ctor.strip_prefix("__JET_FIXED_INLINE:")
@@ -465,6 +470,29 @@ fn emit_tir_stmt(
             } else {
                 v
             };
+            if let TPlace::Local(local) = place {
+                if local.uninit_scalar {
+                    let place = local.rust_place();
+                    match op {
+                        Some(op) => out.push_str(&format!(
+                            "{}{}.write(({}).read().clone() {} {});\n",
+                            pad,
+                            place,
+                            place,
+                            op.spell(),
+                            v
+                        )),
+                        None => out.push_str(&format!("{}{}.write({});\n", pad, place, v)),
+                    }
+                    return;
+                }
+                if local.uninit_fixed {
+                    let place = local.rust_place();
+                    debug_assert!(op.is_none(), "fixed-list compound assignment is unsupported");
+                    out.push_str(&format!("{}{}.write_array({});\n", pad, place, v));
+                    return;
+                }
+            }
             let place = emit_tir_place(place, cx);
             match op {
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v)),
@@ -861,17 +889,31 @@ fn emit_tir_stmt(
         // `LValue::Index` form byte-for-byte: a map insert clones the key; a vec
         // assign casts the index to `usize`. Both wrap the value in a block.
         TStmt::IndexAssign {
+            uninit,
             base,
             index,
             is_map,
             value,
         } => {
-            let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
+            let b = if *uninit {
+                match &base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed => {
+                        local.rust_place()
+                    }
+                    _ => emit_expr_with_cleanups(base, cx, active_deferred_closes),
+                }
+            } else {
+                emit_expr_with_cleanups(base, cx, active_deferred_closes)
+            };
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             if *is_map {
                 out.push_str(&format!(
                     "{pad}{{ let __jet_v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), __jet_v); }}\n",
+                ));
+            } else if *uninit {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; ({b}).write({i} as usize, __jet_v); }}\n",
                 ));
             } else {
                 out.push_str(&format!(

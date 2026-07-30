@@ -198,7 +198,7 @@ fn run() {
     n := reactive.signal(1)
     doubled := reactive.derived(() => (n.get() * 2))
     print(doubled.get())
-    effect := reactive.effect(() => {
+    subscription := reactive.effect(() => {
         print(doubled.get())
     })
     n.set(5)
@@ -271,7 +271,7 @@ fn run() {
     choose_left := reactive.signal(true)
     left := reactive.signal(1)
     right := reactive.signal(10)
-    effect := reactive.effect(() => {
+    subscription := reactive.effect(() => {
         if choose_left.get() {
             print(left.get())
         } else {
@@ -299,14 +299,14 @@ fn reactive_effect_unsubscribe_and_activity() {
 use core.reactive as reactive
 fn run() {
     value := reactive.signal(1)
-    effect := reactive.effect(() => {
+    subscription := reactive.effect(() => {
         print(value.get())
     })
-    print(effect.is_active())
+    print(subscription.is_active())
     value.set(2)
-    effect.unsubscribe()
-    print(effect.is_active())
-    effect.unsubscribe()
+    subscription.unsubscribe()
+    print(subscription.is_active())
+    subscription.unsubscribe()
     value.set(3)
 }
 ";

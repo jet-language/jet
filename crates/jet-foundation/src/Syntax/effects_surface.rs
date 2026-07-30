@@ -22,6 +22,15 @@ pub const KW_PURE: &str = "Pure";
 pub const EFFECT_ARROW_OPEN: &str = "=[";
 pub const EFFECT_ARROW_CLOSE: &str = "]=>";
 
+/// D-EFFECT-DECL1=A: package-scoped effect-leaf declaration.
+/// A declared leaf makes its closed root checked in the package view.
+pub const KW_EFFECT_DECL: &str = "effect";
+
+/// Prelude effect leaves. These make common authority names typo-checked
+/// without declarations in user code.
+pub const BUILTIN_EFFECT_LEAVES: &[&str] =
+    &["DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit"];
+
 /// Retired D-TAINT1 spelling. D-TAG-SURFACE1=A uses direct declared tags such
 /// as `#Input value` and `#Credential value`.
 pub const KW_TAINTED: &str = "Tainted";

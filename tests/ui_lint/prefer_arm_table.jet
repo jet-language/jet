@@ -1,0 +1,22 @@
+fn run() {
+    // Multi-line braced effect branch warns.
+    if true {
+        print("yes")
+    } else {
+        print("no")
+    }
+
+    // Any else-if chain warns.
+    if false print("a") else if true { print("b") } else { print("c") }
+
+    // Multi-line value branch warns.
+    answer :: if true -> {
+        value :: 40 + 2
+        value
+    } else -> 0
+
+    // One-line effect and value branches stay quiet.
+    if true print("short") else print("other")
+    short :: if true -> 1 else -> 0
+    print(answer + short)
+}

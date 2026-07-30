@@ -50,6 +50,9 @@ pub(crate) struct LowerEnv {
     pub(super) borrowed_locals: HashSet<String>,
     pub(super) resource_locals: HashSet<String>,
     pub(super) gc_locals: HashSet<String>,
+    /// Fixed-list locals created with `Type.{ uninit }`. TIR marks their
+    /// index writes so AOT can use the vetted `jet_mem` storage wrapper.
+    pub(super) uninit_fixed_locals: HashSet<String>,
     pub(super) gc_return: bool,
     /// Operand types that lowering materializes with Rust `.clone()`. Generic
     /// function emission uses this to add `Clone` only where the body needs it.
@@ -69,6 +72,7 @@ impl LowerEnv {
             borrowed_locals: HashSet::new(),
             resource_locals: HashSet::new(),
             gc_locals: HashSet::new(),
+            uninit_fixed_locals: HashSet::new(),
             gc_return: false,
             cloned_types: Rc::new(RefCell::new(Vec::new())),
         }
@@ -95,6 +99,12 @@ impl LowerEnv {
     }
     pub(super) fn is_gc(&self, name: &str) -> bool {
         self.gc_locals.contains(name)
+    }
+    pub(super) fn mark_uninit_fixed(&mut self, name: &str) {
+        self.uninit_fixed_locals.insert(name.to_string());
+    }
+    pub(super) fn is_uninit_fixed(&self, name: &str) -> bool {
+        self.uninit_fixed_locals.contains(name)
     }
     pub(super) fn gc_edges_for_expr(&self, expr: &Expr, exclude: Option<&str>) -> Vec<String> {
         let mut names = self.gc_locals.iter().collect::<Vec<_>>();

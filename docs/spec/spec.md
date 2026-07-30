@@ -2518,6 +2518,19 @@ Effects are a closed, compiler-known set of PascalCase tags (D-CASING1). Each
 primitive Core operation contributes one effect; an effect appears in a
 function's set when the function reaches an operation that carries it.
 
+Packages can name precise leaves with a top-level compile-time declaration:
+
+```jet
+effect Log.Audit
+```
+
+The package view merges its declarations with loaded dependency and Prelude
+declarations. After a root has any declared leaves, dotted uses under that root
+must match a declaration exactly. Bare roots remain valid, and a root with no
+declared leaves remains open. The same check applies to function effect rows,
+`#Caps`, `#Grant`, and package effect budgets. Declarations have no runtime
+representation.
+
 | Effect  | Carried by |
 |---------|-----------|
 | `IO`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |

@@ -81,6 +81,27 @@ impl FactRegistry {
         self.declarations.get(&(kind, name.to_string()))
     }
 
+    pub fn declare_member(
+        &mut self,
+        kind: FactKind,
+        name: impl Into<String>,
+        member: impl Into<String>,
+    ) {
+        let name = name.into();
+        let member = member.into();
+        self.declarations
+            .entry((kind, name.clone()))
+            .or_insert_with(|| FactDeclaration {
+                kind,
+                name,
+                members: BTreeSet::new(),
+                deny: BTreeSet::new(),
+                from: BTreeSet::new(),
+            })
+            .members
+            .insert(member);
+    }
+
     pub fn contains(&self, kind: FactKind, name: &str) -> bool {
         self.declarations.contains_key(&(kind, name.to_string()))
     }

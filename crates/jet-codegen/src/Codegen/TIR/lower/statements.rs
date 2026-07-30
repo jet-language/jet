@@ -576,7 +576,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let ty =
                     b.ty.as_ref()
                         .expect("E0421 ensures a `Type.{ uninit }` binding has a type");
-                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
+                let slot = if matches!(ty, Type::FixedList { .. }) {
+                    env.mark_uninit_fixed(&b.name);
+                    TLocal::user(&b.name).as_uninit_fixed()
+                } else {
+                    TLocal::user(&b.name).as_uninit_scalar()
+                };
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let mut",
@@ -899,6 +905,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     };
                 }
                 TStmt::IndexAssign {
+                    uninit: matches!(base.as_ref(), Expr::Ident(name, _) if env.is_uninit_fixed(name)),
                     base: base_t,
                     index: index_t,
                     is_map: matches!(kind, IndexKind::Map),

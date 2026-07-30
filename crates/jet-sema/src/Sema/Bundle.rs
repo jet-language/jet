@@ -98,13 +98,7 @@ fn check_fact_tags_and_states(
     diags: &mut Vec<Diagnostic>,
 ) -> jet_foundation::Facts::FactRegistry {
     let mut facts = jet_foundation::Facts::FactRegistry::default();
-    for effect in jet_foundation::Facts::EFFECT_ROOTS {
-        facts.declare(
-            jet_foundation::Facts::FactKind::Effect,
-            (*effect).to_string(),
-            std::iter::empty(),
-        );
-    }
+    register_effect_facts(bundle, &mut facts);
     super::Taint::register_builtin_tag_facts(&mut facts);
 
     let mut scrubbers = HashMap::new();
@@ -177,6 +171,267 @@ fn check_fact_tags_and_states(
         }
     }
     state_table.into_facts()
+}
+
+fn register_effect_facts(
+    bundle: &ProgramBundle,
+    facts: &mut jet_foundation::Facts::FactRegistry,
+) {
+    use jet_foundation::Facts::FactKind;
+    for effect in jet_foundation::Facts::EFFECT_ROOTS {
+        facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
+    }
+    for name in crate::Syntax::BUILTIN_EFFECT_LEAVES {
+        let root = super::effect_root(name);
+        let member = name.strip_prefix(root).unwrap().trim_start_matches('.');
+        facts.declare_member(FactKind::Effect, root.to_string(), member.to_string());
+    }
+    fn collect(items: &[Item], facts: &mut jet_foundation::Facts::FactRegistry) {
+        for item in items {
+            match item {
+                Item::EffectDecl(declaration) => {
+                    let root = super::effect_root(&declaration.name);
+                    if let Some(member) = declaration
+                        .name
+                        .strip_prefix(root)
+                        .and_then(|suffix| suffix.strip_prefix('.'))
+                    {
+                        facts.declare_member(
+                            jet_foundation::Facts::FactKind::Effect,
+                            root.to_string(),
+                            member.to_string(),
+                        );
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        collect(body, facts);
+                    }
+                }
+                Item::GenericModule(module) => collect(&module.body, facts),
+                _ => {}
+            }
+        }
+    }
+    for module in &bundle.modules {
+        collect(&module.items, facts);
+    }
+}
+
+fn validate_declared_effects(
+    bundle: &ProgramBundle,
+    facts: &jet_foundation::Facts::FactRegistry,
+) -> Vec<Diagnostic> {
+    fn check_name(
+        name: &str,
+        span: Span,
+        facts: &jet_foundation::Facts::FactRegistry,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        if let Err(suggestion) = super::resolve_effect_name(name, facts) {
+            if super::parse_effect_name(name).is_some() {
+                diags.push(super::undeclared_effect(
+                    name,
+                    suggestion.as_deref(),
+                    Some(span),
+                ));
+            }
+        }
+    }
+    fn check_type(
+        ty: &Type,
+        facts: &jet_foundation::Facts::FactRegistry,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        match ty {
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                ..
+            } => {
+                for parameter in params {
+                    check_type(parameter, facts, diags);
+                }
+                if let Some(ret) = ret {
+                    check_type(ret, facts, diags);
+                }
+                if let Some(names) = effect_bound {
+                    for (name, span) in names {
+                        if super::effect_row_var(name).is_none() {
+                            check_name(name, *span, facts, diags);
+                        }
+                    }
+                }
+            }
+            Type::List(inner)
+            | Type::Option(inner)
+            | Type::Shared(inner)
+            | Type::Tagged { inner, .. }
+            | Type::FixedList { elem: inner, .. } => check_type(inner, facts, diags),
+            Type::Result { ok, err } => {
+                check_type(ok, facts, diags);
+                check_type(err, facts, diags);
+            }
+            Type::Apply { args, .. } | Type::Union(args) => {
+                for argument in args {
+                    check_type(argument, facts, diags);
+                }
+            }
+            Type::Map { key, value, .. } => {
+                check_type(key, facts, diags);
+                check_type(value, facts, diags);
+            }
+            Type::Tuple(fields) => {
+                for (_, field) in fields {
+                    check_type(field, facts, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn check_stmts(
+        body: &[Stmt],
+        facts: &jet_foundation::Facts::FactRegistry,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        for statement in body {
+            match statement {
+                Stmt::Val(binding) => {
+                    if let Some(ty) = &binding.ty {
+                        check_type(ty, facts, diags);
+                    }
+                }
+                Stmt::CountedLoop { init, .. } => {
+                    if let Some(ty) = &init.ty {
+                        check_type(ty, facts, diags);
+                    }
+                }
+                _ => {}
+            }
+            for nested in super::UnsafeObligations::nested_bodies(statement) {
+                check_stmts(nested, facts, diags);
+            }
+        }
+    }
+    fn check_func(
+        function: &Func,
+        facts: &jet_foundation::Facts::FactRegistry,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(names) = &function.declared_effects {
+            for (name, span) in names {
+                let name = name.strip_prefix('!').unwrap_or(name);
+                if super::effect_row_var(name).is_none() {
+                    check_name(name, *span, facts, diags);
+                }
+            }
+        }
+        for parameter in &function.params {
+            check_type(&parameter.ty, facts, diags);
+        }
+        if let Some(return_type) = &function.return_type {
+            check_type(return_type, facts, diags);
+        }
+        check_stmts(&function.body, facts, diags);
+    }
+    fn check_items(
+        items: &[Item],
+        facts: &jet_foundation::Facts::FactRegistry,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        for item in items {
+            match item {
+                Item::EffectDecl(declaration) => {
+                    if super::parse_effect_name(&declaration.name).is_none() {
+                        diags.push(super::unknown_effect(
+                            &declaration.name,
+                            declaration.name_span,
+                        ));
+                    } else if !declaration.name.contains('.') {
+                        diags.push(super::effect_leaf_required(
+                            &declaration.name,
+                            Some(declaration.name_span),
+                        ));
+                    }
+                }
+                Item::Func(function) => check_func(function, facts, diags),
+                Item::Struct(definition) => {
+                    for field in &definition.fields {
+                        check_type(&field.ty, facts, diags);
+                    }
+                    for function in &definition.methods {
+                        check_func(function, facts, diags);
+                    }
+                    for implementation in &definition.trait_impls {
+                        for function in &implementation.methods {
+                            check_func(function, facts, diags);
+                        }
+                    }
+                }
+                Item::Enum(definition) => {
+                    for variant in &definition.variants {
+                        match &variant.payload {
+                            crate::AST::VariantPayload::Unit => {}
+                            crate::AST::VariantPayload::Single(ty, _) => {
+                                check_type(ty, facts, diags);
+                            }
+                            crate::AST::VariantPayload::Named(fields) => {
+                                for field in fields {
+                                    check_type(&field.ty, facts, diags);
+                                }
+                            }
+                        }
+                    }
+                    for function in &definition.methods {
+                        check_func(function, facts, diags);
+                    }
+                    for implementation in &definition.trait_impls {
+                        for function in &implementation.methods {
+                            check_func(function, facts, diags);
+                        }
+                    }
+                }
+                Item::Impl(implementation) => {
+                    for function in &implementation.methods {
+                        check_func(function, facts, diags);
+                    }
+                }
+                Item::Trait(definition) => {
+                    for method in &definition.methods {
+                        if let Some(names) = &method.declared_effects {
+                            for (name, span) in names {
+                                check_name(name, *span, facts, diags);
+                            }
+                        }
+                        for parameter in &method.params {
+                            check_type(&parameter.ty, facts, diags);
+                        }
+                        if let Some(return_type) = &method.return_type {
+                            check_type(return_type, facts, diags);
+                        }
+                        if let Some(body) = &method.default_body {
+                            check_stmts(body, facts, diags);
+                        }
+                    }
+                }
+                Item::Test(test) => check_stmts(&test.body, facts, diags),
+                Item::Bench(bench) => check_stmts(&bench.body, facts, diags),
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        check_items(body, facts, diags);
+                    }
+                }
+                Item::GenericModule(module) => check_items(&module.body, facts, diags),
+                _ => {}
+            }
+        }
+    }
+    let mut diags = Vec::new();
+    for module in &bundle.modules {
+        check_items(&module.items, facts, &mut diags);
+    }
+    diags
 }
 
 #[derive(Default)]
@@ -1243,7 +1498,9 @@ fn check_bundle_opts_for_output_inner(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
-                Item::GenericModule(_) | Item::ModuleAlias(_) => {}
+                Item::EffectDecl(_)
+                | Item::GenericModule(_)
+                | Item::ModuleAlias(_) => {}
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
@@ -1899,7 +2156,8 @@ fn check_bundle_opts_for_output_inner(
                 Item::Bench(b) => {
                     walk_stmts_for_const_refs(&b.body, &const_names, &mut address_taken)
                 }
-                Item::Const(_)
+                Item::EffectDecl(_)
+            | Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
             | Item::Tag(_) // D-QUAL2: tags erase
@@ -2036,6 +2294,10 @@ fn check_bundle_opts_for_output_inner(
 
     // D-EFF1: collect effect summaries across every module, then run the
     // whole-program fixpoint and enforce each `#(…)` bound once.
+    let mut declared_effect_facts = jet_foundation::Facts::FactRegistry::default();
+    register_effect_facts(bundle, &mut declared_effect_facts);
+    diags.extend(validate_declared_effects(bundle, &declared_effect_facts));
+
     // D-CTEFFECT1 Tier-1: accumulate embed inputs from all module checks.
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     if mode == CompileMode::Check {
@@ -2062,6 +2324,7 @@ fn check_bundle_opts_for_output_inner(
             module,
             idx,
             &states,
+            &declared_effect_facts,
             mode,
             freestanding,
             allow_impure,

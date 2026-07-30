@@ -2436,7 +2436,7 @@ fn run() {
     total :: reactive.derived(() => (price.get() * qty.get()))
     print(total.get())                       // 200
 
-    effect := reactive.effect(() => {          // prints 200 now
+    subscription := reactive.effect(() => {    // prints 200 now
         print(total.get())
     })
     price.set(150)                             // effect re-runs → 300

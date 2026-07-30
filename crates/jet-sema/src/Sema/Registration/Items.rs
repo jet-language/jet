@@ -348,7 +348,8 @@ pub(crate) fn comptime_context_from_items(
                     externs.insert(ef.name.clone());
                 }
             }
-            Item::Test(_)
+            Item::EffectDecl(_)
+            | Item::Test(_)
             | Item::Bench(_)
             | Item::Const(_)
             | Item::Trait(_)

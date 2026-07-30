@@ -64,7 +64,11 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
     let prog = p.program();
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
-    } else if p.diags.iter().all(|d| is_teaching_parse_diag(&d.code)) {
+    } else if p
+        .diags
+        .iter()
+        .all(|d| d.severity == crate::Diagnostics::Severity::Lint || is_teaching_parse_diag(&d.code))
+    {
         Ok((prog, p.diags))
     } else {
         Err(p.diags)
@@ -98,11 +102,16 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
     if p.diags.is_empty() {
         return Ok(prog);
     }
-    if for_fmt
-        && p.diags.iter().all(|d| {
-            is_teaching_parse_diag(&d.code)
-                || (d.code == "E0927" && d.what.contains("retired"))
-        })
+    let mut errors = p
+        .diags
+        .iter()
+        .filter(|d| d.severity == crate::Diagnostics::Severity::Error);
+    if errors.clone().next().is_none()
+        || (for_fmt
+            && errors.all(|d| {
+                is_teaching_parse_diag(&d.code)
+                    || (d.code == "E0927" && d.what.contains("retired"))
+            }))
     {
         Ok(prog)
     } else {
@@ -251,6 +260,23 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
 }
 
 impl<'a> Parser<'a> {
+    fn span_has_authored_line_break(&self, start: usize, end: usize) -> bool {
+        self.toks[start..end].iter().any(|token| {
+            matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end
+        })
+    }
+
+    fn prefer_arm_table_lint(&mut self, span: Span) {
+        self.diags.push(Diagnostic::lint(
+            "L0507",
+            "prefer an ordered arm table for this branch".to_string(),
+            "one ordered arm table is Jet's normal form for multi-line and chained choices"
+                .to_string(),
+            "write `if { condition -> body else -> body }`".to_string(),
+            Some(span),
+        ));
+    }
+
     fn peek(&self) -> &Token {
         &self.toks[self.pos.min(self.toks.len() - 1)]
     }

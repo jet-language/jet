@@ -532,7 +532,8 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
                     collect_tuple_shapes_from_stmt(s, &mut out);
                 }
             }
-            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
+            Item::EffectDecl(_)
+            | Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
             | Item::CodeModule(_) | Item::Distinct(_) | Item::TypeAlias(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1

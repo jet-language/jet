@@ -1,11 +1,13 @@
-// D-UNINIT-SENTINEL2: plain-data scratch without zero-fill — written before
-// any read. (Fixed-array index-write in `Type.{ uninit }` bindings is sema-proved;
-// TIR coverage for `[T#N]` index-assign is a follow-up — this example stays
-// scalar for golden parity.)
+// D-UNINIT-SENTINEL2: fixed plain-data scratch without payload zero-fill.
+// Sema tracks each fixed index and permits reads only after every slot has
+// been written.
 use core.mem
 
 fn run() {
-    n := Int.{ uninit }
-    n = 8
-    print(n)
+    bytes := [U8#4].{ uninit }
+    bytes[0] = 65
+    bytes[1] = 66
+    bytes[2] = 67
+    bytes[3] = 68
+    print("{bytes[0]} {bytes[1]} {bytes[2]} {bytes[3]}")
 }

@@ -496,7 +496,7 @@ fn graph_query_denies_each_ambient_authority_class() {
         (
             "filesystem",
             "core.files",
-            "effect :: api.write(\"blocked\", \"owned\")",
+            "attempt :: api.write(\"blocked\", \"owned\")",
         ),
         (
             "environment",
@@ -506,12 +506,12 @@ fn graph_query_denies_each_ambient_authority_class() {
         (
             "exec-process",
             "core.process",
-            "effect :: api.run([\"sh\", \"-c\", \"exit 97\"])",
+            "attempt :: api.run([\"sh\", \"-c\", \"exit 97\"])",
         ),
         (
             "network",
             "core.net",
-            "effect :: api.tcp_listen(\"127.0.0.1:0\")",
+            "attempt :: api.tcp_listen(\"127.0.0.1:0\")",
         ),
     ];
     for (name, module, call) in cases {

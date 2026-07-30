@@ -2203,6 +2203,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }];
             for (k, v) in tentries {
                 then_body.push(crate::Codegen::TIR::TStmt::IndexAssign {
+                    uninit: false,
                     base: TExpr {
                         ty: map_ty.clone(),
                         kind: TExprKind::Local(TLocal::user(map_name)),
@@ -2367,6 +2368,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     base: Box::new(base_t),
                     index: Box::new(index_t),
                     is_map: matches!(kind, IndexKind::Map),
+                    uninit_fixed: matches!(
+                        base.as_ref(),
+                        Expr::Ident(name, _) if env.is_uninit_fixed(name)
+                    ),
                     line,
                 },
             }

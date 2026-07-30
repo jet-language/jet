@@ -1083,8 +1083,15 @@ pub(crate) fn lower_method_call(
                     };
                     format!("__JET_FIXED_INLINE:{size}")
                 } else if alloc_type == "Fixed" && method == "over" {
-                    let backing = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
-                    format!("{rust_type}::over(&mut {backing})")
+                    let backing = match &args[0].expr {
+                        Expr::Ident(name, _) if env.is_uninit_fixed(name) => env.place_of(name),
+                        _ => emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx),
+                    };
+                    if matches!(&args[0].expr, Expr::Ident(name, _) if env.is_uninit_fixed(name)) {
+                        format!("{rust_type}::over_uninit_fixed(&mut {backing})")
+                    } else {
+                        format!("{rust_type}::over(&mut {backing})")
+                    }
                 } else if args.is_empty() {
                     format!("{}::new()", rust_type)
                 } else {

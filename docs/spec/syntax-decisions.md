@@ -357,6 +357,12 @@ written; one table may mix unrelated expressions. The first matching or true
 head wins. Chained `else if` remains legal, but there should rarely be a reason
 to prefer it and docs and diagnostics do not teach it as Jet's normal form.
 
+**D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
+D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
+D-BRANCH-TEACH1=A** *(ratified 2026-07-28, card #1259)*: L0507 points
+multi-line braced branches and all `else if` chains at ordered arm tables.
+One-line effect and value forms stay quiet. Fmt does not change branch shape.
+
 - Effect form has no arrow: `if ready run() else wait()`. Braces group
   multiline bodies. Parentheses around the condition are optional and fmt
   strips them.
@@ -1723,6 +1729,15 @@ rejects a sibling `FS.Write` callee; `#Grant(FS.Read)` doesn't authorize
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
 stay valid (no migration break) — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
+
+**D-EFFECT-DECL1=A — Effect-leaf declarations** *(ratified 2026-07-28,
+card #1299)*: `effect FS.Read` is a compile-time package declaration. A package
+view contains its own declarations, declarations from loaded dependencies, and
+Prelude leaves. Once a root has one declared leaf, every dotted use under that
+root in effect rows, `#Caps`, `#Grant`, and package budgets must name a declared
+leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
+A root with no declared leaves stays open for gradual adoption. Declarations
+erase before TIR.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function

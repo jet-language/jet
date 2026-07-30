@@ -92,7 +92,22 @@ pub(crate) fn emit_static_owner(owner: &TStaticOwner, cx: &Cx) -> String {
 pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
     args.iter()
         .map(|a| {
-            let mut s = emit_tir_expr(&a.value, cx);
+            let uninit_borrow = match &a.value.kind {
+                crate::Codegen::TIR::TExprKind::Local(local)
+                    if local.uninit_fixed && a.mut_borrow =>
+                {
+                    Some(format!("({}).as_array_mut()", local.rust_place()))
+                }
+                crate::Codegen::TIR::TExprKind::Local(local)
+                    if local.uninit_fixed && a.borrow =>
+                {
+                    Some(format!("({}).as_array()", local.rust_place()))
+                }
+                _ => None,
+            };
+            let mut s = uninit_borrow
+                .clone()
+                .unwrap_or_else(|| emit_tir_expr(&a.value, cx));
             // emit_call_args applies implicit_clone XOR shared_auto_clone (the AST
             // path uses `if … else if …`); the gate/lowering never set both.
             if a.clone {
@@ -125,9 +140,9 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 }
                 s = format!("{} as {}", s, cx.rust_type(&fc.ty));
             }
-            if a.borrow {
+            if a.borrow && uninit_borrow.is_none() {
                 s = format!("&({})", s);
-            } else if a.mut_borrow {
+            } else if a.mut_borrow && uninit_borrow.is_none() {
                 s = format!("&mut ({})", s);
             }
             s

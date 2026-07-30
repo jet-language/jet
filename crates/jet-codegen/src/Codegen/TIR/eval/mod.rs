@@ -15,6 +15,11 @@ mod range_semantics {
     include!("../../../Prelude/Core/RangeBounds.rs");
 }
 
+#[allow(dead_code)]
+mod uninit_semantics {
+    include!("../../../Prelude/Uninit.rs");
+}
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -120,6 +125,117 @@ pub(super) fn range_contains(
     Ok(range_semantics::jet_range_contains(
         *start, *end, exclusive, *needle,
     ))
+}
+
+const UNINIT_FIXED_CARRIER: &str = "__JetUninitFixed";
+
+pub(super) fn uninit_fixed_carrier(len: usize) -> CtValue {
+    CtValue::Struct {
+        type_name: UNINIT_FIXED_CARRIER.to_string(),
+        fields: vec![
+            (
+                "values".to_string(),
+                CtValue::List(vec![CtValue::Unit; len]),
+            ),
+            (
+                "initialized".to_string(),
+                CtValue::List(
+                    uninit_semantics::jet_uninit_bitmap(len)
+                        .into_iter()
+                        .map(CtValue::Bool)
+                        .collect(),
+                ),
+            ),
+        ],
+    }
+}
+
+pub(super) fn uninit_fixed_read(value: &CtValue, index: usize) -> Option<CtValue> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != UNINIT_FIXED_CARRIER {
+        return None;
+    }
+    let CtValue::List(values) = &fields.iter().find(|(name, _)| name == "values")?.1 else {
+        return None;
+    };
+    let CtValue::List(initialized) = &fields
+        .iter()
+        .find(|(name, _)| name == "initialized")?
+        .1
+    else {
+        return None;
+    };
+    let bitmap = initialized
+        .iter()
+        .map(|value| matches!(value, CtValue::Bool(true)))
+        .collect::<Vec<_>>();
+    let index = uninit_semantics::jet_uninit_read(&bitmap, index).ok()?;
+    values.get(index).cloned()
+}
+
+pub(super) fn uninit_fixed_materialize(value: &CtValue) -> Option<CtValue> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != UNINIT_FIXED_CARRIER {
+        return None;
+    }
+    let CtValue::List(values) = &fields.iter().find(|(name, _)| name == "values")?.1 else {
+        return None;
+    };
+    let CtValue::List(initialized) = &fields
+        .iter()
+        .find(|(name, _)| name == "initialized")?
+        .1
+    else {
+        return None;
+    };
+    let bitmap = initialized
+        .iter()
+        .map(|value| matches!(value, CtValue::Bool(true)))
+        .collect::<Vec<_>>();
+    uninit_semantics::jet_uninit_all(&bitmap).ok()?;
+    Some(CtValue::List(values.clone()))
+}
+
+pub(super) fn uninit_fixed_write(
+    value: &mut CtValue,
+    index: usize,
+    replacement: CtValue,
+) -> bool {
+    let CtValue::Struct { type_name, fields } = value else {
+        return false;
+    };
+    if type_name != UNINIT_FIXED_CARRIER {
+        return false;
+    }
+    let Some(values_index) = fields.iter().position(|(name, _)| name == "values") else {
+        return false;
+    };
+    let Some(initialized_index) = fields
+        .iter()
+        .position(|(name, _)| name == "initialized")
+    else {
+        return false;
+    };
+    let CtValue::List(initialized) = &mut fields[initialized_index].1 else {
+        return false;
+    };
+    let mut bitmap = initialized
+        .iter()
+        .map(|value| matches!(value, CtValue::Bool(true)))
+        .collect::<Vec<_>>();
+    let Ok((index, _)) = uninit_semantics::jet_uninit_write(&mut bitmap, index) else {
+        return false;
+    };
+    *initialized = bitmap.into_iter().map(CtValue::Bool).collect();
+    let CtValue::List(values) = &mut fields[values_index].1 else {
+        return false;
+    };
+    values[index] = replacement;
+    true
 }
 
 /// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
@@ -1404,10 +1520,14 @@ fn eval_block_hook(
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
-        .values()
-        .filter_map(|f| {
+        .iter()
+        .filter_map(|(name, f)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+                crate::Codegen::TIR::with_eval_fragment(|| {
+                    let mut lowered = TIR::lower_func(f, &cx);
+                    lowered.name = name.clone();
+                    lowered
+                })
             }))
             .ok()
         })

@@ -430,6 +430,7 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     },
+                    TokKind::KwEffect => self.effect_decl().map(Item::EffectDecl),
                     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
                     // allocation floor, parsed like `use`/`#PubFile` (not inside any
                     // `module { … }` body — only the top-level file item list).
@@ -1428,6 +1429,20 @@ impl<'a> Parser<'a> {
                 applied_rules: std::mem::take(&mut self.applied_rules),
                 rule_facts: std::mem::take(&mut self.rule_facts),
             }
+        }
+
+        fn effect_decl(&mut self) -> Result<crate::AST::EffectDecl, Diagnostic> {
+            let start = self.bump().span;
+            let (name, name_span) =
+                self.expect_effect_path_name("after the `effect` declaration keyword")?;
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            Ok(crate::AST::EffectDecl {
+                name,
+                name_span,
+                span: Span::new(start.start, name_span.end),
+            })
         }
     
 }

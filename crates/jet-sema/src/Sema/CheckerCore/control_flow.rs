@@ -12,7 +12,16 @@ impl<'a> Checker<'a> {
             // written on *every* path; it stays uninit if still-uninit in any branch
             // (or, with no `else`, on the fall-through).
             let before_u = self.uninit.clone();
-            let mut after_u: HashMap<String, Span> = HashMap::new();
+            let mut after_u = HashMap::new();
+            let merge_uninit = |into: &mut HashMap<String, super::super::UninitState>,
+                                key: String,
+                                value: super::super::UninitState| {
+                if let Some(existing) = into.get_mut(&key) {
+                    existing.merge_paths(&value);
+                } else {
+                    into.insert(key, value);
+                }
+            };
             // D-FLOWTYPE1=A: desugar stable Optional presence checks into S31 Present
             // bindings before binding extraction / TIR lower.
             self.prepare_optional_flow_if(ifs);
@@ -54,7 +63,7 @@ impl<'a> Checker<'a> {
                 after.entry(k).or_insert(v);
             }
             for (k, v) in std::mem::take(&mut self.uninit) {
-                after_u.entry(k).or_insert(v);
+                merge_uninit(&mut after_u, k, v);
             }
             self.moved = before.clone();
             self.uninit = before_u.clone();
@@ -64,7 +73,7 @@ impl<'a> Checker<'a> {
                 None => {
                     // The cond-false path runs no branch, so everything stays uninit.
                     for (k, v) in &before_u {
-                        after_u.entry(k.clone()).or_insert(*v);
+                        merge_uninit(&mut after_u, k.clone(), v.clone());
                     }
                 }
                 Some(ElseBranch::Else(else_body)) => {
@@ -74,7 +83,7 @@ impl<'a> Checker<'a> {
                         after.entry(k).or_insert(v);
                     }
                     for (k, v) in std::mem::take(&mut self.uninit) {
-                        after_u.entry(k).or_insert(v);
+                        merge_uninit(&mut after_u, k, v);
                     }
                 }
                 Some(ElseBranch::ElseIf(next)) => {
@@ -84,7 +93,7 @@ impl<'a> Checker<'a> {
                         after.entry(k).or_insert(v);
                     }
                     for (k, v) in std::mem::take(&mut self.uninit) {
-                        after_u.entry(k).or_insert(v);
+                        merge_uninit(&mut after_u, k, v);
                     }
                 }
             }

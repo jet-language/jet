@@ -168,7 +168,7 @@ impl<'a> Parser<'a> {
                     // S71 (D-SG6): `base?.field` optional chaining.
                     TokKind::QuestionDot => {
                         self.bump();
-                        let (member, member_span) = self.expect_ident("after `?.`")?;
+                        let (member, member_span) = self.expect_field_name()?;
                         if matches!(self.peek().kind, TokKind::LParen) {
                             return Err(Diagnostic::error(
                                 "E0046",

@@ -29,6 +29,10 @@ extern "C" fn jet_jit_list_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list())
 }
 
+extern "C" fn jet_jit_list_uninit(len: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_uninit_list(len.max(0) as usize))
+}
+
 /// `core.io.args()` — List(String) matching AOT `jet_std_io_args`, fed by the
 /// `with_program_args` argv installed for this JIT run (falls back to
 /// `std::env::args` when unset, same as a bare host process).
@@ -1547,6 +1551,7 @@ extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
 pub(crate) struct CollectionsHostFns {
     pub io_args: cranelift_module::FuncId,
     pub list_new: cranelift_module::FuncId,
+    pub list_uninit: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
     pub list_push_f64: cranelift_module::FuncId,
     pub list_push_range: cranelift_module::FuncId,
@@ -1660,6 +1665,7 @@ pub(crate) struct CollectionsHostFns {
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_io_args", jet_jit_io_args as *const u8);
     builder.symbol("jet_jit_list_new", jet_jit_list_new as *const u8);
+    builder.symbol("jet_jit_list_uninit", jet_jit_list_uninit as *const u8);
     builder.symbol("jet_jit_list_push", jet_jit_list_push as *const u8);
     builder.symbol("jet_jit_list_push_f64", jet_jit_list_push_f64 as *const u8);
     builder.symbol(
@@ -1803,6 +1809,9 @@ pub(crate) fn declare_collections_host_fns(
     let cc = module.target_config().default_call_conv;
     let mut sig_new = Signature::new(cc);
     sig_new.returns.push(AbiParam::new(types::I64));
+    let mut sig_uninit = Signature::new(cc);
+    sig_uninit.params.push(AbiParam::new(types::I64));
+    sig_uninit.returns.push(AbiParam::new(types::I64));
     let mut sig_push = Signature::new(cc);
     sig_push.params.push(AbiParam::new(types::I64));
     sig_push.params.push(AbiParam::new(types::I64));
@@ -1907,6 +1916,7 @@ pub(crate) fn declare_collections_host_fns(
     Ok(CollectionsHostFns {
         io_args: import("jet_jit_io_args", &sig_new)?,
         list_new: import("jet_jit_list_new", &sig_new)?,
+        list_uninit: import("jet_jit_list_uninit", &sig_uninit)?,
         list_push: import("jet_jit_list_push", &sig_push)?,
         list_push_f64: import("jet_jit_list_push_f64", &sig_push_f64)?,
         list_push_range: import("jet_jit_list_push_range", &sig_push_range)?,

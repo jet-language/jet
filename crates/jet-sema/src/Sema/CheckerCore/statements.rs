@@ -608,11 +608,17 @@ impl<'a> Checker<'a> {
                             span,
                             kind,
                         } => {
-                            if let Expr::Ident(name, _) = base.as_ref() {
-                                if self.uninit.contains_key(name) && !is_compound {
-                                    self.uninit.remove(name);
+                            let fixed_uninit = if !is_compound {
+                                match base.as_ref() {
+                                    Expr::Ident(name, _) => self
+                                        .uninit
+                                        .remove(name)
+                                        .map(|state| (name.clone(), state)),
+                                    _ => None,
                                 }
-                            }
+                            } else {
+                                None
+                            };
                             self.borrow_ctx = true;
                             let base_ty = self.infer(base);
                             let idx_ty = self.infer(index);
@@ -808,7 +814,10 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
-                            } else if let Some(Type::List(elem_ty)) = base_ty {
+                            } else if let Some(
+                                Type::List(elem_ty) | Type::FixedList { elem: elem_ty, .. },
+                            ) = base_ty
+                            {
                                 if let Some(vt) = vt {
                                     if vt != *elem_ty {
                                         self.diags.push(Diagnostic::error(
@@ -922,6 +931,22 @@ impl<'a> Checker<'a> {
                                     "e.g. `loop c; s.chars() { }` or `s.slice(0..2)`".to_string(),
                                     Some(*span),
                                 ));
+                            }
+                            if let Some((name, mut state)) = fixed_uninit {
+                                let completely_initialized =
+                                    if let (Some(len), Expr::Int(index, _, _, _)) =
+                                        (state.fixed_len, index.as_ref())
+                                    {
+                                        if *index >= 0 && (*index as u64) < len {
+                                            state.initialized_indexes.insert(*index as u64);
+                                        }
+                                        state.initialized_indexes.len() as u64 == len
+                                    } else {
+                                        false
+                                    };
+                                if !completely_initialized {
+                                    self.uninit.insert(name, state);
+                                }
                             }
                         }
                         // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place
@@ -2297,12 +2322,20 @@ impl<'a> Checker<'a> {
                     let mut cap_set = crate::Sema::EffectSet::new();
                     let mut bad = false;
                     for (name, span) in caps.iter() {
-                        match crate::Sema::parse_effect_name(name) {
-                            Some(e) => {
+                        match crate::Sema::resolve_effect_name(name, self.effect_facts) {
+                            Ok(e) => {
                                 cap_set.insert(e);
                             }
-                            None => {
-                                self.diags.push(unknown_effect(name, *span));
+                            Err(suggestion) => {
+                                if crate::Sema::parse_effect_name(name).is_some() {
+                                    self.diags.push(crate::Sema::undeclared_effect(
+                                        name,
+                                        suggestion.as_deref(),
+                                        Some(*span),
+                                    ));
+                                } else {
+                                    self.diags.push(unknown_effect(name, *span));
+                                }
                                 bad = true;
                             }
                         }
@@ -2349,12 +2382,20 @@ impl<'a> Checker<'a> {
                     let mut cap_set = crate::Sema::EffectSet::new();
                     let mut bad = false;
                     for (name, span) in caps.iter() {
-                        match crate::Sema::parse_effect_name(name) {
-                            Some(e) => {
+                        match crate::Sema::resolve_effect_name(name, self.effect_facts) {
+                            Ok(e) => {
                                 cap_set.insert(e);
                             }
-                            None => {
-                                self.diags.push(unknown_effect(name, *span));
+                            Err(suggestion) => {
+                                if crate::Sema::parse_effect_name(name).is_some() {
+                                    self.diags.push(crate::Sema::undeclared_effect(
+                                        name,
+                                        suggestion.as_deref(),
+                                        Some(*span),
+                                    ));
+                                } else {
+                                    self.diags.push(unknown_effect(name, *span));
+                                }
                                 bad = true;
                             }
                         }

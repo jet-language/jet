@@ -358,7 +358,7 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
     }
 }
 
-fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
+pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
     match statement {
         Stmt::If(condition) => {
             let mut bodies = vec![condition.then_body.as_slice()];

@@ -440,6 +440,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::BoolLit(b) => b.to_string(),
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
+        TExprKind::Local(slot) if slot.uninit_scalar => {
+            format!("({}).read().clone()", slot.rust_place())
+        }
+        TExprKind::Local(slot) if slot.uninit_fixed => {
+            format!("({}).read_array()", slot.rust_place())
+        }
         TExprKind::Local(slot) => slot.rust_place(),
         // D-TAG1: binding-free enum variant/group pattern test.
         TExprKind::PatternMatches { subj, pattern } => {
@@ -451,10 +457,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::Unit => "()".to_string(),
         TExprKind::DefaultLit => "Default::default()".to_string(),
-        TExprKind::Uninit => format!(
-            "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
-            cx.rust_type(&e.ty)
-        ),
+        TExprKind::Uninit => match &e.ty {
+            Type::FixedList { elem, len, .. } => format!(
+                "jet_mem::JetUninitFixed::<{}, {}>::new()",
+                cx.rust_type(elem),
+                len
+            ),
+            _ => format!("jet_mem::JetUninit::<{}>::new()", cx.rust_type(&e.ty)),
+        },
         TExprKind::CtLit(value) => value.serialize(),
         TExprKind::HostCall(call) => emit_host_call(call, None, cx),
         // A declared const's Rust static name, resolved from its Jet name here so
@@ -636,6 +646,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("({}).clone()", emit_tir_expr(recv, cx))
         }
         TExprKind::Borrow { place, mutable } => {
+            if let TExprKind::Local(local) = &place.kind {
+                if local.uninit_fixed {
+                    return if *mutable {
+                        format!("({}).as_array_mut()", local.rust_place())
+                    } else {
+                        format!("({}).as_array()", local.rust_place())
+                    };
+                }
+            }
             let place = emit_tir_expr(place, cx);
             if *mutable {
                 format!("&mut ({place})")
@@ -1605,12 +1624,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             base,
             index,
             is_map,
+            uninit_fixed,
             line,
         } => {
-            let b = emit_tir_expr(base, cx);
+            let b = if *uninit_fixed {
+                match &base.kind {
+                    TExprKind::Local(slot) if slot.uninit_fixed => slot.rust_place(),
+                    _ => emit_tir_expr(base, cx),
+                }
+            } else {
+                emit_tir_expr(base, cx)
+            };
             let i = emit_tir_expr(index, cx);
             if *is_map {
                 format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
+            } else if *uninit_fixed {
+                format!("(({b})[({i}) as usize].clone())")
             } else {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
@@ -4019,6 +4048,7 @@ fn object_ordered_pairs_rust(val: &TExpr, cx: &Cx) -> Option<String> {
                     index,
                     is_map: true,
                     value,
+                    ..
                 } = stmt
                 else {
                     return None;

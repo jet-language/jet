@@ -1595,16 +1595,23 @@ impl<'a> Checker<'a> {
                             Expr::Ident(name, _) => self
                                 .uninit
                                 .get(name)
-                                .copied()
-                                .map(|span| (name.clone(), span)),
+                                .cloned()
+                                .map(|state| (name.clone(), state)),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 };
-                // D-UNINIT1: a `mut` arg is the fill site, not a read.
-                self.clear_uninit_mut_args(args);
+                if fixed_uninit.is_empty() {
+                    self.clear_uninit_mut_args(args);
+                } else {
+                    // `Fixed.over(&bytes)` is the one raw-storage adapter: it
+                    // borrows the wrapper without claiming initialization.
+                    for (name, _) in &fixed_uninit {
+                        self.uninit.remove(name);
+                    }
+                }
                 let inferred = self.infer_method_call(
                     receiver,
                     method,

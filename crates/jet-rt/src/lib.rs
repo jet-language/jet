@@ -2,6 +2,11 @@
 
 use std::collections::BTreeMap;
 
+#[allow(dead_code)]
+mod uninit_semantics {
+    include!("../../jet-codegen/src/Prelude/Uninit.rs");
+}
+
 /// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
 #[doc(hidden)]
 pub mod __gc;
@@ -50,6 +55,12 @@ pub fn string_before(s: &str, sep: &str) -> String {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum JetVal {
+    /// JIT value carrier for sema-proved uninitialized fixed-list storage.
+    /// Initialization policy comes from the canonical Prelude source above.
+    UninitList {
+        values: Vec<JetVal>,
+        initialized: Vec<bool>,
+    },
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -183,6 +194,15 @@ impl JetArena {
         id
     }
 
+    pub fn alloc_uninit_list(&mut self, len: usize) -> i64 {
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::UninitList {
+            values: vec![JetVal::Int(0); len],
+            initialized: uninit_semantics::jet_uninit_bitmap(len),
+        });
+        id
+    }
+
     pub fn alloc_empty_map(&mut self) -> i64 {
         let id = self.values.len() as i64;
         self.values.push(JetVal::Map(BTreeMap::new()));
@@ -279,6 +299,7 @@ impl JetArena {
     pub fn list_len(&self, list: i64) -> Option<i64> {
         match self.values.get(list as usize) {
             Some(JetVal::List(values)) => Some(values.len() as i64),
+            Some(JetVal::UninitList { values, .. }) => Some(values.len() as i64),
             _ => None,
         }
     }
@@ -292,6 +313,17 @@ impl JetArena {
                 Some(JetVal::Int(value)) => Some(*value),
                 _ => None,
             },
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let index =
+                    uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
+                match values.get(index) {
+                    Some(JetVal::Int(value)) => Some(*value),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -305,6 +337,17 @@ impl JetArena {
                 Some(JetVal::Float(value)) => Some(*value),
                 _ => None,
             },
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let index =
+                    uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
+                match values.get(index) {
+                    Some(JetVal::Float(value)) => Some(*value),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -338,6 +381,15 @@ impl JetArena {
                 }
                 _ => None,
             },
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let (index, _) =
+                    uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
+                values[index] = JetVal::Int(value);
+                Some(())
+            }
             _ => None,
         }
     }
@@ -354,6 +406,15 @@ impl JetArena {
                 }
                 _ => None,
             },
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let (index, _) =
+                    uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
+                values[index] = JetVal::Float(value);
+                Some(())
+            }
             _ => None,
         }
     }
@@ -403,17 +464,38 @@ impl JetArena {
                 }
                 Some(out)
             }
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                uninit_semantics::jet_uninit_all(initialized).ok()?;
+                let mut out = Vec::with_capacity(values.len());
+                for value in values {
+                    let JetVal::Int(value) = value else {
+                        return None;
+                    };
+                    out.push(*value);
+                }
+                Some(out)
+            }
             _ => None,
         }
     }
 
     pub fn clone_list(&mut self, list: i64) -> Option<i64> {
-        let values = match self.values.get(list as usize) {
-            Some(JetVal::List(values)) => values.clone(),
+        let value = match self.values.get(list as usize) {
+            Some(JetVal::List(values)) => JetVal::List(values.clone()),
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => JetVal::UninitList {
+                values: values.clone(),
+                initialized: initialized.clone(),
+            },
             _ => return None,
         };
         let id = self.values.len() as i64;
-        self.values.push(JetVal::List(values));
+        self.values.push(value);
         Some(id)
     }
 

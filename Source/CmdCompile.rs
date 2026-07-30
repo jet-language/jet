@@ -447,7 +447,28 @@ pub(crate) fn run_compile_cmd(
                     .ok()
                     .and_then(|raw| jet::PackageManifest::parse(&raw).ok())
                 {
-                    let violations = jet::EffectBudget::enforce(&entries, &manifest);
+                    let configured_names = manifest
+                        .effects_allow
+                        .iter()
+                        .flatten()
+                        .chain(manifest.effects_deny.iter().flatten())
+                        .chain(manifest.grants.iter().flat_map(|(_, names)| names));
+                    let mut violations = Vec::new();
+                    for name in configured_names {
+                        if jet::Sema::parse_effect_name(name).is_some() {
+                            if let Err(suggestion) = jet::Sema::resolve_effect_name(
+                                name,
+                                &effect_facts.fact_registry,
+                            ) {
+                                violations.push(jet::Sema::undeclared_effect(
+                                    name,
+                                    suggestion.as_deref(),
+                                    None,
+                                ));
+                            }
+                        }
+                    }
+                    violations.extend(jet::EffectBudget::enforce(&entries, &manifest));
                     if !violations.is_empty() {
                         report_problems(mode, file, &src, &violations);
                         exit(ExitCodes::USER_ERROR);

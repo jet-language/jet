@@ -793,6 +793,11 @@
         }
     }
     impl<T> Eq for JetId<T> {}
+    impl<T> super::user_Equatable for JetId<T> {
+        fn equal(&self, rhs: &Self) -> bool {
+            self == rhs
+        }
+    }
     impl<T> std::hash::Hash for JetId<T> {
         fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
             self.index.hash(state);

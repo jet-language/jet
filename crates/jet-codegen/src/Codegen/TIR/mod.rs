@@ -367,6 +367,10 @@ pub struct TLocal {
     pub name: String,
     pub generated: bool,
     pub deref: bool,
+    /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
+    /// initialization; ordinary TIR reads still have the declared Jet type.
+    pub uninit_scalar: bool,
+    pub uninit_fixed: bool,
 }
 
 impl TLocal {
@@ -376,6 +380,8 @@ impl TLocal {
             name: name.into(),
             generated: false,
             deref: false,
+            uninit_scalar: false,
+            uninit_fixed: false,
         }
     }
 
@@ -385,7 +391,19 @@ impl TLocal {
             name: name.into(),
             generated: true,
             deref: false,
+            uninit_scalar: false,
+            uninit_fixed: false,
         }
+    }
+
+    pub fn as_uninit_scalar(mut self) -> TLocal {
+        self.uninit_scalar = true;
+        self
+    }
+
+    pub fn as_uninit_fixed(mut self) -> TLocal {
+        self.uninit_fixed = true;
+        self
     }
 
     /// The same slot read through a by-reference deref.
@@ -2322,6 +2340,9 @@ pub enum TStmt {
     /// index are not a Jet construct here (the parser/sema only admit a plain `=` to
     /// an index lvalue), so no `op` is carried.
     IndexAssign {
+        /// The base is fixed-list storage created with `Type.{ uninit }`.
+        /// Engines keep the same TIR operation but choose storage-safe writes.
+        uninit: bool,
         base: TExpr,
         index: TExpr,
         is_map: bool,
@@ -2911,6 +2932,8 @@ pub enum TExprKind {
         base: Box<TExpr>,
         index: Box<TExpr>,
         is_map: bool,
+        /// The base uses the vetted `JetUninitFixed` prelude wrapper in AOT.
+        uninit_fixed: bool,
         line: usize,
     },
     /// D-MEM1 S6: `pool[id]` / `pool[id].field` — a generation-checked slot in a

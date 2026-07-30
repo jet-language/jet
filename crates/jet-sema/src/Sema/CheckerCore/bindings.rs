@@ -247,6 +247,10 @@ impl<'a> Checker<'a> {
                     Some(ty_span),
                 ));
             }
+            let state = match &ty {
+                Type::FixedList { len, .. } => super::super::UninitState::fixed(*len),
+                _ => super::super::UninitState::scalar(),
+            };
             self.declare(
                 &b.name,
                 b.name_span,
@@ -264,21 +268,32 @@ impl<'a> Checker<'a> {
                     constant_value: None,
                 },
             );
-            self.uninit.insert(b.name.clone(), b.name_span);
+            self.uninit.insert(b.name.clone(), state);
         }
     
-        /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL2): clear a
-        /// `Type.{ uninit }` binding's not-yet-written flag when it is passed as a
-        /// `mut` argument (the fill case) — the callee writes it. Call before
-        /// inferring the args so the read-hook doesn't flag the fill site.
+        /// A write-convention argument is not a definite-initialization proof:
+        /// Jet has no callee contract that guarantees one scalar, or every fixed
+        /// slot, was written. Keep the state and reject the unproved handoff.
         pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
             if self.uninit.is_empty() {
                 return;
             }
             for arg in args {
                 if arg.convention == AccessConvention::Write {
-                    if let Expr::Ident(n, _) = &arg.expr {
-                        self.uninit.remove(n);
+                    if let Expr::Ident(n, span) = &arg.expr {
+                        if self.uninit.contains_key(n) {
+                            self.diags.push(Diagnostic::error(
+                                "E0420",
+                                format!("`{n}` may be read before it is given a value"),
+                                format!(
+                                    "passing `{n}` with write access does not prove that the callee initializes it"
+                                ),
+                                format!(
+                                    "write every value in `{n}` here before passing it to another function"
+                                ),
+                                Some(*span),
+                            ));
+                        }
                     }
                 }
             }

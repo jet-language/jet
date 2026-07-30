@@ -398,6 +398,14 @@ const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 const WEBAPP_PRELUDE: &str = include_str!("../Prelude/WebApp.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
+
+fn push_mem_prelude(out: &mut String) {
+    out.push_str("mod jet_uninit_semantics {\n");
+    out.push_str(UNINIT_PRELUDE);
+    out.push_str("\n}\n");
+    out.push_str(MEM_PRELUDE);
+}
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
 const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
 
@@ -1210,7 +1218,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push('\n');
@@ -1248,7 +1256,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
+            Item::EffectDecl(_)
+            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
@@ -1646,7 +1655,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
@@ -1689,7 +1698,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
+            Item::EffectDecl(_)
+            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
@@ -2102,7 +2112,7 @@ pub fn emit_bundle_dbg(
     }
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
@@ -2275,7 +2285,7 @@ pub fn emit_bundle_tests_cov(
     }
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
@@ -2479,7 +2489,7 @@ pub fn emit_bundle_fuzz(
     }
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
@@ -2732,7 +2742,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
-    out.push_str(MEM_PRELUDE);
+    push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);

@@ -43,19 +43,17 @@ fn run() {
     // Fresh data — already the current shape, nothing to migrate.
     fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
     fresh :: json.decode_traced<UserRecord>(fresh_raw) ?? panic("bad fresh record")
-    if fresh.migration.migrated {
-        print("record {fresh.value.id} arrived as schema {fresh.migration.from}")
-    } else {
-        print("record {fresh.value.id} arrived fresh, no migration applied")
+    if {
+        fresh.migration.migrated -> print("record {fresh.value.id} arrived as schema {fresh.migration.from}")
+        else -> print("record {fresh.value.id} arrived fresh, no migration applied")
     }
     // An old v1 record — decoded through the migration chain.
     old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
     r :: json.decode_traced<UserRecord>(old_raw) ?? panic("bad old record")
     user :: r.value
-    if r.migration.migrated {
-        print("record {user.id} arrived as schema {r.migration.from}")
-    } else {
-        print("record {user.id} arrived fresh, no migration applied")
+    if {
+        r.migration.migrated -> print("record {user.id} arrived as schema {r.migration.from}")
+        else -> print("record {user.id} arrived fresh, no migration applied")
     }
     print("name: {user.display_name}, verified: {user.verified}")
     print("steps applied: {r.migration.steps.len()}")

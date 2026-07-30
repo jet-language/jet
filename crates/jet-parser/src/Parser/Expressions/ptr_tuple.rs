@@ -123,6 +123,14 @@ impl<'a> Parser<'a> {
                 self.bump();
                 return Ok((Syntax::KW_COPY.to_string(), span));
             }
+            // D-EFFECT-DECL1=A: `effect` is a declaration keyword in item
+            // position, but existing APIs such as `reactive.effect()` keep
+            // their ordinary qualified member spelling.
+            if matches!(self.peek().kind, TokKind::KwEffect) {
+                let span = self.peek().span;
+                self.bump();
+                return Ok((Syntax::KW_EFFECT_DECL.to_string(), span));
+            }
             self.expect_ident("after `.`")
         }
     

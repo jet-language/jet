@@ -674,6 +674,7 @@ impl<'a> EvalCtx<'a> {
                 index,
                 is_map,
                 value,
+                ..
             } => {
                 let base_name = match &base.kind {
                     crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
@@ -729,6 +730,14 @@ impl<'a> EvalCtx<'a> {
                     let idx = as_int(&idx_v, self.span())?;
                     if idx < 0 {
                         return Err(unsupported("negative index assign", self.span()));
+                    }
+                    if let Some(mut carrier @ CtValue::Struct { .. }) =
+                        scope.get(&base_name).cloned()
+                    {
+                        if super::uninit_fixed_write(&mut carrier, idx as usize, rhs.clone()) {
+                            scope.insert(base_name, carrier);
+                            return Ok(Flow::Normal);
+                        }
                     }
                     let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
                         return Err(unsupported("index assign list", self.span()));

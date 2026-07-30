@@ -865,19 +865,12 @@ fn load_file(
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let mut prog = if for_check {
-        match Parser::parse_for_check(&toks) {
-            Ok((p, teaching)) => {
-                parse_teaching.extend(teaching);
-                p
-            }
-            Err(diags) => return Err(diags),
+    let mut prog = match Parser::parse_for_check(&toks) {
+        Ok((p, teaching)) => {
+            parse_teaching.extend(teaching);
+            p
         }
-    } else {
-        match Parser::parse(&toks) {
-            Ok(p) => p,
-            Err(diags) => return Err(diags),
-        }
+        Err(diags) => return Err(diags),
     };
     let auto_derive_default = auto_derive_default_for_file(
         &norm,

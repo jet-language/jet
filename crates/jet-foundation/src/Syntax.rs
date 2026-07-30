@@ -70,6 +70,13 @@
 // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
 // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
 // The same table is a Void-or-value expression in expression position.
+// D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
+// D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
+// D-BRANCH-TEACH1=A (ratified 2026-07-28, card #1259) add no token:
+// multi-line braced branches and `else if` chains get L0507, while one-line
+// effect and value forms stay quiet. Fmt preserves the author's branch shape.
+// D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
+// `effect Root.Leaf` adds one package-view fact and erases before TIR.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are

@@ -3651,6 +3651,7 @@ impl LowerCtx<'_, '_> {
                 index,
                 is_map,
                 value,
+                ..
             } => {
                 if *is_map {
                     let map = self.lower_expr(base)?;
@@ -3691,6 +3692,11 @@ impl LowerCtx<'_, '_> {
                     let list = self.lower_expr(base)?;
                     let idx = self.lower_expr(index)?;
                     let val = self.lower_expr(value)?;
+                    let val = match self.b.func.dfg.value_type(val) {
+                        types::I8 | types::I32 => self.b.ins().uextend(types::I64, val),
+                        types::F32 => self.b.ins().fpromote(types::F64, val),
+                        _ => val,
+                    };
                     let line = self.b.ins().iconst(types::I32, 1);
                     let host_id = match &value.ty {
                         Type::Float => self.host.coll.list_set_f64,
@@ -6152,7 +6158,12 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[list, idx, line]);
                 let value = self.b.inst_results(call)[0];
                 self.emit_trap_check()?;
-                Ok(value)
+                Ok(match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                    Some(types::I8) => self.b.ins().ireduce(types::I8, value),
+                    Some(types::I32) => self.b.ins().ireduce(types::I32, value),
+                    Some(types::F32) => self.b.ins().fdemote(types::F32, value),
+                    _ => value,
+                })
             }
             THostCall::TupleIndex { base, index } => {
                 let handle = self.lower_expr(base)?;
@@ -7893,6 +7904,7 @@ impl LowerCtx<'_, '_> {
                 index,
                 is_map: true,
                 value,
+                ..
             } = stmt
             else {
                 return None;
@@ -11398,6 +11410,7 @@ impl LowerCtx<'_, '_> {
                 index,
                 is_map,
                 line,
+                ..
             } => {
                 if *is_map {
                     let map = self.lower_expr(base)?;
@@ -12066,10 +12079,21 @@ impl LowerCtx<'_, '_> {
             TExprKind::CtLit(value) => self.lower_ct_value(value),
             TExprKind::Uninit => {
                 // D-UNINIT1 / GC promote: placeholder overwritten before read.
-                match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
-                    Some(ty) if ty == types::F64 => Ok(self.b.ins().f64const(0.0)),
-                    Some(ty) => Ok(self.b.ins().iconst(ty, 0)),
-                    None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
+                if let Type::FixedList { len, .. } = &expr.ty {
+                    let uninit_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_uninit, self.b.func);
+                    let len = i64::try_from(*len)
+                        .map_err(|_| "jit fixed-list length exceeds i64".to_string())?;
+                    let len = self.b.ins().iconst(types::I64, len);
+                    let call = self.b.ins().call(uninit_ref, &[len]);
+                    Ok(self.b.inst_results(call)[0])
+                } else {
+                    match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
+                        Some(ty) if ty == types::F64 => Ok(self.b.ins().f64const(0.0)),
+                        Some(ty) => Ok(self.b.ins().iconst(ty, 0)),
+                        None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
+                    }
                 }
             }
             TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
@@ -18146,6 +18170,7 @@ impl LowerCtx<'_, '_> {
                 index,
                 is_map: false,
                 line,
+                ..
             } => {
                 let list = self.lower_expr(base)?;
                 let index = self.lower_expr(index)?;

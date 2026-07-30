@@ -43,9 +43,8 @@ fn expert_import_surface() =[Secret]=> {
 
 fn run() =[Secret, IO]=> {
     current :: vault.current<crypto.SigningKey>("release") ?? panic("vault unavailable")
-    if current == .Val(key_ref) {
-        print("current release key: {key_ref}")
-    } else {
-        print("no release key configured")
+    if {
+        current == .Val(key_ref) -> print("current release key: {key_ref}")
+        else -> print("no release key configured")
     }
 }

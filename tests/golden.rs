@@ -278,6 +278,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             )
         ),
     };
+    assert!(
+        !compiled.lints.iter().any(|diagnostic| diagnostic.code == "L0507"),
+        "feature example {stem} still teaches the discouraged braced/chained branch form:\n{}",
+        jet::render_diagnostics(&entry.shown, &src, &compiled.lints)
+    );
     let rust_code = compiled.rust;
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
@@ -290,7 +295,6 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         || stem == "memory/rawptr"
         || stem == "effects/single_use_discard"
         || stem == "memory/uninit"
-        || stem == "memory/uninit_buffer"
         || stem == "crypto/crypto_migration"
         || stem == "crypto/vault_keys"
     {
@@ -322,7 +326,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     } else {
         assert!(
             !user_code.contains("unsafe"),
-            "generated Rust for {} contains `unsafe` outside the vetted `jet_mem` helper",
+            "generated Rust for {} contains `unsafe` outside vetted memory helpers",
             stem
         );
     }
@@ -755,7 +759,8 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             src.to_string()
         }
     }
-    let s = strip_mod(rust_code, "jet_mem");
+    let s = strip_mod(rust_code, "jet_uninit_semantics");
+    let s = strip_mod(&s, "jet_mem");
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");

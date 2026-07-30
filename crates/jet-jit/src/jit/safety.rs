@@ -1248,6 +1248,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             TIR::TRequireKind::Panic { msg } => resident_safe_expr(msg, callees),
         },
         TExprKind::Todo { .. } => true,
+        TExprKind::Uninit => matches!(&expr.ty, Type::FixedList { .. })
+            && jit_list_native_type(&expr.ty),
         TExprKind::LayoutCompare { lhs, rhs, .. } => {
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
@@ -2078,6 +2080,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             index,
             is_map,
             value,
+            ..
         } => {
             if *is_map {
                 let key_ok = if jit_map_int_type(&base.ty) {
@@ -2096,7 +2099,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
                     && matches!(&index.ty, Type::Int)
-                    && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
+                    && matches!(
+                        &value.ty,
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::Float32
+                            | Type::String
+                            | Type::Char
+                            | Type::Bool
+                    )
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
                     && resident_safe_expr(value, callees)

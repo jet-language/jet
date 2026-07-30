@@ -137,6 +137,12 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(t.span.end);
             }
+            Item::EffectDecl(declaration) => {
+                let text = self.src[declaration.span.start..declaration.span.end].to_string();
+                self.write(&text);
+                self.newline();
+                self.skip_verbatim_comments(declaration.span.end);
+            }
             // Stage 1a: modules are emitted verbatim (non-destructive). A
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {

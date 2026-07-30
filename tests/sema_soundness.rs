@@ -21,7 +21,6 @@ const GATED_UNSAFE_STEMS: &[&str] = &[
     "memory/rawptr",
     "effects/single_use_discard",
     "memory/uninit",
-    "memory/uninit_buffer",
     "crypto/crypto_migration",
 ];
 

@@ -5772,6 +5772,136 @@ fn run() {
 }
 
 #[test]
+fn uninit_fixed_mutating_borrow_matches_interpreter_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let source = r#"
+use core.mem
+
+fn set_first(bytes: &[U8#2]) {
+    bytes[0] = 8
+}
+
+fn first(bytes: [U8#2]) => U8 {
+    index :: 0
+    return bytes[index]
+}
+
+fn run() {
+    bytes := [U8#2].{ uninit }
+    bytes[0] = 1
+    bytes[1] = 2
+    set_first(&bytes)
+    print(bytes[0])
+    print(first(bytes))
+}
+"#;
+    let file = std::env::temp_dir().join(format!(
+        "jet_uninit_fixed_mutating_borrow_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let expected = ProgramOutput::ran("8\n8\n".to_string(), String::new(), 0);
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced interpreter failed: {diags:?}"),
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "uninit_fixed_mutating_borrow");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "uninitialized fixed-list fill did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "uninitialized fixed-list fill used deopt or fallback"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_uninit_fixed_mutating_borrow_aot_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(
+        &dir,
+        "uninit_fixed_mutating_borrow",
+        0,
+        "uninit_fixed_mutating_borrow",
+        &shown,
+    );
+
+    assert_eq!(interpreted, expected, "forced interpreter output drifted");
+    assert_eq!(resident, expected, "resident JIT output drifted");
+    assert_eq!(aot, expected, "AOT output drifted");
+    assert_eq!(resident, interpreted, "JIT and interpreter output differ");
+    assert_eq!(resident, aot, "JIT and AOT output differ");
+
+    let _ = fs::remove_file(file);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let source = r#"
+use core.mem
+
+fn outside() => Int {
+    return 2
+}
+
+fn run() {
+    bytes := [U8#2].{ uninit }
+    bytes[0] = 1
+    bytes[1] = 2
+    print(bytes[outside()])
+}
+"#;
+    let mut bundle = bundle_of(source, "uninit_fixed_dynamic_oob");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
+        })
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "{}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    match run_cranelift_outcome_without_fallback(source, "uninit_fixed_dynamic_oob") {
+        RunOutcome::Problems(diagnostics) => assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0953"),
+            "{diagnostics:#?}"
+        ),
+        RunOutcome::Ran { stdout, .. } => {
+            panic!("dynamic out-of-bounds index unexpectedly ran: {stdout:?}")
+        }
+    }
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "dynamic out-of-bounds index used deopt or fallback"
+    );
+}
+
+#[test]
 fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
