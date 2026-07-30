@@ -1553,7 +1553,11 @@ impl<'a> Checker<'a> {
                                     Some(e.span()),
                                 ));
                             } else if let Some(want) = expected {
-                                if got != want {
+                                // D-NUMJOIN1=A: a numeric item widens into the
+                                // item type the loop is already building.
+                                if got != want && got.numeric_widening_to(&want).is_some() {
+                                    // accepted: the item widens losslessly
+                                } else if got != want {
                                     self.diags.push(Diagnostic::error(
                                         "E0074",
                                         "this yielding loop produces incompatible item types".to_string(),

@@ -570,6 +570,10 @@ impl<'a> Checker<'a> {
                                 *expected_type = Some(b.name());
                             }
                             Some(b)
+                        } else if let Some(joined) = a.numeric_join(&b) {
+                            // D-NUMJOIN1=A: two numeric producers follow the one
+                            // widening law, exactly as an operator's operands do.
+                            Some(joined)
                         } else {
                             if self.collect_item_types.is_empty() {
                                 self.diags.push(Diagnostic::error(
@@ -2282,9 +2286,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let first = elem_types.first()?.clone();
-        for (i, t) in elem_types.iter().enumerate().skip(1) {
+        // D-NUMJOIN1=A: numeric elements widen to one element type.
+        let mut first = elem_types.first()?.clone();
+        for t in elem_types.iter().skip(1) {
             if *t != first {
+                if let Some(joined) = first.numeric_join(t) {
+                    first = joined;
+                }
+            }
+        }
+        for (i, t) in elem_types.iter().enumerate().skip(1) {
+            if *t != first && t.numeric_widening_to(&first).is_none() {
                 self.diags.push(Diagnostic::error(
                     "E0504",
                     format!(
