@@ -111,8 +111,10 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
 /// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
 /// holds something with no wire form (a closure, handle, …), or a user type that
 /// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
-pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
-    if ty == crate::Syntax::TYPE_U64 {
+pub(crate) fn e2411(ty: &Type, encode: bool, span: Span) -> Diagnostic {
+    let shown = ty.show();
+    let ty = shown.as_str();
+    if matches!(ty_name_of(&shown), name if name == crate::Syntax::TYPE_U64) {
         let (verb, fix) = if encode {
             (
                 "serialized",
@@ -144,6 +146,12 @@ pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
         format!("add {marker} to {ty}, or remove it from the encoded value"),
         Some(span),
     )
+}
+
+/// The bare type name inside a shown type, i.e. `U64` in
+/// `U64 (a 64-bit whole number, 0 to 18446744073709551615)`.
+fn ty_name_of(shown: &str) -> &str {
+    shown.split_once(" (").map_or(shown, |(name, _)| name)
 }
 
 fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagnostic {
@@ -493,10 +501,10 @@ pub(crate) fn validate_serde_items(
                 }
                 // E2411: every encoded/decoded field must have a wire form.
                 if enc && !is_encodable_ty(&f.ty, reg) {
-                    out.push(e2411(&f.ty.show(), true, f.name_span));
+                    out.push(e2411(&f.ty, true, f.name_span));
                 }
                 if dec && !is_decodable_ty(&f.ty, reg) {
-                    out.push(e2411(&f.ty.show(), false, f.name_span));
+                    out.push(e2411(&f.ty, false, f.name_span));
                 }
                 if dec {
                     validate_union_decode_shapes(items, &f.ty, f.name_span, &mut out);
@@ -512,10 +520,10 @@ pub(crate) fn validate_serde_items(
                 };
                 for t in tys {
                     if enc && !is_encodable_ty(t, reg) {
-                        out.push(e2411(&t.show(), true, v.name_span));
+                        out.push(e2411(&t, true, v.name_span));
                     }
                     if dec && !is_decodable_ty(t, reg) {
-                        out.push(e2411(&t.show(), false, v.name_span));
+                        out.push(e2411(&t, false, v.name_span));
                     }
                     if dec {
                         validate_union_decode_shapes(items, t, v.name_span, &mut out);

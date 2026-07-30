@@ -436,6 +436,11 @@ fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
 }
 
 fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
+    // A snapshot must not depend on where the repository is checked out. A
+    // diagnostic that names a file inside its message text (E0921's memory-fact
+    // provenance, for one) renders an absolute path; make it repo-relative.
+    let root = format!("{}/", env!("CARGO_MANIFEST_DIR"));
+    let actual = actual.replace(&root, "");
     let actual = actual
         .lines()
         .filter(|line| !line.contains("Blocking waiting for file lock on package cache"))

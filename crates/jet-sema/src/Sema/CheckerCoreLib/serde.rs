@@ -118,13 +118,13 @@ impl<'a> Checker<'a> {
     
         pub(crate) fn check_encodable(&mut self, t: &Type, span: Span) {
             if !self.is_encodable(t) {
-                self.diags.push(e2411(&t.show(), true, span));
+                self.diags.push(e2411(&t, true, span));
             }
         }
 
         pub(crate) fn check_decodable(&mut self, t: &Type, span: Span) {
             if !self.is_decodable(t) {
-                self.diags.push(e2411(&t.show(), false, span));
+                self.diags.push(e2411(&t, false, span));
             }
         }
     
