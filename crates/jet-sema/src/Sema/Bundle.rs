@@ -884,7 +884,7 @@ fn builtin_type_registry() -> TypeRegistry {
 fn unit_fact(
     family: &crate::AST::UnitFamilyDef,
     type_name: &str,
-    dimension: crate::AST::Dimension,
+    dimension: Option<crate::AST::Dimension>,
     package: PathBuf,
 ) -> Option<UnitFact> {
     let affine = family.base.is_some()
@@ -1381,16 +1381,20 @@ fn check_bundle_opts_for_output_inner(
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         st.registry.unit_types.insert(d.name.clone());
-                        if let Some(ref dimension) = dimension {
+                        // D-DIMENSION-OPEN1=D: a family that names a base
+                        // unit relates its members by scale, dimension or not.
+                        // Without a base — currency, plain tags — members stay
+                        // unrelated nominal types with no conversion.
+                        if let Some(owner) = uf
+                            .resolved_owner
+                            .as_deref()
+                            .filter(|_| uf.base.is_some() || dimension.is_some())
+                        {
                             if let Some(fact) = unit_fact(
                                 uf,
                                 &d.name,
                                 dimension.clone(),
-                                PathBuf::from(
-                                    uf.resolved_owner
-                                        .as_deref()
-                                        .expect("resolved dimensions have a semantic owner"),
-                                ),
+                                PathBuf::from(owner),
                             ) {
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
                             }
@@ -3052,6 +3056,22 @@ fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
             definition.resolved_dimension = resolved;
             if definition.resolved_owner.is_none() {
                 definition.resolved_owner = Some(owner);
+            }
+        }
+    }
+
+    // D-DIMENSION-OPEN1=D: a family that never claimed a dimension still needs
+    // its owning package recorded, because its unit facts carry the scale,
+    // offset, and kind that same-family conversion depends on.
+    let owners = (0..bundle.modules.len())
+        .map(|module| stable_unit_owner(bundle, module).0)
+        .collect::<Vec<_>>();
+    for (module, owner) in owners.into_iter().enumerate() {
+        for item in &mut bundle.modules[module].items {
+            if let Item::UnitFamily(definition) = item {
+                if definition.resolved_owner.is_none() {
+                    definition.resolved_owner = Some(owner.clone());
+                }
             }
         }
     }

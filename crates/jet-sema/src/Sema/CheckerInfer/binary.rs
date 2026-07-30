@@ -677,7 +677,10 @@ impl<'a> Checker<'a> {
         let runit = self.unit_fact_for_type(&rt);
         let ldim = self.quantity_dimension(&lt);
         let rdim = self.quantity_dimension(&rt);
-        if ldim.is_some() || rdim.is_some() {
+        // D-DIMENSION-OPEN1=D: a nominal family has no dimension, and still
+        // owns unit conversion, affine points, and rounding policy.
+        let any_dimensional = ldim.is_some() || rdim.is_some();
+        if any_dimensional || lunit.is_some() || runit.is_some() {
             if let (Some((lname, lfact)), Some((rname, rfact))) = (&lunit, &runit) {
                 if lfact.package == rfact.package
                     && lfact.dimension == rfact.dimension
@@ -851,7 +854,7 @@ impl<'a> Checker<'a> {
                         if lt == rt {
                             return Some(lt);
                         }
-                    } else {
+                    } else if any_dimensional {
                         self.dimension_mismatch(
                             op,
                             ldim.unwrap_or_else(Dimension::scalar),
@@ -859,9 +862,13 @@ impl<'a> Checker<'a> {
                             span,
                         );
                         return None;
+                    } else if lt == rt {
+                        return Some(lt);
                     }
+                    // Two nominal families: the ordinary distinct-type rule
+                    // below reports the mismatch.
                 }
-                BinOp::Mul | BinOp::Div => {
+                BinOp::Mul | BinOp::Div if any_dimensional => {
                     if !self.quantity_base_is_compatible(&lt, &rt) {
                         self.op_mismatch(op, &lt, &rt, span);
                         return None;
@@ -887,7 +894,7 @@ impl<'a> Checker<'a> {
                     if lt == rt {
                         return Some(Type::Bool);
                     }
-                    if ldim != rdim {
+                    if any_dimensional && ldim != rdim {
                         self.dimension_mismatch(
                             op,
                             ldim.unwrap_or_else(Dimension::scalar),

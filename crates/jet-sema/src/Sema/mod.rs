@@ -138,7 +138,9 @@ pub(crate) struct UnitFact {
     package: std::path::PathBuf,
     family: String,
     member: String,
-    dimension: crate::AST::Dimension,
+    /// D-DIMENSION-OPEN1=D: `None` for a family that never opted into a
+    /// dimension. Its members still convert inside the family.
+    dimension: Option<crate::AST::Dimension>,
     scale: crate::AST::UnitRatio,
     scale_provenance: crate::AST::UnitScaleProvenance,
     offset: crate::AST::UnitRatio,
@@ -234,7 +236,7 @@ impl TypeRegistry {
     }
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
-        self.unit_facts.get(name).map(|fact| fact.dimension.clone())
+        self.unit_facts.get(name).and_then(|fact| fact.dimension.clone())
     }
 
     pub(crate) fn is_unit_type(&self, name: &str) -> bool {
@@ -1495,7 +1497,7 @@ impl<'a> Checker<'a> {
                     .any(|fact| {
                         fact.family == dimension
                             && fact.kind == QuantityKind::Linear
-                            && fact.dimension == actual_dimension
+                            && fact.dimension.as_ref() == Some(&actual_dimension)
                     });
         }
         self.trait_reg.type_implements_trait(ty, bound)
@@ -1523,7 +1525,7 @@ impl<'a> Checker<'a> {
         };
         if let Some((base, dimension)) = source_ty.quantity_parts() {
             if base == &Type::Float
-                && dimension == destination_fact.dimension
+                && destination_fact.dimension.as_ref() == Some(&dimension)
                 && destination_fact.kind == QuantityKind::Linear
                 && destination_fact.scale == crate::AST::UnitRatio::integer(1)
                 && destination_fact.offset == crate::AST::UnitRatio::zero()

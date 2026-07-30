@@ -1163,7 +1163,9 @@ impl<'a> Checker<'a> {
                 if let (Some(bound), Some((bd, be, bm))) = (&cb_bound, &cb_snapshot) {
                     self.record_callback_obligation(bound, bd, be, *bm, arg.expr.span());
                 }
-                if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _)) {
+                let write_needs_a_name =
+                    arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _));
+                if write_needs_a_name {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
@@ -1224,7 +1226,10 @@ impl<'a> Checker<'a> {
                         && crate::Sema::Diagnostics::expiring_secret_loan_matches(
                             &param_ty, &arg_ty,
                         );
-                    let reported = reads_expiring_secret_loan
+                    // E0202 already told the writer this argument needs a name;
+                    // a follow-up type mismatch on the same span is noise.
+                    let reported = write_needs_a_name
+                        || reads_expiring_secret_loan
                         || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                     // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                     // will emit .to_vec() on the argument.

@@ -12,7 +12,8 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 pub(crate) struct UnitFact {
     pub(crate) family: String,
-    pub(crate) dimension: crate::AST::Dimension,
+    /// `None` for a nominal family (D-DIMENSION-OPEN1=D).
+    pub(crate) dimension: Option<crate::AST::Dimension>,
     pub(crate) kind: crate::AST::QuantityKind,
     pub(crate) scale: crate::AST::UnitRatio,
     pub(crate) offset: crate::AST::UnitRatio,
@@ -62,7 +63,7 @@ fn unit_family_member_for_type<'a>(
 fn unit_fact(
     family: &crate::AST::UnitFamilyDef,
     member: &crate::AST::UnitFamilyMember,
-    dimension: crate::AST::Dimension,
+    dimension: Option<crate::AST::Dimension>,
     kind: crate::AST::QuantityKind,
 ) -> UnitFact {
     UnitFact {
@@ -643,7 +644,7 @@ impl Cx {
                         self.imported_type_metadata_name(name)
                             .and_then(|canonical| self.unit_facts.get(&canonical))
                     })
-                    .map(|fact| fact.dimension.clone())
+                    .and_then(|fact| fact.dimension.clone())
             })
     }
 
@@ -2267,8 +2268,9 @@ pub(crate) fn register_bundle_unit_metadata(
                     };
                     cx.unit_labels
                         .insert(name.clone(), unit_label(family, source));
-                    if let Some(ref dimension) = dimension {
-                        cx.unit_facts.insert(name, unit_fact(family, source, dimension.clone(), kind));
+                    if family.base.is_some() || dimension.is_some() {
+                        cx.unit_facts
+                            .insert(name, unit_fact(family, source, dimension.clone(), kind));
                     }
                 }
             }
@@ -3079,8 +3081,10 @@ pub(crate) fn build_cx_items(
                         cx.unit_labels
                             .insert(d.name.clone(), unit_label(uf, member));
                     }
-                    if let (Some(dimension), Some((_, kind))) =
-                        (dimension.as_ref(), d.quantity.as_ref())
+                    if let Some((_, kind)) = d
+                        .quantity
+                        .as_ref()
+                        .filter(|_| uf.base.is_some() || dimension.is_some())
                     {
                         if let Some(member) = unit_family_member_for_type(uf, &d.name, *kind) {
                             cx.unit_facts.insert(
