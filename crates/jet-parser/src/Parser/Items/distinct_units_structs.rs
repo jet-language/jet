@@ -473,7 +473,7 @@ impl<'a> Parser<'a> {
                     format!("derived dimension `{family}` has no canonical base"),
                     "every derived dimension needs one member whose scale is exactly one"
                         .to_string(),
-                    "add `base: newton` and keep that member's scale at 1 with offset 0"
+                    "add `base: member_name` and keep that member's scale at 1 with offset 0"
                         .to_string(),
                     Some(family_span),
                 ));

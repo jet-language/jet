@@ -64,13 +64,17 @@ fn open_base_and_derived_dimension_claims_parse() {
 
 #[test]
 fn derived_dimension_requires_one_scale_one_anchor() {
-    let src = "#UnitFamily(Force, dimension: Mass * Length) { newton }";
+    let src = "#UnitFamily(Energy, dimension: Force * Length) { joule }";
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
     let diagnostics = jet::Parser::parse(&tokens).expect_err("a derived dimension needs `base:`");
     assert_eq!(
         diagnostics.iter().map(|diagnostic| diagnostic.code.as_str()).collect::<Vec<_>>(),
         ["E0003"]
+    );
+    assert_eq!(
+        diagnostics[0].fix,
+        "add `base: member_name` and keep that member's scale at 1 with offset 0"
     );
 }
 
