@@ -22,6 +22,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         tasks: Vec::new(),
         task_controls: Vec::new(),
         task_groups: Vec::new(),
+        cells: crate::Cell::CellState::new(),
         results: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),

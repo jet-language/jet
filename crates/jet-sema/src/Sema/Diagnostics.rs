@@ -287,6 +287,11 @@ fn is_cloneable_rec(
             result
         }
         Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite") => false,
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+        {
+            false
+        }
         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
         Type::Apply { args, .. } => args
             .iter()

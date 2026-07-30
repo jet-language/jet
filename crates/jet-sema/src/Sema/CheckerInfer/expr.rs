@@ -1278,7 +1278,28 @@ impl<'a> Checker<'a> {
                 if resource
                     || (!type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry))
                 {
-                    let (why, fix) = if resource {
+                    let cell_guard = matches!(
+                        &inner_t,
+                        Type::Apply { name, .. }
+                            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                    );
+                    let shown = match &inner_t {
+                        Type::Apply { name, args }
+                            if cell_guard && args.len() == 1 =>
+                        {
+                            format!("{name}<{}>", args[0].name())
+                        }
+                        _ => inner_t.show(),
+                    };
+                    let (why, fix) = if cell_guard {
+                        (
+                            "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan".to_string(),
+                            format!(
+                                "move it instead with `{}guard`, or create a new guard after this one is dropped",
+                                Syntax::SIGIL_MOVE
+                            ),
+                        )
+                    } else if resource {
                         (
                             "a resource owns one cleanup duty; copying it would create two owners that could close the same handle".to_string(),
                             format!("move it instead with `{}name`, or acquire a second resource", Syntax::SIGIL_MOVE),
@@ -1294,7 +1315,7 @@ impl<'a> Checker<'a> {
                     };
                     self.diags.push(Diagnostic::error(
                         "E0211",
-                        format!("`{}` can't be copied", inner_t.show()),
+                        format!("`{shown}` can't be copied"),
                         why,
                         fix,
                         Some(*span),

@@ -947,15 +947,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr(recv, callees)
                 && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
         }
-        TExprKind::StaticCall { owner, args, .. } => {
-            !matches!(
-                owner,
-                TIR::TStaticOwner::Prelude { path, .. }
-                    if matches!(
-                        path.as_str(),
-                        "jet_std::JetCell" | "jet_std::jet_cell::JetCell"
-                    )
-            ) && args.iter().all(|a| resident_safe_call_arg(a, callees))
+        TExprKind::StaticCall { args, .. } => {
+            args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
         TExprKind::AllocNew { .. } => true,
         TExprKind::PoolSlot { pool, id, .. } => {
@@ -1181,16 +1174,33 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
             THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
-            THostCall::CellGuardProject { .. } => false,
-            THostCall::Method { recv, args, .. } => {
-                !matches!(
-                    &recv.ty,
-                    Type::Apply { name, .. }
-                        if matches!(
-                            name.as_str(),
-                            "Cell" | "CellReadGuard" | "CellEditGuard"
-                        )
-                ) && resident_safe_expr(recv, callees)
+            // Sema emits this node only after proving the receiver is a live
+            // Cell guard and every projected path is valid and disjoint.
+            THostCall::CellGuardProject { .. } => true,
+            THostCall::Method {
+                recv,
+                method,
+                args,
+                ..
+            } => {
+                let cell_method_supported = match &recv.ty {
+                    Type::Apply { name, .. } if name == "Cell" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get" | "guard_read" | "guard_edit", 0)
+                            | ("set" | "replace" | "get_or_set" | "read" | "edit", 1)
+                    ),
+                    Type::Apply { name, .. } if name == "CellReadGuard" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get", 0) | ("read", 1)
+                    ),
+                    Type::Apply { name, .. } if name == "CellEditGuard" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get", 0) | ("set" | "read" | "edit", 1)
+                    ),
+                    _ => true,
+                };
+                cell_method_supported
+                    && resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
             }
             THostCall::Helper { helper, args }
@@ -1926,6 +1936,23 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             _ => 0,
                         }
                     && resident_safe_expr(init, callees))
+                || (matches!(
+                    &init.ty,
+                    Type::Tuple(fields)
+                        if fields.len() == binds.len()
+                            && fields.iter().all(|(_, ty)| matches!(
+                                ty.as_ref(),
+                                Type::Apply { name, .. }
+                                    if matches!(
+                                        name.as_str(),
+                                        "CellReadGuard" | "CellEditGuard"
+                                    )
+                            ))
+                ) && matches!(
+                    &init.kind,
+                    TExprKind::HostCall(host)
+                        if matches!(host.as_ref(), THostCall::CellGuardProject { .. })
+                ))
         }
         TStmt::ListDestructure { init, elems, .. } => {
             jit_list_native_type(&init.ty)

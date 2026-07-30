@@ -14,6 +14,7 @@
 mod Archive;
 mod Args;
 mod ambient_interp;
+mod Cell;
 mod CLI;
 mod Collections;
 mod Compress;

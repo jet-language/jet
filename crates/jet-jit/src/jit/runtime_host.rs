@@ -9,8 +9,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
-    Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Archive, Cell as LocalCell, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt,
+    JitResultValue, Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time,
+    TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 thread_local! {
@@ -82,6 +83,8 @@ pub(crate) struct JitRuntime {
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     pub(crate) task_groups:
         Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
+    /// D-LOCALCELL1=A: one-thread canonical Cell values and guards.
+    pub(crate) cells: LocalCell::CellState,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
@@ -1573,6 +1576,7 @@ pub(crate) struct HostFns {
     pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
     pub(crate) memory: Memory::MemoryHostFns,
+    pub(crate) cell: LocalCell::CellHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
@@ -1777,6 +1781,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Memory::register_memory_symbols(&mut builder);
+    LocalCell::register_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
@@ -1822,6 +1827,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
+    let cell = LocalCell::declare_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
@@ -1857,6 +1863,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         &mut module,
         coll,
         memory,
+        cell,
         conc,
         core,
         encoding,
@@ -2039,6 +2046,7 @@ fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
     memory: Memory::MemoryHostFns,
+    cell: LocalCell::CellHostFns,
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
@@ -2405,6 +2413,7 @@ fn declare_host_fns(
         deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
         memory,
+        cell,
         conc,
         core,
         encoding,

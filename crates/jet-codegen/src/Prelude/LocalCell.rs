@@ -164,6 +164,14 @@ impl<T: Clone> JetCellOptionLike for Option<T> {
 }
 
 impl<T: JetCellOptionLike + 'static> JetCell<T> {
+    pub fn begin_get_or_set(&self) -> JetCellGetOrSet<T> {
+        let guard = self.guard_edit();
+        match guard.read(|slot| slot.value().cloned()) {
+            Some(value) => JetCellGetOrSet::Value(value),
+            None => JetCellGetOrSet::Empty(guard),
+        }
+    }
+
     pub fn get_or_set<F>(&self, init: F) -> T::Value
     where
         F: FnOnce() -> T::Value,
@@ -176,12 +184,28 @@ impl<T: JetCellOptionLike + 'static> JetCell<T> {
     where
         F: FnOnce() -> Result<T::Value, E>,
     {
-        self.edit(|slot| {
-            if slot.value().is_none() {
-                slot.store(init()?);
+        match self.begin_get_or_set() {
+            JetCellGetOrSet::Value(value) => Ok(value),
+            JetCellGetOrSet::Empty(guard) => {
+                let value = init()?;
+                guard.store_option_value(value.clone());
+                Ok(value)
             }
-            Ok(slot.value().expect("Cell was initialized").clone())
-        })
+        }
+    }
+}
+
+pub enum JetCellGetOrSet<T: JetCellOptionLike + 'static> {
+    Value(T::Value),
+    Empty(JetCellEditGuard<T>),
+}
+
+impl<T: JetCellOptionLike + 'static> JetCellEditGuard<T> {
+    /// Canonical completion of an empty optional slot. Runtime tiers may
+    /// marshal the value, but they must call this policy instead of rebuilding
+    /// the `Some` representation themselves.
+    pub fn store_option_value(&self, value: T::Value) {
+        self.edit(|slot| slot.store(value));
     }
 }
 

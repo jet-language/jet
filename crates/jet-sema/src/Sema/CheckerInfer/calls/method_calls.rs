@@ -3102,15 +3102,10 @@ impl<'a> Checker<'a> {
                     {
                         let result =
                             self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-                        // Guard projection callbacks refine the placeholder
-                        // table return to their sema-validated terminal field
-                        // types. Persist that exact fact for every later tier.
-                        if matches!(
-                            (name.as_str(), method),
-                            ("CellReadGuard" | "CellEditGuard", "map" | "split")
-                        ) {
-                            *resolved_ret_out = result.clone();
-                        }
+                        // Cell methods refine the builtin table's placeholder
+                        // return from the checked receiver and callback types.
+                        // Persist that exact fact for every later tier.
+                        *resolved_ret_out = result.clone();
                         *recv_type_out = Some(name.clone());
                         return result;
                     }
