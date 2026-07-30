@@ -3,37 +3,34 @@
 use super::{ExternFn, Type};
 use std::path::{Path, PathBuf};
 
-fn hidden_c_bridge_type(ty: &Type) -> bool {
-    match ty {
-        Type::Int
-        | Type::Float
-        | Type::Bool
-        | Type::Char
-        | Type::String
-        | Type::IntN { .. }
-        | Type::Float32 => true,
-        Type::Fn { params, ret, .. } => {
-            params.iter().all(hidden_c_bridge_type)
-                && ret.as_deref().is_none_or(hidden_c_bridge_type)
-        }
-        Type::Tagged { inner, .. } => hidden_c_bridge_type(inner),
-        _ => false,
-    }
-}
-
 impl ExternFn {
-    /// Whether this C signature can cross the separate hidden Rust bridge crate.
+    /// Whether the resident JIT can execute this signature through the hidden bridge.
     ///
-    /// Program-local structs, enums, distinct types, and pointer targets must
-    /// use CModule's direct wrapper, where their generated Rust types exist.
+    /// Every other valid C signature stays on CModule's direct wrapper path.
     pub fn hidden_c_bridge_compatible(&self) -> bool {
-        self.params
-            .iter()
-            .all(|param| hidden_c_bridge_type(&param.ty))
-            && self
-                .return_type
-                .as_ref()
-                .is_none_or(hidden_c_bridge_type)
+        match self.return_type.as_ref() {
+            None => {
+                self.params.is_empty()
+                    || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+            }
+            Some(Type::Int) => {
+                self.params.is_empty()
+                    || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+                    || matches!(
+                        self.params.as_slice(),
+                        [left, right] if left.ty == Type::Int && right.ty == Type::Int
+                    )
+            }
+            Some(Type::Float) => {
+                matches!(self.params.as_slice(), [param] if param.ty == Type::Float)
+                    || (self.params.len() == 6
+                        && self.params.iter().all(|param| param.ty == Type::Float))
+            }
+            Some(Type::String) => {
+                matches!(self.params.as_slice(), [param] if param.ty == Type::String)
+            }
+            _ => false,
+        }
     }
 }
 

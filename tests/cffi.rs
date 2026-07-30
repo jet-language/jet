@@ -480,7 +480,17 @@ fn build_c_lib(dir: &Path) -> Option<(PathBuf, String)> {
         &c_src,
         r#"
 #include <stdint.h>
+static long long jetc_value = 0;
+void jetc_reset(void) { jetc_value = 7; }
+long long jetc_value_get(void) { return jetc_value; }
+void jetc_store(long long value) { jetc_value = value; }
+long long jetc_twice(long long value) { return value * 2; }
 long long jetc_add_ints(long long a, long long b) { return a + b; }
+double jetc_half(double value) { return value / 2.0; }
+double jetc_sum6(double a, double b, double c, double d, double e, double f) {
+    return a + b + c + d + e + f;
+}
+const char *jetc_echo(const char *value) { return value; }
 const char *jetc_greeting(void) { return "hi from C"; }
 "#,
     )
@@ -677,7 +687,14 @@ fn cffi_end_to_end_links_and_runs() {
     fs::write(
         cache.join("jetc.jet"),
         r#"#Bindgen module c.jetc.__bindgen__ {
+    fn reset() = "jetc_reset";
+    fn value() => Int = "jetc_value_get";
+    fn store(value: Int) = "jetc_store";
+    fn twice(value: Int) => Int = "jetc_twice";
     fn add_ints(a: Int, b: Int) => Int = "jetc_add_ints";
+    fn half(value: Float) => Float = "jetc_half";
+    fn sum6(a: Float, b: Float, c: Float, d: Float, e: Float, f: Float) => Float = "jetc_sum6";
+    fn echo(value: String) => String = "jetc_echo";
     fn greeting() => String = "jetc_greeting";
 }
 "#,
@@ -741,6 +758,48 @@ fn run() {
     let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "C-FFI program failed at runtime");
     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\nhi from C\n");
+
+    let jit = root.join("jit.jet");
+    fs::write(
+        &jit,
+        r#"use c.jetc as jc;
+
+fn run() {
+    jc.reset()
+    print(jc.value())
+    jc.store(9)
+    print(jc.value())
+    print(jc.twice(21))
+    print(jc.add_ints(2, 40))
+    print(jc.half(5.0))
+    print(jc.sum6(1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+    print(jc.echo("hi"))
+}
+"#,
+    )
+    .unwrap();
+    let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "jit.jet", "--trace-tiers"])
+        .current_dir(&root)
+        .env("JET_RUN_CACHE_DIR", root.join("run-cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run every admitted hidden C-bridge signature");
+    let jit_stderr = String::from_utf8_lossy(&jit_run.stderr);
+    assert_eq!(jit_run.status.code(), Some(0), "{jit_stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&jit_run.stdout),
+        "7\n9\n42\n42\n2.5\n21.0\nhi\n"
+    );
+    assert!(
+        jit_stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "{jit_stderr}"
+    );
+    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
+    assert!(!jit_stderr.contains("unbound wrapper"), "{jit_stderr}");
+    assert!(!jit_stderr.contains("unsupported signature"), "{jit_stderr}");
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -878,11 +937,11 @@ fn run() {
             jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
         )
     });
-    // #1317: the hidden bridge keeps the scalar symbols for JIT use, but the
-    // local `Coord` and `Meters` ABI stays on the direct CModule wrapper path.
+    // #1317: none of these signatures are executable by the resident JIT
+    // adapter, so they must all stay on the direct CModule wrapper path.
     assert!(
-        out.ffi.is_some(),
-        "scalar C ABI symbols must keep their generated bridge"
+        out.ffi.is_none(),
+        "unsupported resident-JIT signatures must not enter the hidden bridge"
     );
     assert!(
         !out.rust.contains("/* unsupported"),
@@ -904,12 +963,6 @@ fn run() {
         .arg(format!("native={}", lib_dir.display()))
         .arg("-l")
         .arg(&lib_name);
-    add_ffi_bridge_args(
-        &mut rustc,
-        out.ffi
-            .as_ref()
-            .expect("C ABI fixture needs its generated bridge"),
-    );
     let status = rustc.output().unwrap();
     assert!(
         status.status.success(),
@@ -967,7 +1020,7 @@ fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41
     assert!(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("user_Lost = 7") && out.rust.contains("user_Ping(i64) = 3"));
     assert!(out.rust.contains("typedef uint8_t Packet_Tag;") && out.rust.contains("typedef union Packet_Payload") && out.rust.contains("typedef struct Packet"));
     fs::write(root.join("main.rs"),&out.rust).unwrap();
-    let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lreprc2"); add_ffi_bridge_args(&mut rustc,out.ffi.as_ref().expect("repr(C) fixture needs its generated bridge")); let built=rustc.output().unwrap();
+    let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lreprc2"); let built=rustc.output().unwrap();
     assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap();
     assert!(run.status.success(),"{}",String::from_utf8_lossy(&run.stderr)); assert_eq!(String::from_utf8_lossy(&run.stdout),"7\n341\n24\n8\n8\n");
     let _=fs::remove_dir_all(root);
@@ -993,22 +1046,16 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
     assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
     fs::write(root.join("main.rs"),out.rust).unwrap();
-    let link = out.ffi.as_ref().expect("C callback fixture needs its generated bridge");
     let mut rustc = Command::new("rustc");
     rustc
         .args(["--edition", "2021"])
         .arg(root.join("main.rs"))
         .arg("-o")
         .arg(root.join("main_bin"))
-        .arg("--extern")
-        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()))
         .arg("-L")
         .arg(format!("native={}", root.display()))
         .arg("-lcb")
         .arg("-lpthread");
-    for deps_dir in link.dependency_dirs() {
-        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-    }
     let built = rustc.output().unwrap();
     assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n40\n"); let _=fs::remove_dir_all(root);
 }
@@ -1062,7 +1109,7 @@ fn cffi_sysv64_abi_executes_native_symbol() {
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
     declare_local_c_dep(&root, "abi");
     let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) => I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
-    fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi"); add_ffi_bridge_args(&mut rustc,out.ffi.as_ref().expect("ABI fixture needs its generated bridge")); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
+    fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi"); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1072,7 +1119,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
     fs::write(root.join("strret.c"),"const char* good(void){return \"caf\\xC3\\xA9\";} const char* null_s(void){return 0;} const char* bad(void){static const char s[]={ (char)0xff,0 };return s;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
     declare_local_c_dep(&root, "strret");
-    for (name, expected, success) in [("good","café\n",true),("null_s","foreign function panicked",false),("bad","foreign function panicked",false)] {
+    for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
         let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() => String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
         let wrapper = out.rust
             .split_once("pub fn user_get() -> String {\n")
@@ -1088,7 +1135,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         assert!(wrapper.contains(".to_owned()"));
         assert!(!wrapper.contains("to_string_lossy"));
         assert!(!wrapper.contains("/* unsupported:"));
-        let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret"); add_ffi_bridge_args(&mut rustc,out.ffi.as_ref().expect("string return fixture needs its generated bridge")); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
+        let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret"); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
     }
     let _=fs::remove_dir_all(root);
 }
@@ -1152,13 +1199,8 @@ fn run() {
         .arg("-o")
         .arg(&bin)
         .arg("-L")
-        .arg(format!("native={}", root.display()));
-    add_ffi_bridge_args(
-        &mut rustc,
-        out.ffi
-            .as_ref()
-            .expect("runtime NUL fixture needs its generated bridge"),
-    );
+        .arg(format!("native={}", root.display()))
+        .arg("-ljetc436");
     let status = rustc.output().unwrap();
     assert!(
         status.status.success(),
