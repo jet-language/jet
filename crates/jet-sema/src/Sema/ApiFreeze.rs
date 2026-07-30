@@ -482,6 +482,7 @@ pub fn collect_api_unit_dimensions(
         match item {
             Item::UnitFamily(family) => {
                 if let Some(dimension) = resolved.get(&family.family).cloned() {
+                    let owner = family.resolved_owner.as_deref().unwrap_or(package);
                     let base = family
                         .base
                         .as_ref()
@@ -526,7 +527,7 @@ pub fn collect_api_unit_dimensions(
                                 },
                                 |base| {
                                     format!(
-                                        "{{package={package}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
+                                        "{{package={owner}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
                                         family.family,
                                         dimension.identity(),
                                         member.scale,
@@ -919,6 +920,7 @@ mod tests {
             family_span: zero(),
             dimension: Some(crate::AST::UnitDimensionDecl::Base(zero())),
             resolved_dimension: Some(crate::AST::Dimension::base("api::Length")),
+            resolved_owner: Some("api".into()),
             base: None,
             members: vec![UnitFamilyMember {
                 name: "meter".into(),

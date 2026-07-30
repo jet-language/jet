@@ -443,6 +443,7 @@ impl<'a> Parser<'a> {
                     Ok(crate::AST::UnitDimensionDecl::Base(*span))
                 }
                 crate::AST::Expr::Ident(_, _)
+                | crate::AST::Expr::Field(_, _, _)
                 | crate::AST::Expr::Binary(crate::AST::BinOp::Mul | crate::AST::BinOp::Div, _, _, _) => {
                     Ok(crate::AST::UnitDimensionDecl::Derived(value.clone()))
                 }
@@ -464,6 +465,19 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
+            if matches!(dimension, Some(crate::AST::UnitDimensionDecl::Derived(_)))
+                && base.is_none()
+            {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("derived dimension `{family}` has no canonical base"),
+                    "every derived dimension needs one member whose scale is exactly one"
+                        .to_string(),
+                    "add `base: newton` and keep that member's scale at 1 with offset 0"
+                        .to_string(),
+                    Some(family_span),
+                ));
+            }
             self.expect(TokKind::LBrace, "to open the unit family member list")?;
             let mut members = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -580,6 +594,7 @@ impl<'a> Parser<'a> {
                 family_span,
                 dimension,
                 resolved_dimension: None,
+                resolved_owner: None,
                 base,
                 members,
                 span: Span::new(marker.span.start, end),

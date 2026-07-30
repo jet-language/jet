@@ -1480,9 +1480,24 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn type_satisfies_bound(&self, ty: &Type, bound: &str) -> bool {
         if let Some((dimension, kind)) = crate::Generics::parse_quantity_bound(bound) {
-            return self.unit_fact_for_type(ty).is_some_and(|(_, fact)| {
-                fact.family == dimension && fact.kind.name() == kind
-            });
+            if let Some((_, fact)) = self.unit_fact_for_type(ty) {
+                return fact.family == dimension && fact.kind.name() == kind;
+            }
+            let Some((_, actual_dimension)) = ty.quantity_parts() else {
+                return false;
+            };
+            return kind == QuantityKind::Linear.name()
+                && (self.registry.unit_facts.values().chain(
+                    self.modules
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|module| module.registry.unit_facts.values()),
+                ))
+                    .any(|fact| {
+                        fact.family == dimension
+                            && fact.kind == QuantityKind::Linear
+                            && fact.dimension == actual_dimension
+                    });
         }
         self.trait_reg.type_implements_trait(ty, bound)
     }

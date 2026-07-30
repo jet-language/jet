@@ -940,7 +940,7 @@ fn canonical_lock_source(
     format!("path:{relative}")
 }
 
-fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Path, Option<&'a str>) {
+pub(super) fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Path, Option<&'a str>) {
     bundle.dep_roots.iter()
         .filter(|(_, root)| module_path.starts_with(root))
         .max_by_key(|(_, root)| root.components().count())
@@ -948,7 +948,7 @@ fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Pat
         .unwrap_or((bundle.project_root.as_path(), None))
 }
 
-fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
+pub(super) fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
     let manifest = std::fs::read_to_string(root.join(crate::Syntax::PAYLOAD_FILE)).unwrap_or_default();
     let name = quoted_field(&manifest, "name").or_else(|| dependency_name.map(str::to_string)).unwrap_or_else(|| "workspace".into());
     let version = canonical_semver(&quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into()));

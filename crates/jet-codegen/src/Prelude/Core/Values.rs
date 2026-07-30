@@ -17,6 +17,10 @@ trait JetQuantity: Sized {
     fn raw(&self) -> f64;
     fn from_float(value: f64) -> Self;
 }
+impl JetQuantity for f64 {
+    fn raw(&self) -> f64 { *self }
+    fn from_float(value: f64) -> Self { value }
+}
 
 // D-RANGE-VALUE1=A: one allocation-free integer range value. Both source
 // spellings use this type; `exclusive` selects the half-open end.

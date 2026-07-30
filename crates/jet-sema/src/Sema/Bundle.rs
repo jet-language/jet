@@ -1386,7 +1386,11 @@ fn check_bundle_opts_for_output_inner(
                                 uf,
                                 &d.name,
                                 dimension.clone(),
-                                st.package_scope.clone(),
+                                PathBuf::from(
+                                    uf.resolved_owner
+                                        .as_deref()
+                                        .expect("resolved dimensions have a semantic owner"),
+                                ),
                             ) {
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
                             }
@@ -2607,8 +2611,7 @@ fn check_bundle_opts_for_output_inner(
 }
 
 /// Load the standard dimension catalog from ordinary Jet source. Local names
-/// shadow prelude members, while a same-named family inherits the prelude's
-/// dimension claim so old local unit spellings remain coherent.
+/// shadow Prelude members; physical dimension behavior remains explicit opt-in.
 fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Units.jet");
     let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
@@ -2678,14 +2681,11 @@ fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
             }
         }
         for standard in &prelude {
-            if let Some(local) = module.items.iter_mut().find_map(|item| match item {
-                Item::UnitFamily(local) if local.family == standard.family => Some(local),
-                _ => None,
-            }) {
-                if local.dimension.is_none() {
-                    local.dimension = standard.dimension.clone();
-                    local.resolved_dimension = standard.resolved_dimension.clone();
-                }
+            if module
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::UnitFamily(local) if local.family == standard.family))
+            {
                 continue;
             }
             let mut standard = standard.clone();
@@ -2777,9 +2777,19 @@ fn resolve_standard_unit_dimensions(prelude: &mut [crate::AST::UnitFamilyDef]) {
             let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension else {
                 continue;
             };
-            let Some(dimension) =
-                resolve_dimension_expression(expression, &|name| known.get(name).cloned())
-            else {
+            let DimensionLookup::Found(dimension) = resolve_dimension_expression(
+                expression,
+                &|qualifier, name| {
+                    if qualifier.is_none() {
+                        known
+                            .get(name)
+                            .cloned()
+                            .map_or(DimensionLookup::Missing, DimensionLookup::Found)
+                    } else {
+                        DimensionLookup::Missing
+                    }
+                },
+            ) else {
                 continue;
             };
             known.insert(family.family.clone(), dimension);
@@ -2791,7 +2801,22 @@ fn resolve_standard_unit_dimensions(prelude: &mut [crate::AST::UnitFamilyDef]) {
     }
     for family in prelude {
         family.resolved_dimension = known.get(&family.family).cloned();
+        family.resolved_owner = Some("core.units".to_string());
     }
+}
+
+fn stable_unit_owner(bundle: &ProgramBundle, module: usize) -> (String, String) {
+    let module = &bundle.modules[module];
+    let (package_root, dependency_name) =
+        GenericModules::owning_package(bundle, &module.path);
+    let package = GenericModules::package_identity(bundle, package_root, dependency_name);
+    let module_path = module
+        .path
+        .strip_prefix(package_root)
+        .unwrap_or(&module.path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    (package.clone(), format!("{package}::{module_path}"))
 }
 
 /// Resolve open unit dimensions before registration. The declaration graph is
@@ -2845,6 +2870,24 @@ fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
+    let import_aliases = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(module_index, module)| {
+            module
+                .imports
+                .iter()
+                .filter_map(|import| {
+                    bundle
+                        .import_targets
+                        .get(&(module_index, import.span))
+                        .copied()
+                        .map(|target| (import.import_alias(), target))
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .collect::<Vec<_>>();
     let mut known = HashMap::<(usize, String), crate::AST::Dimension>::new();
     for declaration in &declarations {
         if let Some(dimension) = declaration.preset.clone() {
@@ -2853,15 +2896,13 @@ fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
                 dimension,
             );
         } else if matches!(declaration.claim, crate::AST::UnitDimensionDecl::Base(_)) {
-            let package = package_scope_for(
-                &bundle.modules[declaration.module].path,
-                &bundle.project_root,
-            )
-            .to_string_lossy()
-            .replace('\\', "/");
+            let (_, module_identity) = stable_unit_owner(bundle, declaration.module);
             known.insert(
                 (declaration.module, declaration.family.clone()),
-                crate::AST::Dimension::base(format!("{package}::{}", declaration.family)),
+                crate::AST::Dimension::base(format!(
+                    "{module_identity}::{}",
+                    declaration.family
+                )),
             );
         }
     }
@@ -2880,29 +2921,56 @@ fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
             let crate::AST::UnitDimensionDecl::Derived(expression) = &declaration.claim else {
                 unreachable!()
             };
-            let visible = |name: &str| {
-                known
-                    .get(&(declaration.module, name.to_string()))
-                    .cloned()
-                    .or_else(|| {
-                        imported_modules[declaration.module].iter().find_map(|target| {
-                            declarations
-                                .iter()
-                                .find(|candidate| {
-                                    candidate.module == *target
-                                        && candidate.is_pub
-                                        && candidate.family == name
-                                })
-                                .and_then(|candidate| {
-                                    known
-                                        .get(&(candidate.module, candidate.family.clone()))
-                                        .cloned()
-                                })
+            let visible = |qualifier: Option<&str>, name: &str| {
+                if let Some(alias) = qualifier {
+                    let Some(target) = import_aliases[declaration.module].get(alias) else {
+                        return DimensionLookup::Missing;
+                    };
+                    let Some(candidate) = declarations.iter().find(|candidate| {
+                        candidate.module == *target
+                            && candidate.is_pub
+                            && candidate.family == name
+                    }) else {
+                        return DimensionLookup::Missing;
+                    };
+                    return known
+                        .get(&(candidate.module, candidate.family.clone()))
+                        .cloned()
+                        .map_or(DimensionLookup::Missing, DimensionLookup::Found);
+                }
+                if declarations.iter().any(|candidate| {
+                    candidate.module == declaration.module && candidate.family == name
+                }) {
+                    return known
+                        .get(&(declaration.module, name.to_string()))
+                        .cloned()
+                        .map_or(DimensionLookup::Missing, DimensionLookup::Found);
+                }
+                let candidates = imported_modules[declaration.module]
+                    .iter()
+                    .copied()
+                    .filter(|target| {
+                        declarations.iter().any(|candidate| {
+                            candidate.module == *target
+                                && candidate.is_pub
+                                && candidate.family == name
                         })
                     })
+                    .collect::<HashSet<_>>();
+                if candidates.len() > 1 {
+                    return DimensionLookup::Ambiguous(name.to_string());
+                }
+                let Some(target) = candidates.into_iter().next() else {
+                    return DimensionLookup::Missing;
+                };
+                known
+                    .get(&(target, name.to_string()))
+                    .cloned()
+                    .map_or(DimensionLookup::Missing, DimensionLookup::Found)
             };
-            let Some(dimension) = resolve_dimension_expression(expression, &visible) else {
-                return true;
+            let dimension = match resolve_dimension_expression(expression, &visible) {
+                DimensionLookup::Found(dimension) => dimension,
+                DimensionLookup::Missing | DimensionLookup::Ambiguous(_) => return true,
             };
             known.insert(
                 (declaration.module, declaration.family.clone()),
@@ -2917,45 +2985,118 @@ fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     }
 
     let mut diagnostics = Vec::new();
-    for declaration in declarations {
+    for declaration in &declarations {
         let resolved = known
             .get(&(declaration.module, declaration.family.clone()))
             .cloned();
         if resolved.is_none() {
-            diagnostics.push(Diagnostic::error(
-                "E0905",
-                format!("dimension `{}` cannot be resolved", declaration.family),
-                "derived dimensions can use visible declared dimensions and cannot form a cycle"
-                    .to_string(),
-                "import or declare every base dimension and remove any dimension cycle".to_string(),
-                Some(declaration.span),
-            ));
+            let ambiguity = match &declaration.claim {
+                crate::AST::UnitDimensionDecl::Derived(expression) => {
+                    let visible = |qualifier: Option<&str>, name: &str| {
+                        if qualifier.is_some() {
+                            return DimensionLookup::Missing;
+                        }
+                        if declarations.iter().any(|candidate| {
+                            candidate.module == declaration.module
+                                && candidate.family == name
+                        }) {
+                            return DimensionLookup::Missing;
+                        }
+                        let matches = imported_modules[declaration.module]
+                            .iter()
+                            .copied()
+                            .filter(|target| {
+                                declarations.iter().any(|candidate| {
+                                    candidate.module == *target
+                                        && candidate.is_pub
+                                        && candidate.family == name
+                                })
+                            })
+                            .collect::<HashSet<_>>();
+                        if matches.len() > 1 {
+                            DimensionLookup::Ambiguous(name.to_string())
+                        } else {
+                            DimensionLookup::Missing
+                        }
+                    };
+                    match resolve_dimension_expression(expression, &visible) {
+                        DimensionLookup::Ambiguous(name) => Some(name),
+                        _ => None,
+                    }
+                }
+                crate::AST::UnitDimensionDecl::Base(_) => None,
+            };
+            diagnostics.push(if let Some(name) = ambiguity {
+                Diagnostic::error(
+                    "E0905",
+                    format!("dimension name `{name}` is ambiguous"),
+                    "more than one imported module exports that dimension".to_string(),
+                    format!("qualify it with the intended module alias, such as `dep.{name}`"),
+                    Some(declaration.span),
+                )
+            } else {
+                Diagnostic::error(
+                    "E0905",
+                    format!("dimension `{}` cannot be resolved", declaration.family),
+                    "derived dimensions can use visible declared dimensions and cannot form a cycle"
+                        .to_string(),
+                    "import or declare every base dimension and remove any dimension cycle".to_string(),
+                    Some(declaration.span),
+                )
+            });
         }
+        let owner = stable_unit_owner(bundle, declaration.module).0;
         if let Item::UnitFamily(definition) =
             &mut bundle.modules[declaration.module].items[declaration.item]
         {
             definition.resolved_dimension = resolved;
+            if definition.resolved_owner.is_none() {
+                definition.resolved_owner = Some(owner);
+            }
         }
     }
     diagnostics
 }
 
+enum DimensionLookup {
+    Found(crate::AST::Dimension),
+    Missing,
+    Ambiguous(String),
+}
+
 fn resolve_dimension_expression(
     expression: &crate::AST::Expr,
-    visible: &impl Fn(&str) -> Option<crate::AST::Dimension>,
-) -> Option<crate::AST::Dimension> {
+    visible: &impl Fn(Option<&str>, &str) -> DimensionLookup,
+) -> DimensionLookup {
     match expression {
-        crate::AST::Expr::Ident(name, _) => visible(name),
-        crate::AST::Expr::Binary(op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div), left, right, _) => {
-            let left = resolve_dimension_expression(left, visible)?;
-            let right = resolve_dimension_expression(right, visible)?;
-            if *op == crate::AST::BinOp::Mul {
-                left.multiply(&right)
-            } else {
-                left.divide(&right)
+        crate::AST::Expr::Ident(name, _) => visible(None, name),
+        crate::AST::Expr::Field(base, name, _) => match base.as_ref() {
+            crate::AST::Expr::Ident(alias, _) => visible(Some(alias), name),
+            _ => DimensionLookup::Missing,
+        },
+        crate::AST::Expr::Binary(
+            op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div),
+            left,
+            right,
+            _,
+        ) => {
+            let left = resolve_dimension_expression(left, visible);
+            let right = resolve_dimension_expression(right, visible);
+            match (left, right) {
+                (DimensionLookup::Ambiguous(name), _)
+                | (_, DimensionLookup::Ambiguous(name)) => DimensionLookup::Ambiguous(name),
+                (DimensionLookup::Found(left), DimensionLookup::Found(right)) => {
+                    let dimension = if *op == crate::AST::BinOp::Mul {
+                        left.multiply(&right)
+                    } else {
+                        left.divide(&right)
+                    };
+                    dimension.map_or(DimensionLookup::Missing, DimensionLookup::Found)
+                }
+                _ => DimensionLookup::Missing,
             }
         }
-        _ => None,
+        _ => DimensionLookup::Missing,
     }
 }
 

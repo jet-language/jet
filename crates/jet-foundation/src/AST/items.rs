@@ -1338,6 +1338,9 @@ pub struct UnitFamilyDef {
     pub dimension: Option<UnitDimensionDecl>,
     /// Filled by sema after all declarations in the module are known.
     pub resolved_dimension: Option<Dimension>,
+    /// Compiler-owned semantic owner for conversion facts. Standard Prelude
+    /// units use `core.units`; user families use their stable package identity.
+    pub resolved_owner: Option<String>,
     /// D-QUANTITY-DECL1=A: canonical member whose scale is one and offset zero.
     /// Absent on legacy nominal D-QUAL3 families such as Currency.
     pub base: Option<(String, Span)>,
