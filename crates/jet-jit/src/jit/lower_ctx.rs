@@ -79,8 +79,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) ret_clif: Option<types::Type>,
     /// D-RANGE-VALUE1: this function returns the three-scalar Range ABI.
     pub(crate) ret_range: bool,
-    /// Native Cell guards returned from this function transfer to its caller.
-    pub(crate) ret_cell_guard: i64,
+    /// Checked return-layout handle for native Cell guards transferred to caller.
+    pub(crate) ret_cell_layout: i64,
     /// True when this lowering entered a canonical Cell runtime frame.
     pub(crate) cell_frame: bool,
     /// Lexical `#Shield` depth in emitted native code. Used to emit exact
@@ -2223,7 +2223,7 @@ impl LowerCtx<'_, '_> {
         self.in_lexical_exit = false;
         guards?;
         if self.cell_frame {
-            let returned = if self.ret_cell_guard != 0 {
+            let returned = if self.ret_cell_layout != 0 {
                 values
                     .first()
                     .copied()
@@ -2231,11 +2231,11 @@ impl LowerCtx<'_, '_> {
             } else {
                 self.b.ins().iconst(types::I64, 0)
             };
-            let kind = self.b.ins().iconst(types::I64, self.ret_cell_guard);
+            let layout = self.b.ins().iconst(types::I64, self.ret_cell_layout);
             let leave = self
                 .module
                 .declare_func_in_func(self.host.cell.frame_leave, self.b.func);
-            self.b.ins().call(leave, &[kind, returned]);
+            self.b.ins().call(leave, &[layout, returned]);
         }
 
         let trapped = self

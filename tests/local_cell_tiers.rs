@@ -46,6 +46,22 @@ fn split_edit(cell: Cell<Pair>) {
     right.set(11)
 }
 
+fn make_edit_guards(cell: Cell<Pair>) => (
+    first: CellEditGuard<Int>,
+    second: CellEditGuard<Int>
+) {
+    return cell.guard_edit().split(
+        pair => pair.left,
+        pair => pair.right
+    )
+}
+
+fn edit_returned_split(cell: Cell<Pair>) {
+    (left, right) :: make_edit_guards(cell)
+    left.set(12)
+    right.set(13)
+}
+
 fn edit_then_return(cell: Cell<Int>) {
     guard :: cell.guard_edit()
     guard.set(4)
@@ -66,6 +82,8 @@ fn run() {
     print(cell.get().left)
     split_edit(cell)
     print(cell.get().left + cell.get().right)
+    edit_returned_split(cell)
+    print(cell.get().left + cell.get().right)
 
     cache :: Cache.{ value: Cell.new(None) }
     print(cache.value.get_or_set(() => "built"))
@@ -83,7 +101,7 @@ fn run() {
 }
 "#;
 
-const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\nbuilt\nbuilt\n3\n3\n4\n5\n";
+const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\n";
 
 #[test]
 fn local_cell_split_keeps_projected_tuple_type_in_tir() {

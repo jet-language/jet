@@ -8,6 +8,7 @@ use jet_codegen::local_cell::{
     JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard,
 };
 use jet_codegen::{AST::CtValue, AST::Type};
+use std::collections::HashSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::types_meta::JitMeta;
@@ -87,6 +88,31 @@ pub(crate) struct CellProjection {
     pub paths: Vec<Vec<String>>,
 }
 
+#[derive(Clone)]
+pub(crate) enum CellGuardLayout {
+    Read,
+    Edit,
+    Record(Vec<Option<CellGuardLayout>>),
+}
+
+impl CellGuardLayout {
+    pub(crate) fn from_type(ty: &Type, _meta: &JitMeta<'_>) -> Result<Option<Self>, String> {
+        Ok(match ty {
+            Type::Apply { name, .. } if name == "CellReadGuard" => Some(Self::Read),
+            Type::Apply { name, .. } if name == "CellEditGuard" => Some(Self::Edit),
+            Type::Tagged { inner, .. } => Self::from_type(inner, _meta)?,
+            Type::Tuple(fields) => {
+                let fields = fields
+                    .iter()
+                    .map(|(_, ty)| Self::from_type(ty, _meta))
+                    .collect::<Result<Vec<_>, _>>()?;
+                fields.iter().any(Option::is_some).then_some(Self::Record(fields))
+            }
+            _ => None,
+        })
+    }
+}
+
 struct GuardSlot<G> {
     guard: Option<G>,
     owner: u64,
@@ -98,6 +124,7 @@ pub(crate) struct CellState {
     edit_guards: Vec<GuardSlot<JetCellEditGuard<CtValue>>>,
     schemas: Vec<CellSchema>,
     projections: Vec<CellProjection>,
+    guard_layouts: Vec<CellGuardLayout>,
     frames: Vec<u64>,
     next_frame: u64,
 }
@@ -110,6 +137,7 @@ impl CellState {
             edit_guards: Vec::new(),
             schemas: Vec::new(),
             projections: Vec::new(),
+            guard_layouts: Vec::new(),
             frames: Vec::new(),
             next_frame: 1,
         }
@@ -123,6 +151,11 @@ impl CellState {
     pub(crate) fn register_projection(&mut self, projection: CellProjection) -> i64 {
         self.projections.push(projection);
         self.projections.len() as i64
+    }
+
+    pub(crate) fn register_guard_layout(&mut self, layout: CellGuardLayout) -> i64 {
+        self.guard_layouts.push(layout);
+        self.guard_layouts.len() as i64
     }
 
     fn owner(&self) -> u64 {
@@ -145,14 +178,18 @@ impl CellState {
         self.edit_guards.len() as i64
     }
 
-    fn leave_frame(&mut self, returned_kind: i64, returned: i64) {
+    fn leave_frame(
+        &mut self,
+        returned_read: &HashSet<i64>,
+        returned_edit: &HashSet<i64>,
+    ) {
         let Some(frame) = self.frames.pop() else {
             return;
         };
         let parent = self.owner();
         for (index, slot) in self.read_guards.iter_mut().enumerate() {
             if slot.owner == frame {
-                if returned_kind == 1 && returned == index as i64 + 1 {
+                if returned_read.contains(&(index as i64 + 1)) {
                     slot.owner = parent;
                 } else {
                     slot.guard = None;
@@ -161,7 +198,7 @@ impl CellState {
         }
         for (index, slot) in self.edit_guards.iter_mut().enumerate() {
             if slot.owner == frame {
-                if returned_kind == 2 && returned == index as i64 + 1 {
+                if returned_edit.contains(&(index as i64 + 1)) {
                     slot.owner = parent;
                 } else {
                     slot.guard = None;
@@ -169,6 +206,32 @@ impl CellState {
             }
         }
     }
+}
+
+fn collect_returned_guards(
+    rt: &crate::JitRuntime,
+    raw: i64,
+    layout: &CellGuardLayout,
+    read: &mut HashSet<i64>,
+    edit: &mut HashSet<i64>,
+) -> Option<()> {
+    match layout {
+        CellGuardLayout::Read => {
+            read.insert(raw);
+        }
+        CellGuardLayout::Edit => {
+            edit.insert(raw);
+        }
+        CellGuardLayout::Record(fields) => {
+            for (index, field) in fields.iter().enumerate() {
+                if let Some(field) = field {
+                    let value = rt.heap.record_get_int(raw, index as i64)?;
+                    collect_returned_guards(rt, value, field, read, edit)?;
+                }
+            }
+        }
+    }
+    Some(())
 }
 
 fn schema(rt: &crate::JitRuntime, handle: i64) -> Option<CellSchema> {
@@ -338,8 +401,17 @@ extern "C" fn jet_jit_cell_frame_enter() {
     });
 }
 
-extern "C" fn jet_jit_cell_frame_leave(kind: i64, returned: i64) {
-    with_cell(|rt| rt.cells.leave_frame(kind, returned));
+extern "C" fn jet_jit_cell_frame_leave(layout_handle: i64, returned: i64) {
+    with_cell(|rt| {
+        let mut read = HashSet::new();
+        let mut edit = HashSet::new();
+        if layout_handle != 0 {
+            let layout = rt.cells.guard_layouts[(layout_handle - 1) as usize].clone();
+            collect_returned_guards(rt, returned, &layout, &mut read, &mut edit)
+                .expect("Cell guard return ABI");
+        }
+        rt.cells.leave_frame(&read, &edit);
+    });
 }
 
 extern "C" fn jet_jit_cell_new(raw: i64, schema_handle: i64) -> i64 {
@@ -689,7 +761,7 @@ mod tests {
             "the hostile borrow must conflict while the edit loan is live"
         );
 
-        state.leave_frame(0, 0);
+        state.leave_frame(&HashSet::new(), &HashSet::new());
         assert_eq!(state.cells[0].guard_read().get(), CtValue::Int(1));
     }
 }

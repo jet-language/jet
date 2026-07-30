@@ -291,22 +291,7 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
         ty,
         Type::Tuple(fields)
             if !fields.is_empty()
-                && fields.iter().all(|(_, t)| {
-                    matches!(
-                        t.as_ref(),
-                        Type::Int
-                            | Type::IntN { .. }
-                            | Type::Float
-                            | Type::Float32
-                            | Type::Bool
-                            | Type::Char
-                            | Type::String
-                            | Type::Option(_)
-                            | Type::Named(_)
-                            | Type::Tuple(_)
-                            | Type::List(_)
-                    )
-                })
+                && fields.iter().all(|(_, t)| jit_value_type(t))
     )
 }
 
@@ -375,6 +360,12 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         {
             // Opaque i64 handles: std/user structs and enums (Date, Cmd,
             // FileReader, WatchEvent, GameScene, …).
+            true
+        }
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                && args.len() == 1 =>
+        {
             true
         }
         Type::Apply { name, args }
