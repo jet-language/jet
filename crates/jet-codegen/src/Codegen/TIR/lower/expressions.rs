@@ -691,15 +691,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 let lhs = raw(lhs);
                 let rhs = raw(rhs);
-                let left = ldim.unwrap_or(crate::AST::Dimension::SCALAR);
-                let right = rdim.unwrap_or(crate::AST::Dimension::SCALAR);
+                let left = ldim.unwrap_or_else(crate::AST::Dimension::scalar);
+                let right = rdim.unwrap_or_else(crate::AST::Dimension::scalar);
                 let dimension = if *op == BinOp::Mul {
-                    left.multiply(right)
+                    left.multiply(&right)
                 } else {
-                    left.divide(right)
+                    left.divide(&right)
                 }
                 .expect("sema checked physical dimension exponent bounds");
-                let ty = if dimension == crate::AST::Dimension::SCALAR {
+                let ty = if dimension == crate::AST::Dimension::scalar() {
                     Type::Float
                 } else {
                     Type::quantity(Type::Float, dimension)
@@ -883,6 +883,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Call(call) => {
+            // An `approx(value)` not consumed immediately by an integer-to-float
+            // crossing grants nothing later. Erase its unspellable marker now.
+            if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER && call.args.len() == 1 {
+                return lower_expr(&call.args[0].expr, cx, env);
+            }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call`. Function-type params are unmarked Read params.
             if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {

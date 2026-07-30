@@ -9,8 +9,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
-    Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Archive, Cell as LocalCell, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt,
+    JitResultValue, Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time,
+    TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 thread_local! {
@@ -82,6 +83,8 @@ pub(crate) struct JitRuntime {
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     pub(crate) task_groups:
         Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
+    /// D-LOCALCELL1=A: one-thread canonical Cell values and guards.
+    pub(crate) cells: LocalCell::CellState,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
@@ -984,6 +987,26 @@ extern "C" fn jet_jit_numeric_float_narrow(value: f64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_numeric_checked_widen(
+    raw: i64,
+    source_signed: i64,
+    target_f32: i64,
+) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match jet_codegen::numeric_widen::jet_numeric_checked_widen(
+            raw as u64,
+            source_signed != 0,
+            target_f32 != 0,
+        ) {
+            Some(value) => value,
+            None => {
+                rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
+                0.0
+            }
+        }
+    })
+}
+
 extern "C" fn jet_jit_distinct_range(value: i64, lo: i64, hi: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if value >= lo && value <= hi {
@@ -1504,6 +1527,7 @@ pub(crate) struct HostFns {
     pub(crate) numeric_try_i64: FuncId,
     pub(crate) numeric_float_to_int: FuncId,
     pub(crate) numeric_float_narrow: FuncId,
+    pub(crate) numeric_checked_widen: FuncId,
     pub(crate) distinct_range: FuncId,
     pub(crate) distinct_range_result: FuncId,
     pub(crate) numeric_predicate: FuncId,
@@ -1552,6 +1576,7 @@ pub(crate) struct HostFns {
     pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
     pub(crate) memory: Memory::MemoryHostFns,
+    pub(crate) cell: LocalCell::CellHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
@@ -1670,6 +1695,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
     builder.symbol("jet_jit_numeric_float_to_int", jet_jit_numeric_float_to_int as *const u8);
     builder.symbol("jet_jit_numeric_float_narrow", jet_jit_numeric_float_narrow as *const u8);
+    builder.symbol("jet_jit_numeric_checked_widen", jet_jit_numeric_checked_widen as *const u8);
     builder.symbol("jet_jit_distinct_range", jet_jit_distinct_range as *const u8);
     builder.symbol("jet_jit_distinct_range_result", jet_jit_distinct_range_result as *const u8);
     builder.symbol("jet_jit_numeric_predicate", jet_jit_numeric_predicate as *const u8);
@@ -1755,6 +1781,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Memory::register_memory_symbols(&mut builder);
+    LocalCell::register_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
@@ -1800,6 +1827,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
+    let cell = LocalCell::declare_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
@@ -1835,6 +1863,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         &mut module,
         coll,
         memory,
+        cell,
         conc,
         core,
         encoding,
@@ -2017,6 +2046,7 @@ fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
     memory: Memory::MemoryHostFns,
+    cell: LocalCell::CellHostFns,
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
@@ -2197,6 +2227,13 @@ fn declare_host_fns(
     sig_measurement_get.returns.push(AbiParam::new(types::F64));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
+    let mut sig_numeric_checked_widen = Signature::new(cc);
+    sig_numeric_checked_widen
+        .params
+        .extend([AbiParam::new(types::I64); 3]);
+    sig_numeric_checked_widen
+        .returns
+        .push(AbiParam::new(types::F64));
     let mut sig_result_new_i64 = Signature::new(cc);
     sig_result_new_i64.params.push(AbiParam::new(types::I8));
     sig_result_new_i64.params.push(AbiParam::new(types::I64));
@@ -2321,6 +2358,10 @@ fn declare_host_fns(
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
         numeric_float_to_int: import("jet_jit_numeric_float_to_int", &sig_f64_i64_i64)?,
         numeric_float_narrow: import("jet_jit_numeric_float_narrow", &sig_f64_i64)?,
+        numeric_checked_widen: import(
+            "jet_jit_numeric_checked_widen",
+            &sig_numeric_checked_widen,
+        )?,
         distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
         distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
         numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
@@ -2372,6 +2413,7 @@ fn declare_host_fns(
         deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
         memory,
+        cell,
         conc,
         core,
         encoding,

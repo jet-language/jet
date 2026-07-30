@@ -1,7 +1,7 @@
 // D-FLOATW1 (ratified 2026-06-22): sized-float math is precision-correct.
 // `sqrt(F32) => F32`, `sqrt(Float) => Float` — the math functions are
-// width-generic. F32 is a real precision choice, not just storage; there is no
-// silent widening to F64. Mixing widths (`F32` + `Float`) is a compile error.
+// width-generic. F32 is a real precision choice, not just storage. It widens
+// safely to Float when the surrounding expression needs Float.
 use core.math as math
 
 fn run() {
@@ -11,9 +11,10 @@ fn run() {
     // F32 math — 32-bit precision, NOT silently promoted.
     root32 :: F32.{math.sqrt(9.0)}
     print(root32)
-    // Width conversions are destination-owned and explicit (D-SHAPE-CONVERT1).
+    // The narrower operand widens to the wider operand without ceremony.
     x :: F32.{2.0}
-    wide :: Float.from_f32(x)
+    zero :: 0.0
+    wide :: x + zero
     print(math.sqrt(wide))
     // pow, floor, ceil are also width-generic.
     p64 :: math.pow(2.0, 10.0)

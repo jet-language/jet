@@ -26,7 +26,7 @@
 //! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
 
 use crate::Syntax;
-use crate::AST::{Dimension, Func, Item, TraitMethodSig, Type};
+use crate::AST::{Func, Item, TraitMethodSig, Type};
 use crate::Sema::EffectSet;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -439,10 +439,50 @@ pub fn collect_api_unit_dimensions(
     package: &str,
     out: &mut ApiUnitDimensions,
 ) {
+    let mut resolved = HashMap::<String, crate::AST::Dimension>::new();
+    for item in items {
+        let Item::UnitFamily(family) = item else {
+            continue;
+        };
+        if let Some(dimension) = family.resolved_dimension.clone() {
+            resolved.insert(family.family.clone(), dimension);
+        } else if matches!(
+            family.dimension,
+            Some(crate::AST::UnitDimensionDecl::Base(_))
+        ) {
+            resolved.insert(
+                family.family.clone(),
+                crate::AST::Dimension::base(format!("{package}::{}", family.family)),
+            );
+        }
+    }
+    loop {
+        let mut progress = false;
+        for item in items {
+            let Item::UnitFamily(family) = item else {
+                continue;
+            };
+            if resolved.contains_key(&family.family) {
+                continue;
+            }
+            let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension else {
+                continue;
+            };
+            let Some(dimension) = resolve_api_dimension(expression, &resolved) else {
+                continue;
+            };
+            resolved.insert(family.family.clone(), dimension);
+            progress = true;
+        }
+        if !progress {
+            break;
+        }
+    }
     for item in items {
         match item {
             Item::UnitFamily(family) => {
-                if let Some(dimension) = Dimension::for_family(&family.family) {
+                if let Some(dimension) = resolved.get(&family.family).cloned() {
+                    let owner = family.resolved_owner.as_deref().unwrap_or(package);
                     let base = family
                         .base
                         .as_ref()
@@ -487,10 +527,11 @@ pub fn collect_api_unit_dimensions(
                                 },
                                 |base| {
                                     format!(
-                                        "{{package={package}; family={}; base={base}; dimension={}; scale={}; offset={offset}}}",
+                                        "{{package={owner}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
                                         family.family,
                                         dimension.identity(),
-                                        member.scale
+                                        member.scale,
+                                        unit_scale_provenance_identity(&member.scale_provenance)
                                     )
                                 },
                             );
@@ -506,6 +547,48 @@ pub fn collect_api_unit_dimensions(
             }
             _ => {}
         }
+    }
+}
+
+fn resolve_api_dimension(
+    expression: &crate::AST::Expr,
+    visible: &HashMap<String, crate::AST::Dimension>,
+) -> Option<crate::AST::Dimension> {
+    match expression {
+        crate::AST::Expr::Ident(name, _) => visible.get(name).cloned(),
+        crate::AST::Expr::Binary(
+            op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div),
+            left,
+            right,
+            _,
+        ) => {
+            let left = resolve_api_dimension(left, visible)?;
+            let right = resolve_api_dimension(right, visible)?;
+            if *op == crate::AST::BinOp::Mul {
+                left.multiply(&right)
+            } else {
+                left.divide(&right)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn unit_scale_provenance_identity(provenance: &crate::AST::UnitScaleProvenance) -> String {
+    match provenance {
+        crate::AST::UnitScaleProvenance::Rational => "Rational".to_string(),
+        crate::AST::UnitScaleProvenance::SymbolicPi {
+            numerator,
+            denominator,
+        } => format!("SymbolicPi({numerator}/{denominator})"),
+        crate::AST::UnitScaleProvenance::Conventional { value, source } => {
+            format!("Conventional({value};{source})")
+        }
+        crate::AST::UnitScaleProvenance::Measured {
+            central_value,
+            standard_uncertainty,
+            source,
+        } => format!("Measured({central_value};{standard_uncertainty};{source})"),
     }
 }
 
@@ -809,20 +892,22 @@ mod tests {
 
     #[test]
     fn sig_carries_normalized_physical_dimension_identity() {
-        let speed = crate::AST::Dimension::for_family("Speed").unwrap();
+        let speed = crate::AST::Dimension::base("api::Length")
+            .divide(&crate::AST::Dimension::base("api::Time"))
+            .unwrap();
         let f = func(
             "pace",
             true,
             vec![param(
                 "value",
                 AccessConvention::Read,
-                Type::quantity(Type::Float, speed),
+                Type::quantity(Type::Float, speed.clone()),
             )],
             Some(Type::quantity(Type::Float, speed)),
         );
         assert_eq!(
             fn_signature(&f),
-            "fn pace(value: Quantity<Speed, Float; L1T-1>) => Quantity<Speed, Float; L1T-1>"
+            "fn pace(value: Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>) => Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>"
         );
     }
 
@@ -833,11 +918,15 @@ mod tests {
             is_package_pub: false,
             family: "Length".into(),
             family_span: zero(),
+            dimension: Some(crate::AST::UnitDimensionDecl::Base(zero())),
+            resolved_dimension: Some(crate::AST::Dimension::base("api::Length")),
+            resolved_owner: Some("api".into()),
             base: None,
             members: vec![UnitFamilyMember {
                 name: "meter".into(),
                 name_span: zero(),
                 scale: UnitRatio::integer(1),
+                scale_provenance: crate::AST::UnitScaleProvenance::Rational,
                 offset: UnitRatio::zero(),
             }],
             span: zero(),
@@ -852,7 +941,7 @@ mod tests {
         );
         assert_eq!(
             api.funcs[0].signature,
-            "fn distance() => Meter{family=Length; base=Float; dimension=L1T0}"
+            "fn distance() => Meter{family=Length; base=Float; dimension=api%3A%3ALength:1}"
         );
         assert_eq!(api.api_version, API_SNAPSHOT_VERSION - 1);
     }

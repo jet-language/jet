@@ -142,6 +142,51 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             }
             format!("({}).{method}({arg_str})", emit_tir_expr(recv, cx))
         }
+        THostCall::CellGuardProject {
+            recv,
+            paths,
+            result_ty,
+            editable,
+            edit_paths_disjoint,
+        } => {
+            let borrow = if *editable { "&mut " } else { "&" };
+            let render_path = |steps: &[String]| {
+                let mut place = "__jet_cell_value".to_string();
+                for field in steps {
+                    place.push('.');
+                    place.push_str(&mangle(field));
+                }
+                format!("{borrow}{place}")
+            };
+            let recv = emit_tir_expr(recv, cx);
+            match paths.as_slice() {
+                [path] => format!(
+                    "({recv}).map(|__jet_cell_value| {})",
+                    render_path(path)
+                ),
+                [first, second] => {
+                    debug_assert!(!editable || *edit_paths_disjoint);
+                    let split = format!(
+                        "({recv}).split(|__jet_cell_value| ({}, {}))",
+                        render_path(first),
+                        render_path(second)
+                    );
+                    let Type::Tuple(fields) = result_ty else {
+                        unreachable!("sema types Cell guard split as an exact tuple");
+                    };
+                    let plain = crate::Codegen::Tuples::tuple_fields_plain(fields);
+                    let tuple = crate::Codegen::Tuples::tuple_struct_name(&plain);
+                    let first_field = mangle(&fields[0].0);
+                    let second_field = mangle(&fields[1].0);
+                    format!(
+                        "{{ let (__jet_cell_first, __jet_cell_second) = {split}; \
+                         {tuple} {{ {first_field}: __jet_cell_first, \
+                         {second_field}: __jet_cell_second }} }}"
+                    )
+                }
+                _ => unreachable!("Cell guard projection has one or two sema paths"),
+            }
+        }
         THostCall::FixedListIndex { base, index } => format!(
             "(({b})[({i}).0 as usize].clone())",
             b = emit_tir_expr(base, cx),
@@ -450,7 +495,7 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
     s
 }
 
-fn emit_numeric_op(recv: &str, op: &TNumericOp, _cx: &Cx) -> String {
+fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
     match op {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
         TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
@@ -460,6 +505,22 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, _cx: &Cx) -> String {
             origin.as_deref().unwrap_or("untracked")
         ),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
+        TNumericOp::CheckedIntToFloat {
+            source_signed,
+            target_f32,
+            line,
+        } => {
+            let checked = format!(
+                "match jet_numeric_checked_widen(({recv}) as u64, {source_signed}, {target_f32}) {{ \
+                 Some(value) => value, None => jet_panic({:?}, {line}, JET_NUMERIC_WIDEN_TRAP) }}",
+                cx.file
+            );
+            if *target_f32 {
+                format!("(({checked}) as f32)")
+            } else {
+                checked
+            }
+        }
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,

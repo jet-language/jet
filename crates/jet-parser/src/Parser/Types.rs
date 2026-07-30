@@ -134,23 +134,7 @@ impl<'a> Parser<'a> {
             let (name, _) = self.expect_ident("for a trait bound")?;
             if name == Syntax::BOUND_QUANTITY && matches!(self.peek().kind, TokKind::Lt) {
                 self.expect_type_args_open("quantity bound")?;
-                let (dimension, dimension_span) = self.expect_ident("for a quantity dimension")?;
-                if crate::AST::Dimension::for_family(&dimension).is_none() {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("`{dimension}` is not a physical dimension"),
-                        "Quantity bounds use Jet's closed compiler-known dimension set".to_string(),
-                        format!(
-                            "use one of: {}",
-                            Syntax::PHYSICAL_DIMENSIONS
-                                .iter()
-                                .map(|(name, _)| *name)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                        Some(dimension_span),
-                    ));
-                }
+                let (dimension, _) = self.expect_ident("for a quantity dimension")?;
                 self.expect(TokKind::Comma, "after the quantity dimension")?;
                 self.expect(TokKind::Dot, "before the quantity kind")?;
                 let (kind, kind_span) = self.expect_ident("for a quantity kind")?;

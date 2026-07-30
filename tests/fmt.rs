@@ -2231,6 +2231,16 @@ fn fmt_preserves_scaled_affine_unit_declaration() {
 }
 
 #[test]
+fn fmt_preserves_open_dimension_and_scale_provenance() {
+    let src = r#"#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {
+    newton
+    standard_gravity(scale: conventional(9.80665, source: "BIPM-2026"))
+}
+"#;
+    assert_fmt_stable(src, "open dimension and scale provenance");
+}
+
+#[test]
 fn fmt_preserves_rounded_unit_conversion_contract() {
     let src = r#"#UnitFamily(Length, base: meter) {
     meter

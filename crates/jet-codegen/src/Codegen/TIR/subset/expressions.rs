@@ -130,6 +130,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() <= 1;
+            // D-NUMWIDEN-CROSS1=E: an `approx(value)` marker not consumed by a
+            // surrounding numeric crossing erases to `value`. Admit only the
+            // exact compiler-private one-argument shape sema writes.
+            if c.name == Type::APPROX_NUMERIC_WIDEN_MARKER {
+                return c.args.len() == 1
+                    && c.args[0].label.is_none()
+                    && expr_in_subset(&c.args[0].expr, cx, locals);
+            }
             // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
             // `checked(e)` (D-NUMOPS1). The AST `emit_call` (Expression.rs ~L1756) claims
             // them when the name is one of the three AND not shadowed by a user fn

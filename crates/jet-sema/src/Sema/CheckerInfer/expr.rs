@@ -315,6 +315,31 @@ impl<'a> Checker<'a> {
 
         let borrowed = std::mem::take(&mut self.borrow_ctx);
         let ty = self.infer_inner(e);
+        if let Some(aggregate_ty) = ty.as_ref() {
+            let constructs_value = matches!(
+                e,
+                Expr::ListLit(..)
+                    | Expr::MapLit(..)
+                    | Expr::TupleLit(..)
+                    | Expr::Call(..)
+                    | Expr::MethodCall { .. }
+                    | Expr::CallValue { .. }
+                    | Expr::StructLit { .. }
+                    | Expr::EnumLit { .. }
+                    | Expr::Present(..)
+                    | Expr::Ok(..)
+                    | Expr::Err(..)
+            );
+            if constructs_value && self.cell_guard_storage_is_unsupported(aggregate_ty) {
+                self.report_cell_guard_storage(
+                    format!(
+                        "a Cell guard cannot be stored inside `{}`",
+                        aggregate_ty.show()
+                    ),
+                    e.span(),
+                );
+            }
+        }
         if !borrowed {
             if let Some(t) = &ty {
                 let borrowed_param_place = !type_is_copy(t)
@@ -1279,7 +1304,28 @@ impl<'a> Checker<'a> {
                 if resource
                     || (!type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry))
                 {
-                    let (why, fix) = if resource {
+                    let cell_guard = matches!(
+                        &inner_t,
+                        Type::Apply { name, .. }
+                            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                    );
+                    let shown = match &inner_t {
+                        Type::Apply { name, args }
+                            if cell_guard && args.len() == 1 =>
+                        {
+                            format!("{name}<{}>", args[0].name())
+                        }
+                        _ => inner_t.show(),
+                    };
+                    let (why, fix) = if cell_guard {
+                        (
+                            "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan".to_string(),
+                            format!(
+                                "move it instead with `{}guard`, or create a new guard after this one is dropped",
+                                Syntax::SIGIL_MOVE
+                            ),
+                        )
+                    } else if resource {
                         (
                             "a resource owns one cleanup duty; copying it would create two owners that could close the same handle".to_string(),
                             format!("move it instead with `{}name`, or acquire a second resource", Syntax::SIGIL_MOVE),
@@ -1295,7 +1341,7 @@ impl<'a> Checker<'a> {
                     };
                     self.diags.push(Diagnostic::error(
                         "E0211",
-                        format!("`{}` can't be copied", inner_t.show()),
+                        format!("`{shown}` can't be copied"),
                         why,
                         fix,
                         Some(*span),
@@ -2034,6 +2080,14 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
+        let ty = self.infer(elem);
+        if ty.is_some() {
+            self.note_move_if_direct_ident(elem);
+        }
+        ty
+    }
+
     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
         for elem in elems.iter() {
             self.reject_fixed_storage(elem, "be stored in a list");
@@ -2098,7 +2152,7 @@ impl<'a> Checker<'a> {
             let saved = self.expected_type.clone();
             self.expected_type = Some((*expected_inner).clone());
             for e in elems.iter_mut() {
-                if let Some(t) = self.infer(e) {
+                if let Some(t) = self.infer_owned_list_element(e) {
                     self.check_type_assignable(&expected_inner, &t, e.span());
                 }
             }
@@ -2119,7 +2173,7 @@ impl<'a> Checker<'a> {
                 // `check_type_assignable` path below (which checks every bound).
                 let trait_name = trait_names.first().filter(|_| trait_names.len() == 1);
                 for e in elems.iter_mut() {
-                    if let Some(t) = self.infer(e) {
+                    if let Some(t) = self.infer_owned_list_element(e) {
                         match (&t, trait_name) {
                             (Type::Named(n), Some(trait_name))
                                 if self.trait_reg.implements_trait(n, trait_name) =>
@@ -2161,7 +2215,7 @@ impl<'a> Checker<'a> {
             for e in elems.iter_mut() {
                 match e {
                     Expr::Spread(inner, spread_span) => {
-                        let t = self.infer(inner);
+                        let t = self.infer_owned_list_element(inner);
                         match t {
                             Some(Type::List(spread_elem)) => {
                                 self.check_type_assignable(&expected_inner, &spread_elem, *spread_span);
@@ -2180,7 +2234,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     _ => {
-                        if let Some(t) = self.infer(e) {
+                        if let Some(t) = self.infer_owned_list_element(e) {
                             let string_view_compatible = string_view_elements
                                 && t == Type::String
                                 && (matches!(
@@ -2203,7 +2257,7 @@ impl<'a> Checker<'a> {
         for e in elems.iter_mut() {
             match e {
                 Expr::Spread(inner, spread_span) => {
-                    let t = self.infer(inner);
+                    let t = self.infer_owned_list_element(inner);
                     match t {
                         Some(Type::List(spread_elem)) => {
                             elem_types.push((*spread_elem).clone());
@@ -2222,7 +2276,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 _ => {
-                    if let Some(t) = self.infer(e) {
+                    if let Some(t) = self.infer_owned_list_element(e) {
                         elem_types.push(t);
                     }
                 }
@@ -2375,6 +2429,12 @@ impl<'a> Checker<'a> {
             let item_ty = self.infer(item);
             self.expected_type = saved;
             if let Some(got) = item_ty {
+                let got = self.widen_numeric_argument(
+                    item,
+                    got,
+                    &param_ty,
+                    crate::AST::AccessConvention::Read,
+                );
                 if got != param_ty {
                     had_error = true;
                     self.diags.push(Diagnostic::error(

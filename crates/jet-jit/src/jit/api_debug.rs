@@ -722,8 +722,8 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         return "entry not resident-safe".to_string();
     }
     for f in &program.funcs {
-        if !resident_safe_func(f, &names) {
-            return format!("func `{}` not resident-safe", f.name);
+        if let Some(detail) = resident_safe_func_detail(f, &names) {
+            return format!("func `{}` not resident-safe: {detail}", f.name);
         }
     }
     let spawn_sites = count_spawn_sites(&program);

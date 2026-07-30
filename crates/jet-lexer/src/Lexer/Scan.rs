@@ -241,6 +241,9 @@ impl<'a> Lexer<'a> {
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
+                // D-EACH1=C: fence digraphs are longest-match before `<`/`:`.
+                '<' if next == ':' => toks.push(simple(self, TokKind::FenceOpen, 2)),
+                ':' if next == '>' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 // D-BIND4: `:=` mutable binding sigil.
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),

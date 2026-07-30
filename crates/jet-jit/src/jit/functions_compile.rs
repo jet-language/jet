@@ -14,7 +14,7 @@ use super::types_meta::{
     clif_ty, fn_value_signature, func_has_receiver, func_signature, jit_fn_name, JitMeta,
 };
 use super::JitRuntime;
-use crate::Collections;
+use crate::{Cell, Collections};
 
 fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
     Collections::clear_packed_enum_show();
@@ -126,6 +126,8 @@ fn lower_spawn_function(
                 None
             },
             ret_range: false,
+            ret_cell_layout: 0,
+            cell_frame: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -327,6 +329,8 @@ pub(crate) fn lower_callable_lambda(
             method_struct: None,
             ret_clif,
             ret_range: false,
+            ret_cell_layout: 0,
+            cell_frame: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -444,6 +448,14 @@ fn lower_function(
             }
             _ => (None, None),
         };
+        let ret_cell_layout = tir
+            .ret
+            .as_ref()
+            .map(|ret| Cell::CellGuardLayout::from_type(ret, meta))
+            .transpose()?
+            .flatten()
+            .map(|layout| runtime.cells.register_guard_layout(layout))
+            .unwrap_or(0);
         let mut lctx = LowerCtx {
             b: &mut b,
             module,
@@ -465,6 +477,8 @@ fn lower_function(
             ret_range: tir.ret.as_ref().is_some_and(|ret| {
                 matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
             }),
+            ret_cell_layout,
+            cell_frame: true,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -478,6 +492,10 @@ fn lower_function(
             in_lexical_exit: false,
             txn_stack: Vec::new(),
         };
+        let enter = lctx
+            .module
+            .declare_func_in_func(lctx.host.cell.frame_enter, lctx.b.func);
+        lctx.b.ins().call(enter, &[]);
         if func_has_receiver(tir) {
             let self_var = lctx.fresh_var(types::I64);
             lctx.b.def_var(self_var, param_vals[0]);
@@ -643,6 +661,8 @@ fn lower_generator_body(
             method_struct: None,
             ret_clif: Some(types::I64),
             ret_range: false,
+            ret_cell_layout: 0,
+            cell_frame: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,

@@ -140,11 +140,26 @@ pub(crate) struct UnitFact {
     member: String,
     dimension: crate::AST::Dimension,
     scale: crate::AST::UnitRatio,
+    scale_provenance: crate::AST::UnitScaleProvenance,
     offset: crate::AST::UnitRatio,
     kind: QuantityKind,
 }
 
 impl UnitFact {
+    fn is_measured(&self) -> bool {
+        matches!(
+            self.scale_provenance,
+            crate::AST::UnitScaleProvenance::Measured { .. }
+        )
+    }
+
+    fn is_symbolic(&self) -> bool {
+        matches!(
+            self.scale_provenance,
+            crate::AST::UnitScaleProvenance::SymbolicPi { .. }
+        )
+    }
+
     fn conversion_parts_to(
         &self,
         destination: &Self,
@@ -219,7 +234,7 @@ impl TypeRegistry {
     }
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
-        self.unit_facts.get(name).map(|fact| fact.dimension)
+        self.unit_facts.get(name).map(|fact| fact.dimension.clone())
     }
 
     pub(crate) fn is_unit_type(&self, name: &str) -> bool {
@@ -1464,9 +1479,24 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn type_satisfies_bound(&self, ty: &Type, bound: &str) -> bool {
         if let Some((dimension, kind)) = crate::Generics::parse_quantity_bound(bound) {
-            return self.unit_fact_for_type(ty).is_some_and(|(_, fact)| {
-                fact.dimension.family_name() == Some(dimension) && fact.kind.name() == kind
-            });
+            if let Some((_, fact)) = self.unit_fact_for_type(ty) {
+                return fact.family == dimension && fact.kind.name() == kind;
+            }
+            let Some((_, actual_dimension)) = ty.quantity_parts() else {
+                return false;
+            };
+            return kind == QuantityKind::Linear.name()
+                && (self.registry.unit_facts.values().chain(
+                    self.modules
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|module| module.registry.unit_facts.values()),
+                ))
+                    .any(|fact| {
+                        fact.family == dimension
+                            && fact.kind == QuantityKind::Linear
+                            && fact.dimension == actual_dimension
+                    });
         }
         self.trait_reg.type_implements_trait(ty, bound)
     }
@@ -1491,6 +1521,36 @@ impl<'a> Checker<'a> {
         else {
             return false;
         };
+        if let Some((base, dimension)) = source_ty.quantity_parts() {
+            if base == &Type::Float
+                && dimension == destination_fact.dimension
+                && destination_fact.kind == QuantityKind::Linear
+                && destination_fact.scale == crate::AST::UnitRatio::integer(1)
+                && destination_fact.offset == crate::AST::UnitRatio::zero()
+            {
+                let span = expr.span();
+                let value = std::mem::replace(expr, Expr::Absent(span));
+                *expr = Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(destination_name.clone(), span)),
+                    method: crate::Syntax::numeric_conversion_method("Float")
+                        .expect("Float conversion is registered")
+                        .to_string(),
+                    method_span: span,
+                    type_args: Vec::new(),
+                    args: vec![crate::AST::CallArg {
+                        convention: crate::AST::AccessConvention::Read,
+                        expr: value,
+                        span,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    recv_type: None,
+                    resolved_ret: Some(destination_ty.clone()),
+                };
+                return true;
+            }
+        }
         let Some((source_name, source_fact)) = self.unit_fact_for_type(source_ty) else {
             return false;
         };
@@ -1501,15 +1561,27 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
+        if source_fact.is_measured() || destination_fact.is_measured() {
+            self.diags.push(self.measured_unit_diagnostic(
+                &destination_name,
+                &source_name,
+                &source_fact,
+                &destination_fact,
+                expr.span(),
+            ));
+            return true;
+        }
         if !source_fact.conversion_is_finite_to(&destination_fact) {
             self.diags
                 .push(self.unit_conversion_overflow_diagnostic(expr.span()));
             return true;
         }
-        let exact = self.concrete_unit_value(expr).map_or_else(
-            || source_fact.conversion_is_total_to(&destination_fact),
-            |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
-        );
+        let exact = source_fact.is_symbolic()
+            || destination_fact.is_symbolic()
+            || self.concrete_unit_value(expr).map_or_else(
+                || source_fact.conversion_is_total_to(&destination_fact),
+                |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
+            );
         if !exact {
             self.diags.push(self.inexact_unit_diagnostic(
                 &destination_name,
@@ -1575,6 +1647,36 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn measured_unit_diagnostic(
+        &self,
+        destination_name: &str,
+        source_name: &str,
+        source: &UnitFact,
+        destination: &UnitFact,
+        span: Span,
+    ) -> Diagnostic {
+        let measured = if source.is_measured() { source } else { destination };
+        let crate::AST::UnitScaleProvenance::Measured {
+            central_value,
+            standard_uncertainty,
+            source,
+        } = &measured.scale_provenance
+        else {
+            unreachable!()
+        };
+        Diagnostic::error(
+            "E0127",
+            format!("`{source_name}` to `{destination_name}` crosses a measured scale"),
+            format!(
+                "the pinned central value is {central_value} with standard uncertainty {standard_uncertainty} ({source})"
+            ),
+            format!(
+                "write an explicit rounded conversion to `{destination_name}` and audit the pinned source"
+            ),
+            Some(span),
+        )
+    }
+
     pub(crate) fn reject_implicit_unit_conversion(
         &mut self,
         destination_name: &str,
@@ -1586,15 +1688,27 @@ impl<'a> Checker<'a> {
             self.unit_fact_for_type(&Type::Named(destination_name.to_string())),
             self.unit_fact_for_type(&Type::Named(source_name.to_string())),
         ) {
+            if source.is_measured() || destination.is_measured() {
+                self.diags.push(self.measured_unit_diagnostic(
+                    destination_name,
+                    source_name,
+                    &source,
+                    &destination,
+                    span,
+                ));
+                return true;
+            }
             if !source.conversion_is_finite_to(&destination) {
                 self.diags
                     .push(self.unit_conversion_overflow_diagnostic(span));
                 return true;
             }
-            let exact = self.concrete_unit_value(source_expr).map_or_else(
-                || source.conversion_is_total_to(&destination),
-                |value| source.converted_value_is_exact_to(&destination, value),
-            );
+            let exact = source.is_symbolic()
+                || destination.is_symbolic()
+                || self.concrete_unit_value(source_expr).map_or_else(
+                    || source.conversion_is_total_to(&destination),
+                    |value| source.converted_value_is_exact_to(&destination, value),
+                );
             if !exact {
                 self.diags.push(self.inexact_unit_diagnostic(
                     destination_name,

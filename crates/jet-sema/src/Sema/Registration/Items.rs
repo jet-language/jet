@@ -9,6 +9,50 @@ pub(crate) fn name_defined(
     funcs.contains_key(name) || registry.contains(name) || consts.contains_key(name)
 }
 
+fn declared_type_contains_cell_guard(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+        {
+            true
+        }
+        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+            declared_type_contains_cell_guard(inner)
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            declared_type_contains_cell_guard(key) || declared_type_contains_cell_guard(value)
+        }
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(declared_type_contains_cell_guard)
+                || ret
+                    .as_deref()
+                    .is_some_and(declared_type_contains_cell_guard)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| declared_type_contains_cell_guard(field)),
+        Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+            declared_type_contains_cell_guard(elem)
+        }
+        Type::Union(members) | Type::Apply { args: members, .. } => {
+            members.iter().any(declared_type_contains_cell_guard)
+        }
+        _ => false,
+    }
+}
+
+fn cell_guard_storage_diagnostic(place: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0217",
+        format!("a Cell guard cannot be stored in {place}"),
+        "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends"
+            .to_string(),
+        "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"
+            .to_string(),
+        Some(span),
+    )
+}
+
 /// D-DIST1/D-DIST3: register a distinct type declaration.
 pub(crate) fn register_distinct(
     d: &DistinctDef,
@@ -466,6 +510,12 @@ pub(crate) fn register_struct(
             computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
         } else {
             fields.push((f.name.clone(), f.name_span, f.ty.clone(), f.is_pub));
+            if declared_type_contains_cell_guard(&f.ty) {
+                diags.push(cell_guard_storage_diagnostic(
+                    &format!("struct field `{}`", f.name),
+                    f.name_span,
+                ));
+            }
         }
         if matches!(&f.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
             diags.push(Diagnostic::error(
@@ -591,6 +641,27 @@ pub(crate) fn register_enum(
             continue;
         }
         variant_order.push(v.name.clone());
+        match &v.payload {
+            VariantPayload::Unit => {}
+            VariantPayload::Single(ty, span) => {
+                if declared_type_contains_cell_guard(ty) {
+                    diags.push(cell_guard_storage_diagnostic(
+                        &format!("enum variant `{}`", v.name),
+                        *span,
+                    ));
+                }
+            }
+            VariantPayload::Named(fields) => {
+                for field in fields {
+                    if declared_type_contains_cell_guard(&field.ty) {
+                        diags.push(cell_guard_storage_diagnostic(
+                            &format!("enum field `{}`", field.name),
+                            field.name_span,
+                        ));
+                    }
+                }
+            }
+        }
         variants.insert(v.name.clone(), (v.name_span, v.payload.clone()));
     }
     // D-TAG1: record each group's subtree (ordered leaf paths). A group path

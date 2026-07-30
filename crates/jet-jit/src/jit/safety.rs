@@ -306,6 +306,14 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                             | Type::Tuple(_)
                             | Type::List(_)
                     )
+                        || matches!(
+                            t.as_ref(),
+                            Type::Apply { name, .. }
+                                if matches!(
+                                    name.as_str(),
+                                    "CellReadGuard" | "CellEditGuard"
+                                )
+                        )
                 })
     )
 }
@@ -375,6 +383,12 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         {
             // Opaque i64 handles: std/user structs and enums (Date, Cmd,
             // FileReader, WatchEvent, GameScene, …).
+            true
+        }
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                && args.len() == 1 =>
+        {
             true
         }
         Type::Apply { name, args }
@@ -875,6 +889,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         recv.ty.is_numeric()
                             && matches!(dst_rust.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64")
                     }
+                    TNumericOp::CheckedIntToFloat { .. } => recv.ty.is_integer(),
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
                     TNumericOp::Origin(_) => true,
@@ -1173,12 +1188,33 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
             THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
+            // Sema emits this node only after proving the receiver is a live
+            // Cell guard and every projected path is valid and disjoint.
+            THostCall::CellGuardProject { .. } => true,
             THostCall::Method {
                 recv,
                 method,
                 args,
+                ..
             } => {
-                !matches!(method.as_str(), "guard_read" | "guard_edit")
+                let method_supported = match &recv.ty {
+                    Type::Apply { name, .. } if name == "Cell" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get" | "guard_read" | "guard_edit", 0)
+                            | ("set" | "replace" | "get_or_set" | "read" | "edit", 1)
+                    ),
+                    Type::Apply { name, .. } if name == "CellReadGuard" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get", 0) | ("read", 1)
+                    ),
+                    Type::Apply { name, .. } if name == "CellEditGuard" => matches!(
+                        (method.as_str(), args.len()),
+                        ("get", 0) | ("set" | "read" | "edit", 1)
+                    ),
+                    // A Shared lock lease never enters the resident JIT.
+                    _ => !matches!(method.as_str(), "guard_read" | "guard_edit"),
+                };
+                method_supported
                     && resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
             }
@@ -1915,6 +1951,23 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             _ => 0,
                         }
                     && resident_safe_expr(init, callees))
+                || (matches!(
+                    &init.ty,
+                    Type::Tuple(fields)
+                        if fields.len() == binds.len()
+                            && fields.iter().all(|(_, ty)| matches!(
+                                ty.as_ref(),
+                                Type::Apply { name, .. }
+                                    if matches!(
+                                        name.as_str(),
+                                        "CellReadGuard" | "CellEditGuard"
+                                    )
+                            ))
+                ) && matches!(
+                    &init.kind,
+                    TExprKind::HostCall(host)
+                        if matches!(host.as_ref(), THostCall::CellGuardProject { .. })
+                ))
         }
         TStmt::ListDestructure { init, elems, .. } => {
             jit_list_native_type(&init.ty)

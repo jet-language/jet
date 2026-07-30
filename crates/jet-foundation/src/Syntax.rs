@@ -77,6 +77,8 @@
 // effect and value forms stay quiet. Fmt preserves the author's branch shape.
 // D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
 // `effect Root.Leaf` adds one package-view fact and erases before TIR.
+// D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
+// SIGIL_FENCE_CLOSE: `<: a, b :>` expands one statement per name.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are
@@ -274,7 +276,7 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 }
 
 // D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
-// unwriteable internal type marker and the compiler-owned identity table below.
+// unwriteable internal type marker.
 pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
@@ -293,17 +295,6 @@ pub fn unit_rounding_mode(name: &str) -> Option<crate::UnitRoundingMode> {
         _ => None,
     }
 }
-
-/// Canonical `(Length, Time, Temperature)` exponent vectors for physical
-/// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is
-/// deliberately absent: D-QUAL3 currency units remain nominal quantities.
-pub const PHYSICAL_DIMENSIONS: &[(&str, [i32; 3])] = &[
-    ("Length", [1, 0, 0]),
-    ("Time", [0, 1, 0]),
-    ("Speed", [1, -1, 0]),
-    ("Area", [2, 0, 0]),
-    ("Temperature", [0, 0, 1]),
-];
 
 /// The two identifier tiers fixed by D-SHAPE-CASE1=C.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

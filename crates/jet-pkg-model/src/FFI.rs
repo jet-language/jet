@@ -2751,11 +2751,29 @@ fn emit_wrapper_lib(
 }
 
 fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String {
+    fn bridge_type(ty: &Type, user_types: &HashSet<String>) -> String {
+        match ty {
+            Type::Fn { params, ret, .. } => {
+                let params = params
+                    .iter()
+                    .map(|param| rust_type(param, user_types))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = ret
+                    .as_ref()
+                    .map(|ret| format!(" -> {}", rust_type(ret, user_types)))
+                    .unwrap_or_default();
+                format!("extern \"C\" fn({params}){ret}")
+            }
+            _ => rust_type(ty, user_types),
+        }
+    }
+
     fn raw_type(ty: &Type, user_types: &HashSet<String>) -> String {
         match ty {
             Type::String => "*const std::os::raw::c_char".to_string(),
             Type::Char => "u32".to_string(),
-            _ => rust_type(ty, user_types),
+            _ => bridge_type(ty, user_types),
         }
     }
 
@@ -2763,7 +2781,7 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
         .params
         .iter()
         .enumerate()
-        .map(|(index, (_, ty))| format!("p{index}: {}", rust_type(ty, user_types)))
+        .map(|(index, (_, ty))| format!("p{index}: {}", bridge_type(ty, user_types)))
         .collect::<Vec<_>>();
     let raw_params = entry
         .params
@@ -2779,7 +2797,7 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
     let ret = entry
         .return_type
         .as_ref()
-        .map(|ty| format!(" -> {}", rust_type(ty, user_types)))
+        .map(|ty| format!(" -> {}", bridge_type(ty, user_types)))
         .unwrap_or_default();
     let mut setup = Vec::new();
     let mut call_args = Vec::new();

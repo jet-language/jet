@@ -761,6 +761,9 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     }
     let s = strip_mod(rust_code, "jet_uninit_semantics");
     let s = strip_mod(&s, "jet_mem");
+    // D-LOCALCELL1=A: the Cell runtime's small raw-pointer core is separately
+    // vetted; public operations enforce its dynamic loan law before access.
+    let s = strip_mod(&s, "jet_cell");
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");

@@ -551,6 +551,16 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
     collect_type_shapes(items).tuples
 }
 
+/// A linear Cell guard field must move out of a one-shot tuple, so the tuple
+/// itself cannot derive `Clone` (D-LOCALCELL1=A).
+fn is_move_only_cell_guard(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+    )
+}
+
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
     // Tuples are structural types with no type-parameter scope of their own.
     let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -559,6 +569,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         .iter()
         .all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
+                && !is_move_only_cell_guard(t)
                 && field_type_cloneable(t, &cx.type_names, &no_params)
         })
     {
@@ -568,6 +579,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         .iter()
         .all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
+                && !is_move_only_cell_guard(t)
                 && field_type_comparable(t, &cx.type_names, &no_params)
         })
     {

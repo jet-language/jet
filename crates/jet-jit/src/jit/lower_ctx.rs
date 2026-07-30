@@ -79,6 +79,10 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) ret_clif: Option<types::Type>,
     /// D-RANGE-VALUE1: this function returns the three-scalar Range ABI.
     pub(crate) ret_range: bool,
+    /// Checked return-layout handle for native Cell guards transferred to caller.
+    pub(crate) ret_cell_layout: i64,
+    /// True when this lowering entered a canonical Cell runtime frame.
+    pub(crate) cell_frame: bool,
     /// Lexical `#Shield` depth in emitted native code. Used to emit exact
     /// cleanup calls before every non-local control-flow edge.
     pub(crate) shield_depth: u32,
@@ -465,6 +469,54 @@ impl LowerCtx<'_, '_> {
 
     fn scalar_bitcast_memflags() -> MemFlags {
         MemFlags::new().with_endianness(Endianness::Little)
+    }
+
+    fn cell_schema(&mut self, ty: &Type) -> Result<Value, String> {
+        let schema = crate::Cell::CellSchema::from_type(ty, self.meta)?;
+        let handle = self.runtime.cells.register_schema(schema);
+        Ok(self.b.ins().iconst(types::I64, handle))
+    }
+
+    fn cell_pack_value(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
+        Ok(match self.b.func.dfg.value_type(value) {
+            types::F64 => self.b.ins().bitcast(
+                types::I64,
+                Self::scalar_bitcast_memflags(),
+                value,
+            ),
+            types::I8 => self.b.ins().uextend(types::I64, value),
+            types::I32 => self.b.ins().uextend(types::I64, value),
+            types::I64 => value,
+            other => return Err(format!("jit Cell value ABI unsupported: {ty:?} ({other})")),
+        })
+    }
+
+    fn cell_unpack_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
+        Ok(match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+            Some(types::F64) => self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                raw,
+            ),
+            Some(types::I8) => self.b.ins().ireduce(types::I8, raw),
+            Some(types::I32) => self.b.ins().ireduce(types::I32, raw),
+            Some(types::I64) => raw,
+            other => return Err(format!("jit Cell value ABI unsupported: {ty:?} ({other:?})")),
+        })
+    }
+
+    fn cell_inner(ty: &Type) -> Option<&Type> {
+        match ty {
+            Type::Apply { name, args }
+                if matches!(
+                    name.as_str(),
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                ) =>
+            {
+                args.first()
+            }
+            _ => None,
+        }
     }
 
     fn pack_enum_scalar(
@@ -2170,6 +2222,21 @@ impl LowerCtx<'_, '_> {
         let guards = self.emit_scope_guards();
         self.in_lexical_exit = false;
         guards?;
+        if self.cell_frame {
+            let returned = if self.ret_cell_layout != 0 {
+                values
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| self.b.ins().iconst(types::I64, 0))
+            } else {
+                self.b.ins().iconst(types::I64, 0)
+            };
+            let layout = self.b.ins().iconst(types::I64, self.ret_cell_layout);
+            let leave = self
+                .module
+                .declare_func_in_func(self.host.cell.frame_leave, self.b.func);
+            self.b.ins().call(leave, &[layout, returned]);
+        }
 
         let trapped = self
             .module
@@ -5894,6 +5961,231 @@ impl LowerCtx<'_, '_> {
 
     fn lower_host_call(&mut self, host: &THostCall, ty: &Type) -> Result<Value, String> {
         match host {
+            THostCall::CellGuardProject {
+                recv,
+                paths,
+                editable,
+                ..
+            } => {
+                let guard = self.lower_expr(recv)?;
+                let projection = self.runtime.cells.register_projection(
+                    crate::Cell::CellProjection {
+                        paths: paths.clone(),
+                    },
+                );
+                let kind = self.b.ins().iconst(types::I64, i64::from(*editable) + 1);
+                let projection = self.b.ins().iconst(types::I64, projection);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.cell.guard_project, self.b.func);
+                let call = self.b.ins().call(host, &[kind, guard, projection]);
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
+            }
+            THostCall::Method { recv, method, args }
+                if Self::cell_inner(&recv.ty).is_some() =>
+            {
+                let receiver_name = match &recv.ty {
+                    Type::Apply { name, .. } => name.as_str(),
+                    _ => unreachable!(),
+                };
+                let inner = Self::cell_inner(&recv.ty).expect("Cell inner type").clone();
+                let handle = self.lower_expr(recv)?;
+                match (receiver_name, method.as_str(), args.as_slice()) {
+                    ("Cell", "get", []) => {
+                        let schema = self.cell_schema(&inner)?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.get, self.b.func);
+                        let call = self.b.ins().call(host, &[handle, schema]);
+                        let raw = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        self.cell_unpack_value(raw, &inner)
+                    }
+                    ("Cell", "set", [value]) => {
+                        let value = self.lower_expr(value)?;
+                        let raw = self.cell_pack_value(value, &inner)?;
+                        let schema = self.cell_schema(&inner)?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.set, self.b.func);
+                        self.b.ins().call(host, &[handle, raw, schema]);
+                        self.emit_trap_check()?;
+                        Ok(self.b.ins().iconst(types::I8, 0))
+                    }
+                    ("Cell", "replace", [value]) => {
+                        let value = self.lower_expr(value)?;
+                        let raw = self.cell_pack_value(value, &inner)?;
+                        let schema = self.cell_schema(&inner)?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.replace, self.b.func);
+                        let call = self.b.ins().call(host, &[handle, raw, schema]);
+                        let old = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        self.cell_unpack_value(old, &inner)
+                    }
+                    ("Cell", "guard_read", []) => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_read, self.b.func);
+                        let call = self.b.ins().call(host, &[handle]);
+                        let guard = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        Ok(guard)
+                    }
+                    ("Cell", "guard_edit", []) => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_edit, self.b.func);
+                        let call = self.b.ins().call(host, &[handle]);
+                        let guard = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        Ok(guard)
+                    }
+                    ("Cell", "get_or_set", [initializer]) => {
+                        let Type::Option(value_ty) = &inner else {
+                            return Err("jit Cell.get_or_set on non-option".to_string());
+                        };
+                        let value_ty = value_ty.as_ref().clone();
+                        let schema = self.cell_schema(&value_ty)?;
+                        let begin = self
+                            .module
+                            .declare_func_in_func(self.host.cell.get_or_set_begin, self.b.func);
+                        let call = self.b.ins().call(begin, &[handle, schema]);
+                        let state = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let one = self.b.ins().iconst(types::I64, 1);
+                        let get_bool = self
+                            .module
+                            .declare_func_in_func(self.host.struct_get_bool, self.b.func);
+                        let present_call = self.b.ins().call(get_bool, &[state, zero]);
+                        let present = self.b.inst_results(present_call)[0];
+                        let get_raw = self
+                            .module
+                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                        let raw_call = self.b.ins().call(get_raw, &[state, one]);
+                        let state_value = self.b.inst_results(raw_call)[0];
+                        let present_block = self.b.create_block();
+                        let empty_block = self.b.create_block();
+                        let merge = self.b.create_block();
+                        let result_clif = self
+                            .meta
+                            .clif_ty(&value_ty)
+                            .or_else(|| clif_ty(&value_ty))
+                            .ok_or("jit Cell.get_or_set result ABI")?;
+                        self.b.append_block_param(merge, result_clif);
+                        self.b
+                            .ins()
+                            .brif(present, present_block, &[], empty_block, &[]);
+
+                        self.b.switch_to_block(present_block);
+                        self.b.seal_block(present_block);
+                        let value = self.cell_unpack_value(state_value, &value_ty)?;
+                        self.b.ins().jump(merge, &[value]);
+
+                        self.b.switch_to_block(empty_block);
+                        self.b.seal_block(empty_block);
+                        let TExprKind::Lambda(lambda) = &initializer.kind else {
+                            return Err("jit Cell.get_or_set initializer must be lambda".to_string());
+                        };
+                        let value = self.lower_inline_nullary_lambda(lambda)?;
+                        let raw = self.cell_pack_value(value, &value_ty)?;
+                        let set = self
+                            .module
+                            .declare_func_in_func(
+                                self.host.cell.get_or_set_store,
+                                self.b.func,
+                            );
+                        self.b.ins().call(set, &[state_value, raw, schema]);
+                        let kind = self.b.ins().iconst(types::I64, 2);
+                        let drop = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_drop, self.b.func);
+                        self.b.ins().call(drop, &[kind, state_value]);
+                        self.b.ins().jump(merge, &[value]);
+
+                        self.b.switch_to_block(merge);
+                        self.b.seal_block(merge);
+                        Ok(self.b.block_params(merge)[0])
+                    }
+                    ("Cell" | "CellReadGuard" | "CellEditGuard", "read", [callback])
+                    | ("Cell" | "CellEditGuard", "edit", [callback]) => {
+                        let editable = method == "edit";
+                        let (guard, temporary) = if receiver_name == "Cell" {
+                            let host_id = if editable {
+                                self.host.cell.guard_edit
+                            } else {
+                                self.host.cell.guard_read
+                            };
+                            let host = self.module.declare_func_in_func(host_id, self.b.func);
+                            let call = self.b.ins().call(host, &[handle]);
+                            (self.b.inst_results(call)[0], true)
+                        } else {
+                            (handle, false)
+                        };
+                        let kind = self
+                            .b
+                            .ins()
+                            .iconst(types::I64, i64::from(receiver_name == "CellEditGuard" || editable) + 1);
+                        let schema = self.cell_schema(&inner)?;
+                        let get = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_get, self.b.func);
+                        let call = self.b.ins().call(get, &[kind, guard, schema]);
+                        let raw = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        let payload = self.cell_unpack_value(raw, &inner)?;
+                        let TExprKind::Lambda(lambda) = &callback.kind else {
+                            return Err("jit Cell callback must be lambda".to_string());
+                        };
+                        let (result, updated) = self.lower_inline_lambda(lambda, payload)?;
+                        if editable {
+                            let raw = self.cell_pack_value(updated, &inner)?;
+                            let set = self
+                                .module
+                                .declare_func_in_func(self.host.cell.guard_set, self.b.func);
+                            self.b.ins().call(set, &[guard, raw, schema]);
+                        }
+                        if temporary {
+                            let drop = self
+                                .module
+                                .declare_func_in_func(self.host.cell.guard_drop, self.b.func);
+                            self.b.ins().call(drop, &[kind, guard]);
+                        }
+                        self.emit_trap_check()?;
+                        Ok(result)
+                    }
+                    ("CellReadGuard" | "CellEditGuard", "get", []) => {
+                        let kind = self
+                            .b
+                            .ins()
+                            .iconst(types::I64, if receiver_name == "CellReadGuard" { 1 } else { 2 });
+                        let schema = self.cell_schema(&inner)?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_get, self.b.func);
+                        let call = self.b.ins().call(host, &[kind, handle, schema]);
+                        let raw = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        self.cell_unpack_value(raw, &inner)
+                    }
+                    ("CellEditGuard", "set", [value]) => {
+                        let value = self.lower_expr(value)?;
+                        let raw = self.cell_pack_value(value, &inner)?;
+                        let schema = self.cell_schema(&inner)?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.cell.guard_set, self.b.func);
+                        self.b.ins().call(host, &[handle, raw, schema]);
+                        self.emit_trap_check()?;
+                        Ok(self.b.ins().iconst(types::I8, 0))
+                    }
+                    _ => Err(format!("jit {receiver_name}.{method} unsupported")),
+                }
+            }
             THostCall::Method { recv, method, args }
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Pool") =>
             {
@@ -5930,7 +6222,7 @@ impl LowerCtx<'_, '_> {
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit Shared callback must be a lambda".to_string());
                 };
-                let result = self.lower_inline_lambda(lambda, payload)?;
+                let (result, updated) = self.lower_inline_lambda(lambda, payload)?;
                 let host_id = if transactional {
                     self.host.memory.shared_txn_set
                 } else if method == "read" {
@@ -5942,7 +6234,7 @@ impl LowerCtx<'_, '_> {
                 if method == "read" {
                     self.b.ins().call(end, &[handle]);
                 } else {
-                    self.b.ins().call(end, &[handle, payload]);
+                    self.b.ins().call(end, &[handle, updated]);
                 }
                 Ok(result)
             }
@@ -5979,7 +6271,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(available);
                 self.b.seal_block(available);
-                let callback = self.lower_inline_lambda(lambda, payload)?;
+                let (callback, _) = self.lower_inline_lambda(lambda, payload)?;
                 let callback_plus_one = self.b.ins().iadd(callback, one);
                 self.b.ins().jump(merge, &[callback_plus_one]);
 
@@ -6441,7 +6733,11 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn lower_inline_lambda(&mut self, lambda: &TLambda, argument: Value) -> Result<Value, String> {
+    fn lower_inline_lambda(
+        &mut self,
+        lambda: &TLambda,
+        argument: Value,
+    ) -> Result<(Value, Value), String> {
         let name = lambda
             .source_params
             .first()
@@ -6464,10 +6760,41 @@ impl LowerCtx<'_, '_> {
                 "jit inline callback parameter ABI mismatch: {ty:?} expects {expected}, got {actual}"
             ));
         }
-        let var = self.fresh_var(expected);
-        self.b.def_var(var, argument);
+        let scalar_slot = matches!(
+            &ty,
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::Char
+        )
+        .then(|| {
+            let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                u32::from(expected.bytes()),
+                0,
+            ));
+            self.b.ins().stack_store(argument, slot, 0);
+            slot
+        });
+        let stored_ty = if scalar_slot.is_some() {
+            Type::Apply {
+                name: "__JetScalarMut".to_string(),
+                args: vec![ty],
+            }
+        } else {
+            ty
+        };
+        let bound = scalar_slot.map_or(argument, |slot| {
+            self.b
+                .ins()
+                .stack_addr(self.module.target_config().pointer_type(), slot, 0)
+        });
+        let var = self.fresh_var(self.b.func.dfg.value_type(bound));
+        self.b.def_var(var, bound);
         self.vars.insert(key.clone(), var);
-        self.var_tys.insert(key.clone(), ty);
+        self.var_tys.insert(key.clone(), stored_ty);
         let result = match &lambda.executable {
             TLambdaBody::Expr(expr) => self.lower_expr(expr)?,
             TLambdaBody::Block(body) => {
@@ -6477,6 +6804,10 @@ impl LowerCtx<'_, '_> {
                 }
                 self.b.ins().iconst(types::I64, 0)
             }
+        };
+        let updated = match scalar_slot {
+            Some(slot) => self.b.ins().stack_load(expected, slot, 0),
+            None => self.b.use_var(var),
         };
         match old_var {
             Some(var) => {
@@ -6494,7 +6825,23 @@ impl LowerCtx<'_, '_> {
                 self.var_tys.remove(&key);
             }
         }
-        Ok(result)
+        Ok((result, updated))
+    }
+
+    fn lower_inline_nullary_lambda(&mut self, lambda: &TLambda) -> Result<Value, String> {
+        if !lambda.source_params.is_empty() || !lambda.param_types.is_empty() {
+            return Err("jit nullary callback has parameters".to_string());
+        }
+        match &lambda.executable {
+            TLambdaBody::Expr(expr) => self.lower_expr(expr),
+            TLambdaBody::Block(body) => {
+                self.lower_stmts_scoped(body)?;
+                if self.dead {
+                    return Err("jit inline callback cannot transfer control".to_string());
+                }
+                Ok(self.b.ins().iconst(types::I64, 0))
+            }
+        }
     }
 
     /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
@@ -11743,6 +12090,27 @@ impl LowerCtx<'_, '_> {
                     TStaticOwner::Prelude { path, .. } => Some(path.as_str()),
                     _ => None,
                 };
+                let is_cell_new = method.name == "new"
+                    && args.len() == 1
+                    && matches!(
+                        prelude_path,
+                        Some("jet_std::JetCell" | "jet_std::jet_cell::JetCell")
+                    );
+                if is_cell_new {
+                    let inner = Self::cell_inner(&expr.ty)
+                        .ok_or_else(|| format!("jit Cell.new result type: {:?}", expr.ty))?
+                        .clone();
+                    let value = self.lower_call_arg(&args[0])?;
+                    let raw = self.cell_pack_value(value, &inner)?;
+                    let schema = self.cell_schema(&inner)?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.cell.new, self.b.func);
+                    let call = self.b.ins().call(host, &[raw, schema]);
+                    let cell = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    return Ok(cell);
+                }
                 if method.name == "new" && args.is_empty() {
                     let host_id = match prelude_path {
                         Some(path) if path.ends_with("BTreeSet") => {
@@ -14326,6 +14694,27 @@ impl LowerCtx<'_, '_> {
                     converted = self.b.ins().fpromote(types::F64, narrowed);
                 }
                 Ok(converted)
+            }
+            TNumericOp::CheckedIntToFloat {
+                source_signed,
+                target_f32,
+                ..
+            } => {
+                let source_signed = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(*source_signed));
+                let target_f32 = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(*target_f32));
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.numeric_checked_widen, self.b.func);
+                let call = self.b.ins().call(host, &[value, source_signed, target_f32]);
+                let widened = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(widened)
             }
             TNumericOp::TryFrom { host_kind, .. } => {
                 let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));

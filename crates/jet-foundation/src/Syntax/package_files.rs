@@ -136,6 +136,7 @@ pub const ATTR_NUMERIC: &str = "Numeric";
 pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
 /// D-QUANTITY-DECL1=A (card #603): contextual fields in `#UnitFamily`.
 pub const UNIT_FAMILY_BASE_FIELD: &str = "base";
+pub const UNIT_FAMILY_DIMENSION_FIELD: &str = "dimension";
 pub const UNIT_FAMILY_SCALE_FIELD: &str = "scale";
 pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 

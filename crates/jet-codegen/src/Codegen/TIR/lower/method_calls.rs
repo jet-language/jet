@@ -1416,6 +1416,16 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
+                if module == "core.tasks" && method == "join_all" && args.len() == 1 {
+                    let tasks = lower_expr(&args[0].expr, cx, env);
+                    let elem = taskgroup_result_elem(&tasks);
+                    return TExpr {
+                        ty: Type::List(Box::new(elem)),
+                        kind: TExprKind::TaskGroupAll {
+                            tasks: Box::new(tasks),
+                        },
+                    };
+                }
                 if let Some(t) =
                     lower_core_closure_call(&module, method, method_span, args, cx, env)
                 {
@@ -2636,6 +2646,14 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { name, .. }) if name == "Pool"
             );
         let is_shared = recv_type.as_deref() == Some("Shared");
+        let cell_receiver = recv_type
+            .as_deref()
+            .filter(|name| {
+                matches!(
+                    *name,
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                )
+            });
         let is_expiring_secret = recv_type.as_deref() == Some("ExpiringSecret");
         if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {
             let recv_t = lower_expr(receiver, cx, env);
@@ -2744,6 +2762,126 @@ pub(crate) fn lower_method_call(
                     args: Vec::new(),
                 })),
             };
+        }
+        if let Some(cell_receiver) = cell_receiver {
+            let recv_t = lower_expr(receiver, cx, env);
+            let inner = match &recv_t.ty {
+                Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                _ => Type::Int,
+            };
+            if matches!(cell_receiver, "CellReadGuard" | "CellEditGuard")
+                && matches!((method, args.len()), ("map", 1) | ("split", 2))
+            {
+                let mut paths = Vec::with_capacity(args.len());
+                for arg in args {
+                    let Expr::Lambda(lambda) = &arg.expr else {
+                        unreachable!("sema requires projection lambdas for Cell guard map/split");
+                    };
+                    let path = lambda
+                        .meta
+                        .cell_projection_path
+                        .as_ref()
+                        .expect("sema records every Cell guard projection path");
+                    paths.push(path.clone());
+                }
+                let ty = resolved_ret
+                    .cloned()
+                    .expect("sema persists exact Cell guard projection return type");
+                debug_assert!(method != "split" || matches!(ty, Type::Tuple(_)));
+                return TExpr {
+                    ty,
+                    kind: TExprKind::HostCall(Box::new(THostCall::CellGuardProject {
+                        recv: Box::new(recv_t),
+                        paths,
+                        result_ty: resolved_ret
+                            .cloned()
+                            .expect("sema persists exact Cell guard projection return type"),
+                        editable: cell_receiver == "CellEditGuard",
+                        edit_paths_disjoint: cell_receiver == "CellEditGuard" && method == "split",
+                    })),
+                };
+            }
+            if matches!(
+                (cell_receiver, method, args.len()),
+                ("Cell", "get" | "guard_read" | "guard_edit", 0)
+                    | ("Cell", "set" | "replace", 1)
+                    | ("CellReadGuard" | "CellEditGuard", "get", 0)
+                    | ("CellEditGuard", "set", 1)
+            ) {
+                let ty = resolved_ret.cloned().unwrap_or_else(unit_type);
+                let targs = args
+                    .iter()
+                    .map(|arg| lower_expr(&arg.expr, cx, env))
+                    .collect();
+                return TExpr {
+                    ty,
+                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                        recv: Box::new(recv_t),
+                        method: method.to_string(),
+                        args: targs,
+                    })),
+                };
+            }
+            if matches!(
+                (cell_receiver, method),
+                ("Cell", "read" | "edit")
+                    | ("CellReadGuard", "read")
+                    | ("CellEditGuard", "read" | "edit")
+            ) && args.len() == 1
+            {
+                let Expr::Lambda(lambda) = &args[0].expr else {
+                    unreachable!("sema requires a lambda for Cell read/edit");
+                };
+                let expected = std::slice::from_ref(&inner);
+                let write = method == "edit";
+                let lowered =
+                    lower_lambda_expecting_host_borrow(lambda, cx, env, expected, write);
+                let ty = resolved_ret.cloned().unwrap_or_else(|| {
+                    lambda_body_ty_expecting(lambda, cx, env, Some(expected))
+                });
+                return TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                        recv: Box::new(recv_t),
+                        method: method.to_string(),
+                        args: vec![TExpr {
+                            ty: Type::Fn {
+                                params: vec![inner],
+                                ret: Some(Box::new(ty)),
+                                effect_bound: None,
+                                return_view_provenance: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(lowered)),
+                        }],
+                    })),
+                };
+            }
+            if cell_receiver == "Cell" && method == "get_or_set" && args.len() == 1 {
+                let Expr::Lambda(lambda) = &args[0].expr else {
+                    unreachable!("sema requires a lambda for Cell.get_or_set");
+                };
+                let value_ty = resolved_ret.cloned().unwrap_or_else(|| match inner {
+                    Type::Option(value) => *value,
+                    other => other,
+                });
+                let lowered = lower_lambda(lambda, cx, env);
+                return TExpr {
+                    ty: value_ty.clone(),
+                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                        recv: Box::new(recv_t),
+                        method: method.to_string(),
+                        args: vec![TExpr {
+                            ty: Type::Fn {
+                                params: vec![],
+                                ret: Some(Box::new(value_ty.clone())),
+                                effect_bound: None,
+                                return_view_provenance: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(lowered)),
+                        }],
+                    })),
+                };
+            }
         }
         if is_expiring_secret && method == "with" && args.len() == 1 {
             let mut recv_shape = recv_peek.as_ref();
@@ -2941,6 +3079,27 @@ pub(crate) fn lower_method_call(
         };
         }
     }
+    // D-NUMWIDEN-CROSS1=E: sema owns the checked-crossing decision and leaves
+    // this unspellable marker. Lowering only records adapter facts.
+    if recv_type.as_deref() == Some(Type::CHECKED_NUMERIC_WIDEN_MARKER)
+        && args.len() == 1
+    {
+        let source = lower_expr(&args[0].expr, cx, env);
+        let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
+        let target = resolved_ret.cloned().unwrap_or(Type::Float);
+        return TExpr {
+            ty: target.clone(),
+            kind: TExprKind::NumericMethod {
+                recv: Box::new(source),
+                op: TNumericOp::CheckedIntToFloat {
+                    source_signed,
+                    target_f32: target == Type::Float32,
+                    line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32,
+                },
+            },
+        };
+    }
+
     // c109 Phase 12: a numeric predicate / bit-pop query
     // (`is_nan`/`count_ones`/…). The gate proved `recv_type ==
     // Some(<numeric name>)` + a covered nullary numeric op. Resolve the receiver
@@ -3846,6 +4005,38 @@ pub(crate) fn lower_method_call(
                     owner_type: None,
                     method: TMethodRef::bare("new"),
                     args: Vec::new(),
+                },
+            };
+        }
+        if type_name == "Cell" && method == "new" && args.len() == 1 {
+            let value = lower_expr(&args[0].expr, cx, env);
+            let cell_ty = resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
+                name: "Cell".to_string(),
+                args: vec![value.ty.clone()],
+            });
+            let elem_ty = match &cell_ty {
+                Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                _ => value.ty.clone(),
+            };
+            return TExpr {
+                ty: cell_ty,
+                kind: TExprKind::StaticCall {
+                    owner: rooted_generic_owner(
+                        "jet_std::JetCell",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
+                    owner_type: None,
+                    method: TMethodRef::bare("new"),
+                    args: vec![TCallArg {
+                        value,
+                        borrow: false,
+                        mut_borrow: false,
+                        clone: false,
+                        arc_clone: false,
+                        fn_coerce: None,
+                        widen_to_vec: false,
+                        widen_to_union: None,
+                    }],
                 },
             };
         }

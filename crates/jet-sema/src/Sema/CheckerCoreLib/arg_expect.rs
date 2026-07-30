@@ -196,7 +196,11 @@ impl<'a> Checker<'a> {
             self.expected_type = Some(param_ty.clone());
             let got = self.infer(&mut arg.expr);
             self.expected_type = saved_expected;
-            if let Some(got) = got {
+            if let Some(mut got) = got {
+                if got != *param_ty && got.numeric_widening_to(param_ty).is_some() {
+                    self.widen_numeric_expr(&mut arg.expr, &got, param_ty);
+                    got = param_ty.clone();
+                }
                 let reads_expiring_secret_loan = !consumes
                     && arg.convention == AccessConvention::Read
                     && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);

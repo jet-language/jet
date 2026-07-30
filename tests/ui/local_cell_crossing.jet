@@ -1,0 +1,22 @@
+use core.tasks as tasks
+
+fn cross_task(cell: Cell<Int>) {
+    worker :: tasks.spawn(() => {
+        _ :: cell
+    })
+    worker.join()
+}
+
+fn cross_shared(cell: Cell<Int>) {
+    _ :: Shared.new(^cell)
+}
+
+struct Cache {
+    cell: Cell<Int>,
+}
+
+fn cross_shared_nested(cache: Cache) {
+    _ :: Shared.new(^cache)
+}
+
+fn run() {}

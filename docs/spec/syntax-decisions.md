@@ -540,15 +540,25 @@ no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain integer arithmetic **traps on overflow** at every
 width; opt in per-op with `wrapping(…)` / `saturating(…)` /
 `checked(…) => T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
-bit ops. **D-FLOATW1**: `core.math` is width-generic; mixing F32 and Float is
-a compile error with a convert fix-it.
+bit ops. **D-FLOATW1**: `core.math` is width-generic.
+
+**D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
+2026-07-28)*: one numeric widening law applies to operators, arguments,
+returns, and assignments. One operand may widen to the other; Jet never
+searches for a third type and never narrows implicitly. Integer widening
+requires full value-set containment. `F32` widens to `Float`. Integers cross
+freely to `Float` from `I8 I16 I32 U8 U16 U32`, and to `F32` from
+`I8 I16 U8 U16`. Other integer-to-float crossings use a runtime exactness
+check and trap before rounding. A numeral is checked exactly at compile time.
+Experts accept possible precision loss for one crossing with `approx(value)`.
 
 **D-SHAPE-CONVERT1=A — destination type owns explicit conversion** *(ratified
 2026-07-14, card #566)*: typed conversion is always
 `Target.from_source(value)`. The source-kind suffix is canonical and bounded
 (`from_int`, `from_u8`, `from_float`, or a source type's snake-case name), so
 completion stays on the promised result type. Checked narrowing returns the
-ordinary fallible result and is handled with `?`/`??`; widening is infallible.
+ordinary fallible result and is handled with `?`/`??`; safe numeric widening
+is implicit.
 Text interpretation remains `Target.parse(text)`; non-parsing materialization
 such as `Secret.from_text` remains an ordinary destination-owned conversion. Numeric,
 distinct/unit, enum, FFI, and user-defined static conversions share this one
@@ -558,7 +568,7 @@ and neutral `convert(value)` aliases are not accepted.
 ```jet
 id :: UserId.from_int(raw_id)
 byte :: U8.from_int(count) ?? return
-ratio :: Float.from_u8(byte)
+ratio :: byte + 0.0
 parsed :: Int.parse(text) ?? return
 ```
 
@@ -659,19 +669,36 @@ unit literals**: `500ms`, `12.50usd` resolve against in-scope family members
 Dot-construction `px.{100}` also valid.
 
 **D-SHAPE-QUANTITY1=A — Jet understands physical dimensions** *(ratified
-2026-07-15)*: the compiler owns a small dimension table and scale rules —
-length divided by time is speed, length plus time is a clear Jet error. Unit
-information costs nothing at runtime and is shared across packages. This adds
-no general type-level programming; declaration and spelling are the
-D-QUANTITY-DECL1/TYPE1/POINT1/CONVERT1 family below.
+2026-07-15; amended by D-DIMENSION-OPEN1=D)*: length divided by time is speed,
+and length plus time is a Jet error. Unit information costs nothing at runtime.
+Currency remains nominal and does not take part in dimension algebra.
 
-Implementation identity is a normalized compiler-only exponent vector. The
-initial closed table recognizes `Length`, `Time`, `Speed`, and `Area`;
-D-QUANTITY-DECL1 extends it with `Temperature` for affine family identity. Inferred
-types serialize the canonical family name, numeric base, and exponent identity
-(for example `Quantity<Speed, Float; L1T-1>`) for semantic inspection and API
-freeze checks, then erase to the numeric base before backend emission. Currency
-remains outside this table and keeps D-QUAL3's nominal arithmetic behavior.
+Implementation identity is a sorted exponent map over nominal base dimensions.
+Zero exponents are removed. API facts escape and serialize each sorted key with
+its signed exponent. Sema erases the map before backend emission.
+
+**D-DIMENSION-OPEN1=D — Open dimensions with the standard-unit prelude**
+*(ratified 2026-07-28, card #1292)*: `#UnitFamily(Name, dimension, base: unit)`
+declares a new base dimension. The seven SI base dimensions and the standard
+unit catalog use this same surface in `Prelude/Units.jet`. The compiler has no
+dimension-name table. A third-party dimension is nominal to its declaring
+package, so packages share one by importing a common declaration.
+
+**D-DERIVED-DIMENSION-CLAIM1=A — Derived dimension in the family header**
+*(ratified 2026-07-30, card #1292)*:
+`#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton)`
+claims an existing structural dimension. Sema normalizes the expression to the
+same exponent map that value arithmetic uses. The coherent base member has
+scale one.
+
+**D-UNIT-SCALE-PROVENANCE1=A — Unit scales keep their source truth**
+*(ratified 2026-07-30, card #1292)*: a unit scale is `Rational`,
+`SymbolicPi`, `Conventional(value, source)`, or
+`Measured(central_value, standard_uncertainty, source)`. Degree uses
+`pi / 180`. Dalton records the BIPM/CODATA value and uncertainty. `mmHg`
+records the NIST SP 811 convention. Rational and symbolic conversions use the
+ordinary path. A measured crossing requires an explicit rounded conversion and
+is never reported as exact. API facts and diagnostics retain the provenance.
 
 **D-QUANTITY-DECL1=A — scaled and affine units extend `#UnitFamily`**
 *(ratified 2026-07-16, card #603)*: the post-D-SHAPE2 `#UnitFamily` typed
@@ -5221,3 +5248,15 @@ the trait/derive namespace. Serde internal tagging is
 `#Discriminant("field")`, and a scheduled project entry is `#Job fn`.
 `#Tag` and `#Task` are retired with fixes. D-TAG1 prose calls nested enum
 families “variant groups.” Card #1300.
+
+**2026-07-29 — D-EACH1=C / D-FANOUT3=C**: `<: a, b :>` expands one complete
+binding or expression statement per name. Multiple fences on the same statement
+advance in lock-step. An ascending numbered-name range such as
+`<: task1..task8 :>` may bind names and reuse them in a later expression fence.
+The fence is statement expansion, not a list,
+destructure, or S75 fan-out. `<:` and `:>` are longest-match digraphs; `:>`
+suppresses line termination and neither digraph ends a statement. The formatter
+retains one authored fence and wraps wide explicit fences one name per line.
+`tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
+returns their results in list order; taskgroup combinators remain the structured
+ownership surface. Card #1239.

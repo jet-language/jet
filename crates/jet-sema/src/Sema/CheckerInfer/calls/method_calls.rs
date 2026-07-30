@@ -1179,7 +1179,63 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     let elem_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                    if self.type_contains_local_cell(&elem_ty) {
+                        self.diags.push(Diagnostic::error(
+                            "E1102",
+                            format!(
+                                "{} cannot be stored in `Shared<T>`",
+                                elem_ty.show()
+                            ),
+                            "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized".to_string(),
+                            "store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
                     let ret = Type::Shared(Box::new(elem_ty));
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+                // D-LOCALCELL1=A: `Cell.new(x)` constructs one thread-confined
+                // interior-mutation handle. An annotation or explicit type
+                // argument supplies `T` for `None`; otherwise `x` infers it.
+                if type_name == "Cell" && method == "new" {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        span,
+                        "`Cell.new` allocates local storage",
+                    ));
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`Cell.new` takes exactly one value, got {}", args.len()),
+                            "a `Cell<T>` stores exactly one starting value".to_string(),
+                            "write `Cell.new(value)`".to_string(),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let expected = type_args.first().cloned().or_else(|| {
+                        match &self.expected_type {
+                            Some(Type::Apply { name, args })
+                                if name == "Cell" && !args.is_empty() =>
+                            {
+                                Some(args[0].clone())
+                            }
+                            _ => None,
+                        }
+                    });
+                    let saved_expected = self.expected_type.clone();
+                    self.expected_type = expected.clone();
+                    let inferred = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                    self.expected_type = saved_expected;
+                    let elem_ty = expected.unwrap_or(inferred);
+                    let ret = Type::Apply {
+                        name: "Cell".to_string(),
+                        args: vec![elem_ty],
+                    };
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
@@ -3044,6 +3100,23 @@ impl<'a> Checker<'a> {
                         let result =
                             self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                         *recv_type_out = Some("Pool".to_string());
+                        return result;
+                    }
+                }
+                if matches!(
+                    name.as_str(),
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                ) {
+                    if let Some(ret) =
+                        Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                    {
+                        let result =
+                            self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                        // Cell methods refine the builtin table's placeholder
+                        // return from the checked receiver and callback types.
+                        // Persist that exact fact for every later tier.
+                        *resolved_ret_out = result.clone();
+                        *recv_type_out = Some(name.clone());
                         return result;
                     }
                 }

@@ -1,0 +1,7 @@
+Error [E0217]: Cell guard `guard` cannot be captured by a lambda
+  --> tests/ui/cell_guard_capture.jet:3:12
+    |
+  3 |     return () => guard.get()
+    |            ^^^^^^^^^^^^^^^
+ Why: a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
+ Fix: keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections

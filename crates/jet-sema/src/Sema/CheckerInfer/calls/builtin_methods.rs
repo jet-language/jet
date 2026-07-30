@@ -9,6 +9,14 @@ use crate::Sema::CheckerCoreLib::wrong_core_arity;
 use crate::Sema::Diagnostics::{suggest_field, type_fix_hint};
 use crate::Syntax;
 use std::collections::HashSet;
+
+fn cell_inner(ty: &Type) -> Type {
+    match ty {
+        Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
+        _ => Type::Int,
+    }
+}
+
 impl<'a> Checker<'a> {
         fn para_type_is_transferable(&self, ty: &Type) -> bool {
             fn transferable(
@@ -383,6 +391,55 @@ impl<'a> Checker<'a> {
                         };
                         return Some(Type::List(Box::new(id_ty)));
                     }
+                    // D-LOCALCELL1=A: local cells mutate through read receivers.
+                    // Guard mapping/splitting consumes the source guard so only
+                    // projected guards retain the original dynamic loan.
+                    ("Cell", "get") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_get(&inner, span);
+                    }
+                    ("Cell", "set" | "replace") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_write(method, &inner, args, span);
+                    }
+                    ("Cell", "get_or_set") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_get_or_set(&inner, args, span);
+                    }
+                    ("Cell", "read") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_read(&inner, args, span);
+                    }
+                    ("Cell", "edit") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_edit(&inner, args, span);
+                    }
+                    ("CellReadGuard" | "CellEditGuard", "get") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_get(&inner, span);
+                    }
+                    ("CellEditGuard", "set") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_write("set", &inner, args, span);
+                    }
+                    ("CellReadGuard" | "CellEditGuard", "read") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_read(&inner, args, span);
+                    }
+                    ("CellEditGuard", "edit") => {
+                        let inner = cell_inner(recv_ty);
+                        return self.finish_cell_edit(&inner, args, span);
+                    }
+                    ("CellReadGuard" | "CellEditGuard", "map") => {
+                        let inner = cell_inner(recv_ty);
+                        self.consume_builtin_receiver(receiver, method);
+                        return self.finish_cell_guard_map(name, &inner, args, span);
+                    }
+                    ("CellReadGuard" | "CellEditGuard", "split") => {
+                        let inner = cell_inner(recv_ty);
+                        self.consume_builtin_receiver(receiver, method);
+                        return self.finish_cell_guard_split(name, &inner, args, span);
+                    }
                     _ => {}
                 }
             }
@@ -539,6 +596,12 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if let (Some(et), Some(gt)) = (expected.get(i), got) {
+                        let gt = self.widen_numeric_argument(
+                            &mut arg.expr,
+                            gt,
+                            et,
+                            crate::AST::AccessConvention::Read,
+                        );
                         if Collections::is_closure_method(method) && i == 0 && method == "map" {
                             if let Type::Fn {
                                 ret: Some(ref r), ..

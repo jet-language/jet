@@ -518,9 +518,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
                 _ => Vec::new(),
             };
-            let move_fields = canonical
-                .iter()
-                .any(|(_, ty)| cx.type_contains_shared_guard(ty));
+            let move_fields = canonical.iter().any(|(_, ty)| {
+                cx.type_contains_shared_guard(ty)
+                    || matches!(
+                        ty,
+                        Type::Apply { name, .. }
+                            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
+                    )
+            });
             let tmp = format!("__jet_d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let mut binds = Vec::new();

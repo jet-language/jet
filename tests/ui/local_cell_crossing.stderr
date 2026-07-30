@@ -1,0 +1,31 @@
+Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
+  --> tests/ui/local_cell_crossing.jet:4:27
+    |
+  4 |     worker :: tasks.spawn(() => {
+    |                           ^^^^^^^
+ Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
+
+Error [E0120]: `cell` was not moved here, so it cannot be taken (`^`)
+  --> tests/ui/local_cell_crossing.jet:5:14
+    |
+  5 |         _ :: cell
+    |              ^^^^
+ Why: this function has read access only and does not own the value
+ Fix: copy it instead: `_ :: ~cell`
+
+Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
+  --> tests/ui/local_cell_crossing.jet:11:22
+    |
+ 11 |     _ :: Shared.new(^cell)
+    |                      ^^^^
+ Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`
+
+Error [E1102]: `Cache` cannot be stored in `Shared<T>`
+  --> tests/ui/local_cell_crossing.jet:19:22
+    |
+ 19 |     _ :: Shared.new(^cache)
+    |                      ^^^^^
+ Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`

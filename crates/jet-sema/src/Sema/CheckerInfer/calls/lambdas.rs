@@ -150,6 +150,26 @@ use std::collections::HashSet;
                     let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
                         continue;
                     };
+                    if self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
+                        let problem = self
+                            .sendability_problem(&cap_ty, true)
+                            .expect("Cell guards are thread-confined");
+                        self.report_unsendable(
+                            name,
+                            &cap_ty,
+                            problem,
+                            SendCrossing::TaskCapture,
+                            lam.span,
+                        );
+                        continue;
+                    }
+                    if self.type_contains_cell_guard(&cap_ty) {
+                        self.report_cell_guard_storage(
+                            format!("Cell guard `{name}` cannot be captured by a lambda"),
+                            lam.span,
+                        );
+                        continue;
+                    }
                     if matches!(&cap_ty, Type::Named(ty) if ty == Syntax::TYPE_TASKGROUP) {
                         self.diags.push(Diagnostic::error(
                             "E1110",

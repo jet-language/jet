@@ -1238,18 +1238,33 @@ Example: `examples/features/math/math_audit.jet`.
 
 `#UnitFamily` makes named unit types. Printing a unit value shows its magnitude
 and declared symbol. Physical arithmetic also shows a normalized derived unit.
+Jet loads the seven SI dimensions and standard SI, accepted non-SI, customary,
+and electronics units from ordinary `Prelude/Units.jet` source.
 
 ```jet
-#UnitFamily(Length, base: meter) { meter px(scale: 1) }
-#UnitFamily(Time, base: second) { second }
+#UnitFamily(Token, dimension, base: token) { token }
+#UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) {
+    token_per_second
+}
 
 fn run() {
     distance :: 12meter
     speed :: distance / 3second
+    rate :: 30token / 2second
     print(distance) // 12 meter
     print(speed)    // 4 meter/second
+    print(rate)     // 15 token/second
 }
 ```
+
+Use `dimension` to mint one package-owned base axis. Use
+`dimension: Mass * Length / Time / Time` to give a structural dimension a
+name. Import one declaration when two packages must share a custom axis.
+
+Most unit scales are exact ratios. Degree uses the exact symbolic definition
+`pi / 180`. `mmHg` retains its NIST SP 811 convention. Dalton retains the
+pinned BIPM/CODATA central value, standard uncertainty, and source. A measured
+crossing requires an explicit rounded conversion and is never labeled exact.
 
 Bare interpolation uses the symbol form. `{value#Unit(name)}` uses the
 generated unit type name. `{value#Unit(bare)}` omits the unit. A hand-written
@@ -2161,6 +2176,7 @@ there's no combined channel value).
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
+| `tasks.join_all(handles)` | `[T]` | Consume `[Task<T>]`, wait in list order, and return results in that order |
 | `task.join()` | `T` | Wait for the task and consume the task handle |
 | `task.wait()` | `T` | Alias of `.join()` |
 | `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
@@ -2186,11 +2202,13 @@ With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
-`taskgroup` owns child tasks until scope exit. `g.all`, `g.race`, and `g.any`
-join task lists on the scheduler; `race`/`any` cancel losers. `g.select()` races
-receivers and timers: `.recv(rx)` waits for a channel value, `.after(ms: N)` is a
-unit timer arm, and `.after(ms: N, value: fallback)` is a typed timeout arm that
-can be mixed with same-`T` receive arms.
+Use `tasks.join_all([first, second])` when code already owns free task handles
+and needs every result in handle-list order. The list and each handle are
+consumed. `taskgroup` remains the structured default: it owns child tasks until
+scope exit. Inside one, use `g.all`, `g.race`, and `g.any`; `race`/`any` cancel
+losers. `g.select()` races receivers and timers: `.recv(rx)` waits for a channel
+value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
+is a typed timeout arm that can be mixed with same-`T` receive arms.
 
 ### `core.testing` — fixtures under `#Test`
 
@@ -2548,6 +2566,47 @@ reads an input value or text content. `web.storage.local` and
 
 ---
 
+### `Cell<T>` — local interior mutability
+
+`Cell<T>` stores private state that read-only code can update on one task.
+It uses no `Arc` and no operating-system lock. Use `Shared<T>` when state must
+cross a task, task group, channel, or parallel adapter.
+
+```jet
+cache := Cell.new(0)
+cache.set(1)
+old :: cache.replace(2)
+current :: cache.get()
+cache.edit(value => value += 1)
+```
+
+| Method | Returns | What it does |
+|--------|---------|--------------|
+| `Cell.new(value)` | `Cell<T>` | Create a local cell and infer `T` |
+| `cell.get()` | `T` | Copy the current value; `T` must support Jet's copy law |
+| `cell.set(value)` | nothing | Replace the value |
+| `cell.replace(value)` | `T` | Replace the value and return the old value |
+| `cell.get_or_set(init)` | `T` | Initialize an empty `Cell<T?>` once and copy the value |
+| `cell.read(value => result)` | `R` | Run a closure under one read loan |
+| `cell.edit(value => result)` | `R` | Run a closure under one edit loan |
+| `cell.guard_read()` | `CellReadGuard<T>` | Keep a read loan across calls |
+| `cell.guard_edit()` | `CellEditGuard<T>` | Keep an edit loan across calls |
+| `guard.map(project)` | projected guard | Keep the same loan for one projection |
+| `guard.split(first, second)` | two projected guards | Share the same loan across two disjoint field projections |
+
+Many read guards can coexist. One edit guard excludes all other guards.
+Mapped and split guards release the original loan only after the last derived
+guard drops. Runtime conflicts stop with `Cell borrow conflict`. Use
+`cell.read(value => result)` when `T` does not support copying.
+
+A function can pass or return a guard directly. Named tuples can contain guards
+recursively, which lets split guards cross a named helper boundary. A guard
+cannot be stored in a user struct, enum, list, fixed list, map, `Option`,
+`Result`, `Shared`, another `Cell`, a union, or a lambda. Keep it in a
+local name or tuple and use `map` or `split` for projections.
+
+---
+
 ### `core.mem` — arenas and regions
 
 Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`
@@ -2757,16 +2816,23 @@ fn run() {
 
 `Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
 `F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
-available for expert and FFI/binary work; `I64`/`F64` interchange with
-`Int`/`Float` freely, every other width is its own distinct type. A bare
-integer literal adopts the width of the slot it lands in (a binding/parameter/
-return annotation, or sized arithmetic) and is range-checked at compile time —
-a literal that doesn't fit is **E1003**. Widths never mix implicitly:
-arithmetic, comparison, and assignment require the same width on both sides
-(**E0109**/**E0112**/**E0108**), with no silent narrowing or widening. The
-sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen, so
-they cross the C ABI by value (S59). Width conversions are always named
-methods (below), never implicit.
+available for expert and FFI/binary work. `I64` and `F64` are the explicit
+names for `Int` and `Float`. A bare whole-number literal adopts a typed peer
+that contains its value. Without one, it uses the narrowest integer type that
+contains the value. A destination-owned literal is range-checked at compile
+time; a value that does not fit is **E1003**.
+
+One numeric widening law applies to operators, arguments, returns, and
+assignments. One value can widen to the other type when that type contains
+every source value. Jet does not search for a third type and never narrows
+implicitly. `F32` widens to `Float`. Small integer types widen to a float when
+the crossing is always exact: `I8 I16 I32 U8 U16 U32` to `Float`, and
+`I8 I16 U8 U16` to `F32`. Other integer-to-float crossings check exactness at
+runtime and trap before rounding. `approx(value)` accepts possible precision
+loss for one crossing. Incomparable operator types are **E0109**; invalid
+destination types are **E0112** or **E0108**. The sized types erase to their
+Rust equivalents (`u8`…`i64`, `f32`) at codegen, so they cross the C ABI by
+value (S59). Explicit narrowing uses destination-owned named methods.
 
 Plain integer arithmetic (`+` `-` `*` `/`) **traps on overflow** at every width —
 a result outside the type's range stops the program with a Jet panic instead of
@@ -2812,14 +2878,16 @@ Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005
 type); `<<` `>>` take any integer shift-count and keep the left side's type. A
 shift count past the type's width traps (no leaked Rust panic).
 
-**Width conversions** are destination-owned named methods — no implicit narrowing or widening:
+**Width conversions** use one safe widening law and destination-owned named
+methods for explicit narrowing. Widening is implicit when the destination
+contains every source value. Integer-to-float crossings that cannot be proved
+exact are checked at runtime; `approx(value)` accepts possible precision loss
+for one crossing. Narrowing is never implicit.
 
 | Method | Returns | Direction |
 |--------|---------|-----------|
-| `Int.from_u8(n)` / `U32.from_u8(n)` / … (widening) | `T` | infallible |
 | `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
 | `F32.from_float(n)` | `F32 ? String` | fallible (finite F32 range) |
-| `Float.from_i32(n)` | `Float` | infallible |
 
 ---
 

@@ -9,6 +9,251 @@ use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn is_bare_integer_literal(expr: &Expr) -> bool {
+        match expr {
+            Expr::Paren(inner, _) => Self::is_bare_integer_literal(inner),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                matches!(inner.as_ref(), Expr::Int(_, _, None, _))
+            }
+            Expr::Int(_, _, None, _) => true,
+            _ => false,
+        }
+    }
+
+    fn minimal_integer_literal_type(expr: &mut Expr, peer: Option<&Type>) -> Option<Type> {
+        match expr {
+            Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                let Expr::Int(value, _, width, _) = inner.as_mut() else {
+                    return None;
+                };
+                if width.is_some() {
+                    return None;
+                }
+                let negated = -(*value as i128);
+                if peer == Some(&Type::Int) {
+                    *width = None;
+                    return Some(Type::Int);
+                }
+                if let Some(Type::IntN { signed, bits }) = peer {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if negated >= lower && negated <= upper {
+                        *width = Some((*signed, *bits));
+                        return Some(Type::IntN {
+                            signed: *signed,
+                            bits: *bits,
+                        });
+                    }
+                }
+                let bits = [8, 16, 32, 64]
+                    .into_iter()
+                    .find(|bits| {
+                        let (lower, upper) = crate::AST::int_range(true, *bits);
+                        negated >= lower && negated <= upper
+                    })?;
+                *width = Some((true, bits));
+                Some(Type::IntN { signed: true, bits })
+            }
+            Expr::Int(value, _, width, _) if *value >= 0 && width.is_none() => {
+                let value = *value as i128;
+                if peer == Some(&Type::Int) {
+                    *width = None;
+                    return Some(Type::Int);
+                }
+                if let Some(Type::IntN { signed, bits }) = peer {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if value >= lower && value <= upper {
+                        *width = Some((*signed, *bits));
+                        return Some(Type::IntN {
+                            signed: *signed,
+                            bits: *bits,
+                        });
+                    }
+                }
+                let bits = [8, 16, 32, 64]
+                    .into_iter()
+                    .find(|bits| {
+                        let (_, upper) = crate::AST::int_range(false, *bits);
+                        value <= upper
+                    })?;
+                *width = Some((false, bits));
+                Some(Type::IntN {
+                    signed: false,
+                    bits,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
+        match expr {
+            Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
+            Expr::Call(call)
+                if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER
+                    && call.args.len() == 1 =>
+            {
+                Some(std::mem::replace(
+                    &mut call.args[0].expr,
+                    Expr::Absent(span),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn contextualize_numeric_literal(
+        &mut self,
+        expr: &mut Expr,
+        target: &Type,
+    ) -> Option<Type> {
+        match expr {
+            Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
+                (Expr::Int(value, span, width, _), Type::IntN { signed: true, bits }) => {
+                    let negated = -(*value as i128);
+                    let (lower, upper) = crate::AST::int_range(true, *bits);
+                    if negated < lower || negated > upper {
+                        self.diags
+                            .push(crate::Sema::int_range_error(true, *bits, *span));
+                    }
+                    *width = Some((true, *bits));
+                    Some(target.clone())
+                }
+                (_, Type::IntN { signed: false, .. }) => None,
+                _ => self.contextualize_numeric_literal(inner, target),
+            },
+            Expr::Int(value, span, width, _) => match target {
+                Type::Int => {
+                    *width = None;
+                    Some(Type::Int)
+                }
+                Type::IntN { signed, bits } => {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if (*value as i128) < lower || (*value as i128) > upper {
+                        self.diags
+                            .push(crate::Sema::int_range_error(*signed, *bits, *span));
+                    }
+                    *width = Some((*signed, *bits));
+                    Some(target.clone())
+                }
+                Type::Float | Type::Float32 => {
+                    let exact = if *target == Type::Float32 {
+                        (*value as f32) as i128 == *value as i128
+                    } else {
+                        (*value as f64) as i128 == *value as i128
+                    };
+                    if !exact {
+                        let limit = if *target == Type::Float32 {
+                            1i128 << 24
+                        } else {
+                            1i128 << 53
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E1003",
+                            format!("{} does not fit exactly in {}", value, target.name()),
+                            format!(
+                                "{} holds every whole number only from -{} through {}",
+                                target.name(),
+                                limit,
+                                limit
+                            ),
+                            format!(
+                                "use a whole-number type, or write a value from -{} through {}",
+                                limit,
+                                limit
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                    *expr = Expr::Float(*value as f64, *span, *target == Type::Float32);
+                    Some(target.clone())
+                }
+                _ => None,
+            },
+            Expr::Float(_, _, is_f32) => match target {
+                Type::Float => {
+                    *is_f32 = false;
+                    Some(Type::Float)
+                }
+                Type::Float32 => {
+                    *is_f32 = true;
+                    Some(Type::Float32)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Record sema's numeric widening decision on the expression itself.
+    /// Lowering consumes the explicit conversion and checked-crossing marker.
+    pub(crate) fn widen_numeric_expr(
+        &mut self,
+        expr: &mut Expr,
+        source: &Type,
+        target: &Type,
+    ) {
+        if source == target {
+            return;
+        }
+        if self.contextualize_numeric_literal(expr, target).is_some() {
+            return;
+        }
+        let Some(widening) = source.numeric_widening_to(target) else {
+            return;
+        };
+        let span = expr.span();
+        let approximate = Self::take_numeric_approx_operand(expr, span);
+        let checked = approximate.is_none();
+
+        if checked {
+            if let Expr::Float(_, _, is_f32) = expr {
+                if *target == Type::Float32 {
+                    *is_f32 = true;
+                    return;
+                }
+            }
+        }
+
+        let old = approximate.unwrap_or_else(|| std::mem::replace(expr, Expr::Absent(span)));
+        *expr = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(target.name(), span)),
+            method: Syntax::conversion_method_for_source(&source.name()),
+            method_span: span,
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: old,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: (widening && checked)
+                .then(|| Type::CHECKED_NUMERIC_WIDEN_MARKER.to_string()),
+            resolved_ret: Some(target.clone()),
+        };
+    }
+
+    pub(crate) fn widen_numeric_argument(
+        &mut self,
+        expr: &mut Expr,
+        source: Type,
+        target: &Type,
+        convention: crate::AST::AccessConvention,
+    ) -> Type {
+        if convention != crate::AST::AccessConvention::Write
+            && source != *target
+            && source.numeric_widening_to(target).is_some()
+        {
+            self.widen_numeric_expr(expr, &source, target);
+            target.clone()
+        } else {
+            source
+        }
+    }
+
     fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
         Expr::MethodCall {
             receiver: Box::new(expr),
@@ -257,7 +502,37 @@ impl<'a> Checker<'a> {
         }
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
-        let (lt, rt) = (lt?, rt?);
+        let (mut lt, mut rt) = (lt?, rt?);
+
+        // D-INTLIT-WIDTH1=F: an unowned whole literal adopts a typed peer
+        // that contains its singleton value; without one, it takes the
+        // narrowest integer type that contains the value. The ordinary
+        // value-set law then decides whether one operand widens to the other.
+        let lhs_is_literal = Self::is_bare_integer_literal(lhs);
+        let rhs_is_literal = Self::is_bare_integer_literal(rhs);
+        if let Some(minimal) =
+            Self::minimal_integer_literal_type(lhs, (!rhs_is_literal).then_some(&rt))
+        {
+            lt = minimal;
+        }
+        if let Some(minimal) =
+            Self::minimal_integer_literal_type(rhs, (!lhs_is_literal).then_some(&lt))
+        {
+            rt = minimal;
+        }
+
+        // Decimal context still owns an untyped numeral's representation.
+        if lt != rt && matches!(rt, Type::Float | Type::Float32) {
+            if let Some(contextual) = self.contextualize_numeric_literal(lhs, &rt) {
+                lt = contextual;
+            }
+        }
+        if lt != rt && matches!(lt, Type::Float | Type::Float32) {
+            if let Some(contextual) = self.contextualize_numeric_literal(rhs, &lt) {
+                rt = contextual;
+            }
+        }
+
         if matches!(op, BinOp::Eq | BinOp::Ne)
             && (self.type_contains_observable_clock(&lt)
                 || self.type_contains_observable_clock(&rt))
@@ -266,6 +541,30 @@ impl<'a> Checker<'a> {
             if self.in_pure && self.det_suppress == 0 {
                 self.diags
                     .push(crate::Sema::e3403("Clock comparison", Some(span)));
+            }
+        }
+
+        let joins_numeric = matches!(
+            op,
+            BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Le
+                | BinOp::Gt
+                | BinOp::Ge
+        ) || (matches!(op, BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+            && lt.is_integer()
+            && rt.is_integer());
+        if joins_numeric && lt != rt {
+            if let Some(join) = lt.numeric_join(&rt) {
+                self.widen_numeric_expr(lhs, &lt, &join);
+                self.widen_numeric_expr(rhs, &rt, &join);
+                lt = join.clone();
+                rt = join;
             }
         }
 
@@ -542,7 +841,7 @@ impl<'a> Checker<'a> {
             }
             match op {
                 BinOp::Add | BinOp::Sub => {
-                    if let (Some(ldim), Some(rdim)) = (ldim, rdim) {
+                    if let (Some(ldim), Some(rdim)) = (ldim.clone(), rdim.clone()) {
                         if ldim != rdim {
                             self.dimension_mismatch(op, ldim, rdim, span);
                             return None;
@@ -555,8 +854,8 @@ impl<'a> Checker<'a> {
                     } else {
                         self.dimension_mismatch(
                             op,
-                            ldim.unwrap_or(Dimension::SCALAR),
-                            rdim.unwrap_or(Dimension::SCALAR),
+                            ldim.unwrap_or_else(Dimension::scalar),
+                            rdim.unwrap_or_else(Dimension::scalar),
                             span,
                         );
                         return None;
@@ -567,18 +866,18 @@ impl<'a> Checker<'a> {
                         self.op_mismatch(op, &lt, &rt, span);
                         return None;
                     }
-                    let ldim = ldim.unwrap_or(Dimension::SCALAR);
-                    let rdim = rdim.unwrap_or(Dimension::SCALAR);
+                    let ldim = ldim.unwrap_or_else(Dimension::scalar);
+                    let rdim = rdim.unwrap_or_else(Dimension::scalar);
                     let result = if op == BinOp::Mul {
-                        ldim.multiply(rdim)
+                        ldim.multiply(&rdim)
                     } else {
-                        ldim.divide(rdim)
+                        ldim.divide(&rdim)
                     };
                     let Some(result) = result else {
                         self.dimension_overflow(op, span);
                         return None;
                     };
-                    return if result == Dimension::SCALAR {
+                    return if result == Dimension::scalar() {
                         Some(Type::Float)
                     } else {
                         Some(Type::quantity(Type::Float, result))
@@ -591,8 +890,8 @@ impl<'a> Checker<'a> {
                     if ldim != rdim {
                         self.dimension_mismatch(
                             op,
-                            ldim.unwrap_or(Dimension::SCALAR),
-                            rdim.unwrap_or(Dimension::SCALAR),
+                            ldim.unwrap_or_else(Dimension::scalar),
+                            rdim.unwrap_or_else(Dimension::scalar),
                             span,
                         );
                         return None;
@@ -819,8 +1118,8 @@ impl<'a> Checker<'a> {
 
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                // D-SG9: arithmetic stays within one numeric type (any width) and
-                // keeps that width; widths never mix implicitly.
+                // D-VERDICT-1304-1: the widening join above rewrites both
+                // operands to one numeric type. Arithmetic keeps that type.
                 if lt == rt && lt.is_numeric() {
                     Some(lt)
                 } else if let Type::Named(type_name) = &lt {
@@ -863,23 +1162,6 @@ impl<'a> Checker<'a> {
                         "text isn't joined with `+`".to_string(),
                         "there's one way to build text: interpolation (S8)".to_string(),
                         "write the pieces inside one string: \"{a}{b}\"".to_string(),
-                        Some(span),
-                    ));
-                    None
-                } else if (lt == Type::Int && rt == Type::Float)
-                    || (lt == Type::Float && rt == Type::Int)
-                {
-                    self.diags.push(Diagnostic::error(
-                        "E0109",
-                        format!(
-                            "`{}` can't mix {} and {}",
-                            op.spell(),
-                            lt.show(),
-                            rt.show()
-                        ),
-                        "Jet never converts numbers silently; the two sides must match"
-                            .to_string(),
-                        "make both sides the same kind of number (write `2.0` instead of `2`, or drop the `.0`)".to_string(),
                         Some(span),
                     ));
                     None
@@ -1094,6 +1376,23 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {
+        let (why, fix) = if lt.is_numeric() && rt.is_numeric() {
+            (
+                format!(
+                    "neither {} contains every value of {}, nor {} every value of {}",
+                    lt.name(),
+                    rt.name(),
+                    rt.name(),
+                    lt.name()
+                ),
+                "choose the result type and convert the other side into it".to_string(),
+            )
+        } else {
+            (
+                "the two sides of an operator must be the same type".to_string(),
+                "make both sides the same type".to_string(),
+            )
+        };
         self.diags.push(Diagnostic::error(
             "E0109",
             format!(
@@ -1102,8 +1401,8 @@ impl<'a> Checker<'a> {
                 lt.show(),
                 rt.show()
             ),
-            "the two sides of an operator must be the same type".to_string(),
-            "make both sides the same type".to_string(),
+            why,
+            fix,
             Some(span),
         ));
     }
@@ -1185,7 +1484,10 @@ impl<'a> Checker<'a> {
 /// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`).
 fn expr_wants_expected_type(expr: &Expr) -> bool {
     match expr {
-        Expr::Paren(inner, _) => expr_wants_expected_type(inner),
+        Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            expr_wants_expected_type(inner)
+        }
+        Expr::Float(..) => true,
         Expr::StructLit { inferred: true, .. } => true,
         Expr::TypedLit { head: None, .. } => true,
         Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,

@@ -14,8 +14,9 @@ pub use types::{
 #[path = "AST/program_imports.rs"]
 mod program_imports;
 pub use program_imports::{
-    AppliedRuleApplication, Program, ImportDecl, InlineVersion, ForeignLanguage, ForeignNamespace, ImportKind,
-    ProgramBundle, LoadedModule, TryConvert, ErrorConvDef, MigrationDecl, MigrationOp,
+    AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
+    ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
+    MigrationOp, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]
@@ -29,7 +30,7 @@ pub use items::{
     ProtocolDecl, StateDecl, EffectDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, Func, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
-    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitFamilyDef, UnitFamilyMember, UnitRatio, EnumDef,
+    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
     EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field, SerdeWireShape,
     resolved_decode_wire_shapes,
 };

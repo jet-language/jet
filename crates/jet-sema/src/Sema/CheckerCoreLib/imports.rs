@@ -97,6 +97,8 @@ impl<'a> Checker<'a> {
                 });
                 self.expected_type = saved;
                 if let Some(aty) = aty {
+                    let aty =
+                        self.widen_numeric_argument(&mut arg.expr, aty, pty, *pconv);
                     let arg_span = arg.expr.span();
                     if sig.is_pure
                         && crate::Sema::Diagnostics::is_clock_type(pty)
@@ -351,6 +353,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if let Some(aty) = aty {
+                        let aty =
+                            self.widen_numeric_argument(&mut arg.expr, aty, pty, *pconv);
                         let span = arg.expr.span();
                         let loan_param_ty = match pty {
                             Type::Named(qualified) => qualified

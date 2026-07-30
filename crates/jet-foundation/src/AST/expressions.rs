@@ -201,6 +201,10 @@ pub struct LambdaMeta {
     /// Sema-inferred relation between callback inputs and any returned views.
     /// TIR and codegen consume this fact without widening the owner set.
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
+    /// D-LOCALCELL1=A: sema-proved path for a `guard.map` / `guard.split`
+    /// projector. Later tiers consume this fact instead of reinterpreting the
+    /// lambda body.
+    pub cell_projection_path: Option<Vec<String>>,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

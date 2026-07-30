@@ -141,6 +141,12 @@ impl<'a> Checker<'a> {
                     let got = self.infer(&mut arg.expr);
                     self.expected_type = saved;
                     if let Some(got) = got {
+                        let got = self.widen_numeric_argument(
+                            &mut arg.expr,
+                            got,
+                            &elem_ty,
+                            variadic_conv,
+                        );
                         let loan =
                             crate::Sema::Diagnostics::contains_expiring_secret_loan(&got);
                         if loan {

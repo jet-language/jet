@@ -40,6 +40,7 @@ pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
 /// them alongside the AST so sema can still run (M6 phase 4).
 pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
+    let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
     check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
@@ -61,7 +62,8 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
     };
-    let prog = p.program();
+    let mut prog = p.program();
+    prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
     } else if p
@@ -77,6 +79,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
 
 fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
+    let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
     check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
@@ -98,7 +101,8 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
     };
-    let prog = p.program();
+    let mut prog = p.program();
+    prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         return Ok(prog);
     }

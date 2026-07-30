@@ -36,11 +36,17 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
-  E0001. Unary minus is an operator, not part of the literal.
+  E0001. Unary minus is an operator, not part of the literal. In an operator
+  expression, a bare whole-number literal adopts a typed peer when that type
+  contains its exact value; otherwise it takes the narrowest integer type that
+  contains the value. The operands then follow the ordinary numeric widening
+  law. A typed or destination-owned literal keeps that destination's range
+  check.
 - Explicit conversion (D-SHAPE-CONVERT1=A) is destination-owned:
-  `Target.from_source(value)`. Numeric widening is infallible and narrowing
-  returns a fallible result; numeric-backed distinct and unit types use the
-  same source-kind names. Text interpretation remains `Target.parse(text)`.
+  `Target.from_source(value)`. Numeric narrowing returns a fallible result.
+  Safe widening is implicit under D-INTLIT-WIDTH1, D-VERDICT-1304-1, and
+  D-NUMWIDEN-CROSS1. Numeric-backed distinct and unit types use the same
+  source-kind names. Text interpretation remains `Target.parse(text)`.
   Source-owned `to_*`, casts, and a neutral `convert` helper are absent.
 - Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A) use
   `Duration.milliseconds|seconds|minutes|hours(number)?`; non-finite and
@@ -69,7 +75,7 @@ block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
 // terminator-based. A leading `.` or binary/logical operator on the next line
 // suppresses insertion (continuation). A callable arrow, `=`, or `{` stays
 // attached to the declaration head. `NL` denotes that synthetic terminator.
-stmt     = binding | assign | if | loop
+stmt     = binding | assign | if | loop | fenced-stmt
          | break | next | "return" [ expr ] NL
          | expr NL ;
 binding  = [ "#Track" ] ( ident "::" expr     // immutable
@@ -79,6 +85,9 @@ binding  = [ "#Track" ] ( ident "::" expr     // immutable
 // Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
+fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C
+fence    = "<:" fence-entry { "," fence-entry } ":>"
+         | "<:" numbered-name ".." numbered-name ":>" ;
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
@@ -135,15 +144,18 @@ expr     = precedence climbing over:
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
   Types never annotate the binding name — use `Type.{ … }` or a signature/field.
+- `<: a, b :>` expands one complete binding or expression statement per name.
+  Multiple fences advance in lock-step. `<: task1..task8 :>` generates or
+  reuses the ascending numbered names. A fence is not a list or destructure.
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() => String`; untracked Floats return `"untracked"`.
-- Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
-  `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
-  pointing at interpolation. Compound assignment (S17) mirrors the binary
-  operators.
-- Comparisons (`== != < > <= >=`) need matching operand types and yield
-  `Bool`; `&& || !` operate on `Bool` (E0110).
+- Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
+  numeric widening law permits it; `% & | ^ << >>` remain integer-only.
+  `+` on `String` is a teaching error pointing at interpolation. Compound
+  assignment (S17) mirrors the binary operators.
+- Comparisons (`== != < > <= >=`) use the same numeric widening law and yield
+  `Bool`; other operand types must match. `&& || !` operate on `Bool` (E0110).
 - `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
   alternatives in arm heads use single `|`.
 
@@ -542,6 +554,34 @@ fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
 nothing — the write happens at commit — so its closure ends in a statement.
 An irreversible effect (`Net`/`FS`/`Exec`) directly in the block is still
 E0746: move it after the block or register it with `tx.on_commit(…)`.
+
+**`Cell<T>`** (D-LOCALCELL1=A) is the local interior-mutation path. It lets a
+read receiver update private state without an `Arc` or an operating-system
+lock. `Cell.new(value)` infers `T`. Value methods are `get`, `set`, `replace`,
+and `get_or_set` for `Cell<T?>`. Closure methods `read` and `edit` keep the
+dynamic loan inside one call. `get` and `get_or_set` copy their result, so the
+stored result type must support Jet's copy law. Use `read` when it does not.
+
+`guard_read()` and `guard_edit()` keep a dynamic loan across calls. Any number
+of read guards can coexist. An edit guard conflicts with every other guard.
+A conflict stops at runtime with a `Cell borrow conflict` panic. Dropping a
+guard releases its loan on normal return, early return, and panic unwind.
+`guard.map(project)` keeps the same loan for one projected field.
+`guard.split(first, second)` returns two projected guards that share the
+original loan. Sema accepts direct field paths and proves the two edit paths
+disjoint. The loan ends only after both guards drop.
+
+Cell guards are temporary loan handles. A function can pass or return one
+directly, and named tuples can contain guards recursively. This keeps mapped
+and split guards useful across named helpers. A guard cannot be stored in a
+user struct, enum, list, fixed list, map, `Option`, `Result`, `Shared`, another
+`Cell`, a union, or a lambda. Keep it in a local name or tuple and use
+`map` or `split` to project it.
+
+`Cell<T>`, `CellReadGuard<T>`, and `CellEditGuard<T>` are local types. Sema
+rejects them across task, task-group, channel, `Shared<T>`, and parallel
+adapter boundaries. Use `Shared<T>` when state must cross one of these
+boundaries.
 
 **`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
 lives in one shared table, and other values point at it by `Id<T>` — plain

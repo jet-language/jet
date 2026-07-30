@@ -57,6 +57,37 @@ impl<'a> Checker<'a> {
                 Some(t)
             }
         }
+
+        /// D-NUMWIDEN-CROSS1=E: mark one integer value as accepting an inexact
+        /// float crossing. The surrounding widening consumes this marker.
+        fn check_numeric_approx(&mut self, call: &mut Call) -> Option<Type> {
+            if call.args.len() != 1 {
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!("`{}` takes one whole number", Syntax::BUILTIN_APPROX),
+                    "`approx(value)` accepts possible precision loss at one integer-to-float crossing".to_string(),
+                    format!("write `{}(value)`", Syntax::BUILTIN_APPROX),
+                    Some(call.name_span),
+                ));
+                return None;
+            }
+            let ty = self.infer(&mut call.args[0].expr)?;
+            if !ty.is_integer() {
+                self.diags.push(Diagnostic::error(
+                    "E0109",
+                    format!("`{}` needs a whole number, but this is {}", Syntax::BUILTIN_APPROX, ty.show()),
+                    "`approx(value)` only opts one integer-to-float crossing out of its exactness check".to_string(),
+                    "remove `approx`, or pass a whole number that is crossing into a decimal".to_string(),
+                    Some(call.args[0].expr.span()),
+                ));
+                return None;
+            }
+            call.name = Type::APPROX_NUMERIC_WIDEN_MARKER.to_string();
+            Some(ty)
+        }
     
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
             // D-SHAPE-RESOURCE2=A: `close(^value)` is ambient syntax sugar for
@@ -115,6 +146,9 @@ impl<'a> Checker<'a> {
             ) && !self.funcs.contains_key(&call.name)
             {
                 return Some(self.check_overflow_opt_in(call));
+            }
+            if call.name == Syntax::BUILTIN_APPROX && !self.funcs.contains_key(&call.name) {
+                return self.check_numeric_approx(call).map(Some);
             }
             // D-EFF1: an ambient builtin (`print`/`input`) contributes the `IO`
             // effect, unless a user function of the same name shadows it (in which
@@ -1177,6 +1211,13 @@ impl<'a> Checker<'a> {
                     if param_ty != arg_ty
                         && self.implicitly_convert_unit(&mut arg.expr, &param_ty, &arg_ty)
                     {
+                        arg_ty = param_ty.clone();
+                    }
+                    if *param_conv != AccessConvention::Write
+                        && param_ty != arg_ty
+                        && arg_ty.numeric_widening_to(&param_ty).is_some()
+                    {
+                        self.widen_numeric_expr(&mut arg.expr, &arg_ty, &param_ty);
                         arg_ty = param_ty.clone();
                     }
                     let reads_expiring_secret_loan = arg.convention == AccessConvention::Read

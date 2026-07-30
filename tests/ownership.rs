@@ -394,6 +394,246 @@ fn run() {
 }
 
 #[test]
+fn local_cell_surface_uses_read_receivers_and_host_borrows() {
+    let source = r#"
+struct Pair { left: Int, right: Int }
+fn update(cell: Cell<Pair>) => Int {
+    cell.set(Pair.{ left: 2, right: 3 })
+    old :: cell.replace(Pair.{ left: 4, right: 5 })
+    cell.edit(pair => pair.left += old.left)
+    return cell.read(pair => pair.left + pair.right)
+}
+fn run() {
+    cell :: Cell.new(Pair.{ left: 0, right: 1 })
+    print(update(cell))
+}
+"#;
+    let output = jet::compile(source).expect("local Cell surface must compile");
+    assert!(
+        output.rust.contains("jet_std::JetCell<user_Pair>"),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("|user_pair: &user_Pair|"), "{}", output.rust);
+    assert!(
+        output.rust.contains("|user_pair: &mut user_Pair|"),
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn local_cell_runtime_has_no_atomic_or_os_lock_storage() {
+    let cell = include_str!("../crates/jet-codegen/src/Prelude/LocalCell.rs");
+    assert!(cell.contains("std::rc::Rc"), "{cell}");
+    assert!(cell.contains("std::cell::UnsafeCell"), "{cell}");
+    assert!(!cell.contains("std::sync::Arc"), "{cell}");
+    assert!(!cell.contains("Mutex"), "{cell}");
+    assert!(!cell.contains("RwLock"), "{cell}");
+}
+
+#[test]
+fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
+    if !common::have_rustc() {
+        return;
+    }
+    let cell = include_str!("../crates/jet-codegen/src/Prelude/LocalCell.rs");
+    let harness = [
+        "mod jet_cell {",
+        cell,
+        "}",
+        r#"
+use jet_cell::JetCell;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+#[derive(Clone)]
+struct Pair {
+    left: i64,
+    right: i64,
+}
+
+#[test]
+fn loans_release_after_every_exit() {
+    let cell = JetCell::new(Pair { left: 1, right: 2 });
+    let first = cell.guard_read();
+    let second = cell.guard_read();
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(first);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(second);
+
+    let edit = cell.guard_edit();
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+    drop(edit);
+
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        cell.read::<_, ()>(|_| panic!("read unwind"))
+    }))
+    .is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        cell.edit::<_, ()>(|_| panic!("edit unwind"))
+    }))
+    .is_err());
+    cell.edit(|pair| pair.left = 3);
+    assert_eq!(cell.read(|pair| pair.left), 3);
+
+    let guard = cell.guard_edit();
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        guard.edit(|_| guard.edit(|_| ()))
+    }))
+    .is_err());
+    guard.set(Pair { left: 4, right: 5 });
+    drop(guard);
+    assert_eq!(cell.read(|pair| pair.left), 4);
+}
+
+#[test]
+fn mapped_and_split_guards_keep_the_original_loan() {
+    let cell = JetCell::new(Pair { left: 4, right: 5 });
+    let mapped = cell.guard_read().map(|pair| &pair.left);
+    assert_eq!(mapped.get(), 4);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(mapped);
+
+    let (left, right) = cell
+        .guard_read()
+        .split(|pair| (&pair.left, &pair.right));
+    assert_eq!((left.get(), right.get()), (4, 5));
+    drop(left);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(right);
+
+    let (left, right) = cell
+        .guard_edit()
+        .split(|pair| (&mut pair.left, &mut pair.right));
+    left.set(7);
+    right.set(8);
+    drop(left);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+    drop(right);
+    assert_eq!(cell.read(|pair| (pair.left, pair.right)), (7, 8));
+}
+"#,
+    ]
+    .join("\n");
+
+    let root = common::unique_tmp("jet_local_cell_runtime");
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("cell_runtime.rs");
+    let binary = root.join("cell_runtime_test");
+    fs::write(&source, harness).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition=2021", "--test"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "Cell runtime harness failed to compile:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let ran = Command::new(&binary).output().unwrap();
+    assert!(
+        ran.status.success(),
+        "Cell runtime harness failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn local_cell_guard_mapping_and_splitting_keep_projected_types() {
+    let source = r#"
+struct Pair { left: Int, right: Int }
+fn inspect(cell: Cell<Pair>) {
+    mapped :: cell.guard_read().map(pair => pair.left)
+    print(mapped.get())
+}
+fn edit_pair(cell: Cell<Pair>) {
+    (left, right) :: cell.guard_edit().split(
+        pair => pair.left,
+        pair => pair.right
+    )
+    left.set(7)
+    right.set(8)
+}
+fn run() {}
+"#;
+    let output = jet::compile(source).expect("guard projections must compile");
+    assert!(
+        output.rust.contains("JetCellReadGuard<i64>")
+            && output.rust.contains("JetCellEditGuard<i64>"),
+        "{}",
+        output.rust
+    );
+}
+
+#[test]
+fn local_cell_guard_map_rejects_detached_values() {
+    let source = r#"
+struct Pair { left: Int, right: Int }
+fn inspect(cell: Cell<Pair>) {
+    _ :: cell.guard_read().map(pair => pair.left + pair.right)
+}
+fn run() {}
+"#;
+    let diagnostics =
+        jet::compile(source).expect_err("map must preserve the original dynamic loan");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0112"
+                && diagnostic.what.contains("needs a field projection")
+        }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn local_cell_get_rejects_values_without_copy_semantics() {
+    let source = r#"
+fn inspect(cell: Cell<fn() => Int>) {
+    _ :: cell.get()
+}
+fn run() {}
+"#;
+    let diagnostics =
+        jet::compile(source).expect_err("Cell.get must not defer a missing Clone bound to rustc");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0112"
+                && diagnostic.what.contains("cannot copy its value")
+        }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn local_cell_edit_guard_split_rejects_overlapping_paths() {
+    let source = r#"
+struct Pair { left: Int, right: Int }
+fn edit_pair(cell: Cell<Pair>) {
+    _ :: cell.guard_edit().split(
+        pair => pair.left,
+        pair => pair.left
+    )
+}
+fn run() {}
+"#;
+    let diagnostics =
+        jet::compile(source).expect_err("split must prove projections disjoint in sema");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0112"
+                && diagnostic.what.contains("projections overlap")
+        }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn mutate_required_at_call_site() {
     let src = r#"
 fn touch(n: &Int) {
@@ -2313,13 +2553,13 @@ fn run() {
 #[test]
 fn write_windows_edit_whole_field_and_index_places() {
     let src = r#"
-struct Cell { value: Int }
+struct Slot { value: Int }
 fn run() {
     whole := 1
     whole_edit :: &whole
     whole_edit = 2
 
-    cell := Cell.{ value: 3 }
+    cell := Slot.{ value: 3 }
     field_edit :: &cell.value
     field_edit = 4
 
@@ -2456,7 +2696,7 @@ fn run() {
 fn indexed_simulation_static_update_lowers_to_safe_splits() {
     let src = r#"
 struct Particle { position: Int, velocity: Int }
-struct Cell { force: Int }
+struct Tile { force: Int }
 
 fn run() {
     particles := [Particle].{
@@ -2464,10 +2704,10 @@ fn run() {
         Particle.{ position: 20, velocity: 3 },
         Particle.{ position: 30, velocity: 4 }
     }
-    grid :: [Cell].{
-        Cell.{ force: 5 },
-        Cell.{ force: 7 },
-        Cell.{ force: 11 }
+    grid :: [Tile].{
+        Tile.{ force: 5 },
+        Tile.{ force: 7 },
+        Tile.{ force: 11 }
     }
 
     left :: &particles[0]

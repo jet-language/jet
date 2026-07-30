@@ -5,6 +5,7 @@ use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::is_covered_distinct_ty;
+use crate::Codegen::TIR::is_covered_cell_ty;
 use crate::Codegen::TIR::is_covered_fallible_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
@@ -401,9 +402,11 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
             .iter()
             .all(|(_, ty)| field_ty_covered(ty, cx, seen)),
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
-        // D-MEM1 S6: a bare (non-optional) `Pool<T>`/`Id<T>`/`Shared<T>` field.
+        // D-MEM1 S6 / D-LOCALCELL1=A: a bare core memory-handle field.
         Type::Apply { .. } => {
-            is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx)
+            is_covered_pool_ty(ty, cx)
+                || is_covered_shared_guard_ty(ty, cx)
+                || is_covered_cell_ty(ty, cx)
         }
         Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,

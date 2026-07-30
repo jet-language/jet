@@ -1875,6 +1875,14 @@ pub enum THostCall {
         method: String,
         args: Vec<TExpr>,
     },
+    /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
+    CellGuardProject {
+        recv: Box<TExpr>,
+        paths: Vec<Vec<String>>,
+        result_ty: Type,
+        editable: bool,
+        edit_paths_disjoint: bool,
+    },
     /// `(({base})[({index}).0 as usize].clone())` FixedList index.
     FixedListIndex {
         base: Box<TExpr>,
@@ -3443,6 +3451,13 @@ pub enum TNumericOp {
     Origin(Option<String>),
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
+    /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source
+    /// type is not wholly exact. Every engine calls Prelude/NumericWiden.rs.
+    CheckedIntToFloat {
+        source_signed: bool,
+        target_f32: bool,
+        line: u32,
+    },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form
     /// returning `Result<T, String>`. `host_kind` is the Cranelift host integer
     /// width tag; `dst_rust`/`dst_spelling` are emit-only Rust spellings.

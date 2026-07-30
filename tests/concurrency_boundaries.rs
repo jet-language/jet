@@ -63,6 +63,135 @@ fn run() {
 }
 
 #[test]
+fn local_cell_rejects_task_channel_shared_and_parallel_crossings() {
+    assert_rejected(
+        r#"
+use core.tasks as tasks
+fn cross(cell: Cell<Int>) {
+    worker :: tasks.spawn(() => {
+        _ :: cell
+    })
+    worker.join()
+}
+fn run() {}
+"#,
+        "E1102",
+    );
+
+    assert_rejected(
+        r#"
+use core.tasks as tasks
+fn cross(cell: Cell<Int>) {
+    (tx, rx) :: tasks.channel<Cell<Int>>()
+    tx.send(^cell)
+}
+fn run() {}
+"#,
+        "E1102",
+    );
+
+    assert_rejected(
+        r#"
+fn cross(cell: Cell<Int>) {
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) => {
+        _ :: cell
+        return n
+    })
+}
+fn run() {}
+"#,
+        "E1111",
+    );
+}
+
+#[test]
+fn shared_constructor_rejects_local_cell_at_the_constructor() {
+    let source = r#"
+fn cross(cell: Cell<Int>) {
+    _ :: Shared.new(^cell)
+}
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("Shared.new(Cell) must fail in sema");
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == "E1102"
+                && diagnostic.what.contains("cannot be stored in `Shared<T>`")
+        })
+        .expect("E1102 must point at Shared.new instead of a later task use");
+    let start = error.span.expect("E1102 must have a source span").start;
+    assert!(
+        source[start..].starts_with("^cell") || source[start..].starts_with("cell"),
+        "E1102 must point at Shared.new's Cell argument: {error:?}"
+    );
+}
+
+#[test]
+fn shared_constructor_rejects_cell_nested_in_a_struct() {
+    let source = r#"
+struct Cache { value: Cell<Int> }
+fn cross(cache: Cache) {
+    _ :: Shared.new(^cache)
+}
+fn run() {}
+"#;
+    let diagnostics =
+        jet::compile(source).expect_err("Shared.new(struct containing Cell) must fail in sema");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E1102"
+                && diagnostic.what.contains("cannot be stored in `Shared<T>`")
+        }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn task_capture_rejects_cell_nested_in_a_struct() {
+    let source = r#"
+use core.tasks as tasks
+struct Cache { value: Cell<Int> }
+fn cross(cache: Cache) {
+    worker :: tasks.spawn(() => {
+        _ :: cache
+    })
+    worker.join()
+}
+fn run() {}
+"#;
+    assert_rejected(source, "E1102");
+}
+
+#[test]
+fn local_cell_guard_types_are_not_sendable() {
+    for guard in ["CellReadGuard<Int>", "CellEditGuard<Int>"] {
+        let source = format!(
+            r#"
+use core.tasks as tasks
+fn cross(guard: {guard}) {{
+    worker :: tasks.spawn(() => {{
+        _ :: guard
+    }})
+    worker.join()
+}}
+fn run() {{}}
+"#
+        );
+        let codes = error_codes(&source);
+        assert!(
+            codes.iter().any(|code| code == "E1102"),
+            "task capture must keep the task-boundary diagnostic: {codes:?}"
+        );
+        assert!(
+            codes.iter().all(|code| code != "E0217"),
+            "aggregate-storage E0217 must not shadow task-boundary E1102: {codes:?}"
+        );
+    }
+}
+
+#[test]
 fn signal_crosses_task_and_channel_without_rustc_send_ice() {
     let task_source = r#"
 use core.reactive as reactive

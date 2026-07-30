@@ -38,6 +38,45 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+fn cell_guard_projection_path(expr: &Expr, parameter: &str) -> Option<Vec<String>> {
+    match expr {
+        Expr::Ident(name, _) if name == parameter => Some(Vec::new()),
+        Expr::Field(base, field, _) => {
+            let mut path = cell_guard_projection_path(base, parameter)?;
+            path.push(field.clone());
+            Some(path)
+        }
+        Expr::Paren(base, _) => cell_guard_projection_path(base, parameter),
+        _ => None,
+    }
+}
+
+fn cell_guard_projection_path_from_arg(arg: &crate::AST::CallArg) -> Option<Vec<String>> {
+    let Expr::Lambda(lambda) = &arg.expr else {
+        return None;
+    };
+    let [parameter] = lambda.params.as_slice() else {
+        return None;
+    };
+    let crate::AST::LambdaBody::Expr(expr) = &lambda.body else {
+        return None;
+    };
+    cell_guard_projection_path(expr, &parameter.name)
+}
+
+fn record_cell_guard_projection_path(
+    arg: &mut crate::AST::CallArg,
+    path: Option<Vec<String>>,
+) {
+    if let Expr::Lambda(lambda) = &mut arg.expr {
+        lambda.meta.cell_projection_path = path;
+    }
+}
+
+fn cell_guard_projection_paths_overlap(first: &[String], second: &[String]) -> bool {
+    first.starts_with(second) || second.starts_with(first)
+}
+
 fn named_view_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
     match expr {
         Expr::Ident(name, _) => Some(name.clone()),
@@ -2515,7 +2554,7 @@ impl<'a> Checker<'a> {
                     return Vec::new();
                 };
                 let kind = self.view_kind_for_place(&place);
-                let mut source = |output_path: Vec<String>, proof_span: Span| {
+                let source = |output_path: Vec<String>, proof_span: Span| {
                     let mut proved = place.clone();
                     proved.projections.push(ViewProjection::Fresh(proof_span));
                     (output_path, proved, kind, ViewAccess::Write)
@@ -3970,6 +4009,231 @@ impl<'a> Checker<'a> {
         self.sendability_problem_inner(ty, closure_taken, &mut seen)
     }
 
+    pub(crate) fn type_contains_local_cell(&self, ty: &Type) -> bool {
+        self.type_contains_local_cell_inner(ty, &mut HashSet::new())
+    }
+
+    pub(crate) fn type_contains_cell_guard(&self, ty: &Type) -> bool {
+        self.type_contains_cell_guard_inner(ty, &mut HashSet::new())
+    }
+
+    pub(crate) fn cell_guard_storage_is_unsupported(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+            {
+                false
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.cell_guard_storage_is_unsupported(field)),
+            _ => self.type_contains_cell_guard(ty),
+        }
+    }
+
+    pub(crate) fn report_cell_guard_storage(
+        &mut self,
+        what: String,
+        span: Span,
+    ) {
+        self.diags.push(Diagnostic::error(
+            "E0217",
+            what,
+            "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends"
+                .to_string(),
+            "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"
+                .to_string(),
+            Some(span),
+        ));
+    }
+
+    fn type_contains_cell_guard_inner(
+        &self,
+        ty: &Type,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        match ty {
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
+            {
+                true
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                self.type_contains_cell_guard_inner(inner, seen)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                self.type_contains_cell_guard_inner(key, seen)
+                    || self.type_contains_cell_guard_inner(value, seen)
+            }
+            Type::Fn { params, ret, .. } => {
+                params
+                    .iter()
+                    .any(|param| self.type_contains_cell_guard_inner(param, seen))
+                    || ret
+                        .as_deref()
+                        .is_some_and(|ret| self.type_contains_cell_guard_inner(ret, seen))
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.type_contains_cell_guard_inner(field, seen)),
+            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                self.type_contains_cell_guard_inner(elem, seen)
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|member| self.type_contains_cell_guard_inner(member, seen)),
+            Type::Named(name) => self.named_type_contains_cell_guard(name, &[], seen),
+            Type::Apply { name, args } => {
+                self.named_type_contains_cell_guard(name, args, seen)
+            }
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::TraitObject(_)
+            | Type::IntN { .. }
+            | Type::Float32 => false,
+        }
+    }
+
+    fn named_type_contains_cell_guard(
+        &self,
+        name: &str,
+        args: &[Type],
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(name.to_string()) {
+            return false;
+        }
+        let subst = if args.is_empty() {
+            HashMap::new()
+        } else {
+            self.struct_subst(name, args)
+        };
+        let found = match self.registry.types.get(name) {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+                let actual = self.trait_reg.instantiate_type(ty, &subst);
+                self.type_contains_cell_guard_inner(&actual, seen)
+            }),
+            Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, payload)| {
+                match payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(ty, _) => {
+                        let actual = self.trait_reg.instantiate_type(ty, &subst);
+                        self.type_contains_cell_guard_inner(&actual, seen)
+                    }
+                    VariantPayload::Named(fields) => fields.iter().any(|field| {
+                        let actual = self.trait_reg.instantiate_type(&field.ty, &subst);
+                        self.type_contains_cell_guard_inner(&actual, seen)
+                    }),
+                }
+            }),
+            Some(TypeDef::Alias { target, .. }) => {
+                let actual = self.trait_reg.instantiate_type(target, &subst);
+                self.type_contains_cell_guard_inner(&actual, seen)
+            }
+            Some(TypeDef::Distinct { .. }) | None => false,
+        };
+        seen.remove(name);
+        found
+    }
+
+    fn type_contains_local_cell_inner(
+        &self,
+        ty: &Type,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        match ty {
+            Type::Apply { name, .. }
+                if matches!(
+                    name.as_str(),
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                ) =>
+            {
+                true
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                self.type_contains_local_cell_inner(inner, seen)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                self.type_contains_local_cell_inner(key, seen)
+                    || self.type_contains_local_cell_inner(value, seen)
+            }
+            Type::Fn { params, ret, .. } => {
+                params
+                    .iter()
+                    .any(|param| self.type_contains_local_cell_inner(param, seen))
+                    || ret
+                        .as_deref()
+                        .is_some_and(|ret| self.type_contains_local_cell_inner(ret, seen))
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.type_contains_local_cell_inner(field, seen)),
+            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                self.type_contains_local_cell_inner(elem, seen)
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|member| self.type_contains_local_cell_inner(member, seen)),
+            Type::Named(name) => self.named_type_contains_local_cell(name, &[], seen),
+            Type::Apply { name, args } => {
+                self.named_type_contains_local_cell(name, args, seen)
+            }
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::TraitObject(_)
+            | Type::IntN { .. }
+            | Type::Float32 => false,
+        }
+    }
+
+    fn named_type_contains_local_cell(
+        &self,
+        name: &str,
+        args: &[Type],
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(name.to_string()) {
+            return false;
+        }
+        let subst = if args.is_empty() {
+            HashMap::new()
+        } else {
+            self.struct_subst(name, args)
+        };
+        let found = match self.registry.types.get(name) {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty, _)| {
+                let actual = self.trait_reg.instantiate_type(ty, &subst);
+                self.type_contains_local_cell_inner(&actual, seen)
+            }),
+            Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, payload)| {
+                match payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(ty, _) => {
+                        let actual = self.trait_reg.instantiate_type(ty, &subst);
+                        self.type_contains_local_cell_inner(&actual, seen)
+                    }
+                    VariantPayload::Named(fields) => fields.iter().any(|field| {
+                        let actual = self.trait_reg.instantiate_type(&field.ty, &subst);
+                        self.type_contains_local_cell_inner(&actual, seen)
+                    }),
+                }
+            }),
+            Some(TypeDef::Alias { target, .. }) => {
+                let actual = self.trait_reg.instantiate_type(target, &subst);
+                self.type_contains_local_cell_inner(&actual, seen)
+            }
+            Some(TypeDef::Distinct { .. }) | None => false,
+        };
+        seen.remove(name);
+        found
+    }
+
     pub(crate) fn sendability_problem_inner(
         &self,
         ty: &Type,
@@ -4045,6 +4309,21 @@ impl<'a> Checker<'a> {
             {
                 args.iter()
                     .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
+            }
+            // D-LOCALCELL1=A: local cells and every guard derived from them retain
+            // single-threaded runtime borrow state. They cannot cross any task,
+            // channel, Shared, or parallel boundary.
+            Type::Apply { name, .. }
+                if matches!(
+                    name.as_str(),
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                ) =>
+            {
+                Some(SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ThreadConfined(name.clone()),
+                })
             }
             // D-DYNARRAY1 (E2303, reported as E1102): a `View<T>` is a borrow into
             // its owner's backing storage — it can never cross a task/channel
@@ -4206,11 +4485,25 @@ impl<'a> Checker<'a> {
             "{}; tasks and channels move owned values between threads",
             describe_sendability_problem(&problem)
         );
-        let fix = match crossing {
-            SendCrossing::ChannelSend => {
+        let local_cell = matches!(
+            &problem.kind,
+            SendProblemKind::ThreadConfined(name)
+                if matches!(
+                    name.as_str(),
+                    "Cell" | "CellReadGuard" | "CellEditGuard"
+                )
+        );
+        let fix = match (local_cell, crossing) {
+            (true, SendCrossing::ChannelSend) => {
+                "send the owned value instead, or use `Shared<T>` for synchronized state"
+            }
+            (true, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
+                "create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state"
+            }
+            (false, SendCrossing::ChannelSend) => {
                 "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
             }
-            SendCrossing::TaskCapture | SendCrossing::TaskResult => {
+            (false, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "give the task plain owned data, or rebuild the value as an owned copy before spawning"
             }
         };
@@ -4407,6 +4700,12 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_exp;
         let mut sendability_failed = false;
         if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                &elem_ty,
+                AccessConvention::Move,
+            );
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(
@@ -4497,6 +4796,247 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         self.finish_shared_closure("edit", inner, args, span, true, false, None)
+    }
+
+    pub(crate) fn finish_cell_get(&mut self, inner: &Type, span: Span) -> Option<Type> {
+        if !is_cloneable(inner, self.registry) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`Cell<{}>.get()` cannot copy its value", inner.show()),
+                "`get` returns an independent owned value, so the stored type must support copying".to_string(),
+                "use `.read(value => ...)` to inspect it without making a copy".to_string(),
+                Some(span),
+            ));
+        }
+        Some(inner.clone())
+    }
+
+    pub(crate) fn finish_cell_write(
+        &mut self,
+        method: &str,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags
+                .push(crate::Sema::CheckerCoreLib::wrong_core_arity(
+                    method,
+                    1,
+                    args.len(),
+                    span,
+                ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return (method == "replace").then(|| inner.clone());
+        }
+        let arg = &mut args[0];
+        let saved = self.expected_type.clone();
+        self.expected_type = Some(inner.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved;
+        if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                inner,
+                AccessConvention::Move,
+            );
+            self.check_type_assignable(inner, &got, arg.expr.span());
+        }
+        self.check_take_arg_ownership(method, 0, inner, arg);
+        (method == "replace").then(|| inner.clone())
+    }
+
+    pub(crate) fn finish_cell_get_or_set(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let Type::Option(value) = inner else {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`Cell<{}>` is not an optional cell", inner.show()),
+                "`get_or_set` initializes an empty `Cell<T?>` and returns its `T` value".to_string(),
+                "use `Cell<T?>`, or use `.get()` for a cell that always has a value".to_string(),
+                Some(span),
+            ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return Some(inner.clone());
+        };
+        if args.len() != 1 {
+            self.diags
+                .push(crate::Sema::CheckerCoreLib::wrong_core_arity(
+                    "get_or_set",
+                    1,
+                    args.len(),
+                    span,
+                ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return Some((**value).clone());
+        }
+        if !matches!(args[0].expr, Expr::Lambda(_)) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                "`get_or_set` needs a zero-parameter lambda".to_string(),
+                "the initializer runs only when the cell is empty".to_string(),
+                "write `.get_or_set(() => value)`".to_string(),
+                Some(args[0].expr.span()),
+            ));
+        }
+        let expected = Type::Fn {
+            params: vec![],
+            ret: Some(value.clone()),
+            effect_bound: None,
+            return_view_provenance: None,
+        };
+        let saved_expected = self.expected_type.clone();
+        let saved_escapes = self.lambda_escapes;
+        self.expected_type = Some(expected);
+        self.lambda_escapes = false;
+        self.infer(&mut args[0].expr);
+        self.lambda_escapes = saved_escapes;
+        self.expected_type = saved_expected;
+        if !is_cloneable(value, self.registry) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`Cell<{}?>.get_or_set()` cannot copy its value", value.show()),
+                "`get_or_set` returns an independent owned value, so `T` must support copying".to_string(),
+                "use `.edit(value => ...)` when the cached value cannot be copied".to_string(),
+                Some(span),
+            ));
+        }
+        Some((**value).clone())
+    }
+
+    pub(crate) fn finish_cell_read(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("read", inner, args, span, false, false, None)
+    }
+
+    pub(crate) fn finish_cell_edit(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("edit", inner, args, span, true, false, None)
+    }
+
+    pub(crate) fn finish_cell_guard_map(
+        &mut self,
+        guard: &str,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let editable = guard == "CellEditGuard";
+        let projection = args
+            .first()
+            .and_then(cell_guard_projection_path_from_arg);
+        if let Some(arg) = args.first_mut() {
+            record_cell_guard_projection_path(arg, projection.clone());
+        }
+        if args.first().is_some_and(|_| projection.is_none()) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                "`guard.map` needs a field projection".to_string(),
+                "a mapped guard must point into the value covered by its original dynamic loan".to_string(),
+                "write `.map(value => value.field)`".to_string(),
+                Some(args[0].expr.span()),
+            ));
+        }
+        let projected =
+            self.finish_shared_closure("map", inner, args, span, editable, false, None)?;
+        Some(Type::Apply {
+            name: guard.to_string(),
+            args: vec![projected],
+        })
+    }
+
+    pub(crate) fn finish_cell_guard_split(
+        &mut self,
+        guard: &str,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        if args.len() != 2 {
+            self.diags
+                .push(crate::Sema::CheckerCoreLib::wrong_core_arity(
+                    "split",
+                    2,
+                    args.len(),
+                    span,
+                ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
+        let paths = [
+            cell_guard_projection_path_from_arg(&args[0]),
+            cell_guard_projection_path_from_arg(&args[1]),
+        ];
+        for (arg, path) in args.iter_mut().zip(paths.iter()) {
+            record_cell_guard_projection_path(arg, path.clone());
+            if path.is_none() {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "`guard.split` needs two field projections".to_string(),
+                    "each split guard must point into the value covered by the original dynamic loan".to_string(),
+                    "write `.split(value => value.left, value => value.right)`".to_string(),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+        let editable = guard == "CellEditGuard";
+        if editable {
+            if let (Some(first), Some(second)) = (&paths[0], &paths[1]) {
+                if cell_guard_projection_paths_overlap(first, second) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        "`guard.split` projections overlap".to_string(),
+                        "each edit guard must cover a disjoint field of the original value"
+                            .to_string(),
+                        "project two different fields, or keep one guard and edit through it"
+                            .to_string(),
+                        Some(args[1].expr.span()),
+                    ));
+                }
+            }
+        }
+        let (first_arg, second_arg) = args.split_at_mut(1);
+        let first =
+            self.finish_shared_closure("split", inner, first_arg, span, editable, false, None)?;
+        let second =
+            self.finish_shared_closure("split", inner, second_arg, span, editable, false, None)?;
+        Some(Type::Tuple(vec![
+            (
+                "first".to_string(),
+                Box::new(Type::Apply {
+                    name: guard.to_string(),
+                    args: vec![first],
+                }),
+            ),
+            (
+                "second".to_string(),
+                Box::new(Type::Apply {
+                    name: guard.to_string(),
+                    args: vec![second],
+                }),
+            ),
+        ]))
     }
 
     pub(crate) fn finish_expiring_secret_with(
@@ -4842,6 +5382,12 @@ impl<'a> Checker<'a> {
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved_exp;
         if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                &elem_ty,
+                AccessConvention::Move,
+            );
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(

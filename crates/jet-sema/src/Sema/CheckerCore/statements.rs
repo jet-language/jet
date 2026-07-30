@@ -448,11 +448,21 @@ impl<'a> Checker<'a> {
                     self.validate_shared_guard_lvalue(target);
                     // Beginner magic: place type feeds `.{…}` / `.Variant` on the RHS.
                     let saved_expected = self.expected_type.clone();
-                    if let Some(place_ty) = self.lvalue_type(target) {
-                        self.expected_type = Some(place_ty);
+                    let place_ty = self.lvalue_type(target);
+                    if let Some(place_ty) = &place_ty {
+                        self.expected_type = Some(place_ty.clone());
                     }
-                    let vt = self.infer(value);
+                    let mut vt = self.infer(value);
                     self.expected_type = saved_expected;
+                    if let (Some(source), Some(target_ty)) = (vt.as_ref(), place_ty.as_ref()) {
+                        if source != target_ty
+                            && source.numeric_widening_to(target_ty).is_some()
+                        {
+                            let source = source.clone();
+                            self.widen_numeric_expr(value, &source, target_ty);
+                            vt = Some(target_ty.clone());
+                        }
+                    }
                     if !is_compound {
                         if vt
                             .as_ref()
@@ -1302,9 +1312,16 @@ impl<'a> Checker<'a> {
                             if string_view_return {
                                 self.allow_string_view_read = true;
                             }
-                            let et = self.infer(e);
+                            let mut et = self.infer(e);
                             self.allow_string_view_read = saved_string_view_read;
                             self.expected_type = saved_expected;
+                            if let Some(source) = et.as_ref() {
+                                if source != &rt && source.numeric_widening_to(&rt).is_some() {
+                                    let source = source.clone();
+                                    self.widen_numeric_expr(e, &source, &rt);
+                                    et = Some(rt.clone());
+                                }
+                            }
                             // #1164: direct `View`/`ViewMut` returns use the
                             // dedicated path below. Aggregates that contain view
                             // fields need the walk. Non-view returns must not

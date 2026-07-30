@@ -44,6 +44,12 @@ impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
             self.check_declared_type_rules(ty, span);
+            if self.cell_guard_storage_is_unsupported(ty) {
+                self.report_cell_guard_storage(
+                    format!("a Cell guard cannot be stored in `{}`", ty.show()),
+                    span,
+                );
+            }
         }
 
         pub(crate) fn warn_soft_public_declared_type(&mut self, ty: &Type, span: Span) {
@@ -289,6 +295,8 @@ impl<'a> Checker<'a> {
                             | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
+                            // D-LOCALCELL1=A: one-thread cell and projected guard types.
+                            | "Cell" | "CellReadGuard" | "CellEditGuard"
                             // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
                             // secret-lifetime wrapper.
                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD

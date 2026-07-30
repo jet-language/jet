@@ -902,10 +902,35 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
     assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
     assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
+    fs::write(
+        root.join("pkg.jet"),
+        format!(
+            "payload: {{ name: \"cffi_cb\", version: \"0.1.0\" }}\ndeps: {{ cb: c@\"{}\" }}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
     let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\nfn increment(x: I32) =[]=> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) =[]=> I32, x: I32) => I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) =[]=> I32) => I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
     assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
-    fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lcb").arg("-lpthread").output().unwrap();
+    fs::write(root.join("main.rs"),out.rust).unwrap();
+    let link = out.ffi.as_ref().expect("C callback fixture needs its generated bridge");
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(root.join("main.rs"))
+        .arg("-o")
+        .arg(root.join("main_bin"))
+        .arg("--extern")
+        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()))
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-lcb")
+        .arg("-lpthread");
+    for deps_dir in link.dependency_dirs() {
+        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+    }
+    let built = rustc.output().unwrap();
     assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n40\n"); let _=fs::remove_dir_all(root);
 }
 

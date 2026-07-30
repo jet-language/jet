@@ -1,7 +1,7 @@
-Error [E0003]: `Banana` is not a physical dimension
-  --> tests/ui/quantity_unknown_dimension.jet:2:21
+Error [E0905]: dimension `Force` cannot be resolved
+  --> tests/ui/quantity_unknown_dimension.jet:2:13
     |
-  2 | fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) => Q = value
-    |                     ^^^^^^
- Why: Quantity bounds use Jet's closed compiler-known dimension set
- Fix: use one of: Length, Time, Speed, Area, Temperature
+  2 | #UnitFamily(Force, dimension: Missing, base: newton) { newton }
+    |             ^^^^^
+ Why: derived dimensions can use visible declared dimensions and cannot form a cycle
+ Fix: import or declare every base dimension and remove any dimension cycle

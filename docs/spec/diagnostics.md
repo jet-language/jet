@@ -186,7 +186,7 @@ renumbered, and no new `W` code may be allocated.
 | E0106 | sema  | redefining a built-in                     |
 | E0107 | sema  | unknown name (with suggestion)            |
 | E0108 | sema  | binding type doesn't match its value      |
-| E0109 | sema  | operator type mismatch (incl. Int/Float mixing, `+` on text) |
+| E0109 | sema  | operator type mismatch (including numeric pairs where neither operand can widen to the other, and `+` on text) |
 | E0110 | sema  | condition isn't `Bool` (`if`/`while`/arm/logic operand) |
 | E0111 | sema  | changing a `::`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
@@ -259,6 +259,7 @@ renumbered, and no new `W` code may be allocated.
 | E0214 | sema  | teaching: retired `.view(a..b)` → bare range place `[a..b]` (D-SHAPE-PLACE1=A) |
 | E0215 | sema  | `SharedGuard.map` projection is not a stable stored field place (D-SHAREDGUARD1) |
 | E0216 | sema  | `SharedGuard.split` projections overlap or are not stable stored field places (D-SHAREDGUARD1) |
+| E0217 | sema  | a Cell guard is stored in an unsupported aggregate or captured by a lambda (D-LOCALCELL1=A) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
@@ -333,6 +334,10 @@ renumbered, and no new `W` code may be allocated.
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
+| E0368 | parse | fenced-name expansion has no entries (D-EACH1=C) |
+| E0369 | parse | one fenced-name expansion repeats a name (D-EACH1=C) |
+| E0370 | parse | lock-step fenced names have different entry counts (D-EACH1=C) |
+| E0371 | parse | fenced name appears outside a binding target or expression statement (D-EACH1=C) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -974,6 +979,7 @@ named cell.
 | E0212 | An owner is moved, replaced, or resized while a live view still points into it. | The operation could move or destroy the storage that the view reads or edits; Jet rejects before lowering instead of relying on a backend borrow error. | Finish using the view before changing the owner, narrow the view's scope, or make an owned copy. |
 | E0213 | A read or write window starts from something that is not a place. | Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying. | Bind the call or temporary to a name first, then take the window from that name. |
 | E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access has one rule: `value[a..b]` reads, `&value[a..b]` edits, and `~value[a..b]` copies. | Replace `value.view(a..b)` with `value[a..b]`. |
+| E0217 | A Cell guard is stored inside an unsupported value or captured by a lambda. | A Cell guard is a temporary loan handle. Storing it inside another value could keep the loan after its local scope ends. | Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections. |
 
 ## Library authoring diagnostics (E2-M6)
 
@@ -1314,6 +1320,10 @@ already-freed arena), these track the views themselves.
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 | E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
+| E0368 | This fenced name is empty. | A fenced statement needs at least one name to expand. | Write one or more names between `<:` and `:>`. |
+| E0369 | `{name}` appears twice in this fenced name. | One expansion fence must name each generated copy once. | Remove the second name or give it a different name. |
+| E0370 | Fenced names on one statement have different counts. | Multiple fences expand in lock-step, so every fence needs one name for each copy. | Give every fence the same number of names. |
+| E0371 | This fenced name is not in an allowed statement position. | D-EACH1 expands complete binding or expression statements, not headers, items, or nested syntax. | Move the fence to a binding target or a complete expression statement. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

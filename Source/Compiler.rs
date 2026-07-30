@@ -404,6 +404,8 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::RBrace => "punctuation.right_brace",
         TokKind::LBracket => "punctuation.left_bracket",
         TokKind::RBracket => "punctuation.right_bracket",
+        TokKind::FenceOpen => "operator.fence_open",
+        TokKind::FenceClose => "operator.fence_close",
         TokKind::Colon => "punctuation.colon",
         TokKind::ColonColon => "operator.bind_immutable",
         TokKind::ColonEq => "operator.bind_mutable",

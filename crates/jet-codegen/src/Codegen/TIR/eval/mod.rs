@@ -7,6 +7,7 @@ mod data_calls;
 mod event_ops;
 mod exprs;
 mod handles;
+mod local_cell;
 mod regex_ops;
 mod stmts;
 
@@ -420,6 +421,8 @@ pub(super) struct EvalCtx<'a> {
     /// Handle-backed runtime state is shared by lexical task children. The TIR
     /// and local variable scopes remain borrowed by each evaluator context.
     runtime: Arc<Mutex<EvalRuntime<'a>>>,
+    /// Thread-confined Cell values and loans. Never shared with spawned tasks.
+    local_cells: local_cell::EvalLocalCells,
     shared_transactions: Vec<Vec<EvalSharedDelta<'a>>>,
     /// Spawn bodies are lowered separately because native tiers compile them as
     /// independent functions. The evaluator records each outcome behind a task
@@ -741,6 +744,7 @@ impl<'a> EvalCtx<'a> {
             distinct_ranges: config.distinct_ranges,
             switch_subject: None,
             runtime: config.runtime.clone(),
+            local_cells: local_cell::EvalLocalCells::new(),
             shared_transactions: Vec::new(),
             spawn_lambdas: config.spawn_lambdas,
             task_sender: None,
@@ -1007,6 +1011,7 @@ impl<'a> EvalCtx<'a> {
         }
         self.call_depth += 1;
         let guard_mark = self.scope_guards.len();
+        self.local_cells.enter_frame();
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name.strip_prefix("user_").unwrap_or(name.as_str());
             let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
@@ -1033,6 +1038,8 @@ impl<'a> EvalCtx<'a> {
                 break;
             }
         }
+        let returned = result.as_ref().ok().cloned().unwrap_or(CtValue::Unit);
+        self.local_cells.leave_frame(&returned);
         self.call_depth -= 1;
         match (result, cleanup_result) {
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
@@ -1426,6 +1433,7 @@ pub fn run_program_with_structs(
         distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+        local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
@@ -1492,6 +1500,7 @@ pub fn run_named_func(
         distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+        local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
@@ -1666,6 +1675,7 @@ fn eval_expr_hook(
         distinct_ranges: HashMap::new(),
         switch_subject: None,
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+        local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
         spawn_lambdas: &[],
         task_sender: None,
@@ -1753,6 +1763,7 @@ fn eval_block_hook(
         distinct_ranges: HashMap::new(),
         switch_subject: None,
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+        local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
         spawn_lambdas: &[],
         task_sender: None,

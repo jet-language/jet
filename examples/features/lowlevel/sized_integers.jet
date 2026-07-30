@@ -3,9 +3,9 @@
 // widths `I8 I16 I32 I64 U8 U16 U32 U64` and `F32` are opt-in.
 //
 // Each width is its own type: a literal adopts the width of the slot it lands
-// in and is range-checked at compile time, and widths never mix implicitly
-// (that would hide a narrowing bug). `I64`/`F64` are just aliases for the
-// 64-bit defaults, so they interchange freely with `Int`/`Float`.
+// in and is range-checked at compile time. A value widens implicitly only when
+// the destination holds every possible source value. `I64`/`F64` are aliases
+// for the 64-bit defaults, so they interchange with `Int`/`Float`.
 fn run() {
     // A literal takes the width of its binding, checked to fit at compile time.
     red :: U8.{255}
@@ -24,9 +24,10 @@ fn run() {
     // what binary/byte APIs work in.
     bytes :: [U8].{104, 105, 33}
     print(bytes)
-    // Width conversions are destination-owned methods (D-SHAPE-CONVERT1). Widening is infallible;
-    // narrowing is fallible (`?`/`??`) because a value might not fit.
-    wide :: Int.from_u8(red)
+    // Safe widening is implicit. Narrowing is a destination-owned fallible
+    // method (`?`/`??`) because a value might not fit.
+    wide := Int.{0}
+    wide = red
     print(wide)
     clamped :: U8.from_i32(channel) ?? 255
     print(clamped)

@@ -3,6 +3,19 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+/// Sema's `FuncSig` publishes view provenance through a shared cell; a parsed
+/// `Func` still carries the plain map.
+fn provenance_cell(
+    map: &Option<jet::AST::ViewProvenanceMap>,
+) -> jet::AST::ViewProvenanceCell {
+    let cell = jet::AST::ViewProvenanceCell::new();
+    if let Some(map) = map {
+        cell.set(map.clone());
+    }
+    cell
+}
+
+
 // Serialize all tests that mutate the process-global JET_STORE_DIR to prevent
 // concurrent set_var races under cargo's parallel runner.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
@@ -181,11 +194,7 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    return_view_provenance: f
-                        .return_view_provenance
-                        .clone()
-                        .map(std::sync::OnceLock::from)
-                        .unwrap_or_default(),
+                    return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,
@@ -269,11 +278,7 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    return_view_provenance: f
-                        .return_view_provenance
-                        .clone()
-                        .map(std::sync::OnceLock::from)
-                        .unwrap_or_default(),
+                    return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,
@@ -345,11 +350,7 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    return_view_provenance: f
-                        .return_view_provenance
-                        .clone()
-                        .map(std::sync::OnceLock::from)
-                        .unwrap_or_default(),
+                    return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,

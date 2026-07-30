@@ -643,7 +643,7 @@ impl Cx {
                         self.imported_type_metadata_name(name)
                             .and_then(|canonical| self.unit_facts.get(&canonical))
                     })
-                    .map(|fact| fact.dimension)
+                    .map(|fact| fact.dimension.clone())
             })
     }
 
@@ -676,18 +676,17 @@ impl Cx {
         dimension: crate::AST::Dimension,
         style: crate::AST::UnitFormat,
     ) -> String {
-        let exponents = dimension.exponents();
         let mut numerator = Vec::new();
         let mut denominator = Vec::new();
-        for (index, family) in ["Length", "Time", "Temperature"].iter().enumerate() {
-            let exponent = exponents[index];
+        for (axis, exponent) in dimension.axes() {
+            let family = axis.rsplit("::").next().unwrap_or(axis);
             if exponent == 0 {
                 continue;
             }
             let label = self
                 .unit_labels
                 .values()
-                .filter(|label| label.family == *family && label.is_base)
+                .filter(|label| label.family == family && label.is_base)
                 .min_by(|left, right| left.symbol.cmp(&right.symbol))
                 .map(|label| match style {
                     crate::AST::UnitFormat::Name => label.name.clone(),
@@ -1672,6 +1671,33 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            // D-LOCALCELL1=A: local interior-mutability handles and their
+            // dynamically checked projected guards.
+            Type::Apply { name, args } if name == "Cell" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetCell<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "CellReadGuard" && !args.is_empty() =>
+            {
+                format!(
+                    "{}jet_std::JetCellReadGuard<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "CellEditGuard" && !args.is_empty() =>
+            {
+                format!(
+                    "{}jet_std::JetCellEditGuard<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
             // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
             // which is exactly `loop x; stream { }`'s pull-one-block-until-ready
@@ -2221,7 +2247,7 @@ pub(crate) fn register_bundle_unit_metadata(
                 if qualifier.is_some() && !family.is_pub {
                     continue;
                 }
-                let dimension = crate::AST::Dimension::for_family(&family.family);
+                let dimension = family.resolved_dimension.clone();
                 for member in family.distinct_defs() {
                     let name = qualifier.as_ref().map_or_else(
                         || member.name.clone(),
@@ -2241,8 +2267,8 @@ pub(crate) fn register_bundle_unit_metadata(
                     };
                     cx.unit_labels
                         .insert(name.clone(), unit_label(family, source));
-                    if let Some(dimension) = dimension {
-                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
+                    if let Some(ref dimension) = dimension {
+                        cx.unit_facts.insert(name, unit_fact(family, source, dimension.clone(), kind));
                     }
                 }
             }
@@ -3039,24 +3065,27 @@ pub(crate) fn build_cx_items(
             // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
-                let dimension = crate::AST::Dimension::for_family(&uf.family);
+                let dimension = uf.resolved_dimension.clone();
                 for d in uf.distinct_defs() {
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
                     let kind = d
                         .quantity
-                        .map(|(_, kind)| kind)
+                        .as_ref()
+                        .map(|(_, kind)| *kind)
                         .unwrap_or(crate::AST::QuantityKind::Linear);
                     if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
                         cx.unit_labels
                             .insert(d.name.clone(), unit_label(uf, member));
                     }
-                    if let (Some(dimension), Some((_, kind))) = (dimension, d.quantity) {
-                        if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
+                    if let (Some(dimension), Some((_, kind))) =
+                        (dimension.as_ref(), d.quantity.as_ref())
+                    {
+                        if let Some(member) = unit_family_member_for_type(uf, &d.name, *kind) {
                             cx.unit_facts.insert(
                                 d.name.clone(),
-                                unit_fact(uf, member, dimension, kind),
+                                unit_fact(uf, member, dimension.clone(), *kind),
                             );
                         }
                     }

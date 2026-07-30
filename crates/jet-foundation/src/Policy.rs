@@ -626,7 +626,11 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("CodableAsBase", sig!(), TYPE_SITE, Bare),
     rule!("CLI", sig!(), TYPE_SITE, Bare),
     rule!("Patchable", sig!(), TYPE_SITE, Bare),
-    rule!("UnitFamily", sig!(param!("family", Ident), param!("base", Ident, "first member")), TYPE_SITE, Call),
+    rule!("UnitFamily", sig!(
+        param!("family", Ident),
+        param!("dimension", Any, "nominal"),
+        param!("base", Ident, "first member")
+    ), TYPE_SITE, Call),
     rule!("SingleUse", sig!(), TYPE_SITE, Bare),
     rule!("Invariant", sig!(param!("condition", String)), TYPE_SITE, Call),
     rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE, Call),

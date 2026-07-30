@@ -21,7 +21,7 @@ struct NestedRank<T> {
     tail: [T]
     derive Comparable
 }
-struct Cell<T: Add> { value: T }
+struct Adder<T: Add> { value: T }
 
 impl Vec2.Add {
     fn add(self, rhs: Vec2) => Vec2 {
@@ -69,7 +69,7 @@ fn run() {
         NestedRank<Int>.{ head: Val(1), tail: [2, 3] },
         NestedRank<Int>.{ head: Val(1), tail: [2, 4] }
     )
-    cell := Cell<Int>.{ value: 4 }
+    cell := Adder<Int>.{ value: 4 }
     cell.value += 3
     print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
 }
