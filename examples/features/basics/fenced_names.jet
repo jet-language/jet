@@ -1,5 +1,8 @@
-// D-EACH1=C: one statement can expand over named copies without creating a list.
+// D-EACH1=C / D-VERDICT-1320-1: one statement can expand over entries without
+// creating a list. Binding fences carry names; expression fences also accept
+// expression entries, and repeated expression entries expand as written.
 fn run() {
-    <: score1..score3 :> :: 7
-    print(<: score1, score2, score3 :>)
+    $[ score1..score3 ]$ :: 7
+    print($[ score1, score2, score3 ]$)
+    print($[ "sum={score1 + score2 + score3}", "done", "done" ]$)
 }

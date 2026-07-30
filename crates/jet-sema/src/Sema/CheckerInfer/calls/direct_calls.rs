@@ -281,68 +281,68 @@ impl<'a> Checker<'a> {
                     }
                     return Some(None);
                 }
-                if call.args.len() != 1 {
+                if call.args.is_empty() {
                     self.diags.push(Diagnostic::error(
                         "E0103",
                         format!(
-                            "`{}` needs exactly one thing to print",
+                            "`{}` needs at least one thing to print",
                             Syntax::BUILTIN_PRINT
                         ),
                         "printing nothing isn't meaningful".to_string(),
                         format!("e.g. {}(\"hello\")", Syntax::BUILTIN_PRINT),
                         Some(call.name_span),
                     ));
-                    for arg in call.args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
                     return None;
                 }
-                let arg = &mut call.args[0];
-                self.borrow_ctx = true; // print borrows via `.jet_show()`
-                if let Some(t) = self.infer(&mut arg.expr) {
-                    if !is_printable(&t, self.registry, self.trait_reg)
-                        && !self.is_unit_type(&t)
-                    {
-                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("secret-bearing `{}` cannot be printed", t.name()),
-                                "printing could copy cryptographic secret material into terminal output or logs".to_string(),
-                                "print a public operation label or key identifier instead".to_string(),
-                                Some(arg.expr.span()),
-                            ));
-                        } else if crate::Sema::Diagnostics::is_one_pass_source(&t) {
-                            let fix = crate::Sema::Diagnostics::one_pass_materializer(&t)
-                                .map_or_else(
-                                    || {
-                                        "consume it with a `loop` and print each item instead"
-                                            .to_string()
-                                    },
-                                    |call| {
-                                        format!(
-                                            "materialize it first: add `{call}` before printing"
-                                        )
-                                    },
-                                );
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`{}` cannot show the one-pass source {}", Syntax::BUILTIN_PRINT, t.show()),
-                                "reading this value consumes it, so showing it would spend the only pass".to_string(),
-                                fix,
-                                Some(arg.expr.span()),
-                            ));
-                        } else {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`{}` doesn't know how to show {}",
-                                    Syntax::BUILTIN_PRINT,
-                                    t.show()
-                                ),
-                                "print shows values that have a display".to_string(),
-                                "print one of its parts instead".to_string(),
-                                Some(arg.expr.span()),
-                            ));
+                // D-VERDICT-1321-1: variadic print — every argument renders on
+                // its own line. Each argument passes the same printable checks.
+                for arg in call.args.iter_mut() {
+                    self.borrow_ctx = true; // print borrows via `.jet_show()`
+                    if let Some(t) = self.infer(&mut arg.expr) {
+                        if !is_printable(&t, self.registry, self.trait_reg)
+                            && !self.is_unit_type(&t)
+                        {
+                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("secret-bearing `{}` cannot be printed", t.name()),
+                                    "printing could copy cryptographic secret material into terminal output or logs".to_string(),
+                                    "print a public operation label or key identifier instead".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            } else if crate::Sema::Diagnostics::is_one_pass_source(&t) {
+                                let fix = crate::Sema::Diagnostics::one_pass_materializer(&t)
+                                    .map_or_else(
+                                        || {
+                                            "consume it with a `loop` and print each item instead"
+                                                .to_string()
+                                        },
+                                        |call| {
+                                            format!(
+                                                "materialize it first: add `{call}` before printing"
+                                            )
+                                        },
+                                    );
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("`{}` cannot show the one-pass source {}", Syntax::BUILTIN_PRINT, t.show()),
+                                    "reading this value consumes it, so showing it would spend the only pass".to_string(),
+                                    fix,
+                                    Some(arg.expr.span()),
+                                ));
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!(
+                                        "`{}` doesn't know how to show {}",
+                                        Syntax::BUILTIN_PRINT,
+                                        t.show()
+                                    ),
+                                    "print shows values that have a display".to_string(),
+                                    "print one of its parts instead".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
                         }
                     }
                 }

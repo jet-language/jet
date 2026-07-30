@@ -85,9 +85,10 @@ binding  = [ "#Track" ] ( ident "::" expr     // immutable
 // Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
-fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C
-fence    = "<:" fence-entry { "," fence-entry } ":>"
-         | "<:" numbered-name ".." numbered-name ":>" ;
+fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C / D-VERDICT-1320-1
+fence    = "$[" fence-entry { "," fence-entry } "]$"
+         | "$[" numbered-name ".." numbered-name "]$" ;
+// binding fences: entries are plain names; expression fences: any expression
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
@@ -144,9 +145,11 @@ expr     = precedence climbing over:
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
   Types never annotate the binding name — use `Type.{ … }` or a signature/field.
-- `<: a, b :>` expands one complete binding or expression statement per name.
-  Multiple fences advance in lock-step. `<: task1..task8 :>` generates or
-  reuses the ascending numbered names. A fence is not a list or destructure.
+- `$[ a, b ]$` expands one complete binding or expression statement per entry.
+  Multiple fences advance in lock-step. `$[ task1..task8 ]$` generates or
+  reuses the ascending numbered names. Expression-position fences accept
+  expression entries (`print($[ "a", total(1, 2) ]$)`); binding fences need
+  plain names. A fence is not a list or destructure (D-VERDICT-1320-1).
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() => String`; untracked Floats return `"untracked"`.
@@ -238,9 +241,10 @@ keep code readable from top to bottom. See
   `.jettrace` (performance traces), `.jetreplay` (game input replays), and
   `.jetproof-replay` (proof replays). Consumers reject a different family
   member by artifact kind; retired suffixes have no compatibility aliases.
-- `print(x)` is built in (S9); takes exactly one printable argument
-  (E0103, E0112) and writes it with a trailing newline. `Float` always
-  prints a decimal part (S21): `-5.0`, not `-5`.
+- `print(x)` is built in (S9); takes one or more printable arguments
+  (E0103, E0112) and writes each on its own line with a trailing newline
+  (D-VERDICT-1321-1). `io.print`/`io.eprint` accept the same variadic
+  form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-PRELUDE1); reads a line from
   stdin, strips the trailing newline, and returns `String ? IOError`.
   Use `??` to unwrap or handle the error.

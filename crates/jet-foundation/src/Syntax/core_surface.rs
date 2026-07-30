@@ -87,9 +87,11 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 /// D-BIND-BARE1 retires typed bindings (`name: Type := expr`).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
-/// D-EACH1=C: open/close a lock-step statement-name fence.
-pub const SIGIL_FENCE_OPEN: &str = "<:";
-pub const SIGIL_FENCE_CLOSE: &str = ":>";
+/// D-EACH1=C / D-VERDICT-1320-1: open/close a lock-step statement-expansion
+/// fence. Binding fences carry plain names; expression fences carry names or
+/// expression entries.
+pub const SIGIL_FENCE_OPEN: &str = "$[";
+pub const SIGIL_FENCE_CLOSE: &str = "]$";
 
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.

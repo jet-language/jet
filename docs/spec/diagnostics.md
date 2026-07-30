@@ -180,7 +180,7 @@ renumbered, and no new `W` code may be allocated.
 | E0991 | parse | teaching: the old `copy` keyword → `~` sigil (D-SHAPE-COPY1=A, supersedes D-CAP2/S4) |
 | E0101 | sema  | no `run` function                         |
 | E0102 | sema  | unknown function (with suggestion)        |
-| E0103 | sema  | `print` arity                             |
+| E0103 | sema  | `print` needs at least one argument (variadic, D-VERDICT-1321-1) |
 | E0104 | sema  | wrong number of arguments                 |
 | E0105 | sema  | duplicate definition                      |
 | E0106 | sema  | redefining a built-in                     |
@@ -334,10 +334,10 @@ renumbered, and no new `W` code may be allocated.
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
-| E0368 | parse | fenced-name expansion has no entries (D-EACH1=C) |
-| E0369 | parse | one fenced-name expansion repeats a name (D-EACH1=C) |
-| E0370 | parse | lock-step fenced names have different entry counts (D-EACH1=C) |
-| E0371 | parse | fenced name appears outside a binding target or expression statement (D-EACH1=C) |
+| E0368 | parse | fence expansion has no entries (D-EACH1=C, D-VERDICT-1320-1) |
+| E0369 | parse | one binding fence repeats a name (D-EACH1=C, D-VERDICT-1320-1) |
+| E0370 | parse | lock-step fences have different entry counts (D-EACH1=C, D-VERDICT-1320-1) |
+| E0371 | parse | fence appears outside a binding target or expression statement, or a binding fence carries a non-name entry (D-EACH1=C, D-VERDICT-1320-1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1320,10 +1320,10 @@ already-freed arena), these track the views themselves.
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 | E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
-| E0368 | This fenced name is empty. | A fenced statement needs at least one name to expand. | Write one or more names between `<:` and `:>`. |
-| E0369 | `{name}` appears twice in this fenced name. | One expansion fence must name each generated copy once. | Remove the second name or give it a different name. |
-| E0370 | Fenced names on one statement have different counts. | Multiple fences expand in lock-step, so every fence needs one name for each copy. | Give every fence the same number of names. |
-| E0371 | This fenced name is not in an allowed statement position. | D-EACH1 expands complete binding or expression statements, not headers, items, or nested syntax. | Move the fence to a binding target or a complete expression statement. |
+| E0368 | This fence is empty. | A fenced statement needs at least one entry to expand. | Write one or more entries between `$[` and `]$`. |
+| E0369 | `{name}` appears twice in this fence. | One binding fence must name each generated copy once. | Remove the second name or give it a different name. |
+| E0370 | Fences on one statement have different entry counts. | Multiple fences expand in lock-step, so every fence needs one entry for each copy. | Give every fence the same number of entries. |
+| E0371 | This fence is not in an allowed statement position, or one of its entries has the wrong shape (empty entry, trailing comma, non-name in a binding fence, malformed numbered range). | D-EACH1 expands complete binding or expression statements; a binding fence takes plain names or one ascending numbered-name range, an expression fence takes comma-separated expressions. | Move the fence to a binding target or a complete expression statement, or fix the entry. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

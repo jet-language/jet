@@ -79,11 +79,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     .iter()
                     .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
             }
-            // `print` is the one builtin the subset covers (exactly one arg).
+            // `print` is the one builtin the subset covers (one or more args —
+            // D-VERDICT-1321-1 lowers a multi-arg print to one joined Print).
             let is_print = c.name == Syntax::BUILTIN_PRINT
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
-                && c.args.len() == 1;
+                && !c.args.is_empty();
             // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
             // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
             let is_drop = c.name == Syntax::BUILTIN_CONSUME

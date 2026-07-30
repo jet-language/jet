@@ -1,8 +1,11 @@
-//! D-EACH1=C fenced-name statement expansion.
+//! D-EACH1=C / D-VERDICT-1320-1 fenced statement expansion.
 //!
 //! The parser receives ordinary statements: this pass copies one authored
-//! statement per fence entry and substitutes each fence in lock-step. The
-//! authored fence facts survive only for formatter emission.
+//! statement per fence entry and substitutes each fence in lock-step. A
+//! binding-target fence carries plain names (or a numbered-name range); an
+//! expression-position fence may also carry expression entries separated by
+//! top-level commas. The authored fence facts survive only for formatter
+//! emission.
 
 use std::collections::HashSet;
 
@@ -111,6 +114,7 @@ fn expand_segment(
     brace_depth: usize,
 ) -> Result<(Vec<Token>, FencedStatement), Vec<Diagnostic>> {
     let mut fences = Vec::new();
+    let mut fence_entries: Vec<Vec<Vec<Token>>> = Vec::new();
     let mut pairs = Vec::new();
     let mut index = 0usize;
     let mut diags = Vec::new();
@@ -125,7 +129,10 @@ fn expand_segment(
                 else {
                     diags.push(rejected_position(
                         segment[open].span,
-                        "this fenced name has no closing `:>`",
+                        &format!(
+                            "this fence has no closing `{}`",
+                            crate::Syntax::SIGIL_FENCE_CLOSE
+                        ),
                     ));
                     break;
                 };
@@ -136,7 +143,7 @@ fn expand_segment(
                 {
                     diags.push(rejected_position(
                         Span::new(segment[open].span.start, segment[close].span.end),
-                        "fenced names cannot nest",
+                        "fences cannot nest",
                     ));
                 }
                 pairs.push((open, close));
@@ -145,7 +152,11 @@ fn expand_segment(
             TokKind::FenceClose => {
                 diags.push(rejected_position(
                     segment[index].span,
-                    "this `:>` has no opening `<:`",
+                    &format!(
+                        "this `{}` has no opening `{}`",
+                        crate::Syntax::SIGIL_FENCE_CLOSE,
+                        crate::Syntax::SIGIL_FENCE_OPEN
+                    ),
                 ));
                 index += 1;
             }
@@ -198,15 +209,17 @@ fn expand_segment(
         let span = statement_span(segment);
         diags.push(rejected_position(
             span,
-            "fenced names are allowed only in a binding target or an expression statement",
+            "fences are allowed only in a binding target or an expression statement",
         ));
     }
 
-    for &(open, close) in &pairs {
-        match parse_names(&segment[open + 1..close], segment[open].span) {
-            Ok(mut names) => {
+    for (fence_index, &(open, close)) in pairs.iter().enumerate() {
+        let binding_fence = binding_target && fence_index == 0;
+        match parse_entries(&segment[open + 1..close], segment[open].span, binding_fence) {
+            Ok((mut names, entries)) => {
                 names.span = Span::new(segment[open].span.start, segment[close].span.end);
                 fences.push(names);
+                fence_entries.push(entries);
             }
             Err(diagnostic) => diags.push(diagnostic),
         }
@@ -217,10 +230,10 @@ fn expand_segment(
             if fence.names.len() != expected {
                 diags.push(Diagnostic::error(
                     "E0370",
-                    "fenced names on one statement have different counts".to_string(),
-                    "multiple fences expand in lock-step, so every fence needs one name for each copy"
+                    "fences on one statement have different entry counts".to_string(),
+                    "multiple fences expand in lock-step, so every fence needs one entry for each copy"
                         .to_string(),
-                    format!("give every fence {expected} names"),
+                    format!("give every fence {expected} entries"),
                     Some(fence.span),
                 ));
             }
@@ -244,11 +257,7 @@ fn expand_segment(
         let mut cursor = 0usize;
         for (fence_index, &(open, close)) in pairs.iter().enumerate() {
             expanded.extend_from_slice(&segment[cursor..open]);
-            let (name, span) = &fences[fence_index].names[copy];
-            expanded.push(Token {
-                kind: TokKind::Ident(name.clone()),
-                span: *span,
-            });
+            expanded.extend_from_slice(&fence_entries[fence_index][copy]);
             cursor = close + 1;
         }
         expanded.extend_from_slice(&segment[cursor..]);
@@ -264,87 +273,139 @@ fn expand_segment(
     ))
 }
 
-fn parse_names(
+/// Parse one fence's content into entries. A binding fence needs plain names
+/// (or a numbered-name range). An expression fence also accepts expression
+/// entries split on top-level commas; each entry substitutes token-for-token.
+fn parse_entries(
     content: &[Token],
     open_span: Span,
-) -> Result<FencedNames, Diagnostic> {
+    binding_fence: bool,
+) -> Result<(FencedNames, Vec<Vec<Token>>), Diagnostic> {
     if content.is_empty() {
         return Err(Diagnostic::error(
             "E0368",
-            "this fenced name is empty".to_string(),
-            "a fenced statement needs at least one name to expand".to_string(),
-            "write one or more names between `<:` and `:>`".to_string(),
+            "this fence is empty".to_string(),
+            "a fenced statement needs at least one entry to expand".to_string(),
+            format!(
+                "write one or more entries between `{}` and `{}`",
+                crate::Syntax::SIGIL_FENCE_OPEN,
+                crate::Syntax::SIGIL_FENCE_CLOSE
+            ),
             Some(open_span),
         ));
     }
 
-    let range = if content.len() == 3 && matches!(content[1].kind, TokKind::DotDot) {
-        let (TokKind::Ident(start), TokKind::Ident(end)) = (&content[0].kind, &content[2].kind)
-        else {
-            return Err(rejected_position(
+    // Numbered-name range: exactly `prefixN..prefixM`. Anything else with a
+    // `..` falls through and reads as an ordinary expression entry.
+    if content.len() == 3 && matches!(content[1].kind, TokKind::DotDot) {
+        if let (TokKind::Ident(start), TokKind::Ident(end)) = (&content[0].kind, &content[2].kind)
+        {
+            let range_span = Span::new(content[0].span.start, content[2].span.end);
+            match expand_numbered_range(start, end, range_span) {
+                Ok(names) => {
+                    let entries = names
+                        .iter()
+                        .map(|(name, span)| {
+                            vec![Token {
+                                kind: TokKind::Ident(name.clone()),
+                                span: *span,
+                            }]
+                        })
+                        .collect();
+                    let fact = FencedNames {
+                        span: open_span,
+                        range: Some((
+                            names.first().unwrap().0.clone(),
+                            names.last().unwrap().0.clone(),
+                        )),
+                        names,
+                    };
+                    return Ok((fact, entries));
+                }
+                Err(diagnostic) if binding_fence => return Err(diagnostic),
+                Err(_) => {}
+            }
+        } else if binding_fence {
+            return Err(rejected_entry(
                 Span::new(content[0].span.start, content[2].span.end),
                 "a fenced name range needs two numbered names",
-            ));
-        };
-        Some(expand_numbered_range(start, end, Span::new(content[0].span.start, content[2].span.end))?)
-    } else {
-        None
-    };
-
-    let names = if let Some(names) = &range {
-        names.clone()
-    } else {
-        let mut names = Vec::new();
-        let mut expect_name = true;
-        for token in content {
-            if expect_name {
-                let TokKind::Ident(name) = &token.kind else {
-                    return Err(rejected_position(
-                        token.span,
-                        "fenced entries must be names separated by commas",
-                    ));
-                };
-                names.push((name.clone(), token.span));
-            } else if !matches!(token.kind, TokKind::Comma) {
-                return Err(rejected_position(
-                    token.span,
-                    "fenced entries must be names separated by commas",
-                ));
-            }
-            expect_name = !expect_name;
-        }
-        if expect_name {
-            return Err(rejected_position(
-                content.last().map_or(open_span, |token| token.span),
-                "this fenced name ends after a comma",
-            ));
-        }
-        names
-    };
-
-    let mut seen = HashSet::new();
-    for (name, span) in &names {
-        if !seen.insert(name.clone()) {
-            return Err(Diagnostic::error(
-                "E0369",
-                format!("`{name}` appears twice in this fenced name"),
-                "one expansion fence must name each generated copy once".to_string(),
-                format!("remove the second `{name}` or give it a different name"),
-                Some(*span),
             ));
         }
     }
 
-    Ok(FencedNames {
-        span: open_span,
-        range: range.as_ref().map(|values| {
-            (
-                values.first().unwrap().0.clone(),
-                values.last().unwrap().0.clone(),
-            )
-        }),
-        names,
-    })
+    // Split on top-level commas, tracking every bracket family so entry
+    // expressions keep their internal commas.
+    let mut entries: Vec<Vec<Token>> = Vec::new();
+    let mut current: Vec<Token> = Vec::new();
+    let mut depth = 0usize;
+    for token in content {
+        match token.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                depth = depth.saturating_sub(1)
+            }
+            TokKind::Comma if depth == 0 => {
+                if current.is_empty() {
+                    return Err(rejected_entry(token.span, "this fence entry is empty"));
+                }
+                entries.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(token.clone());
+    }
+    if current.is_empty() {
+        return Err(rejected_entry(
+            content.last().map_or(open_span, |token| token.span),
+            "this fence ends after a comma",
+        ));
+    }
+    entries.push(current);
+
+    let mut names = Vec::new();
+    for entry in &entries {
+        let span = Span::new(
+            entry.first().unwrap().span.start,
+            entry.last().unwrap().span.end,
+        );
+        match (&entry[..], binding_fence) {
+            ([Token { kind: TokKind::Ident(name), .. }], _) => {
+                names.push((name.clone(), span));
+            }
+            (_, true) => {
+                return Err(rejected_entry(
+                    span,
+                    "a binding fence needs plain names separated by commas",
+                ));
+            }
+            (_, false) => names.push((String::new(), span)),
+        }
+    }
+
+    if binding_fence {
+        let mut seen = HashSet::new();
+        for (name, span) in &names {
+            if !seen.insert(name.clone()) {
+                return Err(Diagnostic::error(
+                    "E0369",
+                    format!("`{name}` appears twice in this fence"),
+                    "one binding fence must name each generated copy once".to_string(),
+                    format!("remove the second `{name}` or give it a different name"),
+                    Some(*span),
+                ));
+            }
+        }
+    }
+
+    Ok((
+        FencedNames {
+            span: open_span,
+            range: None,
+            names,
+        },
+        entries,
+    ))
 }
 
 fn expand_numbered_range(
@@ -353,19 +414,19 @@ fn expand_numbered_range(
     span: Span,
 ) -> Result<Vec<(String, Span)>, Diagnostic> {
     let Some((start_prefix, start_number, width)) = numbered_name(start) else {
-        return Err(rejected_position(
+        return Err(rejected_entry(
             span,
             "the first range endpoint needs a trailing number",
         ));
     };
     let Some((end_prefix, end_number, end_width)) = numbered_name(end) else {
-        return Err(rejected_position(
+        return Err(rejected_entry(
             span,
             "the last range endpoint needs a trailing number",
         ));
     };
     if start_prefix != end_prefix || start_number > end_number {
-        return Err(rejected_position(
+        return Err(rejected_entry(
             span,
             "a fenced name range needs one prefix and ascending numbers",
         ));
@@ -412,6 +473,24 @@ fn rejected_position(span: Span, what: &str) -> Diagnostic {
     )
 }
 
+/// Entry-shape rejection: the fence sits in a legal position but one of its
+/// entries has the wrong shape. Distinct from `rejected_position` so the
+/// why/fix teach the entry rules, not statement placement (I4).
+fn rejected_entry(span: Span, what: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0371",
+        what.to_string(),
+        "a binding fence takes plain names or one ascending numbered-name range; an expression fence takes comma-separated expressions"
+            .to_string(),
+        format!(
+            "fix this entry, e.g. `{open} a, b {close}` or `{open} t1..t8 {close}`",
+            open = crate::Syntax::SIGIL_FENCE_OPEN,
+            close = crate::Syntax::SIGIL_FENCE_CLOSE
+        ),
+        Some(span),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,7 +504,7 @@ mod tests {
 
     #[test]
     fn lexer_uses_fence_digraphs_and_close_suppresses_a_terminator() {
-        let (tokens, diagnostics) = Lexer::lex("<:\n    first,\n    second\n:>");
+        let (tokens, diagnostics) = Lexer::lex("$[\n    first,\n    second\n]$");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(matches!(tokens[0].kind, TokKind::FenceOpen));
         assert!(tokens
@@ -441,7 +520,7 @@ mod tests {
     #[test]
     fn expands_numbered_binding_and_lock_step_reference_fences() {
         let (tokens, facts) = expanded(
-            "fn run() {\n<: t1..t3 :> :: work()\n<: t1..t3 :>.wait()\nuse_pair(<: t1, t2, t3 :>, <: a, b, c :>)\n}\n",
+            "fn run() {\n$[ t1..t3 ]$ :: work()\n$[ t1..t3 ]$.wait()\nuse_pair($[ t1, t2, t3 ]$, $[ a, b, c ]$)\n}\n",
         );
         let names = tokens
             .iter()
@@ -460,10 +539,11 @@ mod tests {
     #[test]
     fn diagnoses_empty_duplicate_mismatch_and_header_position() {
         for (source, code) in [
-            ("fn run() { <: :> :: 1 }", "E0368"),
-            ("fn run() { <: a, a :> :: 1 }", "E0369"),
-            ("fn run() { call(<: a, b :>, <: c :>) }", "E0370"),
-            ("fn run() { if <: a, b :> { print(a) } }", "E0371"),
+            ("fn run() { $[ ]$ :: 1 }", "E0368"),
+            ("fn run() { $[ a, a ]$ :: 1 }", "E0369"),
+            ("fn run() { $[ f(x), g ]$ :: 1 }", "E0371"),
+            ("fn run() { call($[ a, b ]$, $[ c ]$) }", "E0370"),
+            ("fn run() { if $[ a, b ]$ { print(a) } }", "E0371"),
         ] {
             let (tokens, lex_diags) = Lexer::lex(source);
             assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -477,13 +557,13 @@ mod tests {
 
     #[test]
     fn formatter_emits_one_fence_and_is_stable() {
-        let source = "fn run() {\n    <: first, second :> :: work()\n    show(<: first, second :>)\n}\n";
+        let source = "fn run() {\n    $[ first, second ]$ :: work()\n    show($[ first, second ]$)\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse fenced source");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert_eq!(formatted.matches("<: first, second :>").count(), 2);
+        assert_eq!(formatted.matches("$[ first, second ]$").count(), 2);
         let (tokens, diagnostics) = Lexer::lex(&formatted);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -497,7 +577,7 @@ mod tests {
     #[test]
     fn formatter_preserves_whitespace_inside_fenced_string_literals() {
         let source =
-            "fn run() {\n    show(<: first, second :>, \"keep  two   spaces\")\n}\n";
+            "fn run() {\n    show($[ first, second ]$, \"keep  two   spaces\")\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -508,21 +588,21 @@ mod tests {
 
     #[test]
     fn formatter_wraps_a_wide_fence_one_name_per_line() {
-        let source = "fn run() {\n    <: this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three :> :: work()\n}\n";
+        let source = "fn run() {\n    $[ this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three ]$ :: work()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse wide fence");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert!(formatted.contains("<:\n"));
+        assert!(formatted.contains("$[\n"));
         assert!(formatted.contains("this_name_is_deliberately_long_one,\n"));
-        assert!(formatted.contains("\n    :> :: work()"));
+        assert!(formatted.contains("\n    ]$ :: work()"));
     }
 
     #[test]
     fn numbered_range_expands_in_binding_and_receiver_expression() {
         let source =
-            "fn run() {\n    <: task1..task3 :> :: spawn()\n    <: task1..task3 :>.wait()\n}\n";
+            "fn run() {\n    $[ task1..task3 ]$ :: spawn()\n    $[ task1..task3 ]$.wait()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse range fences");
@@ -538,8 +618,28 @@ mod tests {
     }
 
     #[test]
+    fn expression_entries_expand_an_expression_statement() {
+        let (tokens, facts) = expanded(
+            "fn run() {\n    print($[ \"a={x}\", \"b\", total(1, 2) ]$)\n}\n",
+        );
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].copies, 3);
+        let prints = tokens
+            .iter()
+            .filter(|token| matches!(&token.kind, TokKind::Ident(name) if name == "print"))
+            .count();
+        assert_eq!(prints, 3);
+        // The third copy substitutes the whole call, commas included.
+        let totals = tokens
+            .iter()
+            .filter(|token| matches!(&token.kind, TokKind::Ident(name) if name == "total"))
+            .count();
+        assert_eq!(totals, 1);
+    }
+
+    #[test]
     fn nested_lambda_and_struct_braces_stay_inside_fenced_statements() {
-        let source = "fn run() {\n    <: first, second :> :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: <: first, second :> })\n}\n";
+        let source = "fn run() {\n    $[ first, second ]$ :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: $[ first, second ]$ })\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse nested fenced statements");

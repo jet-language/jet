@@ -1416,6 +1416,21 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
+                // D-VERDICT-1321-1: variadic io.print/io.eprint — join the
+                // arguments with newlines so the engines keep one-value calls.
+                if module == "core.io" && matches!(method, "print" | "eprint") && args.len() > 1 {
+                    let joined = crate::Codegen::TIR::lower::join_print_args(args, cx, env);
+                    return TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::CoreCall {
+                            module,
+                            method: method.to_string(),
+                            args: vec![joined],
+                            source_span: method_span,
+                            widen_to_vec: vec![false],
+                        },
+                    };
+                }
                 if module == "core.tasks" && method == "join_all" && args.len() == 1 {
                     let tasks = lower_expr(&args[0].expr, cx, env);
                     let elem = taskgroup_result_elem(&tasks);

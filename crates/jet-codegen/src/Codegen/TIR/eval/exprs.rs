@@ -4256,13 +4256,22 @@ impl<'a> EvalCtx<'a> {
                 return Ok(CtValue::Unit);
             }
         }
+        // D-VERDICT-1321-1: variadic print — each argument on its own line.
         if name == "print" {
-            let text = argv.first().map(|v| v.jet_show()).unwrap_or_default();
+            let text = argv
+                .iter()
+                .map(|v| v.jet_show())
+                .collect::<Vec<_>>()
+                .join("\n");
             self.write_print(&text, false)?;
             return Ok(CtValue::Unit);
         }
         if name == "eprint" {
-            let text = argv.first().map(|v| v.jet_show()).unwrap_or_default();
+            let text = argv
+                .iter()
+                .map(|v| v.jet_show())
+                .collect::<Vec<_>>()
+                .join("\n");
             self.write_print(&text, true)?;
             return Ok(CtValue::Unit);
         }

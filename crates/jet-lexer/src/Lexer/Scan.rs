@@ -240,10 +240,10 @@ impl<'a> Lexer<'a> {
                 '{' => toks.push(simple(self, TokKind::LBrace, 1)),
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
+                // D-VERDICT-1320-1: fence close digraph `]$` is longest-match
+                // before plain `]`. No legal program puts `$` right after `]`.
+                ']' if next == '$' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
-                // D-EACH1=C: fence digraphs are longest-match before `<`/`:`.
-                '<' if next == ':' => toks.push(simple(self, TokKind::FenceOpen, 2)),
-                ':' if next == '>' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 // D-BIND4: `:=` mutable binding sigil.
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
@@ -252,6 +252,9 @@ impl<'a> Lexer<'a> {
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
                 '@' => toks.push(simple(self, TokKind::At, 1)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
+                // D-VERDICT-1320-1: fence open digraph `$[` is longest-match
+                // before the D-CTMARKER1 `$name` comptime splice.
+                '$' if next == '[' => toks.push(simple(self, TokKind::FenceOpen, 2)),
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),

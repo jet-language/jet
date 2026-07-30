@@ -1591,10 +1591,17 @@ impl<'a> Checker<'a> {
                 }
                 ("core.io", "print") => {
                     // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    // D-VERDICT-1321-1: variadic — each argument prints on its own line.
+                    if args.is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`{name}` needs at least one thing to print"),
+                            "printing nothing isn't meaningful".to_string(),
+                            "e.g. io.print(\"hello\")".to_string(),
+                            Some(span),
+                        ));
                     }
-                    if let Some(arg) = args.get_mut(0) {
+                    for arg in args.iter_mut() {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
                             if !is_printable(&ty, self.registry, self.trait_reg)
@@ -1614,10 +1621,17 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 ("core.io", "eprint") => {
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    // D-VERDICT-1321-1: variadic — each argument prints on its own line.
+                    if args.is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`{name}` needs at least one thing to print"),
+                            "printing nothing isn't meaningful".to_string(),
+                            "e.g. io.eprint(\"warning\")".to_string(),
+                            Some(span),
+                        ));
                     }
-                    if let Some(arg) = args.get_mut(0) {
+                    for arg in args.iter_mut() {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
                             if !is_printable(&ty, self.registry, self.trait_reg)

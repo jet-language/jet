@@ -5260,3 +5260,26 @@ retains one authored fence and wraps wide explicit fences one name per line.
 `tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
 returns their results in list order; taskgroup combinators remain the structured
 ownership surface. Card #1239.
+
+**2026-07-30 — D-VERDICT-1320-1 (amends D-EACH1)**: the fence respells as
+symmetric `$[ a, b ]$`. `$[` and `]$` are longest-match digraphs (`$[` before
+the D-CTMARKER1 `$name` splice, `]$` before plain `]`); `]$` suppresses line
+termination exactly as `:>` did. An expression-position fence now accepts
+arbitrary expression entries separated by top-level commas — each entry
+substitutes token-for-token into its statement copy. A binding-target fence
+still requires plain names or one ascending numbered-name range
+(`$[ t1..t8 ]$`). E0369 duplicate checking applies to binding fences only;
+repeated expression entries are legal and expand as written. Semantics are
+unchanged from D-EACH1: one statement copy per entry, lock-step across fences,
+formatter keeps one authored fence. Fences inside string interpolation remain
+unsupported (owner-accepted tradeoff, card #1320). Card #1320.
+
+**2026-07-30 — D-VERDICT-1321-1 (amends S9 print arity)**: `print`, `io.print`,
+and `io.eprint` are variadic — they accept one or more arguments and write each
+argument on its own line, in order, with a trailing newline after the last.
+Zero arguments stays rejected (E0103, "needs at least one thing to print").
+Every argument passes the same printable checks as before (E0112). Single-line
+composition stays explicit via string interpolation or concatenation in one
+argument. Lowering joins the arguments into one newline-separated value, so all
+execution tiers (AOT, JIT/dev, interpreter, comptime sink) render identically.
+No new syntax is minted. Card #1321.

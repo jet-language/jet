@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1319,
-    "rev": 20192,
+    "nextNum": 1335,
+    "rev": 20271,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16,7 +16,6 @@
         "epoch:e4",
         "epoch:e5",
         "radar-cards",
-        "board-ideas",
         "radar:e7",
         "radar:e8",
         "radar:e9",
@@ -14225,6 +14224,11 @@
       "assignee": "e3-web-703",
       "log": [
         {
+          "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "Crypto secret snapshots still red after the core-five merge, with findings: crypto_secret_clone and crypto_secret_hash now report E0102 'has no method' instead of E0311's move-only teaching; crypto_secret_serialize reports E0905 'does not implement Encode' instead of E0311; crypto_secret_generic_name_collisions gains three E0112 print errors the snapshot does not have; crypto_secret_nested_provenance's fixture no longer parses at line 19 (E0003 at a different column). The refusals still happen, so nothing became permissible, but the secret-bearing teaching is gone. Left to this card."
+        },
+        {
           "at": "2026-07-22",
           "by": "codex-root",
           "text": "[handoff] Implementation cc4de311 is integrated/pushed. Fresh 2026-07-22 targeted crypto proofs green. Six required snapshots red only against current preserved dirty master; exact diffs logged. No files changed. Resume after concurrent WIP reconciliation, rerun exact selectors, then fresh review."
@@ -14340,10 +14344,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T03:17:36.064Z",
-      "updated": "2026-07-28T21:53:18.611Z",
+      "updated": "2026-07-30T12:57:15.548Z",
       "workOrder": 1400,
       "claimedAt": "2026-07-24T15:30:21.744Z",
-      "updatedBy": "tower-prep",
+      "updatedBy": "claude-merge",
       "tags": [],
       "parentId": null
     },
@@ -47682,7 +47686,7 @@
       "title": "Repair five baseline Canvas suite regressions",
       "body": "Major-boundary verification at 7017885fc found five tests/canvas.rs failures that reproduce identically at pre-batch d84801181: TypedLit parity inventory, debug-overlay running-state timing, unified-loop initializer projection, structural transaction source expectation, and palette/JIT preview expectation. Repair the existing Canvas projection/transaction/debug paths; do not weaken tests or add parallel state.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e6",
       "milestoneId": null,
       "phase": "ready",
@@ -47717,8 +47721,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T20:22:38.542Z",
-      "updated": "2026-07-28T21:53:27.193Z",
-      "updatedBy": "tower-prep",
+      "updated": "2026-07-30T14:01:48.742Z",
+      "updatedBy": "claude-merge",
       "workOrder": 1420,
       "tags": [],
       "parentId": null
@@ -54785,6 +54789,11 @@
       "log": [
         {
           "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "Unit surface repaired in b4caf6838: D-DIMENSION-OPEN1=D made dimensions optional, but unit facts were only registered for families that claimed one, so every scale, offset, and kind fact vanished with it and explicit_units, implicit-rounding, affine-point, and rounded-digits diagnostics all collapsed into the generic distinct-type E0127. A family that names a base unit now registers facts either way, every unit family records its owning package, and dimension checks stay gated on an actual dimension so currency keeps its no-math rule. quantity_dimension_mismatch.jet now claims dimensions explicitly, since a nominal family no longer carries Length or Time. Criterion 4 (snapshots re-blessed) was not in fact met at hand-off."
+        },
+        {
+          "at": "2026-07-30",
           "by": "dimension_1292_finish",
           "text": "Final review copy fix 86c76c50d replaces the Force-specific base: newton guidance with generic base: member_name. Energy/joule unit regression asserts the fix, and the updated filtered UI snapshot passes unblessed."
         },
@@ -54885,8 +54894,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:48:54.387Z",
-      "updated": "2026-07-30T04:30:36.212Z",
-      "updatedBy": "dimension_1292_finish",
+      "updated": "2026-07-30T12:57:15.834Z",
+      "updatedBy": "claude-merge",
       "workOrder": 330,
       "tags": [],
       "parentId": null,
@@ -55954,6 +55963,16 @@
       "log": [
         {
           "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "[handoff] D-NUMLIT-PEER1 is the open gate. Its failing proof is cargo test --test comptime_diff comptime_matches_runtime: the cases 1000000 * 1000000, (0 - 17) / 5, and (0 - 17) % 5 all trap at compile time because each peerless numeral shrinks to its smallest fitting width. That test is the last comptime_diff failure; the other 24 pass. D-NUMJOIN1=A is implemented in 7c27d8fcc (if-branches, yielding-loop items, list elements all use Type::numeric_join), so nothing else on this card is blocked."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "Ballot D-NUMJOIN1 raised: D-INTLIT-WIDTH1=F names operators, arguments, returns, and assignments, and gives a numeral its smallest fitting type, but never named multi-branch value joins. So  is E0124 (U8 against Int) and tests/ui_lint/prefer_arm_table.jet no longer compiles. Also fixed a cascade the same rule caused: E0112 no longer follows E0202 on , where the argument was already refused for not being a named binding."
+        },
+        {
+          "at": "2026-07-30",
           "by": "core-five-1304",
           "text": "Final reviewer-fix commit 44f76c8fe closes the stale evidence blockers. The claimed typed-binding gap is not a valid surface: D-BIND-BARE1 retired initialized `name: Type :: value` and `name: Type := value`, the parser rejects it with E0003, and initialized local bindings cannot populate Binding.ty; reopening it would contradict ratified authority. Replaced the obsolete valid `1 + 2.5` E0109 fixture with incomparable U8 + I8, regenerated E0109, and repaired stale representative E0108/E0119 pages. Rewrote the numeric reference around the one containment law, corrected the binary inference comment, and removed the unreachable Int/Float never-mix branch. Final proof after commits caae2e5e8, ca8f2af0c, d637e253b, and 44f76c8fe: `cargo test --test numeric_widening -- --nocapture` 8/8 across AOT, resident JIT trace, and forced interpreter; unblessed filtered mixed_numbers UI 1/1; unblessed `cargo test --test gen_errors gen_error_pages -- --nocapture` 1/1; `git diff --check` clean."
         },
@@ -56122,8 +56141,8 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-28T15:10:34.383Z",
-      "updated": "2026-07-30T04:00:53.964Z",
-      "updatedBy": "core-five-1304",
+      "updated": "2026-07-30T13:59:21.541Z",
+      "updatedBy": "claude-merge",
       "workOrder": 440,
       "tags": [],
       "parentId": null,
@@ -56859,7 +56878,7 @@
       "title": "JIT Shared scalar edits do not persist",
       "body": "Discovered while proving #1297. A native resident-JIT program using Shared<Int>.edit(value => value += 1) later reads 0; AOT persists 1. Shared list mutation works, so this is a scalar writeback gap, not a general Shared failure. Keep #1297 on the supported shared-list synchronization path; fix scalar parity here without changing Shared semantics.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "verify",
@@ -56902,8 +56921,8 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-29T19:59:36.526Z",
-      "updated": "2026-07-30T03:17:54.453Z",
-      "updatedBy": "codex-core-five-review-1313",
+      "updated": "2026-07-30T14:01:49.037Z",
+      "updatedBy": "claude-merge",
       "tags": [],
       "parentId": null,
       "claimedAt": "2026-07-30T00:14:58.508Z"
@@ -57104,7 +57123,7 @@
       "title": "CFFI tests need canonical local C dependencies after E3201",
       "body": "The full CFFI test suite has 14 stale fixtures that now fail project loading with E3201 because their pkg.jet overlays reference C providers without declaring a canonical local C dependency. The named pure callback regression is repaired and green; these remaining fixture migrations are separate existing test debt.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
@@ -57150,8 +57169,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T02:55:00.950Z",
-      "updated": "2026-07-30T02:55:08.847Z",
-      "updatedBy": "core-five-root"
+      "updated": "2026-07-30T14:01:49.346Z",
+      "updatedBy": "claude-merge"
     },
     {
       "id": "c0awzf12",
@@ -57159,7 +57178,7 @@
       "title": "Trait-object list variable is not boxed for AOT",
       "body": "AOT codegen accepts a struct literal in a trait-object list but fails when the same implementing value comes from a local variable. Repro: trait Sink { fn take(self, value: Float) => Float }; struct Holder { impl Sink { ... } }; fn run() { holder :: Holder.{}; sinks :: [Sink].{holder} }. Front-end accepts it, then generated Rust contains `let user_sinks: Vec<Box<dyn user_Sink>> = vec![user_holder];`; rustc E0308 expects Box<dyn user_Sink> and suggests Box::new(user_holder). Discovered while proving #1304 call seams on 2026-07-29. Existing literal form `[Sink].{Holder.{}}` works. Scope is the AOT trait-object collection coercion only; do not fold it into numeric widening.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "planning",
@@ -57176,8 +57195,521 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T03:31:49.688Z",
-      "updated": "2026-07-30T03:31:49.688Z",
-      "updatedBy": "core-five-1304"
+      "updated": "2026-07-30T14:01:49.654Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0wy20z4",
+      "num": 1319,
+      "title": "Compile stack: a nested program must never overflow",
+      "body": "Sema and the TIR evaluator recurse per nesting level with large frames. `jet::compile` called from a 2 MB thread aborts with `fatal runtime error: stack overflow` on a ten-line program (`shared_is_the_safe_mutation_control_case`, `composite_lambda_capture_walks_if_prefix_and_fallback_values`, `local_cell_full_surface_runs_through_default_tier`). The `jet` binary survives only because a process main thread gets 8 MB. Confirmed on master both before and after the core-five merge, so it predates that work. tests/dev.rs already works around it by setting RUST_MIN_STACK=8388608 for child runs. A stack overflow is an abort, not a diagnostic, so this also violates the spirit of I2/I4: rustc is hidden and every refusal is a product diagnostic. Ballot D-COMPILE-STACK1 attached.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "[handoff] Verdict A is ratified and unimplemented. Two halves: jet::compile (and the other public entry points in the root crate) run the passes on a thread they create with a 32 MiB stack, and sema/TIR-eval count nesting depth and report a registered diagnostic past a published limit, with a UI snapshot and a docs/spec/diagnostics.md row. Watch one trap while implementing: the comptime path registers hooks (TirBridge, native_call_hook, ambient runtime) that may be thread-local, so moving the work to a new thread can silently drop them; check each before wrapping. Until this lands, every suite that calls jet::compile from a libtest thread needs RUST_MIN_STACK=33554432 or it aborts with a stack overflow rather than failing a test."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:04:48.546Z",
+      "updated": "2026-07-30T14:01:34.629Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0bx03jx",
+      "num": 1320,
+      "title": "Fence respell: $[ ... ]$ with expression entries",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "implemented: $[ ]$ digraphs (Scan.rs longest-match before Dollar/RBracket), expression entries in expression fences (FencedNames parse_entries), binding fences keep names+E0369, formatter slices authored entry source, spec+diagnostics updated, 5 UI snapshots re-blessed, examples fenced_names.jet + shared_transact.jet migrated and run green (from=200/to=800/total=1000; 7/7/7/sum=21/done). jet-parser FencedNames 9/9 green."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "claimed: chat-ratified batch (fence respell, variadic print, loop ICE, task helpers, S75 removal)"
+        },
+        {
+          "at": "2026-07-30",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-1320-1): Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fences accept arbitrary expression entries separated by top-level commas; binding fences still require plain names. Statement fanout semantics unchanged: one statement copy per entry, lock-step across fences."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:36.708Z",
+      "updated": "2026-07-30T14:06:32.321Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-07-30T14:06:32.321Z"
+    },
+    {
+      "id": "c0kjro6g",
+      "num": 1321,
+      "title": "Variadic print: each argument prints on its own line",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "claimed: chat-ratified batch (fence respell, variadic print, loop ICE, task helpers, S75 removal)"
+        },
+        {
+          "at": "2026-07-30",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-1321-1): print and eprint accept one or more arguments; each argument renders on its own line (print(a, b) == print(a); print(b)). Single-line composition stays with interpolation."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:43.760Z",
+      "updated": "2026-07-30T14:06:40.035Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-07-30T14:06:40.034Z"
+    },
+    {
+      "id": "c0nyir87",
+      "num": 1322,
+      "title": "Loop over non-copyable list elements: ICE via .cloned() lowering",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "claimed: chat-ratified batch (fence respell, variadic print, loop ICE, task helpers, S75 removal)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:43.967Z",
+      "updated": "2026-07-30T12:45:49.581Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0r8y9ik",
+      "num": 1323,
+      "title": "Task list helpers: spawn_group + full *_all parity set",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "claimed: chat-ratified batch (fence respell, variadic print, loop ICE, task helpers, S75 removal)"
+        },
+        {
+          "at": "2026-07-30",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-1323-1): Ship the full ergonomic group set: tasks.spawn_group(n, fn) => [Task<T>] plus list methods join_all/wait_all (consume), detach_all (consume), cancel_all, pause_all, resume_all (borrow). Beginner magic first: handles.cancel_all() must work without writing a loop."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:44.166Z",
+      "updated": "2026-07-30T12:45:49.812Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ursuly",
+      "num": 1324,
+      "title": "Remove S75 fan-out operator f.[...]; keep [T#N]",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "claimed: chat-ratified batch (fence respell, variadic print, loop ICE, task helpers, S75 removal)"
+        },
+        {
+          "at": "2026-07-30",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-1324-1): Remove (not deprecate) the S75 fan-out operator f.[a, b, c] and its E0961/E0962 diagnostics. Keep S76 [T#N] fixed-size lists and their typed literal heads."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:44.379Z",
+      "updated": "2026-07-30T12:45:50.051Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0yclhqo",
+      "num": 1325,
+      "title": "Comprehension surface coherence: loop-header split, labels, map duality",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T13:51:35.117Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T13:51:35.117Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T13:51:35.117Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T13:51:35.117Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:41:44.595Z",
+      "updated": "2026-07-30T13:57:42.691Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0fl0ik7",
+      "num": 1326,
+      "title": "Predicate arms are rejected against D-MATCHARM1=A",
+      "body": "tests/ui/dispatch_predicate_arm.jet is snapshotted as `(no errors)` and its own header cites D-MATCHARM1=A: a comparison arm head such as `code >= 500` tests the subject directly. The checker now reports E0994 (\"drop the `subject OP`\") for exactly that arm, so a ratified surface is refused. Reproduce: `jet check tests/ui/dispatch_predicate_arm.jet`. Either the E0994 redundancy rule must exclude a comparison arm head whose operator differs from the `if` subject operator, or D-MATCHARM1=A needs an owner amendment. Found while clearing merge fallout; predates the core-five merge.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "tests/semindex.rs semindex_dossier_bypass_facts + semindex_dossier_stitches_scattered_members fail: fixture uses #[allow(lint)] which now trips E0999 (one marker without brackets) — likely from 085968dbd marker-menu fix. Unrelated to fence respell; found during #1320 verification."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:56:05.466Z",
+      "updated": "2026-07-30T14:01:49.946Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c05477jh",
+      "num": 1327,
+      "title": "Diagnostic regressions: specific teaching replaced by generic errors",
+      "body": "Five UI snapshots record teaching text that the compiler no longer produces. Each is a product regression, not a stale snapshot.\n\n1. tests/ui/typestate_name_not_value: E0302 said \"`Machine.Off` is not a value\"; it now says \"`Machine` has no static member `Off`\", losing the typestate teaching.\n2. tests/ui/tag_with_method: E0732 dropped the method name and the \"but tags have no methods\" clause, and its span moved from the method to the tag.\n3. tests/ui/terminal_fact_preview_typo: the terminal capability-key typo suggestion (`reszie` -> `resize`) no longer fires at all; the program compiles clean.\n4. tests/ui/retired_cli_marker: the retired `#Cli` spelling lost its E1308 follow-up and its span moved by one column.\n5. tests/ui/repl_effect_denied_e1803: the fixture now reports E3410 (Tier-2 comptime effect) instead of the recorded E2510; the recorded snapshot also carries a read-only-filesystem warning, so the fixture needs a deterministic form.\n\nEach needs the owning check restored (or its snapshot re-blessed with an owner-reviewed replacement message). Reproduce with `jet check` on each fixture. All five predate the core-five merge.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "Sixth item for this card: L0501 (slicing inside a loop copies every time) no longer fires at all. The lint lives in infer_slice, which now only handles the legacy separate start/end form; D-SHAPE-PLACE1 routes a range place through the range branch, which never lints. The copy spelling does not lint either. Deciding this needs the memory-model view: under D-MEM1 a bare range place is a read window and copies nothing, so the lint may simply be obsolete for that spelling and should either move to the copy form or be retired with its fixture. tests/ui_lint/slice_in_loop.jet is the failing proof and is the only remaining lint_snapshots failure."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:56:26.601Z",
+      "updated": "2026-07-30T14:01:50.245Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c09ygo0y",
+      "num": 1328,
+      "title": "Cascade noise: a second error follows the primary on one construct",
+      "body": "Three UI snapshots gained a follow-on error that repeats what the primary already refused, which is the pattern I4 exists to prevent.\n\n- tests/ui/loop_label_not_in_scope: the label error is followed by E0115 \"`break` only works inside a loop\".\n- tests/ui/rawof_forbidden: the raw-pointer refusal is followed by E0112 \"`print` doesn't know how to show `*Int`\".\n- tests/ui/tuple_numeric_field: E0049 (`.0` is not Jet) is followed by E0302 \"this tuple has no member `0`\".\n\nThe same class was fixed for `&(expr)` arguments in b4caf6838 by marking the argument already-reported; each of these needs the same treatment at its own site. Reproduce with `jet check` on each fixture. All three predate the core-five merge.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:56:26.894Z",
+      "updated": "2026-07-30T14:01:50.549Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0kic2oz",
+      "num": 1329,
+      "title": "TIR evaluator diagnostics have no spans",
+      "body": "`EvalCtx::span()` in crates/jet-codegen/src/Codegen/TIR/eval/mod.rs returns `Span::new(0, 0)` unconditionally, so every diagnostic the canonical TIR evaluator raises points at line 1 column 1. Since #777 made that evaluator the comptime engine, any comptime runtime failure now underlines the first byte of the file instead of the construct that failed — visible in tests/ui/comptime_panic.stderr and in every E0955/E0956 the evaluator raises.\n\n29c90b639 works around it for build-time IO by running the same law in a sema pre-pass that has the call's span. That trick does not generalize: TIR carries no spans at all, so the fix is to thread them (TExpr or at least TStmt) and have the evaluator report against the node it is running.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:56:44.946Z",
+      "updated": "2026-07-30T14:01:50.850Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0ra7qjw",
+      "num": 1330,
+      "title": "I4b snapshot debt: 19 emitted codes have no UI snapshot",
+      "body": "`cargo test --test diagnostics_coverage` fails two ways.\n\n1. every_emitted_code_has_snapshot (I4b): 19 codes are emitted with no tests/ui fixture — E0031, E0034, E0048, E0139, E0320, E0342, E0346, E0350, E0412, E0413, E0414, E0415, E0416, E0417, E0418, E0761, E0994, E2111, E3204. Each needs a .jet fixture plus its .stderr/.warn golden.\n2. registered_unimplemented_codes_are_expected: five codes are registered in docs/spec/diagnostics.md but never emitted. Four are retired or deferred and belong in EXPECTED_SPEC_AHEAD_OF_IMPL with a reason — E0334 (reserved, superseded by D-TRAILBLOCK2=A), E0920 (retired into `#Inline(Always)`), E1109 (partial columnar deferred, D-SOA2B), L3101 (retired into hard error E3112). The fifth, E2407 (`#Rename(...)` needs a string literal), is a live check that is simply not implemented — a non-string `#Rename` argument is currently accepted.\n\nBoth predate the core-five merge.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "claude-merge",
+          "text": "[handoff] Two operating facts for whoever picks up the snapshot debt. Re-bless one reviewed fixture at a time with JET_UI_FILTER=tests/ui/NAME.jet UPDATE_EXPECT=tests/ui/NAME.jet on cargo test --test diagnostic_snapshots ui_snapshots; UPDATE_EXPECT=1 blesses everything and hides regressions. And run comptime_diff with --test-threads=4 or lower: at full parallelism concurrent rustc invocations lose object files under /tmp and fail as spurious linker errors, not real mismatches."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:57:04.947Z",
+      "updated": "2026-07-30T14:01:51.137Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0fw3ppx",
+      "num": 1331,
+      "title": "semindex dossier fixtures broken by E0999 single-marker bracket rule",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "same marker-registry red also hits jet-parser s61_tests: doc_on_a_function_requires_task, adjacent_marker_stacks_share_one_ordered_e0999_rewrite, grouped_function_rules_keep_meta_and_policy_semantics, ordered_function_and_file_groups_format_idempotently (E0355/E0999). Verified pre-existing by stashing fence diff."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "fable",
+          "text": "tests/semindex.rs semindex_dossier_bypass_facts + semindex_dossier_stitches_scattered_members fail: fixture uses #[allow(lint)] which now trips E0999 (one marker without brackets) — likely from 085968dbd marker-menu fix. Unrelated to fence respell; found during #1320 verification."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T12:57:47.793Z",
+      "updated": "2026-07-30T14:01:51.449Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0kfmlgc",
+      "num": 1332,
+      "title": "shared_config parity: generated Rust E0507 moves String out of Shared.read closure",
+      "body": "Pre-existing on master (reproduced with all local work stashed). tests/dev.rs collections_memory_and_streams_match_interpreter_jit_and_aot fails for memory/shared_config: dev tier runs, but AOT-generated Rust fails rustc E0507 — '.read(move |user_c: &user_AppConfig| user_c.user_name)' moves a non-Copy String out of a shared reference; clone insertion is missing for owned-field returns from a borrowed read closure. I2: rustc rejection must never surface. Repro: JET_1216_STEM=memory/shared_config RUST_MIN_STACK=16777216 cargo test --test dev collections_memory_and_streams_match_interpreter_jit_and_aot -- --exact --nocapture",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T13:16:44.348Z",
+      "updated": "2026-07-30T14:01:51.756Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0h9w8lc",
+      "num": 1333,
+      "title": "Crypto secret provenance diagnostics no longer fire (E0311 family)",
+      "body": "Pre-existing on master (verified with all local work stashed). Five UI snapshots record secret-provenance teaching the compiler no longer produces: crypto_secret_clone (E0311 'clone is forbidden on secret-bearing Secret' now generic E0102 'no method clone'), crypto_secret_hash, crypto_secret_serialize, crypto_secret_nested_provenance (parser drift too: E0003 span/word moved), crypto_secret_generic_name_collisions (expected no errors; generic params named Secret/SigningKey/X25519SecretKey/SharedSecret now hit E0112 print errors). The secret-bearing provenance check appears disconnected from method lookup and printability. Related but distinct from #1327 (general teaching regressions) and the cascade-noise card. Repro: NO_COLOR=1 jet check tests/ui/crypto_secret_clone.jet vs its .stderr.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T13:25:59.237Z",
+      "updated": "2026-07-30T14:01:52.067Z",
+      "updatedBy": "claude-merge"
+    },
+    {
+      "id": "c0sp8gpx",
+      "num": 1334,
+      "title": "I5 red: nine examples do not compile or do not match their golden output",
+      "body": "`cargo test --test golden examples_compile_and_run` fails on nine examples. Examples are executable specs (I5), so each is either a real regression or a stale golden.\n\nFront-end failures:\n- types/recursive_enum: E0112 `print` doesn't know how to show `Expr`\n- memory/gc_cyclic: E0112 `print` doesn't know how to show `Link`\n- crypto/auth_tokens: E0722 a `Credential` value is denied at `print`\n- web/web_wasm_map\n\nOutput mismatches:\n- cli/positionals and cli/subcommands: the usage line prints the real binary name where the golden expects `<program>`, so the golden can never match a temp-built binary\n- web/web_wasm_callback, web/web_wasm_list, web/web_wasm_list_string\n\nThe three `print` cases share a shape: showing a user struct or enum that used to display. Worth checking against the recent unit/Display work before touching the examples. Predates the core-five merge.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T13:35:43.305Z",
+      "updated": "2026-07-30T14:01:52.376Z",
+      "updatedBy": "claude-merge"
     }
   ],
   "decisions": [
@@ -74394,6 +74926,588 @@
       "created": "2026-07-30T01:22:28.105Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-NUMJOIN1",
+      "cardId": "c0b0tifp",
+      "group": "syntax",
+      "title": "Widening where several branches produce one value",
+      "gist": "Whether a value built from two branches of different number widths takes the wider one, or is refused.",
+      "lesson": "Jet has one default whole-number type, `Int`, plus a sized menu for experts: `I8`, `U8`, `I32`, `U64`, and friends. The number in the name is how many bits of storage a value gets. A `U8` holds 0 through 255. An `Int` holds every whole number up to about nine quintillion.\n\nWidening means moving a value into a type that holds every value the old type could hold. Moving 200 out of a `U8` into an `Int` cannot lose anything, so Jet does it silently. Moving the other direction could lose data, so Jet never does it on its own.\n\nThe ratified rule D-INTLIT-WIDTH1=F applies that idea in four places: operators, arguments, returns, and assignments. The same rule also gives a written numeral its smallest fitting type first. So the expression `40 + 2` is a `U8`, because 42 fits in one byte.\n\nA join is a fifth place, and the rule never named it. A join happens when one value has more than one producer. In `answer :: if ready -> 40 + 2 else -> 0` there are two producers. The first is a `U8`. The second is a plain `Int`.\n\nToday Jet compares the two branch types for exact equality. It sees `U8` beside `Int` and reports E0124. Nothing was lost and no value was in danger, so the refusal reads as a compiler bug to whoever wrote four ordinary numerals.\n\nThe same arithmetic is accepted one line earlier, as a binding or an argument, because those places already follow the widening rule. This decision picks the rule that joins follow.",
+      "explainer": "",
+      "story": "Priya writes firmware dashboards in Jet. She reads a byte from a sensor register, then picks a retry budget with `budget :: if aggressive -> 8 + 8 else -> 0`. Jet refuses it and tells her the branches produce `U8` and `Int`. She never asked for a byte anywhere; she typed four plain numbers. Her fix is to spell a width she does not care about, in code that had no sized types in it.",
+      "inWild": "// Sensor poller in a firmware dashboard.\nfn poll(register: U8) => Int {\n    // fine: the argument seam already widens\n    ceiling :: register + 8\n\n    // refused today with E0124: branches are U8 and Int\n    backoff :: if register > 200 -> 40 + 2 else -> 0\n\n    // fine again: the statement form has no join\n    if register > 200 {\n        print(\"hot\")\n    }\n\n    return ceiling + backoff\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One join law wherever a value has several producers",
+          "detail": "Every place a single value comes from more than one producer follows the widening rule already used by operators. That covers `if` and `switch` value branches, loop values, and the elements of a list. One side widens to the other. Jet never invents a third type and never narrows. Priya's `backoff` becomes an `Int`, because a byte fits in one.",
+          "technical": "Branch and element joins call the same value-set containment join as binary operators: `Type::numeric_join`, one step, no least-upper-bound search. E0124 stays for pairs with no containment, such as `U8` beside `I8`. List element joins reuse the same call, so `[byte, 300]` yields `[U16]` instead of an error. No narrowing path is added.",
+          "code": "backoff :: if register > 200 -> 40 + 2 else -> 0   // Int\nsizes   :: [U8.{1}, 300]                          // [U16]\nmixed   :: if flag -> U8.{1} else -> I8.{1}       // still E0124: neither holds the other"
+        },
+        {
+          "key": "B",
+          "name": "Control-flow branches only",
+          "detail": "`if` and `switch` value branches and loop values widen; collection literals keep exact matching. Priya's code compiles. A list holding a byte beside 300 still fails, so the rule has to be learned twice: once for branches, once for collections.",
+          "technical": "Join applied in `infer_if_value`, `infer_switch_value`, and yielding-loop item typing only. `infer_list_lit` keeps exact-equality element checking and its current E0074/E0124 paths.",
+          "code": "backoff :: if register > 200 -> 40 + 2 else -> 0   // Int\nsizes   :: [U8.{1}, 300]                          // refused: element types differ"
+        },
+        {
+          "key": "C",
+          "name": "Exact match stays, with a teaching error",
+          "detail": "Branch types must be identical. Priya keeps her error, but the message names the wider type and offers the exact edit that fixes it. The sized menu stays strictly separated once a value has several producers, which is easy to state and easy to predict.",
+          "technical": "E0124 keeps exact equality. The fix line gains the computed widening target and a suggested edit, for example annotating the narrow branch or wrapping it in the destination constructor. No inference change.",
+          "code": "backoff :: if register > 200 -> 40 + 2 else -> 0\n// Error [E0124]: this `if`'s branches produce different types: U8 and Int\n//  Fix: write `Int.{40 + 2}` in the first branch, or `U8.{0}` in the second"
+        },
+        {
+          "key": "D",
+          "name": "A numeral with no sized neighbour stays Int",
+          "detail": "Drop the smallest-fitting-type step when nothing sized sits beside the numeral. `40 + 2` becomes an `Int`, so Priya's two branches already agree and no join rule is needed. The cost is that a numeral no longer arrives pre-sized, so a byte-typed destination must be reached through the surrounding context instead.",
+          "technical": "`minimal_integer_literal_type` narrows only with a fixed-width peer; with no peer both operands stay `Int`. The expected-type channel must then thread destination width into literal arithmetic, or `accept_u8(1 + 2)` regresses to E0112 since `Int` does not widen to `U8`.",
+          "code": "backoff :: if register > 200 -> 40 + 2 else -> 0   // Int, no join needed\nfn accept_u8(value: U8) {}\naccept_u8(1 + 2)                                  // must keep working through context"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Branches must already have one type; there is no implicit widening, so the programmer writes a cast.",
+          "code": "let x: u8 = 1;\nlet y = if flag { x + 1 } else { 0 };      // 0 infers as u8\nlet z = if flag { x as i32 + 1 } else { 0 };  // widening is written out"
+        },
+        {
+          "lang": "C",
+          "note": "The conditional operator applies the usual arithmetic conversions, so the result silently takes the wider type.",
+          "code": "unsigned char b = 200;\nint r = flag ? b + 1 : 0;   /* both arms promote to int */"
+        },
+        {
+          "lang": "Swift",
+          "note": "Literals have no fixed type until the whole expression is solved, so both branches settle on one type together.",
+          "code": "let b: UInt8 = 200\nlet r = flag ? Int(b) + 1 : 0   // conversion is explicit; literals adapt"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Branches produce a union of both types, which is a third type Jet deliberately refuses to invent.",
+          "code": "const r = flag ? small : big;   // type is `Small | Big`"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A value with two producers asks the same question as an operator with two operands. One law answers both, so nobody has to learn where the sized menu stops mixing. Priya's numerals stay numerals, and the widening she gets can never lose a value.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A list holding a byte beside 300 still fails, so the same pair is legal in a branch and illegal one line later in a list."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps a refusal the writer cannot act on without naming a width their code never mentioned, in the beginner-facing form of `if`."
+          },
+          {
+            "key": "D",
+            "reason": "It reopens the ratified smallest-fitting-type step, and `accept_u8(1 + 2)` compiles today only because that step exists."
+          }
+        ],
+        "tradeoff": "A branch result becomes width-sensitive: adding a branch can widen the whole value's type. That is acceptable because a widening never loses a value and never reaches for a third type."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T12:06:23.246Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-COMPILE-STACK1",
+      "cardId": "c0wy20z4",
+      "group": "tooling",
+      "title": "Who guarantees the working memory the compiler needs for nested code",
+      "gist": "What happens when a deeply nested program runs the compiler out of its scratch memory.",
+      "lesson": "A running program keeps a stack: a block of memory where each active function call parks its local values. Every call pushes a frame; every return pops one. The block has a fixed size, chosen when the thread starts.\n\nOn Linux the first thread of a process gets about 8 megabytes. A thread created later gets 2 megabytes by default. Nothing warns you which one you are on.\n\nCompilers walk nested code by calling themselves. A list inside a call inside an `if` inside a lambda becomes one nested chain of calls, so nesting in the source turns into depth on the stack. Each of Jet's checking frames is large, because it carries types, spans, and scope maps.\n\nWhen the frames no longer fit, the operating system stops the process immediately. There is no error to catch and no diagnostic to print. The output is one line: `fatal runtime error: stack overflow`. That is a crash, not a refusal.\n\nJet hits this today. The `jet` binary survives because it checks on the process's first thread, with 8 megabytes. Calling `jet::compile` from a 2-megabyte worker thread aborts on a ten-line program. Our own test suite trips it, and one test file already sets a bigger stack by hand to dodge it.\n\nThat matters beyond tests. An editor server, a build server, or any embedder calls the compiler from a pool thread. Jet promises that every refusal is a diagnostic with a code and a fix. A crash keeps that promise only by luck, depending on which thread called in.",
+      "explainer": "",
+      "story": "Marcus runs a build server that embeds the Jet compiler and answers requests on a thread pool. One generated file with deeply nested data takes the whole server process down. His log shows a single line about a stack overflow: no file, no line, no error code, and no way to tell the user what to fix. Locally the same file compiles, because his terminal runs the compiler on the process's first thread.",
+      "inWild": "// Build server worker: this pattern is why the thread matters.\nfn handle(request: Request) -> Response {\n    // std::thread's default stack is 2 MiB, not the 8 MiB a main thread gets\n    let handle = std::thread::spawn(move || jet::compile(&request.source));\n    match handle.join() {\n        Ok(Ok(output)) => Response::ok(output.rust),\n        Ok(Err(diagnostics)) => Response::diagnostics(diagnostics),\n        // never reached: the overflow aborts the whole process first\n        Err(_) => Response::internal_error(),\n    }\n}\n\n// $ ./build-server\n// fatal runtime error: stack overflow\n// Aborted (core dumped)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The compiler owns its stack and names a depth limit",
+          "detail": "`jet::compile` runs the checking passes on a thread it creates itself, with a stack large enough for realistic code. Past a published nesting limit it stops and reports an ordinary diagnostic naming the limit. Every caller is safe without configuring anything, and absurdly nested input gets a product error instead of a crash.",
+          "technical": "The public entry points spawn one worker with an explicit stack size (32 MiB) and join it, so callers keep the current synchronous signature. Sema and the TIR evaluator keep a depth counter beside the existing fuel counter and emit a registered diagnostic past the limit, with a UI snapshot. The limit is documented in docs/spec/diagnostics.md and chosen to sit well inside the reserved stack.",
+          "code": "// caller side: nothing to configure\nlet output = jet::compile(source)?;\n\n// deeply nested input, 300 levels\n// Error [E0xxx]: this code nests 312 levels deep; the limit is 256\n//  Why: each level of nesting costs one checking frame\n//  Fix: pull inner parts out into named bindings or helper functions"
+        },
+        {
+          "key": "B",
+          "name": "Grow the stack on demand",
+          "detail": "The recursive passes check how much room is left before descending, and add a fresh chunk of memory when it runs low. Depth is then bounded by available memory rather than a fixed reservation, so no realistic program is refused and no memory is reserved up front.",
+          "technical": "Adds a stack-probing dependency (the `stacker` crate, as rustc uses) or a hand-rolled equivalent, called at each recursive entry in sema, TIR lowering, and the evaluator. Requires a new external dependency in a compiler seam crate, which I6 gates on owner approval. Missed call sites still crash, so coverage must be audited.",
+          "code": "fn infer(&mut self, expr: &mut Expr) -> Option<Type> {\n    stacker::maybe_grow(64 * 1024, 8 * 1024 * 1024, || {\n        // existing body, unchanged\n    })\n}"
+        },
+        {
+          "key": "C",
+          "name": "Publish a depth limit and refuse past it",
+          "detail": "Keep whatever stack the caller happens to have, and count nesting instead. Past a conservative published limit the compiler reports a diagnostic. The limit must be low enough to be safe on a 2-megabyte thread, so some legal deeply nested code is refused on every platform to protect the smallest case.",
+          "technical": "Depth counter and registered diagnostic as in A, with the limit derived from the 2 MiB worst case rather than a reserved stack. No thread spawning, no new dependency. Frame sizes then become a hard product constraint: any frame growth lowers the limit users see.",
+          "code": "// same diagnostic as A, but the ceiling is much lower\n// Error [E0xxx]: this code nests 70 levels deep; the limit is 64"
+        },
+        {
+          "key": "D",
+          "name": "Callers configure the stack",
+          "detail": "Document that the compiler needs a large stack, and let each caller arrange it. Our test harness and any embedder set the size themselves. Nothing changes inside the compiler, and a caller who misses the note gets today's crash.",
+          "technical": "Document a minimum thread stack in docs/spec/architecture.md; set RUST_MIN_STACK in the test harness and spawn sized threads in the CLI, LSP, and build paths. The failure stays an abort with no diagnostic, and the contract lives only in prose.",
+          "code": "# test harness and embedders opt in by hand\nRUST_MIN_STACK=33554432 cargo test\n\nstd::thread::Builder::new()\n    .stack_size(32 * 1024 * 1024)\n    .spawn(|| jet::compile(source))?;"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustc",
+          "note": "Runs the compiler on a spawned thread with a large explicit stack, and additionally grows the stack on deep recursion.",
+          "code": "// rustc_interface: spawn with an 8 MiB (or RUST_MIN_STACK) stack, then\n// ensure_sufficient_stack(|| ...) around deeply recursive work"
+        },
+        {
+          "lang": "Clang",
+          "note": "Reserves a large stack and enforces a published bracket-depth limit, reporting a normal compiler error past it.",
+          "code": "// error: bracket nesting level exceeded maximum of 256\n//   note: use -fbracket-depth=N to increase maximum nesting level"
+        },
+        {
+          "lang": "CPython",
+          "note": "Counts recursion instead of trusting the stack, and raises a catchable error at a documented limit.",
+          "code": ">>> sys.setrecursionlimit(3000)\nRecursionError: maximum recursion depth exceeded"
+        },
+        {
+          "lang": "Go",
+          "note": "Goroutine stacks start tiny and grow automatically, so depth is bounded by memory, and a runaway hits a documented 1 GB ceiling.",
+          "code": "// runtime: goroutine stack exceeds 1000000000-byte limit"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It makes the guarantee the compiler's own promise instead of the caller's homework, so Marcus's server, the editor, and the test suite are all safe by default. Nested input past the limit becomes a diagnostic with a code and a fix, which is what every other refusal in Jet already is.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It needs a new external dependency inside a compiler seam crate, and one missed recursive call site still aborts the process."
+          },
+          {
+            "key": "C",
+            "reason": "Sizing the limit for a 2-megabyte thread refuses code that fits comfortably everywhere else, and every frame that grows lowers it again."
+          },
+          {
+            "key": "D",
+            "reason": "It leaves a crash reachable from any caller who never reads the note, and prose cannot enforce a memory contract."
+          }
+        ],
+        "tradeoff": "Each compile pays one thread spawn and reserves address space it usually will not touch. That is acceptable because the reservation is virtual until used, and one spawn is invisible next to checking a program."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T12:07:21.029Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-VERDICT-1320-1",
+      "cardId": "c0bx03jx",
+      "group": "verdict",
+      "title": "Fence spelling and expression entries",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fences accept arbitrary expression entries separated by top-level commas; binding fences still require plain names. Statement fanout semantics unchanged: one statement copy per entry, lock-step across fences.",
+      "comment": "Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fences accept arbitrary expression entries separated by top-level commas; binding fences still require plain names. Statement fanout semantics unchanged: one statement copy per entry, lock-step across fences.",
+      "created": "2026-07-30T12:41:59.579Z",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-VERDICT-1321-1",
+      "cardId": "c0kjro6g",
+      "group": "verdict",
+      "title": "Variadic newline print",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "print and eprint accept one or more arguments; each argument renders on its own line (print(a, b) == print(a); print(b)). Single-line composition stays with interpolation.",
+      "comment": "print and eprint accept one or more arguments; each argument renders on its own line (print(a, b) == print(a); print(b)). Single-line composition stays with interpolation.",
+      "created": "2026-07-30T12:41:59.786Z",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-VERDICT-1323-1",
+      "cardId": "c0r8y9ik",
+      "group": "verdict",
+      "title": "Task group helper set",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Ship the full ergonomic group set: tasks.spawn_group(n, fn) => [Task<T>] plus list methods join_all/wait_all (consume), detach_all (consume), cancel_all, pause_all, resume_all (borrow). Beginner magic first: handles.cancel_all() must work without writing a loop.",
+      "comment": "Ship the full ergonomic group set: tasks.spawn_group(n, fn) => [Task<T>] plus list methods join_all/wait_all (consume), detach_all (consume), cancel_all, pause_all, resume_all (borrow). Beginner magic first: handles.cancel_all() must work without writing a loop.",
+      "created": "2026-07-30T12:41:59.979Z",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-VERDICT-1324-1",
+      "cardId": "c0ursuly",
+      "group": "verdict",
+      "title": "Remove S75 fan-out operator",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Remove (not deprecate) the S75 fan-out operator f.[a, b, c] and its E0961/E0962 diagnostics. Keep S76 [T#N] fixed-size lists and their typed literal heads.",
+      "comment": "Remove (not deprecate) the S75 fan-out operator f.[a, b, c] and its E0961/E0962 diagnostics. Keep S76 [T#N] fixed-size lists and their typed literal heads.",
+      "created": "2026-07-30T12:42:00.196Z",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-LOOPLABEL4",
+      "cardId": "c0yclhqo",
+      "group": "syntax",
+      "title": "Labeling a loop that produces no value",
+      "gist": "How to name a pure-effect loop so `break(name)` and `next(name)` can target it.",
+      "lesson": "When loops nest, `break` and `next` normally act on the innermost one. To act on an outer loop instead, that loop needs a name: `break(outer)` exits the loop named `outer`.\n\nToday a loop gets its name from binding syntax. Writing `found :: loop { … }` does two jobs at once: it declares that the loop's break payload lands in `found`, and it makes `found` a target for `break` and `next`. When the loop produces a value, this is elegant — the name of the destination is the name of the loop.\n\nThe wrinkle appears with loops that produce nothing. A logging sweep or a retry driver is pure effect; it has no value to bind. To label it today you must still write `sweep :: loop { … }`, which binds the empty value Void to `sweep`. The binding is harmless but dishonest: it looks like data flow and is really only a control label.\n\nThe question is whether that dishonesty matters enough to give loops a second way to get a name, or whether one slightly awkward spelling is better than two mechanisms.",
+      "explainer": "",
+      "story": "Marco writes a crawler: an outer loop over sites, an inner loop over pages. When a site returns a rate-limit error he wants `next(sites)` — skip to the next site. His outer loop returns nothing, so to name it he writes `sites :: loop site; queue { … }` and now has a binding `sites` that holds Void forever. His reviewer asks what `sites` stores. The honest answer is: nothing, it exists only so `next` can aim at it.",
+      "inWild": "// Crawler: outer loop is pure effect, but needs a name.\nsites :: loop site; queue {          // `sites` binds Void — label only\n    loop page; site.pages {\n        result :: fetch(page)\n        if result == RateLimited next(sites)\n        index(result)\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep binding-as-label, accept the Void binding",
+          "detail": "No change. A labeled effect loop binds Void to its name. One mechanism covers both value loops and labels; the cost is an occasional binding that exists only for control. The compiler already accepts it and the unused Void value is inert.",
+          "code": "sites :: loop site; queue {\n    …\n    next(sites)\n}",
+          "technical": "No grammar or sema change. Optionally suppress unused-binding lints for Void-typed loop bindings that are used as control targets."
+        },
+        {
+          "key": "B",
+          "name": "Head label only: loop(name)",
+          "detail": "A loop is named in its head, mirroring how exits already target: `loop(sites) site; queue { … }`. The binding form stops being a control target — `found :: loop` still binds the payload, but `break(found)` no longer resolves to it; you would write `found :: loop(search) { break(search, -1) }`. One naming mechanism, but value loops that want a targeted break now carry both a binding and a label.",
+          "code": "loop(sites) site; queue {\n    …\n    next(sites)\n}\n\nfound :: loop(search) {\n    …\n    break(search, -1)\n}",
+          "technical": "Grammar: optional `( name )` immediately after KW_LOOP. Loop names move to a control-label namespace; D-LOOPLABEL3's binding-name targeting is retired."
+        },
+        {
+          "key": "C",
+          "name": "Both: binding names value loops, head label for effect loops",
+          "detail": "Value loops keep the elegant `found :: loop { break(found, -1) }`. Effect loops gain `loop(sites) …` so nobody binds Void as a label. Every loop has exactly one natural spelling, but the language now has two labeling mechanisms and style guides must say when each applies.",
+          "code": "found :: loop { break(found, -1) }   // value loop: binding is the label\nloop(sites) site; queue {             // effect loop: head label\n    next(sites)\n}",
+          "technical": "Both mechanisms feed one label namespace; a loop with both a binding and a head label is an error to keep targeting unambiguous."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python has no labeled break at all. Breaking out of nested loops requires a flag variable, an exception, or refactoring into a function — a long-standing, frequently-cited pain point. Any of these options beats it.",
+          "code": "done = False\nfor site in queue:\n    for page in site.pages:\n        if rate_limited: done = True; break\n    if done: break"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust labels at the head with a lifetime-style tick: `'outer: for … { break 'outer; }`. Labels live in their own namespace and never pretend to be bindings.",
+          "code": "'sites: for site in queue {\n    for page in site.pages {\n        if rate_limited { continue 'sites; }\n    }\n}"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "JavaScript uses statement labels (`sites: for (…)`), also purely in a label namespace. They work but read as an obscure corner because nothing else in the language uses labels.",
+          "code": "sites: for (const site of queue) {\n  for (const page of site.pages) {\n    if (rateLimited) continue sites;\n  }\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One mechanism stays one mechanism. The Void binding is rare, inert, and two characters of noise; both alternatives buy honesty in that rare case by adding a second naming plane that every reader must then learn. Naming the destination and the loop with one word is also a genuinely good idea — it reads as 'exit toward found' — and both alternatives weaken it.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It taxes the common elegant case (value loops with targeted breaks now need a binding plus a separate label) to fix the rare awkward one."
+          },
+          {
+            "key": "C",
+            "reason": "Two labeling spellings for one concept is exactly the surface split I8 forbids, and every style discussion about which to use costs more than the Void binding ever did."
+          }
+        ],
+        "tradeoff": "Labeled pure-effect loops keep binding Void to a name that is only a control target. That is accepted as the cheapest honest price for a single naming mechanism; a lint exemption keeps the binding quiet."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T12:44:48.880Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-LOOP-HEADER3",
+      "cardId": "c0yclhqo",
+      "group": "syntax",
+      "title": "One loop header shape carries two different meanings",
+      "gist": "Whether Jet keeps the C-style three-slot loop header, retires it, or keeps it with a teaching lint.",
+      "lesson": "Jet has one loop keyword. A loop header is what sits between `loop` and the body. Today the header comes in two families that look identical but mean different things.\n\nThe first family iterates a source. You name a binding, then the thing to walk, then an optional stride: `loop i; 0..10; 2`. The slots mean binding, source, step size.\n\nThe second family is the classic C-style counter. You write starting state, a condition, and an advance action: `loop i := 0; i < n; i++`. The slots mean init, test, advance.\n\nBoth families use the same semicolon-separated three-slot shape. Only the `:=` in the first slot tells the reader which family a header belongs to. Slot two is a data source in one family and a true-or-false test in the other. Slot three is a number in one and an action in the other.\n\nWhy it matters: a reader who learned one family will misread the other, because the shape gives no warning that the meaning changed. This is the kind of trap Jet's one-mechanism rule (I8) exists to prevent. The question is whether the C-style family earns its slot, given that a mutable local plus a condition loop can express the same programs.",
+      "explainer": "",
+      "story": "Priya learned Jet last week from the examples. She reads `loop i; 0..10; 2` and correctly explains it: walk the range, stepping by two. Today a teammate's code says `loop i := 0; i < len; i *= 2`. Priya reads slot three as a stride of `i *= 2` items and is confused about what that could mean. Nothing in the shape told her the whole header changed dialect.",
+      "inWild": "// Data pipeline: exponential backoff probe over a size budget.\n// C-style form (today):\nloop size := 1; size < budget; size *= 2 {\n    probe(size)\n}\n\n// The same program with a condition loop and visible state:\nsize := 1\nloop size < budget {\n    probe(size)\n    size *= 2\n}\n\n// Meanwhile the source family reads completely differently:\nloop chunk; chunks; 4 upload(chunk)   // every 4th chunk",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep both families, unchanged",
+          "detail": "Nothing changes. The C-style header stays a compact expert form. Readers keep disambiguating by spotting `:=` in slot one. The shape trap stays, but so does the one-line spelling for irregular counters.",
+          "code": "loop i := 0; i < n; i++ draw(i)      // C-style, one line\nloop i; 0..<n draw(i)                 // source form, same program",
+          "technical": "No grammar change. Both header families continue to parse in Parser/Statements/control.rs, disambiguated by ColonEq in the first clause."
+        },
+        {
+          "key": "B",
+          "name": "Retire the C-style header",
+          "detail": "The three-slot header always means binding; source; stride. Counter loops with irregular advance move their state before the loop and use a condition loop. Every program stays expressible; the state and the advance become visible statements. Cost: the one-line counter spelling is gone, and existing C-style code needs the two-line rewrite.",
+          "code": "// after:\ni := 1\nloop i < n {\n    draw(i)\n    i *= 2\n}\n// ranges already cover the regular cases:\nloop i; 0..<n draw(i)\nloop i; 0..100; 5 tick(i)",
+          "technical": "Remove the init;cond;advance parse in the loop header; keep condition loops and source+stride. A teaching diagnostic on `loop name := …` explains the rewrite. `next` continuation for retired form disappears with it."
+        },
+        {
+          "key": "C",
+          "name": "Keep both, add a teaching lint on confusable headers",
+          "detail": "Both families stay. A lint fires only when a header is genuinely confusable — for example a C-style advance that looks like a stride, or a source loop whose stride is a complex expression. The lint names the family the header belongs to and shows the other family's spelling. The trap stays possible but the compiler narrates it.",
+          "code": "loop i := 0; i < n; i *= 2 { … }\n// L05xx: this is a counter loop (init; test; advance),\n//        not a source loop with a stride.\n//        source form: loop i; source; stride",
+          "technical": "New L-code lint in sema loop checking; fires on C-style headers whose advance is not ++/-- or on source strides that are not integer literals or simple names."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python has no C-style loop at all; `for i in range(start, stop, step)` plus `while` cover everything. Nobody misreads a range call as init-test-advance, because the shapes differ completely.",
+          "code": "for i in range(0, 10, 2): draw(i)\nwhile size < budget:\n    probe(size); size *= 2"
+        },
+        {
+          "lang": "Go",
+          "note": "Go kept one `for` keyword with both dialects, exactly Jet's current shape, and its spec needs three separate forms explained. Readers learn to spot the semicolons and the init clause; the ambiguity Jet has is inherited from this design.",
+          "code": "for i := 0; i < n; i *= 2 { }\nfor _, v := range items { }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift removed the C-style for loop in Swift 3 after real-world usage showed range and while forms covered it. The migration was mechanical and the removal is considered one of Swift 3's uncontroversial cleanups.",
+          "code": "for i in stride(from: 0, to: n, by: 2) { }"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "One header shape keeps one meaning: binding, source, stride. Beginners learn a single dialect that covers counting, ranges, strides, and pairs. Irregular counters remain fully expressible with visible state and a condition loop, so no program is lost. Python needs the same two-line `while` shape for those cases, so Jet stays at parity there and beats `range()` on the regular ones.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It keeps two meanings behind one shape, and the only signal is a two-character token in slot one. That is a standing tax on every reader for the benefit of a rare one-line spelling."
+          },
+          {
+            "key": "C",
+            "reason": "A lint narrates the trap without removing it, and a lint that fires on legal, intended code trains people to ignore lints."
+          }
+        ],
+        "tradeoff": "Irregular counter loops grow from one line to three, and existing C-style code needs a mechanical rewrite. That is accepted because the regular cases — the overwhelming majority — already read better in the source form."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-30T12:45:11.037Z"
+    },
+    {
+      "id": "D-LOOPMAP1",
+      "cardId": "c0yclhqo",
+      "group": "syntax",
+      "title": "Two ways to map: eager loop-yield vs lazy adapters",
+      "gist": "Whether Jet keeps eager loop comprehensions and lazy method pipelines side by side, and how the split is taught.",
+      "lesson": "Jet has two spellings for 'transform every item'. The loop form, `doubled :: loop v; values -> v * 2`, runs immediately and produces a complete List. The method form, `values.map(v => v * 2)`, produces a lazy pipeline: nothing runs until something pulls from it, for example `.to_list()` or a fold.\n\nEager means the work happens at the line where you wrote it, and you hold real data afterward. Lazy means the pipeline is a recipe; work happens later, possibly fused with more steps, possibly never. Lazy pipelines avoid building throwaway middle lists when you chain several steps.\n\nBoth behaviors are useful. The concern is that nothing in the spelling says which is which. A reader sees `map` and, if they come from Python, expects a list; they get a pipeline object. A reader who writes a loop-yield inside a hot path materializes a full List where a lazy chain would have avoided it.\n\nThe question is not whether both should exist — they serve different jobs — but whether the current split is discoverable enough, and whether anything should change in spelling, defaults, or teaching.",
+      "explainer": "",
+      "story": "Ana ports a Python script. She writes `evens :: values.map(v => v * 2)` and then `print(evens)`, expecting a list like Python's comprehensions give her. She gets a pipeline value, not data. Her fix is `.to_list()`, but nothing told her at the `map` call; she found out at the print. Meanwhile her teammate Ken writes a loop-yield over ten million rows, chains three more transformations after it, and builds four full lists where a lazy chain would build one.",
+      "inWild": "// Eager: comprehension — runs now, holds a List\nsquares :: loop n; 1..1000 -> n * n\n\n// Lazy: pipeline — a recipe until pulled\npipeline :: readings.map(r => r.celsius).filter(c => c > 30)\nhot :: pipeline.to_list()          // work happens here\n\n// The trap, both directions:\nevens :: values.map(v => v * 2)    // not a List yet — surprises Python hands\nrows :: loop r; huge -> transform(r)  // materializes 10M items eagerly",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the split, document it as the plane boundary",
+          "detail": "Loop-yield is the beginner plane: eager, immediate, holds data. Adapters are the expert plane: lazy, fusable, allocation-free until pulled. Nothing changes in the language; the spec and docs state the rule in one sentence so the split is a teachable boundary instead of folklore.",
+          "code": "// rule of thumb, verbatim in the docs:\n// \"loop-yield gives you data now; .map gives you a recipe.\"\nsquares :: loop n; 1..100 -> n * n     // data\nrecipe  :: xs.map(f).filter(g)          // recipe until pulled",
+          "technical": "No compiler change. Spec section under S19/D-COMPREHENSION1 states the eager/lazy boundary; hover docs on adapters say 'lazy — pull with .to_list(), fold, or a loop'."
+        },
+        {
+          "key": "B",
+          "name": "Make adapters eager; opt into laziness with .lazy()",
+          "detail": "`values.map(f)` returns a List, matching what Python-trained users expect everywhere. Chained pipelines that should not build middle lists opt in: `values.lazy().map(f).filter(g).to_list()`. Beginners never meet a pipeline object uninvited; experts type one extra word. Cost: innocent-looking chains like `xs.map(f).filter(g)` now build a full middle list unless the author remembered `.lazy()`.",
+          "code": "evens :: values.map(v => v * 2)        // a real List now\nhot :: readings.lazy()\n    .map(r => r.celsius)\n    .filter(c => c > 30)\n    .to_list()                          // one pass, no middle lists",
+          "technical": "Adapter methods on List/Set/Map return collections; `.lazy()` enters the pipeline plane where current adapter semantics apply. Iterator sources (files, channels) stay lazy — eagerness applies only to in-memory collections."
+        },
+        {
+          "key": "C",
+          "name": "Keep the split, add a boundary lint",
+          "detail": "Semantics unchanged. A lint fires exactly where the confusion bites. Using a pipeline value where a List is expected teaches `.to_list()`. Materializing a loop-yield only to chain more adapters onto it teaches starting the pipeline at the source. Legal code that is plausibly intended stays quiet.",
+          "code": "evens :: values.map(v => v * 2)\nprint(evens)\n// L05xx: `evens` is a lazy pipeline, not a List.\n//        pull it: `evens.to_list()` — or build eagerly:\n//        `evens :: loop v; values -> v * 2`",
+          "technical": "Two lint sites in sema: pipeline-typed value reaching a List-typed or Printable sink; loop-yield binding whose only use is a single adapter chain."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python splits the same way: comprehensions are eager, `map()`/generators are lazy. It is a known stumbling block — `map` returning a non-list surprises learners — and comprehensions won the culture war precisely because they hand back real data.",
+          "code": "evens = [v * 2 for v in values]   # eager, everyone's default\nevens = map(lambda v: v * 2, values)  # lazy iterator, surprises"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust is lazy-only with explicit collection: `.iter().map(f).collect()`. Nobody is surprised because there is no eager spelling to contrast with — but every beginner must learn `.collect()` on day one.",
+          "code": "let evens: Vec<i32> = values.iter().map(|v| v * 2).collect();"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Kotlin made collection operators eager and gave laziness its own entry word, `asSequence()`. This is option B's shape, shipped at scale; the middle-list cost on long eager chains is real and documented.",
+          "code": "val evens = values.map { it * 2 }          // eager List\nval hot = readings.asSequence()\n    .map { it.celsius }.filter { it > 30 }.toList()"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "Beating Python for its own users means the obvious spelling hands back data, everywhere, with no pipeline object arriving uninvited. Eager `map` plus an explicit `.lazy()` entry word gives beginners Python's comfort. Experts get a single visible switch for fused, allocation-free chains — clearer control than semantics that depend on which of two spellings was used. The loop-yield and eager adapters then agree with each other, and laziness becomes something you can point at in the code.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Documentation cannot fix a surprise that arrives at runtime distance from its cause; the reader meets the pipeline object long after the `map` call that created it."
+          },
+          {
+            "key": "C",
+            "reason": "A lint at the sink still teaches after the surprise exists, and its second half polices style on legal code, which erodes trust in lints."
+          }
+        ],
+        "tradeoff": "Chained eager adapters build intermediate collections unless the author writes `.lazy()`. That is accepted: the cost is visible and local, Kotlin demonstrates it works at scale, and hot paths get one obvious word to reach for."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T12:45:11.258Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-NUMLIT-PEER1",
+      "cardId": "c0b0tifp",
+      "group": "syntax",
+      "title": "What type a numeral takes when nothing typed sits beside it",
+      "gist": "Whether plain numbers with no other type around them keep the default whole-number type or shrink to their smallest fit.",
+      "lesson": "Jet's default whole-number type is `Int`. It holds every whole number up to about nine quintillion. Experts can also name an exact size. A `U8` holds 0 through 255. A `U32` holds 0 through about four billion.\n\nSay a written number sits next to a sized value. The ratified rule D-INTLIT-WIDTH1=F gives that numeral its smallest fitting type first. Then it widens one side to the other, if nothing can be lost. That is what makes `byte + 1` work when `byte` is a `U8`.\n\nThe rule as implemented applies that first step even when there is nothing sized to fit. So in `1000000 * 1000000` each numeral shrinks to a 32-bit unsigned number, because a million fits there. Both sides are then 32-bit, so the product is 32-bit too.\n\nJet traps on overflow at every width, by ratified design. A million times a million is a trillion, which no 32-bit number holds. The program stops. At compile time it stops the build.\n\nThe same first step turns `0 - 17` into unsigned-byte subtraction, because `0` and `17` both fit in a byte. Unsigned bytes cannot hold minus seventeen, so that traps too.\n\nBoth expressions are ordinary arithmetic with no sized type anywhere in the source. Today they fail. This decision picks what a numeral means when nothing beside it asks for a size.",
+      "explainer": "",
+      "story": "Tomas checks a throughput budget in a build script: `comptime budget = 1000000 * 1000000`. The build stops with a compile-time overflow, naming a 32-bit range he never wrote. He tries `0 - 17` in the next line and that stops too. Nothing in his file mentions a fixed width; both are plain numbers, and both would be fine in a pocket calculator.",
+      "inWild": "// Capacity planning in a build script — no sized type anywhere in sight.\ncomptime budget = 1000000 * 1000000        // build stops: overflows a 32-bit range\ncomptime offset = 0 - 17                   // build stops: underflows an unsigned byte\n\nfn run() {\n    print(\"{1000000 * 1000000}\")           // same trap at runtime\n    print(\"{(0 - 17) / 5}\")\n}\n\n// Meanwhile this is fine and must stay fine:\nfn tick(byte: U8) => U8 {\n    return byte + 1                        // the numeral takes U8 from its neighbour\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A numeral with no sized neighbour is an Int",
+          "detail": "The smallest-fit step only runs when something sized sits beside the numeral, which is the case it was designed for. With no sized neighbour, numerals keep the default `Int`. Tomas gets a trillion and minus seventeen. `byte + 1` still works, because `byte` is the neighbour that asks for a byte.",
+          "technical": "`minimal_integer_literal_type` narrows only when the peer operand resolves to a fixed-width integer; with no peer both operands stay `Int`. Amends D-INTLIT-WIDTH1=F's \"after minimal-width assignment\" clause to \"after minimal-width assignment against a typed peer\". Destination-driven cases keep working through the expected-type channel: a `U8` parameter or annotation still pushes `U8` into the literals.",
+          "code": "budget :: 1000000 * 1000000   // Int, 1000000000000\noffset :: 0 - 17              // Int, -17\n\nfn tick(byte: U8) => U8 { return byte + 1 }   // unchanged\nfn take_u8(value: U8) {}\ntake_u8(1 + 2)                // still U8: the parameter asks for it"
+        },
+        {
+          "key": "B",
+          "name": "Keep smallest-fit, and size the result to the value",
+          "detail": "Numerals still shrink, but a numeral-only expression is folded at compile time and typed by its *result*, not its inputs. A trillion becomes a 64-bit number; minus seventeen becomes signed. Nothing traps, and small constants stay small, which matters for packed data and hardware registers.",
+          "technical": "Constant-fold integer expressions whose leaves are all bare numerals, then assign the minimal type containing the folded result (signed when negative). Requires the fold to run before type assignment in sema, and a rule for what happens when a folded constant meets a sized peer later in the expression tree.",
+          "code": "budget :: 1000000 * 1000000   // folds to 1000000000000, takes I64\noffset :: 0 - 17              // folds to -17, takes I8\nmask   :: 255 & 15            // folds to 15, takes U8"
+        },
+        {
+          "key": "C",
+          "name": "Keep today's rule and refuse instead of trapping",
+          "detail": "Numerals keep shrinking. An expression the compiler can prove overflows its own inferred width becomes a compile error naming that width and value, not a run-time trap. Tomas still cannot write his multiplication, but he learns exactly which width was chosen and why.",
+          "technical": "Constant-evaluate numeral-only integer expressions during checking and report a registered diagnostic naming the inferred width, the computed value, and the containing range, with a fix-it that annotates a wider type. The trap stays for values that are not compile-time known.",
+          "code": "budget :: 1000000 * 1000000\n// Error [E0xxx]: this multiplication overflows U32 (0 to 4294967295)\n//  Why: both numerals took their smallest fitting type, U32\n//  Fix: write `Int.{1000000} * 1000000`, or annotate the binding as Int"
+        },
+        {
+          "key": "D",
+          "name": "Numerals are always Int; sized types are reached only by conversion",
+          "detail": "Drop smallest-fit entirely. Every numeral is an `Int`, and a sized value comes from its own constructor. Simplest rule in the language, and the beginner never meets a width. The cost falls on expert code: `byte + 1` needs the numeral spelled as a byte.",
+          "technical": "Remove literal narrowing; `Int` never widens to a narrower type, so mixed expressions with sized operands need an explicit constructor or conversion. Reverts the part of D-INTLIT-WIDTH1=F that closed the original `x + 1` complaint, so that ergonomics loss returns.",
+          "code": "budget :: 1000000 * 1000000        // Int\nfn tick(byte: U8) => U8 {\n    return byte + U8.{1}           // the numeral must be spelled as a byte\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "An unsuffixed integer literal defaults to `i32` when nothing constrains it, and constant overflow is a deny-by-default compile error.",
+          "code": "let x = 1000000 * 1000000;   // error: this arithmetic operation will overflow\nlet y = 0 - 17;              // fine: both are i32"
+        },
+        {
+          "lang": "Go",
+          "note": "Untyped constants are arbitrary precision until they need a type, so a constant product cannot overflow on the way.",
+          "code": "const budget = 1000000 * 1000000   // exact; only assignment to a sized type can fail"
+        },
+        {
+          "lang": "Swift",
+          "note": "Literals default to `Int` (64-bit) unless context asks otherwise, and overflow traps at run time.",
+          "code": "let budget = 1_000_000 * 1_000_000   // Int, fine\nlet offset = 0 - 17                  // Int, -17"
+        },
+        {
+          "lang": "C",
+          "note": "Integer promotion pulls small operands up to `int` before arithmetic, so byte-sized inputs never do byte-sized math.",
+          "code": "unsigned char a = 0, b = 17;\nint d = a - b;   /* -17: both promote to int first */"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It fixes the broken case by narrowing the rule to the case it was written for: a numeral takes a size from a neighbour that has one. With no neighbour there is nothing to match, and the language default is the honest answer. Tomas's arithmetic works and expert `byte + 1` is untouched.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It types an expression by its answer, so the same numerals mean different widths depending on the arithmetic around them, and folding has to precede checking."
+          },
+          {
+            "key": "C",
+            "reason": "It turns ordinary arithmetic into a compile error and asks the writer to annotate around a width the compiler invented."
+          },
+          {
+            "key": "D",
+            "reason": "It reopens the `x + 1` complaint that D-INTLIT-WIDTH1 was ratified to close, and puts conversion ceremony back into every expert expression."
+          }
+        ],
+        "tradeoff": "A numeral-only expression is `Int`-wide even when its values are tiny, so packed or register-sized code must name its width in the destination. That is acceptable because the destination is exactly where a width belongs."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T13:27:21.868Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
     }
   ],
   "questions": [
@@ -75122,9 +76236,11 @@
       "by": "codex-core-five",
       "kind": "message",
       "text": "Five-card batch is integrated on master as f0b574092. The owner requires .claude/worktrees/core-five deleted before the serial CheckerOwnership wave. Please commit/preserve your #1304 numeric/Units patch and release the worktree, then mark this message done.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T02:50:16.477Z"
+      "created": "2026-07-30T02:50:16.477Z",
+      "completedAt": "2026-07-30T12:43:04.139Z",
+      "doneBy": "owner"
     },
     {
       "id": "q07og4e2",
@@ -75133,9 +76249,11 @@
       "by": "codex-core-five",
       "kind": "message",
       "text": "Coordination: the shared core-five worktree must now be deleted before the serial CheckerOwnership wave. It still contains your untracked crates/jet-codegen/src/Prelude/Units.jet plus a rustfmt-only EffectBudget.rs edit. Please checkpoint/preserve the owned Units.jet work and either absorb or explicitly release the formatting edit, then confirm the worktree is safe to remove. I will not discard or stage either path.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:01:55.824Z"
+      "created": "2026-07-30T03:01:55.824Z",
+      "completedAt": "2026-07-30T12:43:05.035Z",
+      "doneBy": "owner"
     },
     {
       "id": "q0u8wzxp",
@@ -75144,9 +76262,11 @@
       "by": "codex-core-five",
       "kind": "message",
       "text": "Coordination: the shared core-five worktree must be deleted before the serial CheckerOwnership wave. It now has uncommitted reviewer-style changes in FencedNames.rs, tests/fenced_names.rs, and tests/tir_unsafe_and_runtime.rs on top of your commits a189670e7/8e583913b. Please checkpoint/preserve those edits and arrange a durable branch/integration target for your two commits, then confirm codex/core-five can be removed. I will not stage or discard this foreign work.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:02:38.547Z"
+      "created": "2026-07-30T03:02:38.547Z",
+      "completedAt": "2026-07-30T12:43:07.856Z",
+      "doneBy": "owner"
     },
     {
       "id": "q06kld2u",
@@ -75155,9 +76275,11 @@
       "by": "codex-core-five",
       "kind": "message",
       "text": "Coordination: commit c8f9f3e1d is preserved only on codex/core-five, whose worktree the owner requires deleted before the CheckerOwnership wave. A fresh read-only review is running now. Please be ready to integrate or name a durable handoff branch after review; I will not delete the only ref.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:03:44.596Z"
+      "created": "2026-07-30T03:03:44.596Z",
+      "completedAt": "2026-07-30T12:43:08.956Z",
+      "doneBy": "owner"
     },
     {
       "id": "q09nw8jq",
@@ -75166,9 +76288,11 @@
       "by": "codex-core-five",
       "kind": "message",
       "text": "Coordination: commit a8917cc32 is preserved only in the codex/core-five history, whose worktree must be deleted. Please arrange independent review/integration or a named durable handoff ref; I will not delete its only branch.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:03:44.783Z"
+      "created": "2026-07-30T03:03:44.783Z",
+      "completedAt": "2026-07-30T12:43:09.804Z",
+      "doneBy": "owner"
     },
     {
       "id": "q0v0bm9k",
@@ -75177,9 +76301,11 @@
       "by": "codex-core-five-review",
       "kind": "message",
       "text": "Fresh review: c8f9f3e1d is not integration-safe. Required fixes are resident Cranelift Cell lowering with no deopt/fallback, and sema non-cloneability for CellReadGuard/CellEditGuard so ~guard emits E0211 before codegen. The dirty local_cell_tiers additions are required regression tests.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:10:09.187Z"
+      "created": "2026-07-30T03:10:09.187Z",
+      "completedAt": "2026-07-30T12:43:10.540Z",
+      "doneBy": "owner"
     },
     {
       "id": "q07bm3vg",
@@ -75188,9 +76314,11 @@
       "by": "codex-core-five-review",
       "kind": "message",
       "text": "Fresh review blockers: fenced formatter corrupts inline comments via split_whitespace; add a comment-preservation regression and structural formatter fix. Also add executable/golden join_all teaching and prove loose tasks.spawn handles, not only g.task handles. Current commits are not integration-safe.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:11:19.589Z"
+      "created": "2026-07-30T03:11:19.589Z",
+      "completedAt": "2026-07-30T12:43:11.109Z",
+      "doneBy": "owner"
     },
     {
       "id": "q0plh561",
@@ -75199,9 +76327,11 @@
       "by": "codex-core-five-review",
       "kind": "message",
       "text": "Fresh review blocker: numeric widening is missing in infer_call_value and check_method_args. Function-value and user-method I8→I16 arguments still emit E0112. Reuse widen_numeric_expr for non-Write params and add tier regressions before integration.",
-      "status": "open",
+      "status": "done",
       "answer": "",
-      "created": "2026-07-30T03:16:01.499Z"
+      "created": "2026-07-30T03:16:01.499Z",
+      "completedAt": "2026-07-30T12:43:12.152Z",
+      "doneBy": "owner"
     },
     {
       "id": "q08yu0eq",
@@ -75210,9 +76340,22 @@
       "by": "core-five-integrator",
       "kind": "message",
       "text": "Integration coordination: the completed core-five batch must cherry-pick into master, but #1202 currently owns an uncommitted overlapping patch there. Please commit and leave master clean as soon as your coherent slice is ready, then note the commit on #1202. Do not discard either stream.",
+      "status": "done",
+      "answer": "",
+      "created": "2026-07-30T04:47:47.752Z",
+      "completedAt": "2026-07-30T12:43:12.948Z",
+      "doneBy": "owner"
+    },
+    {
+      "id": "q2wx2muk",
+      "cardId": "c0yclhqo",
+      "decisionId": "D-LOOP-HEADER3",
+      "by": "owner",
+      "kind": "question",
+      "text": "this is not clear and the options are terrible. Rethink from first principles, consider surface syntax, ontology, isomorphism, logic, psychology to provide a much better list of options",
       "status": "open",
       "answer": "",
-      "created": "2026-07-30T04:47:47.752Z"
+      "created": "2026-07-30T13:57:42.691Z"
     }
   ],
   "ideas": [
@@ -75584,9 +76727,564 @@
       "tags": [],
       "status": "open",
       "created": "2026-07-27T13:28:43.722Z"
+    },
+    {
+      "id": "b1nfoavl",
+      "text": "Consider multiple allowed args for print(), but if comma separated args are provided, each is a newline. Then you can still control with \\n for newlines, but can also easily join multiple strings without the \\n ceremony?",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-07-30T11:06:10.290Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-07-30T14:06:40.035Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kjro6g",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T14:06:32.321Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0bx03jx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T14:01:52.376Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0sp8gpx",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:52.067Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0h9w8lc",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:51.756Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0kfmlgc",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:51.449Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0fw3ppx",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:51.137Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0ra7qjw",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:50.850Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0kic2oz",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:50.549Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c09ygo0y",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:50.245Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c05477jh",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:49.947Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0fl0ik7",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:49.655Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0awzf12",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:49.347Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0mfdhwp",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:49.037Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0i11n7j",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:48.743Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c05t5bb1",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T14:01:34.630Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0wy20z4",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-30T13:59:33.961Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0ra7qjw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T13:59:21.541Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T13:59:21.240Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0wy20z4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T13:57:42.691Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q2wx2muk",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T13:56:05.429Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NUMLIT-PEER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T13:54:13.339Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LOOPMAP1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-30T13:51:35.117Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LOOPLABEL4",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T13:51:35.117Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yclhqo",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-30T13:51:35.117Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yclhqo",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-30T13:51:35.117Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yclhqo",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-30T13:51:35.117Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yclhqo",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-30T13:40:51.822Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c05477jh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T13:35:43.306Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c0sp8gpx",
+      "note": "I5 red: nine examples do not compile or do not match their golden output"
+    },
+    {
+      "at": "2026-07-30T13:27:21.868Z",
+      "by": "claude-merge",
+      "action": "decision.add",
+      "ref": "D-NUMLIT-PEER1",
+      "note": "What type a numeral takes when nothing typed sits beside it"
+    },
+    {
+      "at": "2026-07-30T13:25:59.237Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0h9w8lc",
+      "note": "Crypto secret provenance diagnostics no longer fire (E0311 family)"
+    },
+    {
+      "at": "2026-07-30T13:16:44.349Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0kfmlgc",
+      "note": "shared_config parity: generated Rust E0507 moves String out of Shared.read closure"
+    },
+    {
+      "at": "2026-07-30T12:59:59.650Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0bx03jx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T12:59:59.432Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fw3ppx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:58.489Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fw3ppx",
+      "note": "priority,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:48.032Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fl0ik7",
+      "note": "priority,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:47.794Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0fw3ppx",
+      "note": "semindex dossier fixtures broken by E0999 single-marker bracket rule"
+    },
+    {
+      "at": "2026-07-30T12:57:30.737Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:15.834Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:15.548Z",
+      "by": "claude-merge",
+      "action": "card.update",
+      "ref": "c0mwjrp1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T12:57:04.947Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c0ra7qjw",
+      "note": "I4b snapshot debt: 19 emitted codes have no UI snapshot"
+    },
+    {
+      "at": "2026-07-30T12:56:44.946Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c0kic2oz",
+      "note": "TIR evaluator diagnostics have no spans"
+    },
+    {
+      "at": "2026-07-30T12:56:26.894Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c09ygo0y",
+      "note": "Cascade noise: a second error follows the primary on one construct"
+    },
+    {
+      "at": "2026-07-30T12:56:26.601Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c05477jh",
+      "note": "Diagnostic regressions: specific teaching replaced by generic errors"
+    },
+    {
+      "at": "2026-07-30T12:56:05.466Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c0fl0ik7",
+      "note": "Predicate arms are rejected against D-MATCHARM1=A"
+    },
+    {
+      "at": "2026-07-30T12:45:50.051Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ursuly",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:45:49.813Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r8y9ik",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:45:49.581Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nyir87",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:45:49.360Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kjro6g",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:45:49.099Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0bx03jx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T12:45:11.258Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LOOPMAP1",
+      "note": "Two ways to map: eager loop-yield vs lazy adapters"
+    },
+    {
+      "at": "2026-07-30T12:45:11.038Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LOOP-HEADER3",
+      "note": "One loop header shape carries two different meanings"
+    },
+    {
+      "at": "2026-07-30T12:44:48.880Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LOOPLABEL4",
+      "note": "Labeling a loop that produces no value"
+    },
+    {
+      "at": "2026-07-30T12:43:12.948Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q08yu0eq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:12.152Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q0plh561",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:11.109Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q07bm3vg",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:10.540Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q0v0bm9k",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:09.804Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q09nw8jq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:08.956Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q06kld2u",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:07.856Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q0u8wzxp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:05.035Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q07og4e2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:43:04.139Z",
+      "by": "owner",
+      "action": "message.done",
+      "ref": "q0xrj127",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T12:42:48.264Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-COMPILE-STACK1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T12:42:00.196Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-1324-1",
+      "note": "Remove (not deprecate) the S75 fan-out operator f.[a, b, c] and its E0961/E0962 diagnostics. Keep S76 [T#N] fixed-size lists and their typed literal heads."
+    },
+    {
+      "at": "2026-07-30T12:41:59.979Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-1323-1",
+      "note": "Ship the full ergonomic group set: tasks.spawn_group(n, fn) => [Task<T>] plus list methods join_all/wait_all (consume), detach_all (consume), cancel_all, pause_all, resume_all (borrow). Beginner magic first: handles.cancel_all() must work without writing a loop."
+    },
+    {
+      "at": "2026-07-30T12:41:59.787Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-1321-1",
+      "note": "print and eprint accept one or more arguments; each argument renders on its own line (print(a, b) == print(a); print(b)). Single-line composition stays with interpolation."
+    },
+    {
+      "at": "2026-07-30T12:41:59.579Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-1320-1",
+      "note": "Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fences accept arbitrary expression entries separated by top-level commas; binding fences still require plain names. Statement fanout semantics unchanged: one statement copy per entry, lock-step across fences."
+    },
+    {
+      "at": "2026-07-30T12:41:44.595Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0yclhqo",
+      "note": "Comprehension surface coherence: loop-header split, labels, map duality"
+    },
+    {
+      "at": "2026-07-30T12:41:44.379Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ursuly",
+      "note": "Remove S75 fan-out operator f.[...]; keep [T#N]"
+    },
+    {
+      "at": "2026-07-30T12:41:44.166Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0r8y9ik",
+      "note": "Task list helpers: spawn_group + full *_all parity set"
+    },
+    {
+      "at": "2026-07-30T12:41:43.967Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0nyir87",
+      "note": "Loop over non-copyable list elements: ICE via .cloned() lowering"
+    },
+    {
+      "at": "2026-07-30T12:41:43.761Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0kjro6g",
+      "note": "Variadic print: each argument prints on its own line"
+    },
+    {
+      "at": "2026-07-30T12:41:36.708Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0bx03jx",
+      "note": "Fence respell: $[ ... ]$ with expression entries"
+    },
+    {
+      "at": "2026-07-30T12:41:29.382Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NUMJOIN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T12:07:21.029Z",
+      "by": "claude-merge",
+      "action": "decision.add",
+      "ref": "D-COMPILE-STACK1",
+      "note": "Who guarantees the working memory the compiler needs for nested code"
+    },
+    {
+      "at": "2026-07-30T12:06:23.246Z",
+      "by": "claude-merge",
+      "action": "decision.add",
+      "ref": "D-NUMJOIN1",
+      "note": "Widening where several branches produce one value"
+    },
+    {
+      "at": "2026-07-30T12:04:48.546Z",
+      "by": "claude-merge",
+      "action": "card.add",
+      "ref": "c0wy20z4",
+      "note": "Compile stack: a nested program must never overflow"
+    },
+    {
+      "at": "2026-07-30T11:06:10.290Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b1nfoavl",
+      "note": "Consider multiple allowed args for print(), but if comma sep"
+    },
     {
       "at": "2026-07-30T10:22:51.378Z",
       "by": "owner",
@@ -78540,552 +80238,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ft6gme",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-29T16:13:10.568Z",
-      "by": "bd-1273",
-      "action": "card.update",
-      "ref": "c047avgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T16:13:10.263Z",
-      "by": "bd-1273",
-      "action": "card.criteria-meet",
-      "ref": "c047avgx",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T16:12:51.678Z",
-      "by": "bd-1273",
-      "action": "card.criteria-meet",
-      "ref": "c047avgx",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T16:12:51.410Z",
-      "by": "bd-1273",
-      "action": "card.criteria-meet",
-      "ref": "c047avgx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T16:12:39.447Z",
-      "by": "bd-1273",
-      "action": "card.criteria-meet",
-      "ref": "c047avgx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T16:05:19.597Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:55:25.738Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:54:48.481Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:49:36.678Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T15:49:36.438Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T15:45:37.427Z",
-      "by": "bd-1273",
-      "action": "card.update",
-      "ref": "c047avgx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T15:45:29.779Z",
-      "by": "bd-1273",
-      "action": "card.update",
-      "ref": "c047avgx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T15:36:28.156Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:32:48.404Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:30:44.722Z",
-      "by": "bd-1273",
-      "action": "card.claim",
-      "ref": "c047avgx",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T15:27:54.924Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:26:47.989Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T15:26:47.745Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T15:20:09.085Z",
-      "by": "e3-bd-1278",
-      "action": "card.update",
-      "ref": "c0s24t6f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:20:08.869Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:20:08.643Z",
-      "by": "e3-bd-1277",
-      "action": "card.update",
-      "ref": "c0ozksvh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:14:59.097Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T15:14:58.864Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T15:14:16.712Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:05:04.638Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T15:04:23.591Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T15:04:23.356Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T14:53:59.037Z",
-      "by": "e3-bd-1278",
-      "action": "card.update",
-      "ref": "c0s24t6f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T14:53:18.989Z",
-      "by": "e3-bd-1278",
-      "action": "card.criteria-meet",
-      "ref": "c0s24t6f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T14:53:12.952Z",
-      "by": "e3-bd-1278",
-      "action": "card.criteria-meet",
-      "ref": "c0s24t6f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T14:53:12.705Z",
-      "by": "e3-bd-1278",
-      "action": "card.criteria-meet",
-      "ref": "c0s24t6f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T14:53:12.369Z",
-      "by": "e3-bd-1278",
-      "action": "card.criteria-meet",
-      "ref": "c0s24t6f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T14:53:12.106Z",
-      "by": "e3-bd-1278",
-      "action": "card.criteria-meet",
-      "ref": "c0s24t6f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T14:45:50.593Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T14:45:45.760Z",
-      "by": "e3-bd-1310",
-      "action": "card.criteria-meet",
-      "ref": "c0u592bs",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T14:45:37.628Z",
-      "by": "e3-bd-1310",
-      "action": "card.criteria-meet",
-      "ref": "c0u592bs",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T14:45:29.890Z",
-      "by": "e3-bd-1310",
-      "action": "card.criteria-meet",
-      "ref": "c0u592bs",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T14:45:23.883Z",
-      "by": "e3-bd-1310",
-      "action": "card.criteria-meet",
-      "ref": "c0u592bs",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T14:40:31.114Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0s24t6f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T14:36:56.643Z",
-      "by": "e3-bd-1278",
-      "action": "card.claim",
-      "ref": "c0s24t6f",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T14:35:56.676Z",
-      "by": "e3-bd-1278",
-      "action": "card.claim",
-      "ref": "c0s24t6f",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T14:35:34.015Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T14:34:38.797Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T14:34:33.138Z",
-      "by": "e3-bd-1283",
-      "action": "card.criteria-meet",
-      "ref": "c05051f9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T14:34:28.974Z",
-      "by": "e3-bd-1283",
-      "action": "card.criteria-meet",
-      "ref": "c05051f9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T14:02:44.643Z",
-      "by": "e3-bd-1283",
-      "action": "card.update",
-      "ref": "c05051f9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T13:57:49.948Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-29T13:57:43.722Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-29T13:57:36.895Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-29T13:57:36.305Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-29T13:57:27.020Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "priority"
-    },
-    {
-      "at": "2026-07-29T13:56:42.635Z",
-      "by": "e3-bd-1283",
-      "action": "card.claim",
-      "ref": "c05051f9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:53:47.218Z",
-      "by": "e3-bd-1277",
-      "action": "card.update",
-      "ref": "c0ozksvh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T13:52:40.762Z",
-      "by": "e3-bd-1277",
-      "action": "card.criteria-meet",
-      "ref": "c0ozksvh",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T13:52:40.568Z",
-      "by": "e3-bd-1277",
-      "action": "card.criteria-meet",
-      "ref": "c0ozksvh",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T13:52:40.376Z",
-      "by": "e3-bd-1277",
-      "action": "card.criteria-meet",
-      "ref": "c0ozksvh",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T13:52:40.172Z",
-      "by": "e3-bd-1277",
-      "action": "card.criteria-meet",
-      "ref": "c0ozksvh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T13:48:42.080Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T13:48:41.830Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T13:38:07.096Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T13:21:19.949Z",
-      "by": "e3-bd-1277",
-      "action": "card.update",
-      "ref": "c0ozksvh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T13:21:11.805Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T13:19:31.488Z",
-      "by": "e3-bd-1277",
-      "action": "card.claim",
-      "ref": "c0ozksvh",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:19:25.148Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.claim",
-      "ref": "c0ft6gme",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:17:56.882Z",
-      "by": "e3-bd-1277",
-      "action": "card.claim",
-      "ref": "c0ozksvh",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:17:53.162Z",
-      "by": "e3-bd-1310",
-      "action": "card.claim",
-      "ref": "c0u592bs",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:17:48.556Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.claim",
-      "ref": "c0ft6gme",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T13:17:19.441Z",
-      "by": "e3-review-1307-final",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T13:02:35.822Z",
-      "by": "e3-review-1271-final",
-      "action": "card.update",
-      "ref": "c0xx15b1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T13:02:35.619Z",
-      "by": "e3-review-1271-final",
-      "action": "card.update",
-      "ref": "c0xx15b1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T13:02:35.403Z",
-      "by": "e3-review-1271-final",
-      "action": "card.criteria-verify",
-      "ref": "c0xx15b1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T13:01:12.505Z",
-      "by": "e3-1271",
-      "action": "card.update",
-      "ref": "c0xx15b1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T13:01:08.365Z",
-      "by": "e3-1271",
-      "action": "card.criteria-meet",
-      "ref": "c0xx15b1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T12:57:06.067Z",
-      "by": "e3-review-1307-final",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T12:56:59.709Z",
-      "by": "e3-review-1307-final",
-      "action": "card.criteria-verify",
-      "ref": "c08z8u2c",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T12:56:54.820Z",
-      "by": "e3-review-1307-final",
-      "action": "card.criteria-verify",
-      "ref": "c08z8u2c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T12:56:50.305Z",
-      "by": "e3-review-1307-final",
-      "action": "card.criteria-verify",
-      "ref": "c08z8u2c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T12:56:45.286Z",
-      "by": "e3-review-1307-final",
-      "action": "card.criteria-verify",
-      "ref": "c08z8u2c",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

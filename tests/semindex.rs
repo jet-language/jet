@@ -866,7 +866,7 @@ fn semindex_references() {
 fn semindex_indexes_generated_fenced_range_names() {
     let path = temp_fixture(
         "fenced_range_names.jet",
-        "fn run() {\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}\n",
+        "fn run() {\n    $[ t1..t4 ]$ :: 1\n    print($[ t1, t2, t3, t4 ]$)\n}\n",
     );
     let idx = open(&path).expect("fenced range fixture indexes");
     let generated = idx.lookup("t4").expect("generated t4 definition");

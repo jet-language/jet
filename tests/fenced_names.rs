@@ -7,8 +7,8 @@ use tir_support::{build_and_run, have_rustc};
 
 const SOURCE: &str = r#"
 fn run() {
-    <: score1..score3 :> :: 7
-    print(<: score1..score3 :>)
+    $[ score1..score3 ]$ :: 7
+    print($[ score1..score3 ]$)
 }
 "#;
 

@@ -78,7 +78,9 @@
 // D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
 // `effect Root.Leaf` adds one package-view fact and erases before TIR.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
-// SIGIL_FENCE_CLOSE: `<: a, b :>` expands one statement per name.
+// SIGIL_FENCE_CLOSE. D-VERDICT-1320-1 (card #1320) respells them
+// `$[ a, b ]$` and opens expression-position fences to expression entries:
+// the statement is copied once per entry, fences advance in lock-step.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are

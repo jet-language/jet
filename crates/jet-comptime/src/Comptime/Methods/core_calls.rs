@@ -2564,11 +2564,25 @@ pub fn apply_impure_core_call(
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
         }
+        // D-VERDICT-1321-1: variadic — each argument renders on its own line.
+        ("core.io", "print") => {
+            let text = args
+                .iter()
+                .map(|v| v.jet_show())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if let Some(s) = sink {
+                s.stdout.push_str(&text);
+                s.stdout.push('\n');
+            }
+            Ok(CtValue::Unit)
+        }
         ("core.io", "eprint") => {
-            let text = match args.first() {
-                Some(v) => v.jet_show(),
-                None => String::new(),
-            };
+            let text = args
+                .iter()
+                .map(|v| v.jet_show())
+                .collect::<Vec<_>>()
+                .join("\n");
             if let Some(s) = sink {
                 s.stderr.push_str(&text);
                 s.stderr.push('\n');

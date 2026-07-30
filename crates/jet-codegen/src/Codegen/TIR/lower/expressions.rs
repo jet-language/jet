@@ -304,6 +304,28 @@ fn lower_unit_text(
     }
 }
 
+/// D-VERDICT-1321-1: variadic `print`/`io.print`/`io.eprint` — join the
+/// arguments with newline separators into one string value, so downstream
+/// engines see the ordinary single-value print they already implement.
+pub(crate) fn join_print_args(
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let mut parts = Vec::with_capacity(args.len() * 2);
+    for (index, arg) in args.iter().enumerate() {
+        if index > 0 {
+            parts.push(TStrPart::Lit("\n".to_string()));
+        }
+        let value = lower_display_value(lower_expr(&arg.expr, cx, env), cx);
+        parts.push(TStrPart::Interp(value, crate::AST::StrFormat::Display));
+    }
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(parts),
+    }
+}
+
 fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     if value.ty.quantity_parts().is_some() {
         return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
@@ -1000,8 +1022,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             // `print` is ambient only when the user has not defined their own
             // `print` function (matches emit_call; sema enforces the shadowing).
+            // D-VERDICT-1321-1: multiple arguments join with newlines into one
+            // Print, so every engine keeps its single-value Print semantics.
             if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
-                let arg = lower_display_value(lower_expr(&call.args[0].expr, cx, env), cx);
+                // `join_print_args` also absorbs the sema-rejected zero-arg
+                // form (empty line) so lowering never indexes out of bounds.
+                let arg = if call.args.len() == 1 {
+                    lower_display_value(lower_expr(&call.args[0].expr, cx, env), cx)
+                } else {
+                    join_print_args(&call.args, cx, env)
+                };
                 return TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Print(Box::new(arg)),

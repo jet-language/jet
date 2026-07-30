@@ -77,10 +77,18 @@ impl<'a> Fmt<'a> {
             return;
         }
 
+        // Expression entries (D-VERDICT-1320-1) store an empty display name;
+        // emit their authored source slice instead.
         let names = fence
             .names
             .iter()
-            .map(|(name, _)| name.as_str())
+            .map(|(name, span)| {
+                if name.is_empty() {
+                    self.src.get(span.start..span.end).unwrap_or("").to_string()
+                } else {
+                    name.clone()
+                }
+            })
             .collect::<Vec<_>>();
         let inline = format!(
             "{} {} {}",
