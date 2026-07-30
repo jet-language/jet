@@ -893,11 +893,11 @@ fn project_function_catalog_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{},\"node_descriptor_id\":{},\"signature\":{},\"callee\":{},\"module_path\":{},\"pure\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}],\"available\":true,\"source_span\":{},\"insert_op\":\"insert_call\"}}",
+        "{{\"name\":{},\"signature\":{},\"callee\":{},\"node_descriptor_id\":{},\"module_path\":{},\"pure\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}],\"available\":true,\"source_span\":{},\"insert_op\":\"insert_call\"}}",
         json_str(&def.name),
-        json_str(descriptor_id),
         json_str(&function_signature_from_parts(&def.name, params, ret)),
         json_str(&def.name),
+        json_str(descriptor_id),
         json_str(&def.module_path),
         if pure { "true" } else { "false" },
         json_str(ret.unwrap_or("Void")),

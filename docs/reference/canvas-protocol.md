@@ -224,8 +224,11 @@ Request fields:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"revision":"sha256-...","session":{"id":"local-source-span","state":"running","persistence":"local-source-span"},"overlay":{"debug_overlay":"running","active_line":3,"active_span":{"start":24,"end":36},"active_graph_id":"fn:main.jet::run@0-3","active_node_id":"...","active_wire_id":"...","breakpoints":[],"locals":[],"watches":[],"call_stack":[],"trace":[]}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"revision":"sha256-...","session":{"id":"local-source-span","state":"finished","persistence":"local-source-span"},"overlay":{"debug_overlay":"finished","active_line":null,"active_span":{"start":0,"end":0},"active_graph_id":"","active_node_id":"","active_wire_id":"","breakpoints":[],"locals":[],"watches":[],"call_stack":[],"trace":[]}}
 ```
+
+The response keeps observed locals, watches, call frames, and trace entries as
+history. It clears active source and graph IDs after the scripted run finishes.
 
 Unsupported interpreter/native boundaries return Jet diagnostics through the
 same protocol. They never expose rustc output.

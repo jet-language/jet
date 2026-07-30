@@ -31,6 +31,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Item::Migration] status=readonly schema evolution facts, source edits.
 - [Item::StateDecl] status=readonly typestate facts, source edits.
 - [Item::ProtocolDecl] status=readonly protocol facts, source edits.
+- [Item::EffectDecl] status=source through Code lens/source transactions; no dedicated graph projection.
 - [Item::UserDerive] status=readonly derive facts, source edits.
 - [Item::GenericModule] status=readonly module-template facts, source edits.
 - [Item::ModuleAlias] status=readonly module alias facts, source edits.
@@ -92,6 +93,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::MapLit] status=graph collection node.
 - [Expr::Index] status=graph index node.
 - [Expr::Slice] status=graph slice node.
+- [Expr::Range] status=source through Code lens/source transactions; no dedicated graph projection.
 - [Expr::Ident] status=graph reference node.
 - [Expr::Call] status=graph function node.
 - [Expr::Unary] status=graph operator node.

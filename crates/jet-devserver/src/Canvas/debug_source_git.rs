@@ -14,7 +14,11 @@ pub(super) fn debug_ok(
     breakpoint_lines: &[usize],
     watches: &[String],
 ) -> String {
-    let active_line = active_line_from_transcript(transcript);
+    let active_line = if transcript.lines().any(|line| line == "program finished") {
+        None
+    } else {
+        active_line_from_transcript(transcript)
+    };
     let active_span = active_line
         .map(|line| line_span(src, line))
         .unwrap_or(SourceSpan { start: 0, end: 0 });

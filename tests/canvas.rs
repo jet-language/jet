@@ -1017,7 +1017,7 @@ fn canvas_pattern_arm_and_multi_input_transactions_write_source() {
 
 fn choose(x: Choice) => Int {
     if x == {
-        A(n) -> { return n }
+        .A(n) -> { return n }
         else -> { return 0 }
     }
 }
@@ -1032,13 +1032,13 @@ fn run() {
     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
     let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
     let add = format!(
-        "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"== B(n)\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"== .B(n)\"}}",
         revision, graph_id, node_start, node_end
     );
     let out = jet::Canvas::apply_transaction_json(&path, &add).expect("add arm");
     assert!(out.contains("\"changed\":true"), "{out}");
     let added = fs::read_to_string(&path).unwrap();
-    assert!(added.contains("B(n) ->"), "{added}");
+    assert!(added.contains(".B(n) ->"), "{added}");
     assert!(
         added.contains("return 1"),
         "fresh arm uses sema-safe default return body: {added}"
@@ -1048,13 +1048,13 @@ fn run() {
     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"B(n)\"");
     let revision = jet::Canvas::source_revision(&added);
     let edit = format!(
-        "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"== C(n)\"}}",
+        "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"== .C(n)\"}}",
         revision, graph_id, pat_start, pat_end
     );
     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit arm");
     let edited = fs::read_to_string(&path).unwrap();
-    assert!(edited.contains("C(n) ->"), "{edited}");
-    assert!(!edited.contains("B(n) ->"), "{edited}");
+    assert!(edited.contains(".C(n) ->"), "{edited}");
+    assert!(!edited.contains(".B(n) ->"), "{edited}");
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after edit");
     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"C(n)\"");
@@ -1065,7 +1065,7 @@ fn run() {
     );
     jet::Canvas::apply_transaction_json(&path, &remove).expect("remove arm");
     let removed = fs::read_to_string(&path).unwrap();
-    assert!(!removed.contains("C(n) ->"), "{removed}");
+    assert!(!removed.contains(".C(n) ->"), "{removed}");
 
     let invalid_path = write_fixture(
         "pattern_arm_invalid_tx",
@@ -1075,7 +1075,7 @@ fn run() {
 
 fn choose(x: Choice) => Int {
     if x == {
-        A(n) -> { return n }
+        .A(n) -> { return n }
     }
 }
 
@@ -1559,7 +1559,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"signature\":\"fn summarize(limit: Int) => Int\"",
         "\"name\":\"run\"",
         "\"signature\":\"fn run()\"",
-        "\"callee\":\"run\"",
+        "\"name\":\"run\",\"signature\":\"fn run()\",\"callee\":\"run\"",
         "\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"]",
         "\"callee\":\"square\"",
         "\"default_args\":[\"1\"]",
@@ -3221,10 +3221,13 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "\"protocol\":\"jet.canvas.debug\"",
         "\"ok\":true",
         "\"persistence\":\"local-source-span\"",
-        "\"debug_overlay\":\"running\"",
-        "\"active_line\":3",
-        "\"active_node_id\":\"fn:",
-        "\"active_wire_id\":\"fn:",
+        "\"state\":\"finished\"",
+        "\"debug_overlay\":\"finished\"",
+        "\"active_line\":null",
+        "\"active_span\":{\"start\":0,\"end\":0}",
+        "\"active_graph_id\":\"\"",
+        "\"active_node_id\":\"\"",
+        "\"active_wire_id\":\"\"",
         "\"breakpoints\"",
         "\"locals\"",
         "\"watches\"",
