@@ -2810,16 +2810,23 @@ fn run() {
 
 `Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
 `F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
-available for expert and FFI/binary work; `I64`/`F64` interchange with
-`Int`/`Float` freely, every other width is its own distinct type. A bare
-integer literal adopts the width of the slot it lands in (a binding/parameter/
-return annotation, or sized arithmetic) and is range-checked at compile time —
-a literal that doesn't fit is **E1003**. Widths never mix implicitly:
-arithmetic, comparison, and assignment require the same width on both sides
-(**E0109**/**E0112**/**E0108**), with no silent narrowing or widening. The
-sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen, so
-they cross the C ABI by value (S59). Width conversions are always named
-methods (below), never implicit.
+available for expert and FFI/binary work. `I64` and `F64` are the explicit
+names for `Int` and `Float`. A bare whole-number literal adopts a typed peer
+that contains its value. Without one, it uses the narrowest integer type that
+contains the value. A destination-owned literal is range-checked at compile
+time; a value that does not fit is **E1003**.
+
+One numeric widening law applies to operators, arguments, returns, and
+assignments. One value can widen to the other type when that type contains
+every source value. Jet does not search for a third type and never narrows
+implicitly. `F32` widens to `Float`. Small integer types widen to a float when
+the crossing is always exact: `I8 I16 I32 U8 U16 U32` to `Float`, and
+`I8 I16 U8 U16` to `F32`. Other integer-to-float crossings check exactness at
+runtime and trap before rounding. `approx(value)` accepts possible precision
+loss for one crossing. Incomparable operator types are **E0109**; invalid
+destination types are **E0112** or **E0108**. The sized types erase to their
+Rust equivalents (`u8`…`i64`, `f32`) at codegen, so they cross the C ABI by
+value (S59). Explicit narrowing uses destination-owned named methods.
 
 Plain integer arithmetic (`+` `-` `*` `/`) **traps on overflow** at every width —
 a result outside the type's range stops the program with a Jet panic instead of

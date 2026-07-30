@@ -1,7 +1,7 @@
-Error [E0109]: `+` can't mix Int (a whole number) and Float (a decimal number)
-  --> tests/ui/mixed_numbers.jet:2:11
+Error [E0109]: `+` can't compare or combine U8 (an 8-bit whole number, 0 to 255) and I8 (an 8-bit whole number, -128 to 127)
+  --> tests/ui/mixed_numbers.jet:4:10
     |
-  2 |     x :: (1 + 2.5)
-    |           ^^^^^^^
- Why: Jet never converts numbers silently; the two sides must match
- Fix: make both sides the same kind of number (write `2.0` instead of `2`, or drop the `.0`)
+  4 |     x :: unsigned + signed
+    |          ^^^^^^^^^^^^^^^^^
+ Why: neither U8 contains every value of I8, nor I8 every value of U8
+ Fix: choose the result type and convert the other side into it

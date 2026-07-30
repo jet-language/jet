@@ -1118,8 +1118,8 @@ impl<'a> Checker<'a> {
 
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                // D-SG9: arithmetic stays within one numeric type (any width) and
-                // keeps that width; widths never mix implicitly.
+                // D-VERDICT-1304-1: the widening join above rewrites both
+                // operands to one numeric type. Arithmetic keeps that type.
                 if lt == rt && lt.is_numeric() {
                     Some(lt)
                 } else if let Type::Named(type_name) = &lt {
@@ -1162,23 +1162,6 @@ impl<'a> Checker<'a> {
                         "text isn't joined with `+`".to_string(),
                         "there's one way to build text: interpolation (S8)".to_string(),
                         "write the pieces inside one string: \"{a}{b}\"".to_string(),
-                        Some(span),
-                    ));
-                    None
-                } else if (lt == Type::Int && rt == Type::Float)
-                    || (lt == Type::Float && rt == Type::Int)
-                {
-                    self.diags.push(Diagnostic::error(
-                        "E0109",
-                        format!(
-                            "`{}` can't mix {} and {}",
-                            op.spell(),
-                            lt.show(),
-                            rt.show()
-                        ),
-                        "Jet never converts numbers silently; the two sides must match"
-                            .to_string(),
-                        "make both sides the same kind of number (write `2.0` instead of `2`, or drop the `.0`)".to_string(),
                         Some(span),
                     ));
                     None
