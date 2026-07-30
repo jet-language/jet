@@ -532,6 +532,12 @@ impl<'a> Checker<'a> {
                     })
                 };
                 if let Some(arg_ty) = arg_ty {
+                    let arg_ty = self.widen_numeric_argument(
+                        &mut arg.expr,
+                        arg_ty,
+                        param_ty,
+                        *param_conv,
+                    );
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     if !reported && arg_ty != *param_ty {
                         self.diags.push(Diagnostic::error(
@@ -745,6 +751,12 @@ impl<'a> Checker<'a> {
             });
             self.expected_type = saved_expected;
             if let Some(arg_ty) = arg_ty {
+                let arg_ty = self.widen_numeric_argument(
+                    &mut arg.expr,
+                    arg_ty,
+                    &param.ty,
+                    param.convention,
+                );
                 let reported =
                     self.check_type_assignable(&param.ty, &arg_ty, arg.expr.span());
                 if !reported && arg_ty != param.ty {

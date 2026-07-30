@@ -1568,6 +1568,12 @@ impl<'a> Checker<'a> {
                     };
                     let value_arg = args.get_mut(1)?;
                     if let Some(value_ty) = self.infer(&mut value_arg.expr) {
+                        let value_ty = self.widen_numeric_argument(
+                            &mut value_arg.expr,
+                            value_ty,
+                            &elem,
+                            AccessConvention::Read,
+                        );
                         self.check_type_assignable(&elem, &value_ty, value_arg.expr.span());
                     }
                     return Some(unit_ty());

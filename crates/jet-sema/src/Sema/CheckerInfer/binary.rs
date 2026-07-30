@@ -9,6 +9,83 @@ use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn is_bare_integer_literal(expr: &Expr) -> bool {
+        match expr {
+            Expr::Paren(inner, _) => Self::is_bare_integer_literal(inner),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                matches!(inner.as_ref(), Expr::Int(_, _, None, _))
+            }
+            Expr::Int(_, _, None, _) => true,
+            _ => false,
+        }
+    }
+
+    fn minimal_integer_literal_type(expr: &mut Expr, peer: Option<&Type>) -> Option<Type> {
+        match expr {
+            Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                let Expr::Int(value, _, width, _) = inner.as_mut() else {
+                    return None;
+                };
+                if width.is_some() {
+                    return None;
+                }
+                let negated = -(*value as i128);
+                if peer == Some(&Type::Int) {
+                    *width = None;
+                    return Some(Type::Int);
+                }
+                if let Some(Type::IntN { signed, bits }) = peer {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if negated >= lower && negated <= upper {
+                        *width = Some((*signed, *bits));
+                        return Some(Type::IntN {
+                            signed: *signed,
+                            bits: *bits,
+                        });
+                    }
+                }
+                let bits = [8, 16, 32, 64]
+                    .into_iter()
+                    .find(|bits| {
+                        let (lower, upper) = crate::AST::int_range(true, *bits);
+                        negated >= lower && negated <= upper
+                    })?;
+                *width = Some((true, bits));
+                Some(Type::IntN { signed: true, bits })
+            }
+            Expr::Int(value, _, width, _) if *value >= 0 && width.is_none() => {
+                let value = *value as i128;
+                if peer == Some(&Type::Int) {
+                    *width = None;
+                    return Some(Type::Int);
+                }
+                if let Some(Type::IntN { signed, bits }) = peer {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if value >= lower && value <= upper {
+                        *width = Some((*signed, *bits));
+                        return Some(Type::IntN {
+                            signed: *signed,
+                            bits: *bits,
+                        });
+                    }
+                }
+                let bits = [8, 16, 32, 64]
+                    .into_iter()
+                    .find(|bits| {
+                        let (_, upper) = crate::AST::int_range(false, *bits);
+                        value <= upper
+                    })?;
+                *width = Some((false, bits));
+                Some(Type::IntN {
+                    signed: false,
+                    bits,
+                })
+            }
+            _ => None,
+        }
+    }
+
     fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
         match expr {
             Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
@@ -157,6 +234,24 @@ impl<'a> Checker<'a> {
                 .then(|| Type::CHECKED_NUMERIC_WIDEN_MARKER.to_string()),
             resolved_ret: Some(target.clone()),
         };
+    }
+
+    pub(crate) fn widen_numeric_argument(
+        &mut self,
+        expr: &mut Expr,
+        source: Type,
+        target: &Type,
+        convention: crate::AST::AccessConvention,
+    ) -> Type {
+        if convention != crate::AST::AccessConvention::Write
+            && source != *target
+            && source.numeric_widening_to(target).is_some()
+        {
+            self.widen_numeric_expr(expr, &source, target);
+            target.clone()
+        } else {
+            source
+        }
     }
 
     fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
@@ -409,16 +504,30 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
 
-        // A numeral has no independently chosen runtime width. Let a numeric
-        // type on either side provide its context before applying the
-        // value-set widening law. This keeps `1 + sized` and `sized + 1`
-        // symmetric without searching for a third common type.
-        if lt != rt && rt.is_numeric() {
+        // D-INTLIT-WIDTH1=F: an unowned whole literal adopts a typed peer
+        // that contains its singleton value; without one, it takes the
+        // narrowest integer type that contains the value. The ordinary
+        // value-set law then decides whether one operand widens to the other.
+        let lhs_is_literal = Self::is_bare_integer_literal(lhs);
+        let rhs_is_literal = Self::is_bare_integer_literal(rhs);
+        if let Some(minimal) =
+            Self::minimal_integer_literal_type(lhs, (!rhs_is_literal).then_some(&rt))
+        {
+            lt = minimal;
+        }
+        if let Some(minimal) =
+            Self::minimal_integer_literal_type(rhs, (!lhs_is_literal).then_some(&lt))
+        {
+            rt = minimal;
+        }
+
+        // Decimal context still owns an untyped numeral's representation.
+        if lt != rt && matches!(rt, Type::Float | Type::Float32) {
             if let Some(contextual) = self.contextualize_numeric_literal(lhs, &rt) {
                 lt = contextual;
             }
         }
-        if lt != rt && lt.is_numeric() {
+        if lt != rt && matches!(lt, Type::Float | Type::Float32) {
             if let Some(contextual) = self.contextualize_numeric_literal(rhs, &lt) {
                 rt = contextual;
             }
@@ -1395,7 +1504,7 @@ fn expr_wants_expected_type(expr: &Expr) -> bool {
         Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
             expr_wants_expected_type(inner)
         }
-        Expr::Int(..) | Expr::Float(..) => true,
+        Expr::Float(..) => true,
         Expr::StructLit { inferred: true, .. } => true,
         Expr::TypedLit { head: None, .. } => true,
         Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,

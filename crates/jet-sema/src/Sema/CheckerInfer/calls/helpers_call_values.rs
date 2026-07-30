@@ -145,6 +145,12 @@ impl<'a> Checker<'a> {
                     self.expected_type = saved;
                     self.borrow_ctx = saved_borrow;
                     if let Some(got) = got {
+                        let got = self.widen_numeric_argument(
+                            &mut arg.expr,
+                            got,
+                            param_ty,
+                            AccessConvention::Read,
+                        );
                         if got != *param_ty {
                             self.diags.push(Diagnostic::error(
                                 "E0112",

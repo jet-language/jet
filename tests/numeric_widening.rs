@@ -3,9 +3,11 @@ mod tir_support;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tir_support::{build_and_run_full, have_rustc, run_default_multi};
+use std::sync::Mutex;
+use tir_support::{build_and_run_full, build_and_run_multi, have_rustc};
 
 static INTERPRETER_SEQ: AtomicU64 = AtomicU64::new(0);
+static JIT_TRACE_LOCK: Mutex<()> = Mutex::new(());
 
 fn compile_ok(source: &str) -> jet::CompileOutput {
     jet::compile(source).unwrap_or_else(|diagnostics| {
@@ -21,18 +23,36 @@ fn compile_error(source: &str) -> String {
     jet::render_diagnostics("numeric_widening.jet", source, &diagnostics)
 }
 
-fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
+fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     let sequence = INTERPRETER_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "jet_numeric_widen_interpreter_{}_{}_{}",
+        "jet_numeric_widen_{}_{}_{}",
         name,
         std::process::id(),
         sequence
     ));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("main.jet");
-    fs::write(&path, source).unwrap();
-    match dev_iteration(path.to_str().unwrap(), false, true) {
+    for (relative, source) in files {
+        let path = dir.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, source).unwrap();
+    }
+    dir.join("main.jet")
+}
+
+fn run_in_process(
+    name: &str,
+    files: &[(&str, &str)],
+    force_interpreter: bool,
+) -> RunOutcome {
+    let path = write_program(name, files);
+    dev_iteration(path.to_str().unwrap(), false, force_interpreter)
+}
+
+fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
+    match run_in_process(name, &[("main.jet", source)], true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -44,6 +64,25 @@ fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
     }
 }
 
+fn run_resident(name: &str, files: &[(&str, &str)]) -> RunOutcome {
+    let _trace_guard = JIT_TRACE_LOCK.lock().unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = run_in_process(name, files, false);
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "{name} did not execute resident JIT code"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "{name} invoked the fallback tier"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "{name} deoptimized into the interpreter"
+    );
+    outcome
+}
+
 fn assert_all_tiers(name: &str, source: &str, expected_code: i32, expected_stdout: &str) {
     if have_rustc() {
         let (code, stdout, stderr) =
@@ -52,18 +91,64 @@ fn assert_all_tiers(name: &str, source: &str, expected_code: i32, expected_stdou
         assert_eq!(stdout, expected_stdout, "AOT stderr:\n{stderr}");
     }
 
-    let (code, stdout, stderr) =
-        run_default_multi(name, "main.jet", &[("main.jet", source)]);
-    assert_eq!(code, expected_code, "default-tier stderr:\n{stderr}");
-    assert_eq!(stdout, expected_stdout, "default-tier stderr:\n{stderr}");
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "default tier silently deoptimized:\n{stderr}"
-    );
+    match run_resident(name, &[("main.jet", source)]) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, expected_code, "resident-JIT stderr:\n{stderr}");
+            assert_eq!(stdout, expected_stdout, "resident-JIT stderr:\n{stderr}");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("resident JIT rejected numeric widening: {diagnostics:#?}")
+        }
+    }
 
     let (code, stdout, stderr) = run_interpreter(name, source);
     assert_eq!(code, expected_code, "interpreter stderr:\n{stderr}");
     assert_eq!(stdout, expected_stdout, "interpreter stderr:\n{stderr}");
+}
+
+fn assert_all_tiers_multi(
+    name: &str,
+    files: &[(&str, &str)],
+    expected_code: i32,
+    expected_stdout: &str,
+) {
+    if have_rustc() {
+        let (code, stdout) = build_and_run_multi(name, "main.jet", files);
+        assert_eq!(code, expected_code, "multi-file AOT exit drift");
+        assert_eq!(stdout, expected_stdout, "multi-file AOT output drift");
+    }
+
+    match run_resident(name, files) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, expected_code, "resident-JIT stderr:\n{stderr}");
+            assert_eq!(stdout, expected_stdout, "resident-JIT stderr:\n{stderr}");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("resident JIT rejected imported numeric widening: {diagnostics:#?}")
+        }
+    }
+
+    match run_in_process(name, files, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, expected_code, "interpreter stderr:\n{stderr}");
+            assert_eq!(stdout, expected_stdout, "interpreter stderr:\n{stderr}");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("interpreter rejected imported numeric widening: {diagnostics:#?}")
+        }
+    }
 }
 
 fn assert_trap_all_tiers(name: &str, source: &str) {
@@ -77,18 +162,24 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
         assert!(stderr.contains(MESSAGE), "AOT stderr:\n{stderr}");
     }
 
-    let (code, stdout, stderr) =
-        run_default_multi(name, "main.jet", &[("main.jet", source)]);
-    assert_eq!(code, 1, "default-tier stderr:\n{stderr}");
-    assert!(stdout.is_empty(), "default-tier stdout:\n{stdout}");
-    assert!(
-        stderr.contains("[E0953]") && stderr.contains(MESSAGE),
-        "default-tier stderr:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "default tier silently deoptimized:\n{stderr}"
-    );
+    match run_resident(name, &[("main.jet", source)]) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 70, "resident-JIT stderr:\n{stderr}");
+            assert!(stdout.is_empty(), "resident-JIT stdout:\n{stdout}");
+            assert!(stderr.contains(MESSAGE), "resident-JIT stderr:\n{stderr}");
+        }
+        RunOutcome::Problems(diagnostics) => assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0953"
+                    && diagnostic.why.contains(MESSAGE)),
+            "resident-JIT diagnostics: {diagnostics:#?}"
+        ),
+    }
 
     let sequence = INTERPRETER_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
@@ -235,6 +326,92 @@ fn run() {
 }
 
 #[test]
+fn numeric_arguments_widen_at_every_user_call_seam() {
+    let source = r#"
+trait NumericSink {
+    fn accept(self, value: Float) => Float
+}
+
+struct Holder {
+    seed: Int
+}
+
+impl Holder.NumericSink {
+    fn accept(self, value: Float) => Float {
+        return value
+    }
+}
+
+impl Holder {
+    fn instance(self, value: Float) => Float {
+        return value
+    }
+
+    fn static(value: Float) => Float {
+        return value
+    }
+}
+
+module numeric_helpers {
+    pub fn accept(value: Float) => Float {
+        return value
+    }
+}
+
+fn accept_float(value: Float) => Float {
+    return value
+}
+
+fn run() {
+    narrow :: I32.{7}
+    holder :: Holder.{seed: 0}
+    callback :: accept_float
+
+    print(holder.instance(narrow) == 7.0)
+    print(Holder.static(narrow) == 7.0)
+    print(callback(narrow) == 7.0)
+    print(numeric_helpers.accept(narrow) == 7.0)
+    print(holder.accept(narrow) == 7.0)
+    widened :: accept_float.[narrow]
+    print(widened[0] == 7.0)
+}
+"#;
+
+    assert_all_tiers(
+        "numeric_widen_user_call_seams",
+        source,
+        0,
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
+fn numeric_arguments_widen_across_imported_call_seams() {
+    let files = [
+        (
+            "main.jet",
+            r#"
+use "./helper" as helper
+
+fn run() {
+    narrow :: I32.{7}
+    print(helper.accept(narrow) == 7.0)
+}
+"#,
+        ),
+        (
+            "helper.jet",
+            r#"
+pub fn accept(value: Float) => Float {
+    return value
+}
+"#,
+        ),
+    ];
+    assert_all_tiers_multi("numeric_widen_imported_call", &files, 0, "true\n");
+}
+
+#[test]
 fn widening_does_not_search_for_a_third_type_or_narrow() {
     let no_join = compile_error(
         r#"
@@ -264,22 +441,55 @@ fn run() {
 }
 
 #[test]
-fn contextual_numerals_still_fail_at_the_destination_limit() {
-    for expression in ["byte + 256", "256 + byte"] {
-        let source = format!(
-            r#"
-fn run() {{
-    byte :: U8.{{1}}
-    _ :: {expression}
-}}
-"#
-        );
-        let rendered = compile_error(&source);
+fn bare_whole_literals_take_the_minimal_width_before_operator_join() {
+    let source = r#"
+fn run() {
+    byte :: U8.{1}
+    signed :: I8.{1}
+    left :: byte + 256
+    right :: 256 + byte
+    print(left == U16.{257})
+    print(right == U16.{257})
+    print((signed + 1) == I8.{2})
+    print((1 + signed) == I8.{2})
+    print((byte + 1) == U8.{2})
+    print((1 + byte) == U8.{2})
+    print((I8.{0} + 127) == I8.{127})
+    print((I16.{0} + 128) == I16.{128})
+    print((I8.{0} + -128) == I8.{-128})
+    print((I16.{0} + -129) == I16.{-129})
+    print((U64.{0} + 9223372036854775807) == U64.{9223372036854775807})
+}
+"#;
+    assert_all_tiers(
+        "numeric_minimal_literal_join",
+        source,
+        0,
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+
+    let rendered = compile_error("fn run() { _ :: U8.{256} }");
+    assert!(
+        rendered.contains("[E1003]") && rendered.contains("U8") && rendered.contains("255"),
+        "{rendered}"
+    );
+
+    for value in [
+        "9223372036854775808",
+        "18446744073709551615",
+        "18446744073709551616",
+    ] {
+        let rendered = compile_error(&format!("fn run() {{ _ :: U64.{{{value}}} }}"));
         assert!(
-            rendered.contains("[E1003]")
-                && rendered.contains("U8")
-                && rendered.contains("255"),
+            rendered.contains("[E0007]")
+                && rendered.contains("numbers currently top out at 9223372036854775807"),
             "{rendered}"
         );
     }
+    let rendered = compile_error("fn run() { _ :: -9223372036854775808 + I64.{0} }");
+    assert!(
+        rendered.contains("[E0007]")
+            && rendered.contains("numbers currently top out at 9223372036854775807"),
+        "{rendered}"
+    );
 }

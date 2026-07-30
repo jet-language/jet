@@ -3637,6 +3637,12 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_exp;
         let mut sendability_failed = false;
         if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                &elem_ty,
+                AccessConvention::Move,
+            );
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(
@@ -3768,6 +3774,12 @@ impl<'a> Checker<'a> {
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved;
         if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                inner,
+                AccessConvention::Move,
+            );
             self.check_type_assignable(inner, &got, arg.expr.span());
         }
         self.check_take_arg_ownership(method, 0, inner, arg);
@@ -4083,6 +4095,12 @@ impl<'a> Checker<'a> {
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved_exp;
         if let Some(got) = got {
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                &elem_ty,
+                AccessConvention::Move,
+            );
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(

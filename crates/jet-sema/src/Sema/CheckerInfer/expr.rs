@@ -2383,6 +2383,12 @@ impl<'a> Checker<'a> {
             let item_ty = self.infer(item);
             self.expected_type = saved;
             if let Some(got) = item_ty {
+                let got = self.widen_numeric_argument(
+                    item,
+                    got,
+                    &param_ty,
+                    crate::AST::AccessConvention::Read,
+                );
                 if got != param_ty {
                     had_error = true;
                     self.diags.push(Diagnostic::error(

@@ -284,6 +284,12 @@ impl<'a> Checker<'a> {
             let Some(got) = got else { return };
             let want = self.resolve_type(want.clone());
             let got = self.resolve_type(got);
+            let got = self.widen_numeric_argument(
+                &mut arg.expr,
+                got,
+                &want,
+                crate::AST::AccessConvention::Read,
+            );
             let reported = self.check_type_assignable(&want, &got, arg.expr.span());
             // D-FIXARR1: [T#N] widens to [T] at a call site.
             let fixed_widens = matches!((&want, &got),
@@ -292,19 +298,10 @@ impl<'a> Checker<'a> {
                 &want,
                 Type::Union(members) if members.iter().any(|m| m == &got)
             );
-            let reader_length_widens = label == "Reader.take"
-                && matches!(
-                    &got,
-                    Type::IntN {
-                        signed: false,
-                        bits: 8 | 16 | 32
-                    }
-                );
             if !reported
                 && got != want
                 && !fixed_widens
                 && !union_widens
-                && !reader_length_widens
             {
                 self.diags.push(Diagnostic::error(
                     "E0112",
