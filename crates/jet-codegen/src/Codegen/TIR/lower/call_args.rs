@@ -293,10 +293,20 @@ pub(crate) fn lower_extern_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TExternArg {
-    let value = lower_expr(&a.expr, cx, env);
+    // D-CABI-CALLBACK1: the C bridge is still an extern call, but its callback
+    // argument needs the same stable function item / lambda wrapper as a direct
+    // C call. Preserve sema's fact instead of re-boxing it as `dyn Fn`.
+    let c_callback = conv.as_ref().is_some_and(|(_, ty)| {
+        a.flags.c_callback_symbol && callback_fn_type(ty).is_some()
+    });
+    let value = if c_callback {
+        lower_one_call_arg(a, conv.clone(), env, cx).value
+    } else {
+        lower_expr(&a.expr, cx, env)
+    };
     let non_scalar_param = conv
         .as_ref()
-        .map(|(_, ty)| !ty.is_scalar())
+        .map(|(_, ty)| !ty.is_scalar() && !c_callback)
         .unwrap_or(false);
     // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or the
     // non-scalar-param clone (when implicit_clone is false). The two never stack — the

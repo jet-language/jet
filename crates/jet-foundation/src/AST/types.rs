@@ -440,6 +440,14 @@ fn effect_names(row: &[(String, Span)]) -> String {
 }
 
 impl Type {
+    /// Compiler-private fact marker on an implicit checked integer-to-float
+    /// conversion. Sema writes it; lowering consumes it without reconstructing
+    /// the language rule.
+    pub const CHECKED_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.checked_widen";
+    /// Compiler-private call name left by `approx(value)` until its surrounding
+    /// numeric widening consumes the explicit loss opt-out.
+    pub const APPROX_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.approx_widen";
+
     /// Recursively rewrite nominal leaves while preserving every container and
     /// callback shape. Import resolution uses this to attach module identity to
     /// unit-family members in signatures.
@@ -716,6 +724,60 @@ impl Type {
         self.is_integer() || self.is_float()
     }
 
+    /// D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E:
+    /// classify an implicit numeric move into `target`.
+    /// The returned bool is true only when the crossing needs a runtime check.
+    pub fn numeric_widening_to(&self, target: &Type) -> Option<bool> {
+        if self == target && self.is_numeric() {
+            return Some(false);
+        }
+
+        let integer = |ty: &Type| match ty {
+            Type::Int => Some((true, 64)),
+            Type::IntN { signed, bits } => Some((*signed, *bits)),
+            _ => None,
+        };
+
+        if let (Some((source_signed, source_bits)), Some((target_signed, target_bits))) =
+            (integer(self), integer(target))
+        {
+            let (source_min, source_max) = int_range(source_signed, source_bits);
+            let (target_min, target_max) = int_range(target_signed, target_bits);
+            return (target_min <= source_min && source_max <= target_max).then_some(false);
+        }
+
+        match (self, target) {
+            (Type::Float32, Type::Float) => Some(false),
+            (source, Type::Float | Type::Float32) if source.is_integer() => {
+                let (signed, bits) = integer(source)?;
+                let precision = if matches!(target, Type::Float32) {
+                    24
+                } else {
+                    53
+                };
+                let exact = if signed {
+                    bits <= precision + 1
+                } else {
+                    bits <= precision
+                };
+                Some(!exact)
+            }
+            _ => None,
+        }
+    }
+
+    /// Numeric expression join. One operand must itself be the wider target;
+    /// Jet does not search for a third numeric type that could hold both.
+    pub fn numeric_join(&self, other: &Type) -> Option<Type> {
+        if self.numeric_widening_to(other).is_some() {
+            Some(other.clone())
+        } else if other.numeric_widening_to(self).is_some() {
+            Some(self.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn unwrap_option(&self) -> Option<&Type> {
         match self {
             Type::Option(inner) => Some(inner),
@@ -753,7 +815,7 @@ impl Type {
 
 #[cfg(test)]
 mod tests {
-    use super::{Dimension, Type, CORE_CRYPTO_NOMINAL_MARKER};
+    use super::{numeric_type_from_name, Dimension, Type, CORE_CRYPTO_NOMINAL_MARKER};
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -833,5 +895,102 @@ mod tests {
         assert_ne!(length, time);
         assert!(length.name().contains("length.Unit"));
         assert!(time.name().contains("time.Unit"));
+    }
+
+    #[test]
+    fn numeric_widening_uses_value_containment_and_marks_checked_crossings() {
+        let i8 = Type::IntN {
+            signed: true,
+            bits: 8,
+        };
+        let i16 = Type::IntN {
+            signed: true,
+            bits: 16,
+        };
+        let i32 = Type::IntN {
+            signed: true,
+            bits: 32,
+        };
+        let u8 = Type::IntN {
+            signed: false,
+            bits: 8,
+        };
+        let u32 = Type::IntN {
+            signed: false,
+            bits: 32,
+        };
+        let u64 = Type::IntN {
+            signed: false,
+            bits: 64,
+        };
+
+        assert_eq!(i8.numeric_widening_to(&i16), Some(false));
+        assert_eq!(u8.numeric_widening_to(&i16), Some(false));
+        assert_eq!(i16.numeric_widening_to(&u32), None);
+        assert_eq!(u64.numeric_widening_to(&Type::Int), None);
+        assert_eq!(Type::Float32.numeric_widening_to(&Type::Float), Some(false));
+        assert_eq!(Type::Float.numeric_widening_to(&Type::Float32), None);
+
+        assert_eq!(i32.numeric_widening_to(&Type::Float), Some(false));
+        assert_eq!(Type::Int.numeric_widening_to(&Type::Float), Some(true));
+        assert_eq!(i16.numeric_widening_to(&Type::Float32), Some(false));
+        assert_eq!(i32.numeric_widening_to(&Type::Float32), Some(true));
+        assert_eq!(u64.numeric_widening_to(&Type::Float32), Some(true));
+
+        assert_eq!(u8.numeric_join(&i8), None);
+        assert_eq!(i8.numeric_join(&i16), Some(i16));
+        assert_eq!(Type::Int.numeric_join(&Type::Float), Some(Type::Float));
+    }
+
+    #[test]
+    fn numeric_widening_covers_the_ratified_integer_float_matrix() {
+        let ty = |name| numeric_type_from_name(name).unwrap();
+        let integers = ["I8", "I16", "I32", "Int", "U8", "U16", "U32", "U64"];
+
+        for source in integers {
+            for target in integers {
+                let source_ty = ty(source);
+                let target_ty = ty(target);
+                let (source_signed, source_bits) = match source_ty {
+                    Type::Int => (true, 64),
+                    Type::IntN { signed, bits } => (signed, bits),
+                    _ => unreachable!(),
+                };
+                let (target_signed, target_bits) = match target_ty {
+                    Type::Int => (true, 64),
+                    Type::IntN { signed, bits } => (signed, bits),
+                    _ => unreachable!(),
+                };
+                let (source_min, source_max) = super::int_range(source_signed, source_bits);
+                let (target_min, target_max) = super::int_range(target_signed, target_bits);
+                let expected =
+                    (target_min <= source_min && source_max <= target_max).then_some(false);
+                assert_eq!(
+                    ty(source).numeric_widening_to(&ty(target)),
+                    expected,
+                    "{source} -> {target}"
+                );
+            }
+        }
+
+        for target in ["Float", "F32"] {
+            for source in integers {
+                let exact = match (source, target) {
+                    ("I8" | "I16" | "I32" | "U8" | "U16" | "U32", "Float") => true,
+                    ("I8" | "I16" | "U8" | "U16", "F32") => true,
+                    _ => false,
+                };
+                assert_eq!(
+                    ty(source).numeric_widening_to(&ty(target)),
+                    Some(!exact),
+                    "{source} -> {target}"
+                );
+                assert_eq!(
+                    ty(target).numeric_widening_to(&ty(source)),
+                    None,
+                    "{target} must not narrow to {source}"
+                );
+            }
+        }
     }
 }

@@ -875,6 +875,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         recv.ty.is_numeric()
                             && matches!(dst_rust.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64")
                     }
+                    TNumericOp::CheckedIntToFloat { .. } => recv.ty.is_integer(),
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
                     TNumericOp::Origin(_) => true,

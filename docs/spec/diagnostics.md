@@ -186,7 +186,7 @@ renumbered, and no new `W` code may be allocated.
 | E0106 | sema  | redefining a built-in                     |
 | E0107 | sema  | unknown name (with suggestion)            |
 | E0108 | sema  | binding type doesn't match its value      |
-| E0109 | sema  | operator type mismatch (incl. Int/Float mixing, `+` on text) |
+| E0109 | sema  | operator type mismatch (including numeric pairs where neither operand can widen to the other, and `+` on text) |
 | E0110 | sema  | condition isn't `Bool` (`if`/`while`/arm/logic operand) |
 | E0111 | sema  | changing a `::`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |

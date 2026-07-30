@@ -572,6 +572,9 @@ pub const BUILTIN_PANIC: &str = "panic";
 pub const BUILTIN_WRAPPING: &str = "wrapping";
 pub const BUILTIN_SATURATING: &str = "saturating";
 pub const BUILTIN_CHECKED: &str = "checked";
+/// D-NUMWIDEN-CROSS1=E (ratified 2026-07-28): accept a possibly inexact
+/// integer-to-float crossing at one use site.
+pub const BUILTIN_APPROX: &str = "approx";
 pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";

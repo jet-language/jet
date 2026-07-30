@@ -14329,6 +14329,27 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(converted)
             }
+            TNumericOp::CheckedIntToFloat {
+                source_signed,
+                target_f32,
+                ..
+            } => {
+                let source_signed = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(*source_signed));
+                let target_f32 = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(*target_f32));
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.numeric_checked_widen, self.b.func);
+                let call = self.b.ins().call(host, &[value, source_signed, target_f32]);
+                let widened = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(widened)
+            }
             TNumericOp::TryFrom { host_kind, .. } => {
                 let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));
                 let unsigned = self.b.ins().iconst(types::I64, unsigned);

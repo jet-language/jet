@@ -2850,14 +2850,16 @@ Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005
 type); `<<` `>>` take any integer shift-count and keep the left side's type. A
 shift count past the type's width traps (no leaked Rust panic).
 
-**Width conversions** are destination-owned named methods — no implicit narrowing or widening:
+**Width conversions** use one safe widening law and destination-owned named
+methods for explicit narrowing. Widening is implicit when the destination
+contains every source value. Integer-to-float crossings that cannot be proved
+exact are checked at runtime; `approx(value)` accepts possible precision loss
+for one crossing. Narrowing is never implicit.
 
 | Method | Returns | Direction |
 |--------|---------|-----------|
-| `Int.from_u8(n)` / `U32.from_u8(n)` / … (widening) | `T` | infallible |
 | `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
 | `F32.from_float(n)` | `F32 ? String` | fallible (finite F32 range) |
-| `Float.from_i32(n)` | `Float` | infallible |
 
 ---
 

@@ -428,7 +428,7 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
     s
 }
 
-fn emit_numeric_op(recv: &str, op: &TNumericOp, _cx: &Cx) -> String {
+fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
     match op {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
         TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
@@ -438,6 +438,22 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, _cx: &Cx) -> String {
             origin.as_deref().unwrap_or("untracked")
         ),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
+        TNumericOp::CheckedIntToFloat {
+            source_signed,
+            target_f32,
+            line,
+        } => {
+            let checked = format!(
+                "match jet_numeric_checked_widen(({recv}) as u64, {source_signed}, {target_f32}) {{ \
+                 Some(value) => value, None => jet_panic({:?}, {line}, JET_NUMERIC_WIDEN_TRAP) }}",
+                cx.file
+            );
+            if *target_f32 {
+                format!("(({checked}) as f32)")
+            } else {
+                checked
+            }
+        }
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,

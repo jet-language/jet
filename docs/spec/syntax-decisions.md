@@ -540,15 +540,25 @@ no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain integer arithmetic **traps on overflow** at every
 width; opt in per-op with `wrapping(…)` / `saturating(…)` /
 `checked(…) => T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
-bit ops. **D-FLOATW1**: `core.math` is width-generic; mixing F32 and Float is
-a compile error with a convert fix-it.
+bit ops. **D-FLOATW1**: `core.math` is width-generic.
+
+**D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
+2026-07-28)*: one numeric widening law applies to operators, arguments,
+returns, and assignments. One operand may widen to the other; Jet never
+searches for a third type and never narrows implicitly. Integer widening
+requires full value-set containment. `F32` widens to `Float`. Integers cross
+freely to `Float` from `I8 I16 I32 U8 U16 U32`, and to `F32` from
+`I8 I16 U8 U16`. Other integer-to-float crossings use a runtime exactness
+check and trap before rounding. A numeral is checked exactly at compile time.
+Experts accept possible precision loss for one crossing with `approx(value)`.
 
 **D-SHAPE-CONVERT1=A — destination type owns explicit conversion** *(ratified
 2026-07-14, card #566)*: typed conversion is always
 `Target.from_source(value)`. The source-kind suffix is canonical and bounded
 (`from_int`, `from_u8`, `from_float`, or a source type's snake-case name), so
 completion stays on the promised result type. Checked narrowing returns the
-ordinary fallible result and is handled with `?`/`??`; widening is infallible.
+ordinary fallible result and is handled with `?`/`??`; safe numeric widening
+is implicit.
 Text interpretation remains `Target.parse(text)`; non-parsing materialization
 such as `Secret.from_text` remains an ordinary destination-owned conversion. Numeric,
 distinct/unit, enum, FFI, and user-defined static conversions share this one
@@ -558,7 +568,7 @@ and neutral `convert(value)` aliases are not accepted.
 ```jet
 id :: UserId.from_int(raw_id)
 byte :: U8.from_int(count) ?? return
-ratio :: Float.from_u8(byte)
+ratio :: byte + 0.0
 parsed :: Int.parse(text) ?? return
 ```
 

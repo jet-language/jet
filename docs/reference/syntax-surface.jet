@@ -66,8 +66,9 @@ small :: U8.{ 255 }
 wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
     mask :: 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big :: 6.022e23                 // float exponent (S67)
-    // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
-    f :: Float.from_u8(small)
+    // safe widening is implicit; narrowing uses named methods (S42)
+    f := Float.{ 0.0 }
+    f = small
     n :: Int.from_float(f) ?? 0
 }
 

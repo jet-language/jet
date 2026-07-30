@@ -2954,6 +2954,27 @@ pub(crate) fn lower_method_call(
         };
         }
     }
+    // D-NUMWIDEN-CROSS1=E: sema owns the checked-crossing decision and leaves
+    // this unspellable marker. Lowering only records adapter facts.
+    if recv_type.as_deref() == Some(Type::CHECKED_NUMERIC_WIDEN_MARKER)
+        && args.len() == 1
+    {
+        let source = lower_expr(&args[0].expr, cx, env);
+        let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
+        let target = resolved_ret.cloned().unwrap_or(Type::Float);
+        return TExpr {
+            ty: target.clone(),
+            kind: TExprKind::NumericMethod {
+                recv: Box::new(source),
+                op: TNumericOp::CheckedIntToFloat {
+                    source_signed,
+                    target_f32: target == Type::Float32,
+                    line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32,
+                },
+            },
+        };
+    }
+
     // c109 Phase 12: a numeric predicate / bit-pop query
     // (`is_nan`/`count_ones`/…). The gate proved `recv_type ==
     // Some(<numeric name>)` + a covered nullary numeric op. Resolve the receiver

@@ -13,6 +13,10 @@ pub mod scheduler;
 /// the TIR evaluator's deopt adapter.
 #[path = "Prelude/LocalCell.rs"]
 pub mod local_cell;
+/// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
+/// by AOT emission, TIR evaluation, and the resident JIT adapter.
+#[path = "Prelude/NumericWiden.rs"]
+pub mod numeric_widen;
 /// D-TASKGROUP-PARAM1=A: canonical structured task ownership policy. The JIT
 /// compiles the same Prelude source that AOT embeds.
 #[path = "Prelude/TaskGroup.rs"]

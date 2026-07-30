@@ -9,6 +9,149 @@ use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn contextualize_numeric_literal(
+        &mut self,
+        expr: &mut Expr,
+        target: &Type,
+    ) -> Option<Type> {
+        match expr {
+            Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
+                (Expr::Int(value, span, width, _), Type::IntN { signed: true, bits }) => {
+                    let negated = -(*value as i128);
+                    let (lower, upper) = crate::AST::int_range(true, *bits);
+                    if negated < lower || negated > upper {
+                        self.diags
+                            .push(crate::Sema::int_range_error(true, *bits, *span));
+                    }
+                    *width = Some((true, *bits));
+                    Some(target.clone())
+                }
+                (_, Type::IntN { signed: false, .. }) => None,
+                _ => self.contextualize_numeric_literal(inner, target),
+            },
+            Expr::Int(value, span, width, _) => match target {
+                Type::Int => {
+                    *width = None;
+                    Some(Type::Int)
+                }
+                Type::IntN { signed, bits } => {
+                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    if (*value as i128) < lower || (*value as i128) > upper {
+                        self.diags
+                            .push(crate::Sema::int_range_error(*signed, *bits, *span));
+                    }
+                    *width = Some((*signed, *bits));
+                    Some(target.clone())
+                }
+                Type::Float | Type::Float32 => {
+                    let exact = if *target == Type::Float32 {
+                        (*value as f32) as i128 == *value as i128
+                    } else {
+                        (*value as f64) as i128 == *value as i128
+                    };
+                    if !exact {
+                        let limit = if *target == Type::Float32 {
+                            1i128 << 24
+                        } else {
+                            1i128 << 53
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E1003",
+                            format!("{} does not fit exactly in {}", value, target.name()),
+                            format!(
+                                "{} holds every whole number only from -{} through {}",
+                                target.name(),
+                                limit,
+                                limit
+                            ),
+                            format!(
+                                "use a whole-number type, or write a value from -{} through {}",
+                                limit,
+                                limit
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                    *expr = Expr::Float(*value as f64, *span, *target == Type::Float32);
+                    Some(target.clone())
+                }
+                _ => None,
+            },
+            Expr::Float(_, _, is_f32) => match target {
+                Type::Float => {
+                    *is_f32 = false;
+                    Some(Type::Float)
+                }
+                Type::Float32 => {
+                    *is_f32 = true;
+                    Some(Type::Float32)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Record sema's numeric widening decision on the expression itself.
+    /// Lowering consumes the explicit conversion and checked-crossing marker.
+    pub(crate) fn widen_numeric_expr(
+        &mut self,
+        expr: &mut Expr,
+        source: &Type,
+        target: &Type,
+    ) {
+        if source == target {
+            return;
+        }
+        if self.contextualize_numeric_literal(expr, target).is_some() {
+            return;
+        }
+        let Some(widening) = source.numeric_widening_to(target) else {
+            return;
+        };
+        let span = expr.span();
+        let approximate = matches!(
+            expr,
+            Expr::Call(call) if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER
+        );
+
+        if !approximate {
+            if let Expr::Float(_, _, is_f32) = expr {
+                if *target == Type::Float32 {
+                    *is_f32 = true;
+                    return;
+                }
+            }
+        }
+
+        let old = if approximate {
+            let Expr::Call(call) = expr else {
+                unreachable!()
+            };
+            std::mem::replace(&mut call.args[0].expr, Expr::Absent(span))
+        } else {
+            std::mem::replace(expr, Expr::Absent(span))
+        };
+        *expr = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(target.name(), span)),
+            method: Syntax::conversion_method_for_source(&source.name()),
+            method_span: span,
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: old,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: (widening && !approximate)
+                .then(|| Type::CHECKED_NUMERIC_WIDEN_MARKER.to_string()),
+            resolved_ret: Some(target.clone()),
+        };
+    }
+
     fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
         Expr::MethodCall {
             receiver: Box::new(expr),
@@ -257,7 +400,23 @@ impl<'a> Checker<'a> {
         }
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
-        let (lt, rt) = (lt?, rt?);
+        let (mut lt, mut rt) = (lt?, rt?);
+
+        // A numeral has no independently chosen runtime width. Let a numeric
+        // type on either side provide its context before applying the
+        // value-set widening law. This keeps `1 + sized` and `sized + 1`
+        // symmetric without searching for a third common type.
+        if lt != rt && rt.is_numeric() {
+            if let Some(contextual) = self.contextualize_numeric_literal(lhs, &rt) {
+                lt = contextual;
+            }
+        }
+        if lt != rt && lt.is_numeric() {
+            if let Some(contextual) = self.contextualize_numeric_literal(rhs, &lt) {
+                rt = contextual;
+            }
+        }
+
         if matches!(op, BinOp::Eq | BinOp::Ne)
             && (self.type_contains_observable_clock(&lt)
                 || self.type_contains_observable_clock(&rt))
@@ -266,6 +425,30 @@ impl<'a> Checker<'a> {
             if self.in_pure && self.det_suppress == 0 {
                 self.diags
                     .push(crate::Sema::e3403("Clock comparison", Some(span)));
+            }
+        }
+
+        let joins_numeric = matches!(
+            op,
+            BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Le
+                | BinOp::Gt
+                | BinOp::Ge
+        ) || (matches!(op, BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+            && lt.is_integer()
+            && rt.is_integer());
+        if joins_numeric && lt != rt {
+            if let Some(join) = lt.numeric_join(&rt) {
+                self.widen_numeric_expr(lhs, &lt, &join);
+                self.widen_numeric_expr(rhs, &rt, &join);
+                lt = join.clone();
+                rt = join;
             }
         }
 
@@ -1094,6 +1277,23 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {
+        let (why, fix) = if lt.is_numeric() && rt.is_numeric() {
+            (
+                format!(
+                    "neither {} contains every value of {}, nor {} every value of {}",
+                    lt.name(),
+                    rt.name(),
+                    rt.name(),
+                    lt.name()
+                ),
+                "choose the result type and convert the other side into it".to_string(),
+            )
+        } else {
+            (
+                "the two sides of an operator must be the same type".to_string(),
+                "make both sides the same type".to_string(),
+            )
+        };
         self.diags.push(Diagnostic::error(
             "E0109",
             format!(
@@ -1102,8 +1302,8 @@ impl<'a> Checker<'a> {
                 lt.show(),
                 rt.show()
             ),
-            "the two sides of an operator must be the same type".to_string(),
-            "make both sides the same type".to_string(),
+            why,
+            fix,
             Some(span),
         ));
     }
@@ -1185,7 +1385,10 @@ impl<'a> Checker<'a> {
 /// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`).
 fn expr_wants_expected_type(expr: &Expr) -> bool {
     match expr {
-        Expr::Paren(inner, _) => expr_wants_expected_type(inner),
+        Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            expr_wants_expected_type(inner)
+        }
+        Expr::Int(..) | Expr::Float(..) => true,
         Expr::StructLit { inferred: true, .. } => true,
         Expr::TypedLit { head: None, .. } => true,
         Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,

@@ -984,6 +984,26 @@ extern "C" fn jet_jit_numeric_float_narrow(value: f64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_numeric_checked_widen(
+    raw: i64,
+    source_signed: i64,
+    target_f32: i64,
+) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match jet_codegen::numeric_widen::jet_numeric_checked_widen(
+            raw as u64,
+            source_signed != 0,
+            target_f32 != 0,
+        ) {
+            Some(value) => value,
+            None => {
+                rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
+                0.0
+            }
+        }
+    })
+}
+
 extern "C" fn jet_jit_distinct_range(value: i64, lo: i64, hi: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if value >= lo && value <= hi {
@@ -1504,6 +1524,7 @@ pub(crate) struct HostFns {
     pub(crate) numeric_try_i64: FuncId,
     pub(crate) numeric_float_to_int: FuncId,
     pub(crate) numeric_float_narrow: FuncId,
+    pub(crate) numeric_checked_widen: FuncId,
     pub(crate) distinct_range: FuncId,
     pub(crate) distinct_range_result: FuncId,
     pub(crate) numeric_predicate: FuncId,
@@ -1670,6 +1691,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
     builder.symbol("jet_jit_numeric_float_to_int", jet_jit_numeric_float_to_int as *const u8);
     builder.symbol("jet_jit_numeric_float_narrow", jet_jit_numeric_float_narrow as *const u8);
+    builder.symbol("jet_jit_numeric_checked_widen", jet_jit_numeric_checked_widen as *const u8);
     builder.symbol("jet_jit_distinct_range", jet_jit_distinct_range as *const u8);
     builder.symbol("jet_jit_distinct_range_result", jet_jit_distinct_range_result as *const u8);
     builder.symbol("jet_jit_numeric_predicate", jet_jit_numeric_predicate as *const u8);
@@ -2197,6 +2219,13 @@ fn declare_host_fns(
     sig_measurement_get.returns.push(AbiParam::new(types::F64));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
+    let mut sig_numeric_checked_widen = Signature::new(cc);
+    sig_numeric_checked_widen
+        .params
+        .extend([AbiParam::new(types::I64); 3]);
+    sig_numeric_checked_widen
+        .returns
+        .push(AbiParam::new(types::F64));
     let mut sig_result_new_i64 = Signature::new(cc);
     sig_result_new_i64.params.push(AbiParam::new(types::I8));
     sig_result_new_i64.params.push(AbiParam::new(types::I64));
@@ -2321,6 +2350,10 @@ fn declare_host_fns(
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
         numeric_float_to_int: import("jet_jit_numeric_float_to_int", &sig_f64_i64_i64)?,
         numeric_float_narrow: import("jet_jit_numeric_float_narrow", &sig_f64_i64)?,
+        numeric_checked_widen: import(
+            "jet_jit_numeric_checked_widen",
+            &sig_numeric_checked_widen,
+        )?,
         distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
         distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
         numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,

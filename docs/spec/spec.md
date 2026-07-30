@@ -38,9 +38,10 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
   E0001. Unary minus is an operator, not part of the literal.
 - Explicit conversion (D-SHAPE-CONVERT1=A) is destination-owned:
-  `Target.from_source(value)`. Numeric widening is infallible and narrowing
-  returns a fallible result; numeric-backed distinct and unit types use the
-  same source-kind names. Text interpretation remains `Target.parse(text)`.
+  `Target.from_source(value)`. Numeric narrowing returns a fallible result.
+  Safe widening is implicit under D-INTLIT-WIDTH1, D-VERDICT-1304-1, and
+  D-NUMWIDEN-CROSS1. Numeric-backed distinct and unit types use the same
+  source-kind names. Text interpretation remains `Target.parse(text)`.
   Source-owned `to_*`, casts, and a neutral `convert` helper are absent.
 - Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A) use
   `Duration.milliseconds|seconds|minutes|hours(number)?`; non-finite and
@@ -144,12 +145,12 @@ expr     = precedence climbing over:
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() => String`; untracked Floats return `"untracked"`.
-- Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
-  `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
-  pointing at interpolation. Compound assignment (S17) mirrors the binary
-  operators.
-- Comparisons (`== != < > <= >=`) need matching operand types and yield
-  `Bool`; `&& || !` operate on `Bool` (E0110).
+- Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
+  numeric widening law permits it; `% & | ^ << >>` remain integer-only.
+  `+` on `String` is a teaching error pointing at interpolation. Compound
+  assignment (S17) mirrors the binary operators.
+- Comparisons (`== != < > <= >=`) use the same numeric widening law and yield
+  `Bool`; other operand types must match. `&& || !` operate on `Bool` (E0110).
 - `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
   alternatives in arm heads use single `|`.
 

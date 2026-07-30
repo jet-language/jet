@@ -3662,6 +3662,44 @@ impl<'a> EvalCtx<'a> {
                     _ => Ok(v.clone()),
                 }
             }
+            TNumericOp::CheckedIntToFloat {
+                source_signed,
+                target_f32,
+                ..
+            } => {
+                let CtValue::Int(value) = v else {
+                    return Err(unsupported("checked numeric widening expects Int", self.span()));
+                };
+                let Some(value) = crate::numeric_widen::jet_numeric_checked_widen(
+                    *value as u64,
+                    *source_signed,
+                    *target_f32,
+                ) else {
+                    if let Some(sink) = self.sink.as_ref() {
+                        let mut sink = sink.lock().expect("evaluator sink poisoned");
+                        sink.stderr
+                            .push_str(crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
+                        sink.stderr.push('\n');
+                        sink.exit_code = Some(70);
+                        return Err(Diagnostic::error(
+                            "SOFT_EXIT",
+                            "70".to_string(),
+                            crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP.to_string(),
+                            String::new(),
+                            Some(self.span()),
+                        ));
+                    }
+                    return Err(unsupported(
+                        crate::numeric_widen::JET_NUMERIC_WIDEN_TRAP,
+                        self.span(),
+                    ));
+                };
+                Ok(CtValue::Float(if *target_f32 {
+                    CtFloat::f32(value as f32)
+                } else {
+                    CtFloat::f64(value)
+                }))
+            }
             TNumericOp::TryFrom {
                 dst_spelling,
                 host_kind,
