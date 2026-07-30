@@ -492,6 +492,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_gtk");
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
+    s = strip_shared_guard_internals(&s);
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");
@@ -519,6 +520,26 @@ pub fn strip_scheduler_native(src: &str) -> String {
             s
         }
         _ => src.to_string(),
+    }
+}
+
+/// D-SHAREDGUARD1: drop every vetted `jet:shared-guard-internal` region. A
+/// guard's lease holds the matching lock while its sema-proved projection is
+/// dereferenced; those casts are runtime internals, not user-reachable unsafe.
+pub fn strip_shared_guard_internals(src: &str) -> String {
+    let begin = "// jet:shared-guard-internal-begin";
+    let end = "// jet:shared-guard-internal-end";
+    let mut out = src.to_string();
+    loop {
+        let (Some(b), Some(e)) = (out.find(begin), out.find(end)) else {
+            return out;
+        };
+        if e < b {
+            return out;
+        }
+        let mut next = out[..b].to_string();
+        next.push_str(&out[e + end.len()..]);
+        out = next;
     }
 }
 

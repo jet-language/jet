@@ -782,6 +782,15 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// jet:scheduler-native-begin",
         "// jet:scheduler-native-end",
     );
+    // D-SHAREDGUARD1: a guard's lease keeps the locked root alive and holds the
+    // matching read or write permit; its projections are sema-proved stored
+    // places. Those few pointer casts are delimited in Prelude/CoreLib/JetStd
+    // and are vetted runtime internals, not user-reachable unsafe.
+    s = strip_regions(
+        &s,
+        "// jet:shared-guard-internal-begin",
+        "// jet:shared-guard-internal-end",
+    );
     s = strip_region(
         &s,
         "// JET_VETTED_UNSAFE_BEGIN: jet_env_windows",

@@ -903,12 +903,12 @@ fn run() {
 fn if_expr_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
-comptime true_value = if 3 > 2 { 10 } else { 20 }
-comptime false_value = if 1 > 2 { 10 } else { 20 }
+comptime true_value = if 3 > 2 -> 10 else -> 20
+comptime false_value = if 1 > 2 -> 10 else -> 20
 
 fn run() {
-    c :: if 3 > 2 { 10 } else { 20 }
-    d :: if 1 > 2 { 10 } else { 20 }
+    c :: if 3 > 2 -> 10 else -> 20
+    d :: if 1 > 2 -> 10 else -> 20
     print("{true_value}")
     print("{c}")
     print("{false_value}")
