@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Type};
+use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
@@ -38,6 +38,20 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
         }
         crate::AST::Expr::Paren(inner, _) => literal_list_len(inner),
         _ => None,
+    }
+}
+
+fn collect_task_handles(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expr::Ident(name, _) => {
+            out.insert(name.clone());
+        }
+        Expr::ListLit(items, _) => {
+            for item in items {
+                collect_task_handles(item, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -2133,6 +2147,81 @@ impl<'a> Checker<'a> {
                         name: "Task".to_string(),
                         args: vec![t],
                     });
+                }
+                // D-FANOUT3=C: consume a list of task handles and join them in
+                // list order. Runtime meaning reuses TaskGroupAll/jet_task_all.
+                ("core.tasks", "join_all") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(
+                            "join_all",
+                            1,
+                            args.len(),
+                            span,
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let literal_handles = matches!(&args[0].expr, Expr::ListLit(..));
+                    if !literal_handles && args[0].convention != AccessConvention::Move {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            "`tasks.join_all` consumes its list of task handles".to_string(),
+                            "each task handle can be joined only once".to_string(),
+                            format!(
+                                "pass ownership of the list: `tasks.join_all({}handles)`",
+                                Syntax::SIGIL_MOVE
+                            ),
+                            Some(args[0].span),
+                        ));
+                    }
+                    let elem = match self.infer(&mut args[0].expr) {
+                        Some(Type::List(inner)) => match *inner {
+                            Type::Apply {
+                                ref name,
+                                ref args,
+                                ..
+                            } if name == "Task" && args.len() == 1 => args[0].clone(),
+                            other => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!(
+                                        "`tasks.join_all` needs a list of task handles, not `[{}]`",
+                                        other.show()
+                                    ),
+                                    "each element must be a `Task<T>` handle".to_string(),
+                                    "pass a list such as `[first, second]` where each value came from `tasks.spawn`".to_string(),
+                                    Some(args[0].expr.span()),
+                                ));
+                                return None;
+                            }
+                        },
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`tasks.join_all` needs a list of task handles, not {}",
+                                    other.show()
+                                ),
+                                "the call waits for and consumes each `Task<T>` in one list"
+                                    .to_string(),
+                                "pass a `[Task<T>]` list".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                        None => return None,
+                    };
+                    let mut names = std::collections::HashSet::new();
+                    collect_task_handles(&args[0].expr, &mut names);
+                    for name in names {
+                        self.mark_taskgroup_spawn_consumed(&name);
+                    }
+                    if let Expr::Ident(name, name_span) = &args[0].expr {
+                        self.mark_moved(name.clone(), *name_span);
+                    }
+                    return Some(Type::List(Box::new(elem)));
                 }
                 // L2501 is reserved for "whole-file read advisory" but intentionally not
                 // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call

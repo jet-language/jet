@@ -85,7 +85,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
-            | ("core.tasks", "channel" | "after")
+            | ("core.tasks", "channel" | "after" | "join_all")
             | (
                 "core.data",
                 "csv" | "json" | "csv_reader" | "json_reader" | "count" | "table" | "rows"

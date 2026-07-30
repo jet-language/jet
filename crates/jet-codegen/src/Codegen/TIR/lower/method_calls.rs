@@ -1319,6 +1319,16 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
+                if module == "core.tasks" && method == "join_all" && args.len() == 1 {
+                    let tasks = lower_expr(&args[0].expr, cx, env);
+                    let elem = taskgroup_result_elem(&tasks);
+                    return TExpr {
+                        ty: Type::List(Box::new(elem)),
+                        kind: TExprKind::TaskGroupAll {
+                            tasks: Box::new(tasks),
+                        },
+                    };
+                }
                 if let Some(t) =
                     lower_core_closure_call(&module, method, method_span, args, cx, env)
                 {

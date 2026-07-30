@@ -2033,6 +2033,14 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
+        let ty = self.infer(elem);
+        if ty.is_some() {
+            self.note_move_if_direct_ident(elem);
+        }
+        ty
+    }
+
     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
         for elem in elems.iter() {
             self.reject_fixed_storage(elem, "be stored in a list");
@@ -2097,7 +2105,7 @@ impl<'a> Checker<'a> {
             let saved = self.expected_type.clone();
             self.expected_type = Some((*expected_inner).clone());
             for e in elems.iter_mut() {
-                if let Some(t) = self.infer(e) {
+                if let Some(t) = self.infer_owned_list_element(e) {
                     self.check_type_assignable(&expected_inner, &t, e.span());
                 }
             }
@@ -2118,7 +2126,7 @@ impl<'a> Checker<'a> {
                 // `check_type_assignable` path below (which checks every bound).
                 let trait_name = trait_names.first().filter(|_| trait_names.len() == 1);
                 for e in elems.iter_mut() {
-                    if let Some(t) = self.infer(e) {
+                    if let Some(t) = self.infer_owned_list_element(e) {
                         match (&t, trait_name) {
                             (Type::Named(n), Some(trait_name))
                                 if self.trait_reg.implements_trait(n, trait_name) =>
@@ -2150,7 +2158,7 @@ impl<'a> Checker<'a> {
             for e in elems.iter_mut() {
                 match e {
                     Expr::Spread(inner, spread_span) => {
-                        let t = self.infer(inner);
+                        let t = self.infer_owned_list_element(inner);
                         match t {
                             Some(Type::List(spread_elem)) => {
                                 self.check_type_assignable(&expected_inner, &spread_elem, *spread_span);
@@ -2169,7 +2177,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     _ => {
-                        if let Some(t) = self.infer(e) {
+                        if let Some(t) = self.infer_owned_list_element(e) {
                             if self.type_contains_view_boundary(&t) {
                                 self.diags.push(Diagnostic::error(
                                     "E2305",
@@ -2193,7 +2201,7 @@ impl<'a> Checker<'a> {
         for e in elems.iter_mut() {
             match e {
                 Expr::Spread(inner, spread_span) => {
-                    let t = self.infer(inner);
+                    let t = self.infer_owned_list_element(inner);
                     match t {
                         Some(Type::List(spread_elem)) => {
                             elem_types.push((*spread_elem).clone());
@@ -2212,7 +2220,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 _ => {
-                    if let Some(t) = self.infer(e) {
+                    if let Some(t) = self.infer_owned_list_element(e) {
                         if self.type_contains_view_boundary(&t) {
                             self.diags.push(Diagnostic::error(
                                 "E2305",
