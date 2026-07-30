@@ -436,9 +436,23 @@ fn render_locals(scope: &HashMap<String, CtValue>) -> String {
 /// mode, where output already went to the terminal).
 fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
     let scripted = io.is_scripted();
-    let bundle = match crate::Loader::load_entry(file) {
-        Ok(b) => b,
-        Err(diags) => {
+    let checked = jet_driver::run_compiler_work(|| {
+        let mut bundle = crate::Loader::load_entry(file).map_err(|diags| (None, diags))?;
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        let errors: Vec<Diagnostic> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+            .collect();
+        if errors.is_empty() {
+            Ok(bundle)
+        } else {
+            let src = bundle.modules[bundle.entry].source.clone();
+            Err((Some(src), errors))
+        }
+    });
+    let bundle = match checked {
+        Ok(bundle) => bundle,
+        Err((None, diags)) => {
             for d in &diags {
                 let line = format!("error [{}]: {}", d.code, d.what);
                 if scripted {
@@ -449,18 +463,12 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
             }
             return (ExitCodes::USER_ERROR, io.into_output());
         }
+        Err((Some(src), errors)) => {
+            emit_diags(&mut io, file, &src, &errors);
+            return (ExitCodes::USER_ERROR, io.into_output());
+        }
     };
-    let mut bundle = bundle;
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-    let errors: Vec<Diagnostic> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-        .collect();
     let src = bundle.modules[bundle.entry].source.clone();
-    if !errors.is_empty() {
-        emit_diags(&mut io, file, &src, &errors);
-        return (ExitCodes::USER_ERROR, io.into_output());
-    }
     // The debugger steps the dev interpreter, so it declines the same features
     // `jet dev` does — but with E2203 (debug-specific): names `jet debug` and
     // points at the real build (D-DBG3 step 2, the native backend follow-on).
@@ -562,13 +570,16 @@ pub fn run_debug(file: &str) -> i32 {
 /// the `(jet)` prompt in order and returns the captured transcript (banners,
 /// `locals:` dumps, command echoes, program output, and the final marker).
 pub fn run_session(file: &str, inputs: &[&str]) -> String {
-    let queue: std::collections::VecDeque<String> = inputs.iter().map(|s| s.to_string()).collect();
-    let io = IO::Scripted {
-        inputs: queue,
-        out: String::new(),
-    };
-    let (_code, captured) = run_with_io(file, io);
-    captured
+    jet_driver::run_compiler_work(|| {
+        let queue: std::collections::VecDeque<String> =
+            inputs.iter().map(|s| s.to_string()).collect();
+        let io = IO::Scripted {
+            inputs: queue,
+            out: String::new(),
+        };
+        let (_code, captured) = run_with_io(file, io);
+        captured
+    })
 }
 
 /// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend

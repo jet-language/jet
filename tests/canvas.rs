@@ -3216,7 +3216,14 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         print_start + "print".len()
     );
 
-    let out = jet::Canvas::debug_session_json_for_file(&path, &req).expect("debug session");
+    let debug_path = path.clone();
+    let out = std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || jet::Canvas::debug_session_json_for_file(&debug_path, &req))
+        .expect("spawn 2 MiB Canvas debug embedder")
+        .join()
+        .expect("Canvas debug embedder must not overflow")
+        .expect("debug session");
     for field in [
         "\"protocol\":\"jet.canvas.debug\"",
         "\"ok\":true",

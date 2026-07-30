@@ -342,22 +342,24 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 /// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
 /// tier-0 interpreter only.
 fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    crate::RunCache::note_parse();
-    match crate::Loader::load_entry_with_overlay(file, None, false) {
-        Ok(mut bundle) => {
-            crate::RunCache::note_check();
-            let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-            let errors: Vec<Diagnostic> = diags
-                .into_iter()
-                .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-                .collect();
-            if !errors.is_empty() {
-                return Err(errors);
+    jet_driver::run_compiler_work(|| {
+        crate::RunCache::note_parse();
+        match crate::Loader::load_entry_with_overlay(file, None, false) {
+            Ok(mut bundle) => {
+                crate::RunCache::note_check();
+                let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+                let errors: Vec<Diagnostic> = diags
+                    .into_iter()
+                    .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+                    .collect();
+                if !errors.is_empty() {
+                    return Err(errors);
+                }
+                Ok(bundle)
             }
-            Ok(bundle)
+            Err(diags) => Err(diags),
         }
-        Err(diags) => Err(diags),
-    }
+    })
 }
 
 /// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
@@ -407,10 +409,15 @@ pub fn run_jit_once_with_args_opts(
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
-    match checked_bundle(file) {
-        Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
-        Err(diags) => RunOutcome::Problems(diags),
-    }
+    let (outcome, trace) = jet_driver::run_compiler_work(|| {
+        let outcome = match checked_bundle(file) {
+            Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
+            Err(diags) => RunOutcome::Problems(diags),
+        };
+        (outcome, jet_jit::jit_trace_flags_for_test())
+    });
+    jet_jit::merge_jit_trace_flags_for_test(trace);
+    outcome
 }
 
 /// Run an already-checked bundle through the dev backend seam.

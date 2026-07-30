@@ -1634,6 +1634,10 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
 pub struct TFunc {
     /// Jet function name (unmangled) — the emitter mangles via `cx.mangle_name`.
     pub name: String,
+    /// Source range for function-level evaluator diagnostics.
+    ///
+    /// Expression-precise spans remain owned by Tower #1329.
+    pub source_span: crate::Diagnostics::Span,
     /// `(mangled rust name, resolved jet type, convention)` per parameter. The
     /// convention is kept so the emitter reproduces the `&`/by-value Rust form
     /// without re-deciding (it mirrors `rust_param_type`).

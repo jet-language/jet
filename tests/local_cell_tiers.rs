@@ -130,62 +130,50 @@ fn local_cell_full_surface_runs_through_aot() {
 
 #[test]
 fn local_cell_full_surface_runs_through_default_tier() {
-    jet::on_compiler_stack(|| {
-        let dir = std::env::temp_dir().join(format!(
-            "jet_local_cell_parity_{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("main.jet");
-        fs::write(&path, SOURCE).unwrap();
-        let shown = path.to_string_lossy().into_owned();
-        let mut bundle = jet::Loader::load_entry(&shown).expect("Cell bundle should load");
-        let errors = jet::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
-            .filter(|diagnostic| {
-                matches!(
-                    diagnostic.severity,
-                    jet::Diagnostics::Severity::Error
-                )
-            })
-            .collect::<Vec<_>>();
-        assert!(errors.is_empty(), "Cell surface must type-check: {errors:?}");
-        assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
-            "Cell surface must stay resident-safe: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
-        );
-        jet_jit::try_compile_bundle(&bundle).expect("Cell surface must compile in resident JIT");
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "jet_local_cell_parity_{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("main.jet");
+            fs::write(&path, SOURCE).unwrap();
+            let shown = path.to_string_lossy().into_owned();
 
-        for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-            jet_jit::reset_jit_trace_for_test();
-            match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
-                jet::Interpreter::RunOutcome::Ran {
-                    stdout,
-                    stderr,
-                    exit_code,
-                } => {
-                    assert_eq!(exit_code, 0, "{tier} exit drift");
-                    assert_eq!(stderr, "", "{tier} stderr drift");
-                    assert_eq!(stdout, EXPECTED, "{tier} output drift");
+            for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+                jet_jit::reset_jit_trace_for_test();
+                match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+                    jet::Interpreter::RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    } => {
+                        assert_eq!(exit_code, 0, "{tier} exit drift");
+                        assert_eq!(stderr, "", "{tier} stderr drift");
+                        assert_eq!(stdout, EXPECTED, "{tier} output drift");
+                    }
+                    jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                        panic!("{tier} rejected Cell: {diagnostics:?}")
+                    }
                 }
-                jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-                    panic!("{tier} rejected Cell: {diagnostics:?}")
+                if force_interpreter {
+                    continue;
                 }
+                assert!(
+                    jet_jit::jit_executed_for_test(),
+                    "Cell must execute native resident JIT code"
+                );
+                assert!(
+                    !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+                    "Cell must not deopt or use fallback"
+                );
             }
-            if force_interpreter {
-                continue;
-            }
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "Cell must execute native resident JIT code"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-                "Cell must not deopt or use fallback"
-            );
-        }
-    });
+        })
+        .expect("spawn 2 MiB local Cell embedder")
+        .join()
+        .expect("local Cell embedder must not overflow");
 }
 
 #[test]

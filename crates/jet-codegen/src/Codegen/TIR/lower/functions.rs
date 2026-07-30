@@ -115,6 +115,7 @@ pub(crate) fn lower_error_conv(
     );
     TFunc {
         name,
+        source_span: conversion.from_span,
         params: vec![(
             cx.mangle_name(Syntax::KW_SELF),
             from_ty,
@@ -223,6 +224,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
         name: f.name.clone(),
+        source_span: f.span,
         params,
         web_param_reconstructions,
         ret: f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty)),
@@ -437,6 +439,7 @@ pub(crate) fn lower_method_for_owner(
     };
     TFunc {
         name: f.name.clone(),
+        source_span: f.span,
         params,
         web_param_reconstructions: Vec::new(),
         ret: f
@@ -541,6 +544,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     let clone_types = env.cloned_types.borrow().clone();
     TFunc {
         name: f.name.clone(),
+        source_span: f.span,
         params,
         web_param_reconstructions: Vec::new(),
         ret: f
@@ -635,6 +639,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
     let fwd = format!("(self).{}.{}({})", field_rust, f.name, fwd_args.join(", "));
     TFunc {
         name: f.name.clone(),
+        source_span: f.span,
         params: Vec::new(),
         web_param_reconstructions: Vec::new(),
         ret: f.return_type.clone(),

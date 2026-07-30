@@ -416,6 +416,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) collecting_items: Vec<Vec<CtValue>>,
     pub(super) call_depth: usize,
     pub(super) source_nesting: usize,
+    pub(super) current_span: Span,
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
@@ -747,6 +748,7 @@ impl<'a> EvalCtx<'a> {
             collecting_items: Vec::new(),
             call_depth: 0,
             source_nesting: 0,
+            current_span: Span::new(0, 0),
             emitted_fragments: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
@@ -980,7 +982,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     pub(crate) fn span(&self) -> Span {
-        Span::new(0, 0)
+        self.current_span
     }
 
     pub(super) fn burn(&mut self) -> Result<(), Diagnostic> {
@@ -1031,6 +1033,8 @@ impl<'a> EvalCtx<'a> {
             unreachable!("burn with fuel 0 always errors");
         }
         self.call_depth += 1;
+        let previous_source_nesting = std::mem::replace(&mut self.source_nesting, 0);
+        let previous_span = std::mem::replace(&mut self.current_span, func.source_span);
         let guard_mark = self.scope_guards.len();
         self.local_cells.enter_frame();
         for (i, (name, _, _)) in func.params.iter().enumerate() {
@@ -1062,6 +1066,8 @@ impl<'a> EvalCtx<'a> {
         let returned = result.as_ref().ok().cloned().unwrap_or(CtValue::Unit);
         self.local_cells.leave_frame(&returned);
         self.call_depth -= 1;
+        self.source_nesting = previous_source_nesting;
+        self.current_span = previous_span;
         match (result, cleanup_result) {
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
             (Ok(value), Ok(())) => Ok(value),
@@ -1156,25 +1162,6 @@ impl<'a> EvalCtx<'a> {
             .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
         let mut child = HashMap::new();
         self.run_func(func, args, &mut child)
-    }
-}
-
-#[cfg(test)]
-mod source_nesting_tests {
-    use super::*;
-
-    #[test]
-    fn tir_source_nesting_accepts_256_and_rejects_257() {
-        let mut depth = 0;
-        let span = Span::new(0, 1);
-
-        for _ in 0..crate::Diagnostics::MAX_SOURCE_NESTING {
-            enter_source_nesting(&mut depth, span).expect("depth 256 is allowed");
-        }
-        let diagnostic =
-            enter_source_nesting(&mut depth, span).expect_err("depth 257 is rejected");
-        assert_eq!(diagnostic.code, "E1403");
-        assert_eq!(depth, crate::Diagnostics::MAX_SOURCE_NESTING);
     }
 }
 
@@ -1465,6 +1452,7 @@ pub fn run_program_with_structs(
         collecting_items: Vec::new(),
         call_depth: 0,
         source_nesting: 0,
+        current_span: entry.source_span,
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields,
@@ -1533,6 +1521,7 @@ pub fn run_named_func(
         collecting_items: Vec::new(),
         call_depth: 0,
         source_nesting: 0,
+        current_span: func.source_span,
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
@@ -1685,6 +1674,7 @@ fn eval_expr_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
+    let source_span = req.expr.span();
     let mut sink_target = req.sink.take();
     let sink = sink_target
         .as_deref_mut()
@@ -1709,6 +1699,7 @@ fn eval_expr_hook(
         collecting_items: Vec::new(),
         call_depth: 0,
         source_nesting: 0,
+        current_span: source_span,
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
@@ -1774,6 +1765,11 @@ fn eval_block_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
+    let source_span = req
+        .stmts
+        .first()
+        .map(crate::AST::Stmt::span)
+        .unwrap_or_else(|| Span::new(0, 0));
     let mut sink_target = req.sink.take();
     let sink = sink_target
         .as_deref_mut()
@@ -1798,6 +1794,7 @@ fn eval_block_hook(
         collecting_items: Vec::new(),
         call_depth: 0,
         source_nesting: 0,
+        current_span: source_span,
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),

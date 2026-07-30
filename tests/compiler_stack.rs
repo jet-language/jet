@@ -185,3 +185,146 @@ fn public_compile_accepts_depth_256_and_reports_depth_257() {
     assert!(diagnostic.what.contains("257 levels deep"));
     assert!(diagnostic.what.contains("limit is 256"));
 }
+
+fn tir_func(
+    name: &str,
+    body: Vec<jet::Codegen::TIR::TStmt>,
+    source_span: jet::Diagnostics::Span,
+) -> jet::Codegen::TIR::TFunc {
+    jet::Codegen::TIR::TFunc {
+        name: name.to_string(),
+        source_span,
+        params: Vec::new(),
+        web_param_reconstructions: Vec::new(),
+        ret: None,
+        gc_return: false,
+        return_view_provenance: None,
+        generics: String::new(),
+        clone_types: Vec::new(),
+        is_main: name == "run",
+        line: 1,
+        is_unsafe: false,
+        is_pure: true,
+        is_reactive: false,
+        reactive_upgrades: Vec::new(),
+        is_inline: false,
+        is_inline_always: false,
+        body,
+        kind: jet::Codegen::TIR::TFuncKind::TopLevel,
+    }
+}
+
+fn nested_tir_expr(nodes: usize) -> jet::Codegen::TIR::TExpr {
+    use jet::Codegen::TIR::{TExpr, TExprKind};
+
+    let mut expr = TExpr {
+        ty: jet::AST::Type::Named("Unit".to_string()),
+        kind: TExprKind::Unit,
+    };
+    for _ in 1..nodes {
+        expr = TExpr {
+            ty: jet::AST::Type::Named("Unit".to_string()),
+            kind: TExprKind::Clone(Box::new(expr)),
+        };
+    }
+    expr
+}
+
+fn nested_tir_program(
+    nodes: usize,
+    source_span: jet::Diagnostics::Span,
+) -> jet::Codegen::TIR::JitProgram {
+    use jet::Codegen::TIR::{JitProgram, TStmt};
+
+    JitProgram {
+        source_file: "nested-tir.jet".to_string(),
+        entry: "run".to_string(),
+        instance_provenance: Vec::new(),
+        funcs: vec![tir_func(
+            "run",
+            vec![TStmt::ExprStmt(nested_tir_expr(nodes))],
+            source_span,
+        )],
+        spawn_lambdas: Vec::new(),
+        struct_fields: std::collections::HashMap::new(),
+        struct_field_types: std::collections::HashMap::new(),
+        enum_variants: std::collections::HashMap::new(),
+        enum_variant_payload_types: std::collections::HashMap::new(),
+        canonical_deopt: std::collections::HashSet::new(),
+        canonical_calls: std::collections::HashSet::new(),
+        int_constants: std::collections::HashMap::new(),
+        constants: std::collections::HashMap::new(),
+        distinct_bases: std::collections::HashMap::new(),
+        distinct_ranges: std::collections::HashMap::new(),
+        codec_migrations: std::collections::HashMap::new(),
+        trait_method_owners: std::collections::HashMap::new(),
+        iterable_item_types: std::collections::HashMap::new(),
+    }
+}
+
+fn run_tir_program(
+    program: jet::Codegen::TIR::JitProgram,
+) -> Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic> {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            jet::Codegen::TIR::run_program(
+                &program,
+                std::path::Path::new("."),
+                &mut jet::Comptime::DevSink::new(),
+                std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
+                false,
+            )
+        })
+        .expect("spawn TIR boundary evaluator")
+        .join()
+        .expect("TIR boundary evaluator must not panic")
+}
+
+fn run_nested_tir(
+    nodes: usize,
+    source_span: jet::Diagnostics::Span,
+) -> Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic> {
+    run_tir_program(nested_tir_program(nodes, source_span))
+}
+
+#[test]
+fn canonical_tir_evaluator_accepts_depth_256_and_renders_depth_257() {
+    let source = "fn run() {\n    value\n}\n";
+    let span = jet::Diagnostics::Span::new(0, source.len());
+
+    run_nested_tir(255, span).expect("one statement plus 255 expressions is depth 256");
+
+    let diagnostic =
+        run_nested_tir(256, span).expect_err("one statement plus 256 expressions is depth 257");
+    assert_eq!(diagnostic.code, "E1403");
+    assert_eq!(diagnostic.span, Some(span));
+    let rendered = jet::Diagnostics::render_all("nested-tir.jet", source, &[diagnostic]);
+    assert!(rendered.contains("nested-tir.jet:1:"), "{rendered}");
+    assert!(rendered.contains("fn run()"), "{rendered}");
+}
+
+#[test]
+fn tir_function_entry_resets_structural_depth() {
+    use jet::Codegen::TIR::{TExpr, TExprKind, TStmt};
+
+    let source = "fn helper() {}\nfn run() {}\n";
+    let span = jet::Diagnostics::Span::new(0, source.len());
+    let mut program = nested_tir_program(255, span);
+    program.funcs[0].name = "helper".to_string();
+    program.funcs[0].is_main = false;
+    program.funcs.push(tir_func(
+        "run",
+        vec![TStmt::ExprStmt(TExpr {
+            ty: jet::AST::Type::Named("Unit".to_string()),
+            kind: TExprKind::Call {
+                name: "helper".to_string(),
+                args: Vec::new(),
+            },
+        })],
+        span,
+    ));
+
+    run_tir_program(program).expect("runtime call depth must not count as source nesting");
+}

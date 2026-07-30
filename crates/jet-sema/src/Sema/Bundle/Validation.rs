@@ -2047,6 +2047,7 @@ pub(crate) fn check_func_body_bundle(
         moved: HashMap::new(),
         suppress_partial_move_root_read: false,
         loop_depth: 0,
+        source_nesting: 0,
         loop_labels: Vec::new(),
         collect_item_types: Vec::new(),
         loop_value_frames: Vec::new(),

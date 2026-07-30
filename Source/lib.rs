@@ -111,40 +111,8 @@ pub mod Store;
 
 use Diagnostics::Diagnostic;
 
-const COMPILER_STACK_SIZE: usize = 32 * 1024 * 1024;
-
-thread_local! {
-    static ON_COMPILER_STACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    if ON_COMPILER_STACK.with(std::cell::Cell::get) {
-        return work();
-    }
-    std::thread::scope(|scope| {
-        let worker = std::thread::Builder::new()
-            .name("jet-compiler".to_string())
-            .stack_size(COMPILER_STACK_SIZE)
-            .spawn_scoped(scope, || {
-                ON_COMPILER_STACK.with(|active| active.set(true));
-                boot_tir_eval();
-                work()
-            })
-            .unwrap_or_else(|error| {
-                jet_foundation::ice!(None, "could not start compiler worker: {error}")
-            });
-        worker
-            .join()
-            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
-    })
-}
-
-/// Run a custom low-level compiler session on Jet's fixed compiler stack.
-///
-/// Root compile and check APIs do this automatically. Embedders need this only
-/// when composing lower-level loader, sema, TIR, or JIT compiler seams directly.
-pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    with_compiler_stack(work)
+    jet_driver::run_compiler_work(work)
 }
 
 /// Run the full front end on source text. All lex errors (then all parse

@@ -1098,8 +1098,22 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         self.enter_source_nesting()?;
+        let mut expr = expr;
+        let mut transparent_depth = 0;
+        while let TExprKind::Clone(inner) = &expr.kind {
+            if let Err(diagnostic) = self.enter_source_nesting() {
+                for _ in 0..=transparent_depth {
+                    self.leave_source_nesting();
+                }
+                return Err(diagnostic);
+            }
+            transparent_depth += 1;
+            expr = inner;
+        }
         let result = self.eval_expr_inner(expr, scope);
-        self.leave_source_nesting();
+        for _ in 0..=transparent_depth {
+            self.leave_source_nesting();
+        }
         result
     }
 
