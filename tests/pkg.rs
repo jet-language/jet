@@ -2985,7 +2985,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
         .expect("public trait method");
     assert_eq!(
         method.signature,
-        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=L1T0}) => Meter{family=Length; base=Float; dimension=L1T0}"
+        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}) => Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}"
     );
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)

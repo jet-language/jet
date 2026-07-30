@@ -841,7 +841,7 @@ impl<'a> Checker<'a> {
             }
             match op {
                 BinOp::Add | BinOp::Sub => {
-                    if let (Some(ldim), Some(rdim)) = (ldim, rdim) {
+                    if let (Some(ldim), Some(rdim)) = (ldim.clone(), rdim.clone()) {
                         if ldim != rdim {
                             self.dimension_mismatch(op, ldim, rdim, span);
                             return None;
@@ -854,8 +854,8 @@ impl<'a> Checker<'a> {
                     } else {
                         self.dimension_mismatch(
                             op,
-                            ldim.unwrap_or(Dimension::SCALAR),
-                            rdim.unwrap_or(Dimension::SCALAR),
+                            ldim.unwrap_or_else(Dimension::scalar),
+                            rdim.unwrap_or_else(Dimension::scalar),
                             span,
                         );
                         return None;
@@ -866,18 +866,18 @@ impl<'a> Checker<'a> {
                         self.op_mismatch(op, &lt, &rt, span);
                         return None;
                     }
-                    let ldim = ldim.unwrap_or(Dimension::SCALAR);
-                    let rdim = rdim.unwrap_or(Dimension::SCALAR);
+                    let ldim = ldim.unwrap_or_else(Dimension::scalar);
+                    let rdim = rdim.unwrap_or_else(Dimension::scalar);
                     let result = if op == BinOp::Mul {
-                        ldim.multiply(rdim)
+                        ldim.multiply(&rdim)
                     } else {
-                        ldim.divide(rdim)
+                        ldim.divide(&rdim)
                     };
                     let Some(result) = result else {
                         self.dimension_overflow(op, span);
                         return None;
                     };
-                    return if result == Dimension::SCALAR {
+                    return if result == Dimension::scalar() {
                         Some(Type::Float)
                     } else {
                         Some(Type::quantity(Type::Float, result))
@@ -890,8 +890,8 @@ impl<'a> Checker<'a> {
                     if ldim != rdim {
                         self.dimension_mismatch(
                             op,
-                            ldim.unwrap_or(Dimension::SCALAR),
-                            rdim.unwrap_or(Dimension::SCALAR),
+                            ldim.unwrap_or_else(Dimension::scalar),
+                            rdim.unwrap_or_else(Dimension::scalar),
                             span,
                         );
                         return None;

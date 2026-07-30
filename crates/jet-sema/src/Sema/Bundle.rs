@@ -911,8 +911,9 @@ fn unit_fact(
             package: package.clone(),
             family: family.family.clone(),
             member: member.name.clone(),
-            dimension,
+            dimension: dimension.clone(),
             scale: member.scale.clone(),
+            scale_provenance: member.scale_provenance.clone(),
             offset: if kind == QuantityKind::Point {
                 member.offset.clone()
             } else {
@@ -1041,7 +1042,9 @@ fn check_bundle_opts_for_output_inner(
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
+    diags.extend(inject_units_prelude(bundle));
     diags.extend(super::Casing::validate_bundle(bundle));
+    diags.extend(resolve_unit_dimensions(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
@@ -1374,15 +1377,15 @@ fn check_bundle_opts_for_output_inner(
                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
-                    let dimension = crate::AST::Dimension::for_family(&uf.family);
+                    let dimension = uf.resolved_dimension.clone();
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         st.registry.unit_types.insert(d.name.clone());
-                        if let Some(dimension) = dimension {
+                        if let Some(ref dimension) = dimension {
                             if let Some(fact) = unit_fact(
                                 uf,
                                 &d.name,
-                                dimension,
+                                dimension.clone(),
                                 st.package_scope.clone(),
                             ) {
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
@@ -1732,10 +1735,10 @@ fn check_bundle_opts_for_output_inner(
                 .insert((type_name.clone(), crate::Generics::DISPLAY.to_string()));
         }
         for (type_name, fact) in &st.registry.unit_facts {
-            if let Some(dimension) = fact.dimension.family_name() {
+            {
                 st.trait_reg.trait_impls.insert((
                     type_name.clone(),
-                    crate::Generics::quantity_bound(dimension, fact.kind.name()),
+                    crate::Generics::quantity_bound(&fact.family, fact.kind.name()),
                 ));
                 for capability in [crate::Generics::ENCODE, crate::Generics::DECODE] {
                     st.trait_reg
@@ -2603,6 +2606,359 @@ fn check_bundle_opts_for_output_inner(
     )
 }
 
+/// Load the standard dimension catalog from ordinary Jet source. Local names
+/// shadow prelude members, while a same-named family inherits the prelude's
+/// dimension claim so old local unit spellings remain coherent.
+fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+    const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Units.jet");
+    let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
+    let mut prelude = match crate::Parser::parse(&tokens) {
+        Ok(program) => program
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::UnitFamily(family) => Some(family),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        Err(mut parse_diagnostics) => {
+            diagnostics.append(&mut parse_diagnostics);
+            return diagnostics;
+        }
+    };
+    resolve_standard_unit_dimensions(&mut prelude);
+
+    for module in &mut bundle.modules {
+        if module.no_prelude {
+            continue;
+        }
+        let occupied = module
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                Item::UnitFamily(family) => family
+                    .distinct_defs()
+                    .into_iter()
+                    .map(|definition| definition.name)
+                    .collect::<Vec<_>>(),
+                Item::Distinct(definition) => vec![definition.name.clone()],
+                Item::Struct(definition) => vec![definition.name.clone()],
+                Item::Enum(definition) => vec![definition.name.clone()],
+                Item::TypeAlias(definition) => vec![definition.name.clone()],
+                _ => Vec::new(),
+            })
+            .collect::<HashSet<_>>();
+        let mut selected = prelude
+            .iter()
+            .filter(|family| {
+                source_mentions_identifier(&module.source, &family.family)
+                    || family
+                        .members
+                        .iter()
+                        .any(|member| source_mentions_unit_member(&module.source, &member.name))
+            })
+            .map(|family| family.family.clone())
+            .collect::<HashSet<_>>();
+        loop {
+            let mut added = false;
+            for family in &prelude {
+                if !selected.contains(&family.family) {
+                    continue;
+                }
+                let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension
+                else {
+                    continue;
+                };
+                for dependency in dimension_dependencies(expression) {
+                    added |= selected.insert(dependency);
+                }
+            }
+            if !added {
+                break;
+            }
+        }
+        for standard in &prelude {
+            if let Some(local) = module.items.iter_mut().find_map(|item| match item {
+                Item::UnitFamily(local) if local.family == standard.family => Some(local),
+                _ => None,
+            }) {
+                if local.dimension.is_none() {
+                    local.dimension = standard.dimension.clone();
+                    local.resolved_dimension = standard.resolved_dimension.clone();
+                }
+                continue;
+            }
+            let mut standard = standard.clone();
+            let used_members = standard
+                .members
+                .iter()
+                .filter(|member| source_mentions_unit_member(&module.source, &member.name))
+                .map(|member| member.name.clone())
+                .collect::<HashSet<_>>();
+            if !selected.contains(&standard.family) {
+                continue;
+            }
+            standard.members.retain(|member| {
+                let is_base = standard
+                    .base
+                    .as_ref()
+                    .is_some_and(|base| base.0 == member.name);
+                (is_base || used_members.contains(&member.name))
+                    && !occupied.contains(&crate::AST::UnitFamilyDef::type_name(&member.name))
+            });
+            module.items.push(Item::UnitFamily(standard));
+        }
+    }
+    diagnostics
+}
+
+fn dimension_dependencies(expression: &crate::AST::Expr) -> Vec<String> {
+    match expression {
+        crate::AST::Expr::Ident(name, _) => vec![name.clone()],
+        crate::AST::Expr::Binary(_, left, right, _) => {
+            let mut dependencies = dimension_dependencies(left);
+            dependencies.extend(dimension_dependencies(right));
+            dependencies
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn source_mentions_identifier(source: &str, name: &str) -> bool {
+    source.match_indices(name).any(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + name.len()..].chars().next();
+        !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+    })
+}
+
+fn source_mentions_unit_member(source: &str, member: &str) -> bool {
+    source_mentions_unqualified_identifier(
+        source,
+        &crate::AST::UnitFamilyDef::type_name(member),
+    ) || source.contains(&format!("from_{member}"))
+        || source.match_indices(member).any(|(start, _)| {
+            source[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_ascii_digit())
+        })
+}
+
+fn source_mentions_unqualified_identifier(source: &str, name: &str) -> bool {
+    source.match_indices(name).any(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + name.len()..].chars().next();
+        before != Some('.')
+            && !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+    })
+}
+
+/// Give the shared catalog one stable identity, independent of the package
+/// whose module receives the ordinary Prelude declarations.
+fn resolve_standard_unit_dimensions(prelude: &mut [crate::AST::UnitFamilyDef]) {
+    let mut known = HashMap::<String, crate::AST::Dimension>::new();
+    for family in prelude.iter() {
+        if matches!(family.dimension, Some(crate::AST::UnitDimensionDecl::Base(_))) {
+            known.insert(
+                family.family.clone(),
+                crate::AST::Dimension::base(format!("core.units::{}", family.family)),
+            );
+        }
+    }
+    loop {
+        let mut progress = false;
+        for family in prelude.iter() {
+            if known.contains_key(&family.family) {
+                continue;
+            }
+            let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension else {
+                continue;
+            };
+            let Some(dimension) =
+                resolve_dimension_expression(expression, &|name| known.get(name).cloned())
+            else {
+                continue;
+            };
+            known.insert(family.family.clone(), dimension);
+            progress = true;
+        }
+        if !progress {
+            break;
+        }
+    }
+    for family in prelude {
+        family.resolved_dimension = known.get(&family.family).cloned();
+    }
+}
+
+/// Resolve open unit dimensions before registration. The declaration graph is
+/// compile-time only; backends receive the normalized map already attached to
+/// each family.
+fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+    #[derive(Clone)]
+    struct Declaration {
+        module: usize,
+        item: usize,
+        family: String,
+        span: Span,
+        is_pub: bool,
+        claim: crate::AST::UnitDimensionDecl,
+        preset: Option<crate::AST::Dimension>,
+    }
+
+    let declarations = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .flat_map(|(module_index, module)| {
+            module
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(move |(item_index, item)| match item {
+                Item::UnitFamily(family) => family.dimension.clone().map(|claim| Declaration {
+                    module: module_index,
+                    item: item_index,
+                    family: family.family.clone(),
+                    span: family.family_span,
+                    is_pub: family.is_pub,
+                    claim,
+                    preset: family.resolved_dimension.clone(),
+                }),
+                _ => None,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let imported_modules = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(module_index, module)| {
+            module
+                .imports
+                .iter()
+                .filter_map(|import| bundle.import_targets.get(&(module_index, import.span)).copied())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut known = HashMap::<(usize, String), crate::AST::Dimension>::new();
+    for declaration in &declarations {
+        if let Some(dimension) = declaration.preset.clone() {
+            known.insert(
+                (declaration.module, declaration.family.clone()),
+                dimension,
+            );
+        } else if matches!(declaration.claim, crate::AST::UnitDimensionDecl::Base(_)) {
+            let package = package_scope_for(
+                &bundle.modules[declaration.module].path,
+                &bundle.project_root,
+            )
+            .to_string_lossy()
+            .replace('\\', "/");
+            known.insert(
+                (declaration.module, declaration.family.clone()),
+                crate::AST::Dimension::base(format!("{package}::{}", declaration.family)),
+            );
+        }
+    }
+
+    let mut pending = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.preset.is_none()
+                && matches!(declaration.claim, crate::AST::UnitDimensionDecl::Derived(_))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    loop {
+        let mut progress = false;
+        pending.retain(|declaration| {
+            let crate::AST::UnitDimensionDecl::Derived(expression) = &declaration.claim else {
+                unreachable!()
+            };
+            let visible = |name: &str| {
+                known
+                    .get(&(declaration.module, name.to_string()))
+                    .cloned()
+                    .or_else(|| {
+                        imported_modules[declaration.module].iter().find_map(|target| {
+                            declarations
+                                .iter()
+                                .find(|candidate| {
+                                    candidate.module == *target
+                                        && candidate.is_pub
+                                        && candidate.family == name
+                                })
+                                .and_then(|candidate| {
+                                    known
+                                        .get(&(candidate.module, candidate.family.clone()))
+                                        .cloned()
+                                })
+                        })
+                    })
+            };
+            let Some(dimension) = resolve_dimension_expression(expression, &visible) else {
+                return true;
+            };
+            known.insert(
+                (declaration.module, declaration.family.clone()),
+                dimension,
+            );
+            progress = true;
+            false
+        });
+        if !progress {
+            break;
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    for declaration in declarations {
+        let resolved = known
+            .get(&(declaration.module, declaration.family.clone()))
+            .cloned();
+        if resolved.is_none() {
+            diagnostics.push(Diagnostic::error(
+                "E0905",
+                format!("dimension `{}` cannot be resolved", declaration.family),
+                "derived dimensions can use visible declared dimensions and cannot form a cycle"
+                    .to_string(),
+                "import or declare every base dimension and remove any dimension cycle".to_string(),
+                Some(declaration.span),
+            ));
+        }
+        if let Item::UnitFamily(definition) =
+            &mut bundle.modules[declaration.module].items[declaration.item]
+        {
+            definition.resolved_dimension = resolved;
+        }
+    }
+    diagnostics
+}
+
+fn resolve_dimension_expression(
+    expression: &crate::AST::Expr,
+    visible: &impl Fn(&str) -> Option<crate::AST::Dimension>,
+) -> Option<crate::AST::Dimension> {
+    match expression {
+        crate::AST::Expr::Ident(name, _) => visible(name),
+        crate::AST::Expr::Binary(op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div), left, right, _) => {
+            let left = resolve_dimension_expression(left, visible)?;
+            let right = resolve_dimension_expression(right, visible)?;
+            if *op == crate::AST::BinOp::Mul {
+                left.multiply(&right)
+            } else {
+                left.divide(&right)
+            }
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod structure_tests {
     use super::*;
@@ -2681,6 +3037,89 @@ mod structure_tests {
             active_os: crate::Syntax::OSTarget::host(),
             edition: "2027".to_string(),
         }
+    }
+
+    #[test]
+    fn ordinary_units_prelude_supplies_standard_axes_and_provenance() {
+        let mut bundle = incremental_bundle(
+            "#UnitFamily(Token, dimension, base: token) { token }\n\
+             #UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) { token_per_second }\n",
+        );
+        assert!(inject_units_prelude(&mut bundle).is_empty());
+        assert!(resolve_unit_dimensions(&mut bundle).is_empty());
+
+        let families = bundle.modules[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::UnitFamily(family) => Some(family),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let token = families.iter().find(|family| family.family == "Token").unwrap();
+        let time = families.iter().find(|family| family.family == "Time").unwrap();
+        let rate = families
+            .iter()
+            .find(|family| family.family == "TokenRate")
+            .unwrap();
+        assert_eq!(
+            rate.resolved_dimension,
+            token
+                .resolved_dimension
+                .as_ref()
+                .unwrap()
+                .divide(time.resolved_dimension.as_ref().unwrap())
+        );
+
+        let mass = families.iter().find(|family| family.family == "Mass").unwrap();
+        let dalton = mass
+            .members
+            .iter()
+            .find(|member| member.name == "dalton")
+            .unwrap();
+        assert!(matches!(
+            dalton.scale_provenance,
+            crate::AST::UnitScaleProvenance::Measured { .. }
+        ));
+    }
+
+    #[test]
+    fn imported_public_dimension_participates_in_derived_claims() {
+        let mut bundle = incremental_bundle(
+            "use dep\n\
+             #UnitFamily(InventoryRate, dimension: Inventory / Time, base: item_per_second) { item_per_second }\n",
+        );
+        let import_span = bundle.modules[0].imports[0].span;
+        let mut dependency =
+            incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n")
+                .modules
+                .remove(0);
+        dependency.path = "deps/dep.jet".into();
+        dependency.display = "deps/dep.jet".to_string();
+        dependency.alias = "dep".to_string();
+        bundle.modules.push(dependency);
+        bundle.import_targets.insert((0, import_span), 1);
+
+        assert!(inject_units_prelude(&mut bundle).is_empty());
+        assert!(resolve_unit_dimensions(&mut bundle).is_empty());
+        let dimension = |module: usize, family: &str| {
+            bundle.modules[module]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::UnitFamily(definition) if definition.family == family => {
+                        definition.resolved_dimension.clone()
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            dimension(0, "InventoryRate"),
+            dimension(1, "Inventory")
+                .divide(&dimension(0, "Time"))
+                .unwrap()
+        );
     }
 
     #[test]

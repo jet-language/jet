@@ -1,90 +1,100 @@
 use crate::Diagnostics::Span;
 
-/// D-SHAPE-QUANTITY1=A: a normalized compiler-known physical dimension.
-/// Runtime values carry no dimension metadata; this value exists only in the
-/// front-end/TIR type facts. The closed table has Length, Time, and Temperature
-/// bases, which is sufficient to derive Speed, Area, and arbitrary products.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Dimension([i32; 3]);
+/// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
+///
+/// Keys are nominal base-dimension identities. Entries stay sorted and zero
+/// exponents are removed, so equality and serialized API identity are stable.
+/// Runtime values carry no dimension metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Dimension(std::collections::BTreeMap<String, i32>);
 
 impl Dimension {
-    pub const SCALAR: Self = Self([0, 0, 0]);
-
-    pub fn for_family(name: &str) -> Option<Self> {
-        crate::Syntax::PHYSICAL_DIMENSIONS
-            .iter()
-            .find_map(|(family, exponents)| (*family == name).then_some(Self(*exponents)))
+    pub fn scalar() -> Self {
+        Self(std::collections::BTreeMap::new())
     }
 
-    pub fn multiply(self, rhs: Self) -> Option<Self> {
-        Some(Self([
-            self.0[0].checked_add(rhs.0[0])?,
-            self.0[1].checked_add(rhs.0[1])?,
-            self.0[2].checked_add(rhs.0[2])?,
-        ]))
+    pub fn base(identity: impl Into<String>) -> Self {
+        Self(std::iter::once((identity.into(), 1)).collect())
     }
 
-    pub fn divide(self, rhs: Self) -> Option<Self> {
-        Some(Self([
-            self.0[0].checked_sub(rhs.0[0])?,
-            self.0[1].checked_sub(rhs.0[1])?,
-            self.0[2].checked_sub(rhs.0[2])?,
-        ]))
+    pub fn multiply(&self, rhs: &Self) -> Option<Self> {
+        self.combine(rhs, false)
     }
 
-    pub fn pow(self, exponent: i32) -> Option<Self> {
-        Some(Self([
-            self.0[0].checked_mul(exponent)?,
-            self.0[1].checked_mul(exponent)?,
-            self.0[2].checked_mul(exponent)?,
-        ]))
+    pub fn divide(&self, rhs: &Self) -> Option<Self> {
+        self.combine(rhs, true)
     }
 
-    pub fn family_name(self) -> Option<&'static str> {
-        crate::Syntax::PHYSICAL_DIMENSIONS
-            .iter()
-            .find_map(|(family, exponents)| (*exponents == self.0).then_some(*family))
-    }
-
-    pub fn exponents(self) -> [i32; 3] {
-        self.0
-    }
-
-    /// Stable, package-independent identity used by API/type serialization.
-    pub fn identity(self) -> String {
-        if self.0[2] == 0 {
-            format!("L{}T{}", self.0[0], self.0[1])
-        } else {
-            format!("L{}T{}H{}", self.0[0], self.0[1], self.0[2])
+    fn combine(&self, rhs: &Self, subtract: bool) -> Option<Self> {
+        let mut out = self.0.clone();
+        for (axis, exponent) in &rhs.0 {
+            let exponent = if subtract {
+                exponent.checked_neg()?
+            } else {
+                *exponent
+            };
+            let next = out
+                .get(axis)
+                .copied()
+                .unwrap_or(0)
+                .checked_add(exponent)?;
+            if next == 0 {
+                out.remove(axis);
+            } else {
+                out.insert(axis.clone(), next);
+            }
         }
+        Some(Self(out))
+    }
+
+    pub fn pow(&self, exponent: i32) -> Option<Self> {
+        let mut out = std::collections::BTreeMap::new();
+        for (axis, current) in &self.0 {
+            let next = current.checked_mul(exponent)?;
+            if next != 0 {
+                out.insert(axis.clone(), next);
+            }
+        }
+        Some(Self(out))
+    }
+
+    pub fn axes(&self) -> impl Iterator<Item = (&str, i32)> {
+        self.0.iter().map(|(axis, exponent)| (axis.as_str(), *exponent))
+    }
+
+    /// Stable identity used by API/type serialization.
+    pub fn identity(&self) -> String {
+        self.0
+            .iter()
+            .map(|(axis, exponent)| format!("{}:{exponent}", escape_axis(axis)))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     pub fn from_identity(identity: &str) -> Option<Self> {
-        let rest = identity.strip_prefix('L')?;
-        let (length, rest) = rest.split_once('T')?;
-        let (time, temperature) = rest.split_once('H').map_or((rest, "0"), |parts| parts);
-        Some(Self([
-            length.parse().ok()?,
-            time.parse().ok()?,
-            temperature.parse().ok()?,
-        ]))
+        let mut axes = std::collections::BTreeMap::new();
+        if identity.is_empty() {
+            return Some(Self(axes));
+        }
+        for part in identity.split(';') {
+            let (axis, exponent) = part.rsplit_once(':')?;
+            let exponent = exponent.parse().ok()?;
+            if exponent == 0 || axes.insert(unescape_axis(axis)?, exponent).is_some() {
+                return None;
+            }
+        }
+        Some(Self(axes))
     }
 
-    pub fn display_name(self) -> String {
-        if let Some(name) = self.family_name() {
-            return name.to_string();
-        }
+    pub fn display_name(&self) -> String {
         let mut parts = Vec::new();
-        for (name, exponent) in [
-            ("Length", self.0[0]),
-            ("Time", self.0[1]),
-            ("Temperature", self.0[2]),
-        ] {
-            if exponent == 1 {
-                parts.push(name.to_string());
-            } else if exponent != 0 {
-                parts.push(format!("{name}^{exponent}"));
-            }
+        for (axis, exponent) in &self.0 {
+            let name = axis.rsplit("::").next().unwrap_or(axis);
+            parts.push(if *exponent == 1 {
+                name.to_string()
+            } else {
+                format!("{name}^{exponent}")
+            });
         }
         if parts.is_empty() {
             "Scalar".to_string()
@@ -92,6 +102,32 @@ impl Dimension {
             parts.join(" * ")
         }
     }
+}
+
+fn escape_axis(axis: &str) -> String {
+    axis.replace('%', "%25").replace(';', "%3B").replace(':', "%3A")
+}
+
+fn unescape_axis(axis: &str) -> Option<String> {
+    let bytes = axis.as_bytes();
+    let mut out = String::with_capacity(axis.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            out.push(bytes[index] as char);
+            index += 1;
+            continue;
+        }
+        let code = axis.get(index + 1..index + 3)?;
+        out.push(match code {
+            "25" => '%',
+            "3B" => ';',
+            "3A" => ':',
+            _ => return None,
+        });
+        index += 3;
+    }
+    Some(out)
 }
 
 /// Internal-only provenance tag for purpose-bound `core.crypto` nominal types.
@@ -854,20 +890,23 @@ mod tests {
 
     #[test]
     fn physical_dimensions_normalize_and_serialize_stably() {
-        let length = Dimension::for_family("Length").unwrap();
-        let time = Dimension::for_family("Time").unwrap();
-        let speed = length.divide(time).unwrap();
-        assert_eq!(speed.family_name(), Some("Speed"));
-        assert_eq!(length.multiply(length).unwrap().family_name(), Some("Area"));
-        assert_eq!(length.pow(2).unwrap().family_name(), Some("Area"));
-        assert_eq!(speed.multiply(time), Some(length));
-        assert_eq!(Dimension::from_identity(&speed.identity()), Some(speed));
-        let max = Dimension::from_identity("L2147483647T0").unwrap();
-        assert_eq!(max.multiply(length), None);
+        let mass = Dimension::base("pkg::Mass");
+        let length = Dimension::base("pkg::Length");
+        let time = Dimension::base("pkg::Time");
+        let force = mass
+            .multiply(&length)
+            .unwrap()
+            .divide(&time)
+            .unwrap()
+            .divide(&time)
+            .unwrap();
         assert_eq!(
-            Type::quantity(Type::Float, speed).name(),
-            "Quantity<Speed, Float; L1T-1>"
+            force.identity(),
+            "pkg%3A%3ALength:1;pkg%3A%3AMass:1;pkg%3A%3ATime:-2"
         );
+        assert_eq!(Dimension::from_identity(&force.identity()), Some(force));
+        let max = Dimension::from_identity("pkg%3A%3ALength:2147483647").unwrap();
+        assert_eq!(max.multiply(&length), None);
     }
 
     #[test]

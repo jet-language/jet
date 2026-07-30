@@ -1238,18 +1238,33 @@ Example: `examples/features/math/math_audit.jet`.
 
 `#UnitFamily` makes named unit types. Printing a unit value shows its magnitude
 and declared symbol. Physical arithmetic also shows a normalized derived unit.
+Jet loads the seven SI dimensions and standard SI, accepted non-SI, customary,
+and electronics units from ordinary `Prelude/Units.jet` source.
 
 ```jet
-#UnitFamily(Length, base: meter) { meter px(scale: 1) }
-#UnitFamily(Time, base: second) { second }
+#UnitFamily(Token, dimension, base: token) { token }
+#UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) {
+    token_per_second
+}
 
 fn run() {
     distance :: 12meter
     speed :: distance / 3second
+    rate :: 30token / 2second
     print(distance) // 12 meter
     print(speed)    // 4 meter/second
+    print(rate)     // 15 token/second
 }
 ```
+
+Use `dimension` to mint one package-owned base axis. Use
+`dimension: Mass * Length / Time / Time` to give a structural dimension a
+name. Import one declaration when two packages must share a custom axis.
+
+Most unit scales are exact ratios. Degree uses the exact symbolic definition
+`pi / 180`. `mmHg` retains its NIST SP 811 convention. Dalton retains the
+pinned BIPM/CODATA central value, standard uncertainty, and source. A measured
+crossing requires an explicit rounded conversion and is never labeled exact.
 
 Bare interpolation uses the symbol form. `{value#Unit(name)}` uses the
 generated unit type name. `{value#Unit(bare)}` omits the unit. A hand-written

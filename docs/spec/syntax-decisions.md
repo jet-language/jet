@@ -669,19 +669,36 @@ unit literals**: `500ms`, `12.50usd` resolve against in-scope family members
 Dot-construction `px.{100}` also valid.
 
 **D-SHAPE-QUANTITY1=A — Jet understands physical dimensions** *(ratified
-2026-07-15)*: the compiler owns a small dimension table and scale rules —
-length divided by time is speed, length plus time is a clear Jet error. Unit
-information costs nothing at runtime and is shared across packages. This adds
-no general type-level programming; declaration and spelling are the
-D-QUANTITY-DECL1/TYPE1/POINT1/CONVERT1 family below.
+2026-07-15; amended by D-DIMENSION-OPEN1=D)*: length divided by time is speed,
+and length plus time is a Jet error. Unit information costs nothing at runtime.
+Currency remains nominal and does not take part in dimension algebra.
 
-Implementation identity is a normalized compiler-only exponent vector. The
-initial closed table recognizes `Length`, `Time`, `Speed`, and `Area`;
-D-QUANTITY-DECL1 extends it with `Temperature` for affine family identity. Inferred
-types serialize the canonical family name, numeric base, and exponent identity
-(for example `Quantity<Speed, Float; L1T-1>`) for semantic inspection and API
-freeze checks, then erase to the numeric base before backend emission. Currency
-remains outside this table and keeps D-QUAL3's nominal arithmetic behavior.
+Implementation identity is a sorted exponent map over nominal base dimensions.
+Zero exponents are removed. API facts escape and serialize each sorted key with
+its signed exponent. Sema erases the map before backend emission.
+
+**D-DIMENSION-OPEN1=D — Open dimensions with the standard-unit prelude**
+*(ratified 2026-07-28, card #1292)*: `#UnitFamily(Name, dimension, base: unit)`
+declares a new base dimension. The seven SI base dimensions and the standard
+unit catalog use this same surface in `Prelude/Units.jet`. The compiler has no
+dimension-name table. A third-party dimension is nominal to its declaring
+package, so packages share one by importing a common declaration.
+
+**D-DERIVED-DIMENSION-CLAIM1=A — Derived dimension in the family header**
+*(ratified 2026-07-30, card #1292)*:
+`#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton)`
+claims an existing structural dimension. Sema normalizes the expression to the
+same exponent map that value arithmetic uses. The coherent base member has
+scale one.
+
+**D-UNIT-SCALE-PROVENANCE1=A — Unit scales keep their source truth**
+*(ratified 2026-07-30, card #1292)*: a unit scale is `Rational`,
+`SymbolicPi`, `Conventional(value, source)`, or
+`Measured(central_value, standard_uncertainty, source)`. Degree uses
+`pi / 180`. Dalton records the BIPM/CODATA value and uncertainty. `mmHg`
+records the NIST SP 811 convention. Rational and symbolic conversions use the
+ordinary path. A measured crossing requires an explicit rounded conversion and
+is never reported as exact. API facts and diagnostics retain the provenance.
 
 **D-QUANTITY-DECL1=A — scaled and affine units extend `#UnitFamily`**
 *(ratified 2026-07-16, card #603)*: the post-D-SHAPE2 `#UnitFamily` typed

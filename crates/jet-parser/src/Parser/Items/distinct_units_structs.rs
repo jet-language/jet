@@ -1,4 +1,4 @@
-use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe};
+use super::super::{Diagnostic, Parser, Span, StrTokPart, Syntax, TokKind, describe};
 use super::helpers::parse_invariant_bounds;
 
 impl<'a> Parser<'a> {
@@ -436,7 +436,27 @@ impl<'a> Parser<'a> {
             };
             let family = family.clone();
             let family_span = *family_span;
-            let base = if let Some(value) = arguments.parameter(1) {
+            let dimension = arguments.parameter(1).map(|value| match value {
+                crate::AST::Expr::Ident(name, span)
+                    if name == Syntax::UNIT_FAMILY_DIMENSION_FIELD =>
+                {
+                    Ok(crate::AST::UnitDimensionDecl::Base(*span))
+                }
+                crate::AST::Expr::Ident(_, _)
+                | crate::AST::Expr::Binary(crate::AST::BinOp::Mul | crate::AST::BinOp::Div, _, _, _) => {
+                    Ok(crate::AST::UnitDimensionDecl::Derived(value.clone()))
+                }
+                _ => Err(Diagnostic::error(
+                    "E0003",
+                    "invalid dimension declaration".to_string(),
+                    "a dimension is a new axis or a product of existing dimension names"
+                        .to_string(),
+                    "write `dimension` or `dimension: Mass * Length / Time / Time`"
+                        .to_string(),
+                    Some(value.span()),
+                )),
+            }).transpose()?;
+            let base = if let Some(value) = arguments.parameter(2) {
                 let crate::AST::Expr::Ident(base, base_span) = value else {
                     return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, value.span()));
                 };
@@ -449,6 +469,7 @@ impl<'a> Parser<'a> {
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 let (member, member_span) = self.expect_ident("as a unit family member")?;
                 let mut scale = crate::AST::UnitRatio::integer(1);
+                let mut scale_provenance = crate::AST::UnitScaleProvenance::Rational;
                 let mut offset = crate::AST::UnitRatio::zero();
                 let mut saw_scale = false;
                 let mut saw_offset = false;
@@ -457,14 +478,15 @@ impl<'a> Parser<'a> {
                     while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
                         let (field, field_span) = self.expect_ident("as unit metadata")?;
                         self.expect(TokKind::Colon, "after unit metadata")?;
-                        let value = self.unit_family_ratio()?;
                         match field.as_str() {
                             Syntax::UNIT_FAMILY_SCALE_FIELD if !saw_scale => {
+                                let (value, provenance) = self.unit_family_scale()?;
                                 scale = value;
+                                scale_provenance = provenance;
                                 saw_scale = true;
                             }
                             Syntax::UNIT_FAMILY_OFFSET_FIELD if !saw_offset => {
-                                offset = value;
+                                offset = self.unit_family_ratio()?;
                                 saw_offset = true;
                             }
                             Syntax::UNIT_FAMILY_SCALE_FIELD | Syntax::UNIT_FAMILY_OFFSET_FIELD => {
@@ -519,6 +541,7 @@ impl<'a> Parser<'a> {
                     name: member,
                     name_span: member_span,
                     scale,
+                    scale_provenance,
                     offset,
                 });
                 while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
@@ -555,6 +578,8 @@ impl<'a> Parser<'a> {
                 is_package_pub,
                 family,
                 family_span,
+                dimension,
+                resolved_dimension: None,
                 base,
                 members,
                 span: Span::new(marker.span.start, end),
@@ -580,6 +605,126 @@ impl<'a> Parser<'a> {
                     Some(error_span),
                 )
             })
+        }
+
+        fn unit_family_scale(
+            &mut self,
+        ) -> Result<(crate::AST::UnitRatio, crate::AST::UnitScaleProvenance), Diagnostic> {
+            if matches!(&self.peek().kind, TokKind::Ident(name) if name == "pi") {
+                let pi_span = self.bump().span;
+                self.expect(TokKind::Slash, "after `pi` in a symbolic unit scale")?;
+                let (denominator, denominator_span) =
+                    self.unit_family_integer("as the symbolic scale denominator")?;
+                let denominator = crate::AST::UnitRatio::parse_source(&denominator, "1")
+                    .map_err(|reason| unit_scale_error(reason, denominator_span))?;
+                if denominator == crate::AST::UnitRatio::zero() {
+                    return Err(unit_scale_error(
+                        "symbolic scale denominator is zero".to_string(),
+                        denominator_span,
+                    ));
+                }
+                let pi = decimal_ratio(&std::f64::consts::PI.to_string())
+                    .map_err(|reason| unit_scale_error(reason, pi_span))?;
+                let effective = pi
+                    .div(&denominator)
+                    .map_err(|reason| unit_scale_error(reason, pi_span))?;
+                return Ok((
+                    effective,
+                    crate::AST::UnitScaleProvenance::SymbolicPi {
+                        numerator: crate::AST::UnitRatio::integer(1),
+                        denominator,
+                    },
+                ));
+            }
+
+            let kind = match &self.peek().kind {
+                TokKind::Ident(name) if name == "conventional" || name == "measured" => {
+                    name.clone()
+                }
+                _ => {
+                    return self.unit_family_ratio().map(|ratio| {
+                        (ratio, crate::AST::UnitScaleProvenance::Rational)
+                    });
+                }
+            };
+            let kind_span = self.bump().span;
+            self.expect(TokKind::LParen, "after the unit scale provenance")?;
+            let value = self.unit_family_decimal("as the scale value")?;
+            let effective =
+                decimal_ratio(&value).map_err(|reason| unit_scale_error(reason, kind_span))?;
+            self.expect(TokKind::Comma, "after the unit scale value")?;
+
+            let provenance = if kind == "conventional" {
+                self.expect_unit_scale_label("source")?;
+                let source = self.unit_family_plain_string("as the convention source")?;
+                crate::AST::UnitScaleProvenance::Conventional { value, source }
+            } else {
+                self.expect_unit_scale_label("uncertainty")?;
+                let standard_uncertainty =
+                    self.unit_family_decimal("as the standard uncertainty")?;
+                self.expect(TokKind::Comma, "after the standard uncertainty")?;
+                self.expect_unit_scale_label("source")?;
+                let source = self.unit_family_plain_string("as the measurement source")?;
+                crate::AST::UnitScaleProvenance::Measured {
+                    central_value: value,
+                    standard_uncertainty,
+                    source,
+                }
+            };
+            self.expect(TokKind::RParen, "after the unit scale provenance")?;
+            Ok((effective, provenance))
+        }
+
+        fn expect_unit_scale_label(&mut self, expected: &str) -> Result<(), Diagnostic> {
+            let (label, span) = self.expect_ident("as unit scale provenance metadata")?;
+            if label != expected {
+                return Err(unit_scale_error(
+                    format!("expected `{expected}:`, found `{label}:`"),
+                    span,
+                ));
+            }
+            self.expect(TokKind::Colon, "after unit scale provenance metadata")
+        }
+
+        fn unit_family_decimal(&mut self, expected: &str) -> Result<String, Diagnostic> {
+            let sign = if matches!(self.peek().kind, TokKind::Minus) {
+                self.bump();
+                "-"
+            } else {
+                ""
+            };
+            let token = self.bump();
+            let value = match token.kind {
+                TokKind::Int(_, raw) => raw,
+                TokKind::Float(value) if value.is_finite() => value.to_string(),
+                _ => {
+                    return Err(unit_scale_error(
+                        format!("expected a finite decimal {expected}"),
+                        token.span,
+                    ));
+                }
+            };
+            Ok(format!("{sign}{value}"))
+        }
+
+        fn unit_family_plain_string(&mut self, expected: &str) -> Result<String, Diagnostic> {
+            let token = self.bump();
+            let TokKind::Str(parts) = token.kind else {
+                return Err(unit_scale_error(format!("expected a plain string {expected}"), token.span));
+            };
+            if parts.len() != 1 {
+                return Err(unit_scale_error(
+                    "unit scale sources cannot contain interpolation".to_string(),
+                    token.span,
+                ));
+            }
+            let StrTokPart::Lit(value) = &parts[0] else {
+                return Err(unit_scale_error(
+                    "unit scale sources cannot contain interpolation".to_string(),
+                    token.span,
+                ));
+            };
+            Ok(value.clone())
         }
 
         fn unit_family_integer(&mut self, expected: &str) -> Result<(String, Span), Diagnostic> {
@@ -1019,4 +1164,121 @@ impl<'a> Parser<'a> {
             })
         }
 
+}
+
+fn unit_scale_error(reason: String, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0003",
+        format!("invalid unit scale: {reason}"),
+        "unit scales preserve whether a value is exact, symbolic, conventional, or measured"
+            .to_string(),
+        "use an exact ratio, `pi / n`, `conventional(...)`, or `measured(...)`"
+            .to_string(),
+        Some(span),
+    )
+}
+
+fn decimal_ratio(source: &str) -> Result<crate::AST::UnitRatio, String> {
+    let source = source.replace('_', "");
+    let (mantissa, exponent) = source
+        .split_once(['e', 'E'])
+        .map_or((source.as_str(), 0), |(mantissa, exponent)| {
+            (mantissa, exponent.parse::<i32>().unwrap_or(i32::MIN))
+        });
+    if exponent == i32::MIN {
+        return Err("invalid decimal exponent".to_string());
+    }
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.trim_start_matches(['-', '+']);
+    let (whole, fraction) = mantissa
+        .split_once('.')
+        .map_or((mantissa, ""), |parts| parts);
+    if whole.is_empty() && fraction.is_empty() {
+        return Err("invalid decimal value".to_string());
+    }
+    let mut numerator = format!("{whole}{fraction}");
+    if numerator.is_empty() {
+        numerator.push('0');
+    }
+    let power = exponent - i32::try_from(fraction.len()).map_err(|_| "decimal is too long")?;
+    let denominator = if power >= 0 {
+        numerator.extend(std::iter::repeat_n('0', power as usize));
+        "1".to_string()
+    } else {
+        format!("1{}", "0".repeat(power.unsigned_abs() as usize))
+    };
+    if negative {
+        numerator.insert(0, '-');
+    }
+    crate::AST::UnitRatio::parse_source(&numerator, &denominator)
+}
+
+#[cfg(test)]
+mod dimension_tests {
+    use crate::{AST, Lexer, Parser};
+
+    #[test]
+    fn standard_units_source_parses_with_unique_members_and_provenance() {
+        let source = include_str!("../../../../jet-codegen/src/Prelude/Units.jet");
+        let (tokens, diagnostics) = Lexer::lex_generated(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("standard units must parse");
+        let families = program
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                AST::Item::UnitFamily(family) => Some(family),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(families.len(), 32);
+        for family in &families {
+            let unique = family
+                .members
+                .iter()
+                .map(|member| member.name.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(unique.len(), family.members.len(), "{}", family.family);
+            assert!(family
+                .members
+                .iter()
+                .all(|member| member.scale != AST::UnitRatio::zero()));
+        }
+        let provenance = |member: &str| {
+            families
+                .iter()
+                .flat_map(|family| &family.members)
+                .find(|candidate| candidate.name == member)
+                .unwrap()
+                .scale_provenance
+                .clone()
+        };
+        assert!(matches!(
+            provenance("degree"),
+            AST::UnitScaleProvenance::SymbolicPi { .. }
+        ));
+        assert!(matches!(
+            provenance("dalton"),
+            AST::UnitScaleProvenance::Measured { .. }
+        ));
+        assert!(matches!(
+            provenance("mmHg"),
+            AST::UnitScaleProvenance::Conventional { .. }
+        ));
+        let scale = |member: &str| {
+            families
+                .iter()
+                .flat_map(|family| &family.members)
+                .find(|candidate| candidate.name == member)
+                .unwrap()
+                .scale
+                .to_string()
+        };
+        assert_eq!(scale("square_kilometer"), "1000000");
+        assert_eq!(scale("cubic_kilometer"), "1000000000");
+        assert!(!families
+            .iter()
+            .flat_map(|family| &family.members)
+            .any(|member| member.name == "kilosquare_meter" || member.name == "kilocubic_meter"));
+    }
 }

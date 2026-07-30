@@ -117,7 +117,13 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         }
         Item::UnitFamily(u) => {
             pascal(&u.family, u.family_span, "unit family", out);
-            for member in &u.members { snake(&member.name, member.name_span, "unit member", out); }
+            for member in &u.members {
+                // D-UNIT-SCALE-PROVENANCE1: SI-accepted `mmHg` keeps its
+                // published symbol; all other user members follow snake_case.
+                if member.name != "mmHg" {
+                    snake(&member.name, member.name_span, "unit member", out);
+                }
+            }
         }
         Item::Trait(t) => {
             pascal(&t.name, t.name_span, "trait", out);

@@ -276,7 +276,7 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 }
 
 // D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
-// unwriteable internal type marker and the compiler-owned identity table below.
+// unwriteable internal type marker.
 pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
@@ -295,17 +295,6 @@ pub fn unit_rounding_mode(name: &str) -> Option<crate::UnitRoundingMode> {
         _ => None,
     }
 }
-
-/// Canonical `(Length, Time, Temperature)` exponent vectors for physical
-/// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is
-/// deliberately absent: D-QUAL3 currency units remain nominal quantities.
-pub const PHYSICAL_DIMENSIONS: &[(&str, [i32; 3])] = &[
-    ("Length", [1, 0, 0]),
-    ("Time", [0, 1, 0]),
-    ("Speed", [1, -1, 0]),
-    ("Area", [2, 0, 0]),
-    ("Temperature", [0, 0, 1]),
-];
 
 /// The two identifier tiers fixed by D-SHAPE-CASE1=C.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

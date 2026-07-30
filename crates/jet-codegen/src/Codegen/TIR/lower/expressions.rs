@@ -691,15 +691,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 let lhs = raw(lhs);
                 let rhs = raw(rhs);
-                let left = ldim.unwrap_or(crate::AST::Dimension::SCALAR);
-                let right = rdim.unwrap_or(crate::AST::Dimension::SCALAR);
+                let left = ldim.unwrap_or_else(crate::AST::Dimension::scalar);
+                let right = rdim.unwrap_or_else(crate::AST::Dimension::scalar);
                 let dimension = if *op == BinOp::Mul {
-                    left.multiply(right)
+                    left.multiply(&right)
                 } else {
-                    left.divide(right)
+                    left.divide(&right)
                 }
                 .expect("sema checked physical dimension exponent bounds");
-                let ty = if dimension == crate::AST::Dimension::SCALAR {
+                let ty = if dimension == crate::AST::Dimension::scalar() {
                     Type::Float
                 } else {
                     Type::quantity(Type::Float, dimension)

@@ -30,7 +30,7 @@ pub use items::{
     ProtocolDecl, StateDecl, EffectDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, Func, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
-    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitFamilyDef, UnitFamilyMember, UnitRatio, EnumDef,
+    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
     EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field, SerdeWireShape,
     resolved_decode_wire_shapes,
 };

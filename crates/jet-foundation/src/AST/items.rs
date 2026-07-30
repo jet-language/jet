@@ -1332,11 +1332,23 @@ pub struct UnitFamilyDef {
     /// The family label, e.g. `currency` — documentation only; not a type name.
     pub family: String,
     pub family_span: Span,
+    /// D-DIMENSION-OPEN1 / D-DERIVED-DIMENSION-CLAIM1: absent keeps the
+    /// family nominal; `Base` mints one axis; `Derived` claims a normalized
+    /// product of existing dimension names.
+    pub dimension: Option<UnitDimensionDecl>,
+    /// Filled by sema after all declarations in the module are known.
+    pub resolved_dimension: Option<Dimension>,
     /// D-QUANTITY-DECL1=A: canonical member whose scale is one and offset zero.
     /// Absent on legacy nominal D-QUAL3 families such as Currency.
     pub base: Option<(String, Span)>,
     pub members: Vec<UnitFamilyMember>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnitDimensionDecl {
+    Base(Span),
+    Derived(Expr),
 }
 
 /// One closed `#UnitFamily` member and its exact normalized conversion facts.
@@ -1345,10 +1357,31 @@ pub struct UnitFamilyMember {
     pub name: String,
     pub name_span: Span,
     pub scale: UnitRatio,
+    pub scale_provenance: UnitScaleProvenance,
     pub offset: UnitRatio,
 }
 
 pub type UnitRatio = crate::PerformanceBudget::Rational;
+
+/// D-UNIT-SCALE-PROVENANCE1=A: source truth behind a unit's runtime scale.
+/// `scale` above is the one precomputed multiplier used by the engines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnitScaleProvenance {
+    Rational,
+    SymbolicPi {
+        numerator: UnitRatio,
+        denominator: UnitRatio,
+    },
+    Conventional {
+        value: String,
+        source: String,
+    },
+    Measured {
+        central_value: String,
+        standard_uncertainty: String,
+        source: String,
+    },
+}
 
 impl UnitFamilyDef {
     /// PascalCase the member spelling to its minted distinct-type name:
@@ -1400,9 +1433,9 @@ impl UnitFamilyDef {
                     comparable_span: None,
                     is_printable: false,
                     printable_span: None,
-                    is_codable_as_base: Dimension::for_family(&self.family).is_some(),
+                    is_codable_as_base: self.resolved_dimension.is_some(),
                     codable_as_base_span: None,
-                    quantity: Dimension::for_family(&self.family).map(|dimension| {
+                    quantity: self.resolved_dimension.clone().map(|dimension| {
                         let kind = if affine {
                             if is_point { QuantityKind::Point } else { QuantityKind::Delta }
                         } else {

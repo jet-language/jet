@@ -46,6 +46,139 @@ fn parse_family(src: &str) -> jet::AST::UnitFamilyDef {
 }
 
 #[test]
+fn open_base_and_derived_dimension_claims_parse() {
+    let base = parse_family("#UnitFamily(Mass, dimension, base: kilogram) { kilogram }");
+    assert!(matches!(
+        base.dimension,
+        Some(jet::AST::UnitDimensionDecl::Base(_))
+    ));
+
+    let derived = parse_family(
+        "#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }",
+    );
+    assert!(matches!(
+        derived.dimension,
+        Some(jet::AST::UnitDimensionDecl::Derived(_))
+    ));
+}
+
+#[test]
+fn scale_provenance_parses_without_erasing_source_truth() {
+    let angle = parse_family(
+        "#UnitFamily(Angle, dimension, base: radian) { radian degree(scale: pi / 180) }",
+    );
+    assert!(matches!(
+        angle.members[1].scale_provenance,
+        jet::AST::UnitScaleProvenance::SymbolicPi { .. }
+    ));
+
+    let mass = parse_family(
+        r#"#UnitFamily(Mass, dimension, base: kilogram) {
+    kilogram
+    dalton(scale: measured(1.66053906892e-27, uncertainty: 0.00000000052e-27, source: "BIPM-2026/CODATA-2022"))
+}"#,
+    );
+    assert!(matches!(
+        mass.members[1].scale_provenance,
+        jet::AST::UnitScaleProvenance::Measured { .. }
+    ));
+}
+
+#[test]
+fn symbolic_and_measured_standard_scales_keep_one_explicit_boundary() {
+    let symbolic = r#"
+fn accept(value: Radian) {}
+fn run() { accept(1degree) }
+"#;
+    assert!(
+        codes_of(symbolic).is_empty(),
+        "symbolic pi conversions should use the ordinary conversion path"
+    );
+
+    let measured = r#"
+fn run() {
+    mass :: Kilogram.from_dalton_rounded(1dalton, .NearestEven, digits: 30) ?? panic("rounded measured conversion")
+    print(mass.raw())
+}
+"#;
+    assert!(
+        codes_of(measured).is_empty(),
+        "a written rounded conversion is the audit boundary for measured scales"
+    );
+}
+
+#[test]
+fn user_dimensions_compose_and_named_derived_units_share_the_structure() {
+    let src = r#"
+#UnitFamily(Mass, dimension, base: kilogram) { kilogram }
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Time, dimension, base: second) { second }
+#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
+
+fn accept(force: Newton) { print("{force.raw()}") }
+fn run() {
+    momentum :: 4kilogram * 3meter
+    acceleration_step :: momentum / 2second
+    force :: acceleration_step / 2second
+    accept(force)
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("open_dimensions", src);
+    assert_eq!((code, stdout.as_str()), (0, "3.0\n"));
+}
+
+#[test]
+fn user_dimensions_keep_interpreter_and_resident_jit_parity() {
+    let src = r#"
+#UnitFamily(Mass, dimension, base: kilogram) { kilogram }
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Time, dimension, base: second) { second }
+#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
+
+fn accept(force: Newton) { print("{force.raw()}") }
+fn run() {
+    momentum :: 4kilogram * 3meter
+    acceleration_step :: momentum / 2second
+    force :: acceleration_step / 2second
+    accept(force)
+}
+"#;
+    let dir = common::unique_tmp("open_dimension_tiers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("open dimensions must lower through shared TIR");
+    let mut sink = jet::Comptime::DevSink::default();
+    jet::Codegen::TIR::run_program(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        true,
+    )
+    .expect("open dimensions must run in the evaluator");
+    assert_eq!(sink.stdout, "3.0\n");
+
+    if jet_jit::cranelift_host_supported() {
+        use jet::JitBackend::{JitBackend, RunOutcome};
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "3.0\n"),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("JIT rejected open dimensions: {diagnostics:?}")
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn scaled_and_affine_metadata_is_exact_and_normalized() {
     let family = parse_family(
         r#"#UnitFamily(Temperature, base: kelvin) {
@@ -110,7 +243,7 @@ fn affine_family_mints_point_and_delta_types_only() {
 
 #[test]
 fn scaled_family_metadata_is_public_api_identity() {
-    let src = r#"pub #UnitFamily(Length, base: meter) {
+    let src = r#"pub #UnitFamily(Length, dimension, base: meter) {
     meter
     millimeter(scale: 2/2000)
 }
@@ -122,13 +255,13 @@ pub fn length() => Millimeter { return Millimeter.from_float(1.0)? }
     let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "geometry", "1.0.0");
     assert_eq!(
         snapshot.funcs[0].signature,
-        "fn length() => Millimeter{package=geometry; family=Length; base=Meter; dimension=L1T0; scale=1/1000; offset=0}"
+        "fn length() => Millimeter{package=geometry; family=Length; base=Meter; dimension=geometry%3A%3ALength:1; scale=1/1000; provenance=Rational; offset=0}"
     );
 }
 
 #[test]
 fn affine_point_and_delta_have_distinct_public_identities() {
-    let src = r#"pub #UnitFamily(Temperature, base: kelvin) {
+    let src = r#"pub #UnitFamily(Temperature, dimension, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
@@ -141,9 +274,9 @@ pub fn tolerance() => CelsiusDelta { return CelsiusDelta.from_float(2.0) }
     let program = jet::Parser::parse(&tokens).expect("affine family should parse");
     let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "climate", "1.0.0");
     assert!(snapshot.funcs.iter().any(|func| func.signature ==
-        "fn target() => CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=5463/20}"));
+        "fn target() => CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=5463/20}"));
     assert!(snapshot.funcs.iter().any(|func| func.signature ==
-        "fn tolerance() => CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=0}"));
+        "fn tolerance() => CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=0}"));
 }
 
 #[test]
@@ -633,15 +766,20 @@ fn run() {
 }
 
 #[test]
-fn quantity_bounds_reject_unknown_dimensions_and_kinds_at_parse_time() {
-    for src in [
-        "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) => Q { return value }",
-        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) => Q { return value }",
-    ] {
-        let (tokens, lex) = jet::Lexer::lex(src);
-        assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
-        assert!(jet::Parser::parse(&tokens).is_err(), "invalid Quantity bound parsed: {src}");
-    }
+fn quantity_bounds_accept_open_dimensions_but_reject_unknown_kinds() {
+    let open = "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) => Q { return value }";
+    let (tokens, lex) = jet::Lexer::lex(open);
+    assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
+    assert!(
+        jet::Parser::parse(&tokens).is_ok(),
+        "open dimension names must not come from a compiler table"
+    );
+
+    let bad_kind =
+        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) => Q { return value }";
+    let (tokens, lex) = jet::Lexer::lex(bad_kind);
+    assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
+    assert!(jet::Parser::parse(&tokens).is_err());
 }
 
 #[test]
