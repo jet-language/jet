@@ -359,6 +359,7 @@ pub(crate) struct JitMeta<'a> {
         &'a HashMap<(String, String), Type>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
+    struct_type_params: &'a HashMap<String, Vec<String>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
     int_constants: &'a HashMap<String, i64>,
@@ -375,6 +376,7 @@ impl<'a> JitMeta<'a> {
             iterable_item_types: &program.iterable_item_types,
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
+            struct_type_params: &program.struct_type_params,
             enum_variants: &program.enum_variants,
             enum_variant_payload_types: &program.enum_variant_payload_types,
             int_constants: &program.int_constants,
@@ -520,6 +522,10 @@ impl<'a> JitMeta<'a> {
             return None;
         }
         Some((names.as_slice(), tys.as_slice()))
+    }
+
+    pub(crate) fn struct_type_params(&self, type_name: &str) -> Option<&[String]> {
+        self.struct_type_params.get(type_name).map(Vec::as_slice)
     }
 
     pub(crate) fn struct_type_id(&self, type_name: &str) -> Option<i64> {

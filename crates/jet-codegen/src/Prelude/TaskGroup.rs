@@ -53,6 +53,56 @@ pub enum JetTaskDecision<T, E> {
     Finish(Result<Vec<T>, E>),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum JetTaskWaitInterrupt<D> {
+    Deadline(D),
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JetTaskDeadline {
+    pub what: String,
+    pub why: String,
+    pub fix: String,
+}
+
+impl JetTaskDeadline {
+    pub fn render(&self) -> String {
+        format!(
+            "Error [E3003]: {}\nWhy: {}\nFix: {}",
+            self.what, self.why, self.fix
+        )
+    }
+}
+
+pub fn jet_task_deadline(wait_kind: &str) -> JetTaskDeadline {
+    JetTaskDeadline {
+        what: format!("deadline exceeded while waiting in {wait_kind}"),
+        why: "this wait point observed the task context deadline from `#Context(deadline: …)`"
+            .to_string(),
+        fix: "raise the deadline budget or shorten the work before this wait point".to_string(),
+    }
+}
+
+/// Canonical parent wait-point policy. A shield defers both interrupts;
+/// otherwise an expired deadline lands before a pending cancellation.
+pub fn jet_task_wait_policy<D>(
+    deadline: Option<D>,
+    cancelled: bool,
+    shielded: bool,
+) -> Result<(), JetTaskWaitInterrupt<D>> {
+    if shielded {
+        return Ok(());
+    }
+    if let Some(deadline) = deadline {
+        return Err(JetTaskWaitInterrupt::Deadline(deadline));
+    }
+    if cancelled {
+        return Err(JetTaskWaitInterrupt::Cancelled);
+    }
+    Ok(())
+}
+
 /// Canonical all/race/any result policy. Engines only report completed task
 /// outcomes and apply cancellation/drain when this policy says to finish.
 pub struct JetTaskSelectPolicy<T, E> {
@@ -123,10 +173,65 @@ impl<T, E> JetTaskSelectPolicy<T, E> {
     }
 }
 
+/// Canonical all/race/any wait loop. Engines only marshal their task handle,
+/// completion, cancellation, and drain operations into these callbacks.
+pub fn jet_task_select<Task, T, E>(
+    tasks: Vec<Task>,
+    mode: JetTaskSelectMode,
+    mut wait_check: impl FnMut() -> Result<(), E>,
+    mut completion_order: impl FnMut(&Task) -> Option<u128>,
+    mut try_complete: impl FnMut(&mut Task) -> Option<Result<T, E>>,
+    mut cancel: impl FnMut(&Task),
+    mut drain: impl FnMut(Task),
+) -> Result<Vec<T>, E> {
+    assert!(!tasks.is_empty(), "task selection needs at least one task");
+    let mut tasks = tasks.into_iter().map(Some).collect::<Vec<_>>();
+    let mut policy = JetTaskSelectPolicy::new(mode, tasks.len());
+    loop {
+        if let Err(error) = wait_check() {
+            for task in tasks.iter().flatten() {
+                cancel(task);
+            }
+            for task in tasks.into_iter().flatten() {
+                drain(task);
+            }
+            return Err(error);
+        }
+        let next = tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| {
+                task.as_ref()
+                    .and_then(&mut completion_order)
+                    .map(|order| (order, index))
+            })
+            .min();
+        if let Some((order, index)) = next {
+            let result = tasks[index].as_mut().and_then(&mut try_complete);
+            if let Some(result) = result {
+                tasks[index] = None;
+                if let JetTaskDecision::Finish(result) = policy.settle(order, index, result) {
+                    if result.is_err() || !matches!(mode, JetTaskSelectMode::All) {
+                        for task in tasks.iter().flatten() {
+                            cancel(task);
+                        }
+                    }
+                    for task in tasks.into_iter().flatten() {
+                        drain(task);
+                    }
+                    return result;
+                }
+            }
+        }
+        std::thread::yield_now();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        JetTaskDecision, JetTaskGroupRuntime, JetTaskSelectMode, JetTaskSelectPolicy,
+        jet_task_select, jet_task_wait_policy, JetTaskDecision, JetTaskGroupRuntime,
+        JetTaskSelectMode, JetTaskSelectPolicy, JetTaskWaitInterrupt,
     };
     use std::sync::{Arc, Mutex};
 
@@ -181,5 +286,52 @@ mod tests {
             JetTaskDecision::Finish(Err(error)) => assert_eq!(error, "first failed"),
             _ => panic!("any did not expose its first completion"),
         }
+    }
+
+    #[test]
+    fn shared_wait_loop_cancels_and_drains_after_an_error() {
+        struct Task {
+            id: i32,
+            order: u128,
+            result: Option<Result<i32, &'static str>>,
+        }
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let cancel_events = events.clone();
+        let drain_events = events.clone();
+        let result = jet_task_select(
+            vec![
+                Task {
+                    id: 1,
+                    order: 0,
+                    result: Some(Err("failed")),
+                },
+                Task {
+                    id: 2,
+                    order: 1,
+                    result: Some(Ok(2)),
+                },
+            ],
+            JetTaskSelectMode::All,
+            || Ok(()),
+            |task| Some(task.order),
+            |task| task.result.take(),
+            |task| cancel_events.lock().unwrap().push(("cancel", task.id)),
+            |task| drain_events.lock().unwrap().push(("drain", task.id)),
+        );
+        assert_eq!(result, Err("failed"));
+        assert_eq!(*events.lock().unwrap(), [("cancel", 2), ("drain", 2)]);
+    }
+
+    #[test]
+    fn parent_wait_policy_defers_a_shield_and_prefers_a_deadline() {
+        assert_eq!(
+            jet_task_wait_policy(Some("deadline"), true, false),
+            Err(JetTaskWaitInterrupt::Deadline("deadline"))
+        );
+        assert_eq!(
+            jet_task_wait_policy::<&str>(None, true, false),
+            Err(JetTaskWaitInterrupt::Cancelled)
+        );
+        assert_eq!(jet_task_wait_policy(Some("deadline"), true, true), Ok(()));
     }
 }

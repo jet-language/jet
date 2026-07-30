@@ -412,6 +412,50 @@ pub fn accept(value: Float) => Float {
 }
 
 #[test]
+fn numeric_multi_producer_joins_widen_every_producer_across_tiers() {
+    let source = r#"
+fn run() {
+    small :: U8.{1}
+    wide :: U16.{2}
+    choose_first :: true
+
+    small_first :: if choose_first -> small else -> wide
+    wide_first :: if choose_first -> wide else -> small
+    print(small_first == U16.{1})
+    print(wide_first == U16.{2})
+
+    small_first_list :: [small, wide]
+    wide_first_list :: [wide, small]
+    print(small_first_list[0] == U16.{1})
+    print(small_first_list[1] == U16.{2})
+    print(wide_first_list[0] == U16.{2})
+    print(wide_first_list[1] == U16.{1})
+
+    exact :: Int.{9007199254740992}
+    decimal :: Float.{1.0}
+    exact_if :: if choose_first -> exact else -> decimal
+    exact_list :: [exact, decimal]
+    print(exact_if == 9007199254740992.0)
+    print(exact_list[0] == 9007199254740992.0)
+
+    lossy :: Int.{9007199254740993}
+    rounded :: 9007199254740992.0
+    approx_if :: if choose_first -> approx(lossy) else -> decimal
+    approx_list :: [approx(lossy), decimal]
+    print(approx_if == rounded)
+    print(approx_list[0] == rounded)
+}
+"#;
+
+    assert_all_tiers(
+        "numeric_multi_producer_joins",
+        source,
+        0,
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
 fn widening_does_not_search_for_a_third_type_or_narrow() {
     let no_join = compile_error(
         r#"
@@ -438,6 +482,20 @@ fn run() {
 "#,
     );
     assert!(narrowing.contains("[E0112]"), "{narrowing}");
+
+    let spread_widening = compile_error(
+        r#"
+fn run() {
+    small :: [U8.{1}]
+    _ :: [...small, U16.{2}]
+}
+"#,
+    );
+    assert!(
+        spread_widening.contains("[E0504]")
+            && spread_widening.contains("list resolves to `U16`"),
+        "{spread_widening}"
+    );
 }
 
 #[test]

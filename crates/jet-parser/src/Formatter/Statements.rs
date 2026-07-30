@@ -56,13 +56,20 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_fenced_statement(&mut self, fact: &crate::AST::FencedStatement) {
+        let preserve_layout = self
+            .comments
+            .iter()
+            .any(|comment| fact.span.start <= comment.span.start && comment.span.start < fact.span.end);
         let mut cursor = fact.span.start;
         for fence in &fact.fences {
-            self.write_normalized_fence_fragment(cursor, fence.span.start);
+            self.write_fence_fragment(cursor, fence.span.start, preserve_layout);
             self.fmt_fenced_names(fence);
             cursor = fence.span.end;
         }
-        self.write_normalized_fence_fragment(cursor, fact.span.end);
+        self.write_fence_fragment(cursor, fact.span.end, preserve_layout);
+        if preserve_layout {
+            self.skip_verbatim_comments(fact.span.end);
+        }
     }
 
     fn fmt_fenced_names(&mut self, fence: &crate::AST::FencedNames) {
@@ -115,7 +122,13 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::SIGIL_FENCE_CLOSE);
     }
 
-    fn write_normalized_fence_fragment(&mut self, start: usize, end: usize) {
+    fn write_fence_fragment(&mut self, start: usize, end: usize, preserve_layout: bool) {
+        if preserve_layout {
+            if let Some(fragment) = self.src.get(start..end) {
+                self.write(fragment);
+            }
+            return;
+        }
         let literal_spans = self
             .source_toks
             .iter()

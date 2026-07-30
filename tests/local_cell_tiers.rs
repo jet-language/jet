@@ -98,10 +98,85 @@ fn run() {
     print(early.get())
     early.edit(value => value += 1)
     print(early.get())
+
+    wide :: Cell.new(U16.{0})
+    wide.set(U8.{7})
+    print(wide.get() == U16.{7})
+
+    decimal :: Cell.new(Float.{0.0})
+    decimal.set(Int.{42})
+    print(decimal.get() == 42.0)
 }
 "#;
 
-const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\n";
+const EXPECTED: &str =
+    "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n";
+
+const GENERIC_SOURCE: &str = r#"
+struct Box<T> {
+    value: T,
+}
+
+struct Number {
+    value: Int,
+}
+
+struct Reverse<Value, Alpha> {
+    first: Value,
+    second: Alpha,
+}
+
+impl Box {
+    fn new(value: ^T) => Box<T> {
+        return Box<T>.{ value: value }
+    }
+}
+
+fn keep_result(value: ^(Int ? String)) {
+    cell :: Cell.new(value)
+    print(cell.read(result => result ?? 0))
+}
+
+fn ok_result() => Int ? String {
+    return Ok(7)
+}
+
+fn run() {
+    counts := [String: Int].{}
+    counts["jet"] = 3
+    map_cell :: Cell.new(^counts)
+    print(map_cell.read(values => values.get("jet") ?? 0))
+
+    keep_result(ok_result())
+
+    shared :: Shared.new(9)
+    shared_cell :: Cell.new(shared)
+    print(shared_cell.read(handle => handle.read(value => value)))
+
+    nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
+    projected :: nested.guard_read().map(value => value.value.value)
+    print(projected.get())
+
+    reverse :: Cell.new(Reverse<Float, Number>.{
+        first: 1.5,
+        second: Number.{ value: 13 },
+    })
+    print(reverse.get().first)
+    print(reverse.get().second.value)
+
+}
+"#;
+
+const GENERIC_EXPECTED: &str = "3\n7\n9\n11\n1.5\n13\n";
+
+const INT_MAP_SOURCE: &str = r#"
+fn run() {
+    values := [Int: Int].{}
+    values[1] = 2
+    cell :: Cell.new(^values)
+    print(cell.read(items => items.get(1) ?? 0))
+}
+"#;
 
 #[test]
 fn local_cell_split_keeps_projected_tuple_type_in_tir() {
@@ -174,6 +249,121 @@ fn local_cell_full_surface_runs_through_default_tier() {
         .expect("spawn 2 MiB local Cell embedder")
         .join()
         .expect("local Cell embedder must not overflow");
+}
+
+#[test]
+fn local_cell_generic_shapes_run_through_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("local_cell_generic_aot", GENERIC_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, GENERIC_EXPECTED);
+}
+
+#[test]
+fn local_cell_generic_shapes_run_through_default_tier() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "jet_local_cell_generic_parity_{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("main.jet");
+            fs::write(&path, GENERIC_SOURCE).unwrap();
+            let shown = path.to_string_lossy().into_owned();
+
+            for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+                jet_jit::reset_jit_trace_for_test();
+                match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+                    jet::Interpreter::RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    } => {
+                        assert_eq!(exit_code, 0, "{tier} exit drift");
+                        assert_eq!(stderr, "", "{tier} stderr drift");
+                        assert_eq!(stdout, GENERIC_EXPECTED, "{tier} output drift");
+                    }
+                    jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                        panic!("{tier} rejected generic Cell: {diagnostics:?}")
+                    }
+                }
+                if force_interpreter {
+                    continue;
+                }
+                assert!(
+                    jet_jit::jit_executed_for_test(),
+                    "generic Cell shapes must execute native resident JIT code"
+                );
+                assert!(
+                    !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+                    "generic Cell shapes must not deopt or use fallback"
+                );
+            }
+        })
+        .expect("spawn 2 MiB generic Cell embedder")
+        .join()
+        .expect("generic Cell embedder must not overflow");
+}
+
+#[test]
+fn local_cell_non_string_map_uses_default_evaluator() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "jet_local_cell_int_map_{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("main.jet");
+            fs::write(&path, INT_MAP_SOURCE).unwrap();
+            let shown = path.to_string_lossy().into_owned();
+
+            jet_jit::reset_jit_trace_for_test();
+            let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+            match outcome {
+                jet::Interpreter::RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => {
+                    assert_eq!(exit_code, 0);
+                    assert_eq!(stderr, "");
+                    assert_eq!(stdout, "2\n");
+                }
+                jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                    panic!("default tier rejected Cell<[Int: Int]>: {diagnostics:?}")
+                }
+            }
+            assert!(
+                !jet_jit::jit_executed_for_test(),
+                "Cell<[Int: Int]> must not claim resident-native execution"
+            );
+
+            jet_jit::reset_jit_trace_for_test();
+            let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+            match outcome {
+                jet::Interpreter::RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => {
+                    assert_eq!(exit_code, 0);
+                    assert_eq!(stderr, "");
+                    assert_eq!(stdout, "2\n");
+                }
+                jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                    panic!("interpreter rejected Cell<[Int: Int]>: {diagnostics:?}")
+                }
+            }
+        })
+        .expect("spawn 2 MiB non-string map Cell embedder")
+        .join()
+        .expect("non-string map Cell embedder must not overflow");
 }
 
 #[test]

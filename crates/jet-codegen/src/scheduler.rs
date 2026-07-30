@@ -1263,64 +1263,47 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
     mode: crate::task_group::JetTaskSelectMode,
 ) -> Vec<T> {
-    use crate::task_group::{JetTaskDecision, JetTaskSelectPolicy};
-    assert!(!entries.is_empty(), "task selection: empty task list");
-    let mut settled = vec![false; entries.len()];
-    let mut policy = JetTaskSelectPolicy::new(mode, entries.len());
-    loop {
-        let next = entries
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !settled[*index])
-            .filter_map(|(index, (join, _))| {
-                join.completion_order().map(|order| (order, index))
+    use crate::task_group::{
+        jet_task_deadline, jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt,
+    };
+    let result = jet_task_select(
+        entries,
+        mode,
+        || {
+            let deadline = matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0)
+                .then(|| jet_task_deadline("task selection").render());
+            jet_task_wait_policy(deadline, jet_scheduler_task_cancelled(), jet_scheduler_shielded())
+                .map_err(|interrupt| match interrupt {
+                    JetTaskWaitInterrupt::Deadline(rendered) => {
+                        JetSchedulerResult::Deadline(rendered)
+                    }
+                    JetTaskWaitInterrupt::Cancelled => JetSchedulerResult::Cancelled,
+                })
+        },
+        |(join, _)| join.completion_order(),
+        |(join, _)| {
+            join.try_recv().map(|result| match result {
+                JetSchedulerResult::Value(value) => Ok(value),
+                failure => Err(failure),
             })
-            .min();
-        if let Some((order, index)) = next {
-            if let Some(result) = entries[index].0.try_recv() {
-                settled[index] = true;
-                let result = match result {
-                    JetSchedulerResult::Value(value) => Ok(value),
-                    JetSchedulerResult::Panicked => Err(JetSchedulerResult::Panicked),
-                    JetSchedulerResult::Cancelled => Err(JetSchedulerResult::Cancelled),
-                    JetSchedulerResult::Deadline(rendered) => {
-                        Err(JetSchedulerResult::Deadline(rendered))
-                    }
-                };
-                if let JetTaskDecision::Finish(result) =
-                    policy.settle(order, index, result)
-                {
-                    let cancel = result.is_err()
-                        || !matches!(mode, crate::task_group::JetTaskSelectMode::All);
-                    if cancel {
-                        for (task, (_, control)) in entries.iter().enumerate() {
-                            if !settled[task] {
-                                control.cancel();
-                            }
-                        }
-                    }
-                    for (join, _) in entries {
-                        join.drain();
-                    }
-                    jet_scheduler_drain();
-                    return match result {
-                        Ok(values) => values,
-                        Err(JetSchedulerResult::Deadline(rendered)) => {
-                            jet_scheduler_propagate_deadline(rendered)
-                        }
-                        Err(JetSchedulerResult::Cancelled) => {
-                            jet_task_deliver_cancel();
-                            jet_scheduler_fatal("a task was cancelled")
-                        }
-                        Err(JetSchedulerResult::Panicked) => {
-                            jet_scheduler_fatal("a task panicked")
-                        }
-                        Err(JetSchedulerResult::Value(())) => unreachable!(),
-                    };
-                }
-            }
+        },
+        |(_, control)| control.cancel(),
+        |(join, _)| join.drain(),
+    );
+    jet_scheduler_drain();
+    match result {
+        Ok(values) => values,
+        Err(JetSchedulerResult::Deadline(rendered)) => {
+            jet_scheduler_propagate_deadline(rendered)
         }
-        thread::sleep(Duration::from_micros(50));
+        Err(JetSchedulerResult::Cancelled) => {
+            jet_task_deliver_cancel();
+            jet_scheduler_fatal("a task was cancelled")
+        }
+        Err(JetSchedulerResult::Panicked) => {
+            jet_scheduler_fatal("a task panicked")
+        }
+        Err(JetSchedulerResult::Value(_)) => unreachable!(),
     }
 }
 

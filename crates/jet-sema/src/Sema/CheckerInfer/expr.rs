@@ -582,6 +582,8 @@ impl<'a> Checker<'a> {
                         } else if let Some(joined) = a.numeric_join(&b) {
                             // D-NUMJOIN1=A: two numeric producers follow the one
                             // widening law, exactly as an operator's operands do.
+                            self.widen_numeric_expr(then_value, &a, &joined);
+                            self.widen_numeric_expr(else_value, &b, &joined);
                             Some(joined)
                         } else {
                             if self.collect_item_types.is_empty() {
@@ -2325,12 +2327,15 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        for (i, t) in elem_types.iter().enumerate().skip(1) {
-            if *t != first && t.numeric_widening_to(&first).is_none() {
+        for (i, (elem, t)) in elems.iter().zip(&elem_types).enumerate() {
+            let spread_needs_conversion = matches!(elem, Expr::Spread(..)) && *t != first;
+            if spread_needs_conversion
+                || (*t != first && t.numeric_widening_to(&first).is_none())
+            {
                 self.diags.push(Diagnostic::error(
                     "E0504",
                     format!(
-                        "this list started as `{}` but item {} is `{}`",
+                        "this list resolves to `{}` but item {} is `{}`",
                         first.name(),
                         i + 1,
                         t.name()
@@ -2339,6 +2344,11 @@ impl<'a> Checker<'a> {
                     "make every element the same type, or build the list in steps".to_string(),
                     Some(elems[i].span()),
                 ));
+            }
+        }
+        for (elem, source) in elems.iter_mut().zip(&elem_types) {
+            if !matches!(elem, Expr::Spread(..)) {
+                self.widen_numeric_expr(elem, source, &first);
             }
         }
         self.check_list_view_element_aliases(elems, &first);

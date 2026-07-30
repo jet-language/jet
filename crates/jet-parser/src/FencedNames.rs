@@ -587,6 +587,36 @@ mod tests {
     }
 
     #[test]
+    fn formatter_keeps_fenced_lambda_body_after_an_inline_comment() {
+        let source = "\
+fn run() {
+    $[ first, second ]$ :: work(() => { // keep this note
+        print(\"body\")
+        return 1
+    })
+}
+";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let comments = Lexer::comments(&tokens);
+        let program = crate::Parser::parse_for_fmt(&tokens).expect("parse fenced lambda");
+        let formatted = crate::Formatter::format_program(&program, source, &comments);
+        assert!(
+            formatted.contains("// keep this note\n"),
+            "inline comment swallowed the fenced lambda body:\n{formatted}"
+        );
+        let (tokens, diagnostics) = Lexer::lex(&formatted);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let comments = Lexer::comments(&tokens);
+        let program =
+            crate::Parser::parse_for_fmt(&tokens).expect("reparse formatted fenced lambda");
+        assert_eq!(
+            crate::Formatter::format_program(&program, &formatted, &comments),
+            formatted
+        );
+    }
+
+    #[test]
     fn formatter_wraps_a_wide_fence_one_name_per_line() {
         let source = "fn run() {\n    $[ this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three ]$ :: work()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);

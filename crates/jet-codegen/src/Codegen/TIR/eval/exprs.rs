@@ -3263,7 +3263,55 @@ impl<'a> EvalCtx<'a> {
                     inner
                 })
             }
-            TExprKind::UnitConvert { .. } => Err(unsupported("expr `UnitConvert`", self.span())),
+            TExprKind::UnitConvert {
+                arg,
+                scale,
+                offset,
+                rounding,
+                fallible,
+                ..
+            } => {
+                let CtValue::Float(value) = self.eval_expr(arg, scope)? else {
+                    return Err(unsupported("unit conversion on non-Float", self.span()));
+                };
+                let converted = if let Some((mode, digits)) = rounding {
+                    let CtValue::Int(digits) = self.eval_expr(digits, scope)? else {
+                        return Err(unsupported(
+                            "unit conversion digits on non-Int",
+                            self.span(),
+                        ));
+                    };
+                    jet_foundation::jet_unit_conversion_rounded(
+                        value.as_f64(),
+                        &scale.num.to_string(),
+                        &scale.den.to_string(),
+                        &offset.num.to_string(),
+                        &offset.den.to_string(),
+                        *mode,
+                        digits,
+                    )
+                    .map_err(str::to_string)
+                } else {
+                    jet_foundation::jet_unit_conversion_exact(
+                        value.as_f64(),
+                        &scale.num.to_string(),
+                        &scale.den.to_string(),
+                        &offset.num.to_string(),
+                        &offset.den.to_string(),
+                    )
+                    .ok_or_else(|| "unit conversion would round".to_string())
+                };
+                match converted {
+                    Ok(value) if *fallible || rounding.is_some() => Ok(CtValue::ResOk(Box::new(
+                        CtValue::Float(CtFloat::f64(value)),
+                    ))),
+                    Ok(value) => Ok(CtValue::Float(CtFloat::f64(value))),
+                    Err(error) if *fallible || rounding.is_some() => {
+                        Ok(CtValue::ResErr(Box::new(CtValue::Str(error))))
+                    }
+                    Err(error) => Err(unsupported(&error, self.span())),
+                }
+            }
             TExprKind::MathBuiltin {
                 type_name,
                 func,

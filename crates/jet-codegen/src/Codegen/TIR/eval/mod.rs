@@ -386,6 +386,14 @@ const DEV_FUEL: u64 = 1_000_000_000;
 #[allow(dead_code)]
 const CT_FUEL: u64 = 10_000_000;
 
+fn wall_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
 pub(super) struct EvalCtx<'a> {
     pub(super) funcs: HashMap<String, &'a TFunc>,
     #[allow(dead_code)]
@@ -442,6 +450,8 @@ pub(super) struct EvalCtx<'a> {
     spawn_lambdas: &'a [TJitSpawnLambda],
     task_sender: Option<mpsc::Sender<EvalTaskJob<'a>>>,
     task_cancel: Option<Arc<AtomicBool>>,
+    pub(super) context_deadline: Option<i64>,
+    pub(super) shield_depth: usize,
     /// Direct yield delivery keeps generator evaluation streaming: no eager
     /// collection is materialized between producer and consumer.
     yield_consumer: Option<YieldConsumer<'a>>,
@@ -576,73 +586,36 @@ struct EvalTaskCompletion {
 struct EvalTaskJob<'a> {
     lambda: &'a TJitSpawnLambda,
     captured: HashMap<String, CtValue>,
+    task_sender: mpsc::Sender<EvalTaskJob<'a>>,
+    context_deadline: Option<i64>,
     completion: mpsc::SyncSender<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
 }
 
-fn cancel_and_drain_eval_tasks(tasks: Vec<EvalTask>) {
-    for task in &tasks {
-        task.cancel.store(true, Ordering::Release);
-    }
-    for task in tasks {
-        let _ = task.completion.recv();
-    }
-}
-
 fn select_eval_tasks(
-    mut tasks: Vec<Option<EvalTask>>,
+    tasks: Vec<EvalTask>,
     mode: crate::task_group::JetTaskSelectMode,
     span: Span,
     mut wait_check: impl FnMut() -> Result<(), Diagnostic>,
 ) -> Result<Vec<CtValue>, Diagnostic> {
-    let mut pending = std::iter::repeat_with(|| None)
-        .take(tasks.len())
-        .collect::<Vec<Option<EvalTaskCompletion>>>();
-    let mut policy = crate::task_group::JetTaskSelectPolicy::new(mode, tasks.len());
-    loop {
-        wait_check()?;
-        for (index, task) in tasks.iter().enumerate() {
-            let Some(task) = task else { continue };
-            if pending[index].is_some() {
-                continue;
+    crate::task_group::jet_task_select(
+        tasks,
+        mode,
+        &mut wait_check,
+        |task| task.completion_order.get().copied().map(Into::into),
+        |task| match task.completion.try_recv() {
+            Ok(completion) => Some(completion.result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Some(Err(unsupported("task completion", span)))
             }
-            match task.completion.try_recv() {
-                Ok(completion) => pending[index] = Some(completion),
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err(unsupported("task completion", span));
-                }
-            }
-        }
-
-        let next = tasks
-            .iter()
-            .enumerate()
-            .filter_map(|(index, task)| {
-                task.as_ref()
-                    .and_then(|task| task.completion_order.get().copied())
-                    .map(|order| (order, index))
-            })
-            .min();
-        if let Some((order, index)) = next {
-            if let Some(completion) = pending[index].take() {
-                tasks[index] = None;
-                if let crate::task_group::JetTaskDecision::Finish(result) =
-                    policy.settle(order.into(), index, completion.result)
-                {
-                    for (index, completion) in pending.iter_mut().enumerate() {
-                        if completion.take().is_some() {
-                            tasks[index] = None;
-                        }
-                    }
-                    cancel_and_drain_eval_tasks(tasks.into_iter().flatten().collect());
-                    return result;
-                }
-            }
-        }
-        std::thread::yield_now();
-    }
+        },
+        |task| task.cancel.store(true, Ordering::Release),
+        |task| {
+            let _ = task.completion.recv();
+        },
+    )
 }
 
 #[derive(Clone)]
@@ -690,20 +663,32 @@ struct YieldConsumer<'a> {
 
 impl<'a> EvalCtx<'a> {
     fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
-        if self
+        let deadline = self
+            .context_deadline
+            .filter(|deadline| wall_now_ms() >= *deadline)
+            .map(|_| crate::task_group::jet_task_deadline("task selection"));
+        let cancelled = self
             .task_cancel
             .as_ref()
-            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-        {
-            Err(Diagnostic::error(
+            .is_some_and(|cancel| cancel.load(Ordering::Acquire));
+        match crate::task_group::jet_task_wait_policy(deadline, cancelled, self.shield_depth > 0) {
+            Ok(()) => Ok(()),
+            Err(crate::task_group::JetTaskWaitInterrupt::Deadline(deadline)) => {
+                Err(Diagnostic::error(
+                    "E3003",
+                    deadline.what,
+                    deadline.why,
+                    deadline.fix,
+                    Some(self.span()),
+                ))
+            }
+            Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => Err(Diagnostic::error(
                 "TASK_CANCELLED",
                 "task cancelled".to_string(),
                 "the owning taskgroup stopped this task".to_string(),
                 String::new(),
                 Some(self.span()),
-            ))
-        } else {
-            Ok(())
+            )),
         }
     }
 
@@ -727,6 +712,42 @@ impl<'a> EvalCtx<'a> {
             spawn_lambdas: self.spawn_lambdas,
             runtime: self.runtime.clone(),
         }
+    }
+
+    fn with_task_dispatcher<R>(&mut self, run: impl FnOnce(&mut Self) -> R) -> R {
+        if self.task_sender.is_some() {
+            return run(self);
+        }
+        std::thread::scope(|threads| {
+            let (sender, receiver) = mpsc::channel();
+            self.task_sender = Some(sender);
+            let config = Arc::new(self.task_config());
+            let dispatcher = std::thread::Builder::new()
+                .name("jet-tir-task-dispatch".to_string())
+                .stack_size(8 * 1024 * 1024)
+                .spawn_scoped(threads, {
+                    let config = config.clone();
+                    move || {
+                        while let Ok(job) = receiver.recv() {
+                            let job_config = (*config).clone();
+                            std::thread::Builder::new()
+                                .name("jet-tir-task".to_string())
+                                .stack_size(8 * 1024 * 1024)
+                                .spawn_scoped(threads, move || {
+                                    Self::run_task_job(job_config, job)
+                                })
+                                .expect("evaluator task worker");
+                        }
+                    }
+                })
+                .expect("evaluator task dispatcher");
+            let result = run(self);
+            drop(self.task_sender.take());
+            dispatcher
+                .join()
+                .expect("evaluator task dispatcher panicked");
+            result
+        })
     }
 
     fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
@@ -761,8 +782,10 @@ impl<'a> EvalCtx<'a> {
             local_cells: local_cell::EvalLocalCells::new(),
             shared_transactions: Vec::new(),
             spawn_lambdas: config.spawn_lambdas,
-            task_sender: None,
+            task_sender: Some(job.task_sender),
             task_cancel: Some(job.cancel),
+            context_deadline: job.context_deadline,
+            shield_depth: 0,
             yield_consumer: None,
             yield_scope: None,
             scope_guards: Vec::new(),
@@ -847,6 +870,8 @@ impl<'a> EvalCtx<'a> {
             .send(EvalTaskJob {
                 lambda: lam,
                 captured: child,
+                task_sender: sender.clone(),
+                context_deadline: self.context_deadline,
                 completion,
                 completion_order,
                 cancel,
@@ -920,7 +945,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let tasks = values
             .iter()
-            .map(|value| self.take_task_entry(value).map(Some))
+            .map(|value| self.take_task_entry(value))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
             return Err(unsupported("empty taskgroup combinator", self.span()));
@@ -1467,6 +1492,8 @@ pub fn run_program_with_structs(
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
         task_cancel: None,
+        context_deadline: None,
+        shield_depth: 0,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
@@ -1474,7 +1501,7 @@ pub fn run_program_with_structs(
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
-    let result = ctx.run_func(entry, Vec::new(), &mut scope);
+    let result = ctx.with_task_dispatcher(|ctx| ctx.run_func(entry, Vec::new(), &mut scope));
     *sink = std::mem::take(
         &mut *shared_sink.lock().expect("evaluator sink poisoned"),
     );
@@ -1536,6 +1563,8 @@ pub fn run_named_func(
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
         task_cancel: None,
+        context_deadline: None,
+        shield_depth: 0,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
@@ -1543,7 +1572,7 @@ pub fn run_named_func(
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
-    let result = ctx.run_func(func, args, &mut scope);
+    let result = ctx.with_task_dispatcher(|ctx| ctx.run_func(func, args, &mut scope));
     *sink = std::mem::take(
         &mut *shared_sink.lock().expect("evaluator sink poisoned"),
     );
@@ -1714,6 +1743,8 @@ fn eval_expr_hook(
         spawn_lambdas: &[],
         task_sender: None,
         task_cancel: None,
+        context_deadline: None,
+        shield_depth: 0,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
@@ -1809,6 +1840,8 @@ fn eval_block_hook(
         spawn_lambdas: &[],
         task_sender: None,
         task_cancel: None,
+        context_deadline: None,
+        shield_depth: 0,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
@@ -1857,8 +1890,8 @@ mod tests {
     fn selection_keeps_every_already_ready_completion() {
         let all = select_eval_tasks(
             vec![
-                Some(ready_task(1, Ok(CtValue::Int(10)))),
-                Some(ready_task(0, Ok(CtValue::Int(20)))),
+                ready_task(1, Ok(CtValue::Int(10))),
+                ready_task(0, Ok(CtValue::Int(20))),
             ],
             JetTaskSelectMode::All,
             Span::new(0, 0),
@@ -1869,11 +1902,11 @@ mod tests {
 
         let race = select_eval_tasks(
             vec![
-                Some(ready_task(
+                ready_task(
                     0,
                     Err(unsupported("first completion failed", Span::new(0, 0))),
-                )),
-                Some(ready_task(1, Ok(CtValue::Int(22)))),
+                ),
+                ready_task(1, Ok(CtValue::Int(22))),
             ],
             JetTaskSelectMode::Race,
             Span::new(0, 0),

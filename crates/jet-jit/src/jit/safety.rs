@@ -431,6 +431,13 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
     }
 }
 
+fn jit_cell_value_type(ty: &Type) -> bool {
+    let ty = erase_runtime_qualifiers(ty);
+    matches!(ty, Type::Named(name) if matches!(name.as_str(), "Unit" | "Void"))
+        || matches!(ty, Type::Tuple(fields) if fields.is_empty())
+        || super::types_meta::clif_ty(ty).is_some()
+}
+
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if n == "Unit" || n == "Void" || n == "Error")
         || jit_value_type(ty)
@@ -962,7 +969,12 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
         }
         TExprKind::StaticCall { args, .. } => {
-            args.iter().all(|a| resident_safe_call_arg(a, callees))
+            (!matches!(
+                &expr.ty,
+                Type::Apply { name, args }
+                    if name == "Cell"
+                        && args.first().is_some_and(|ty| !jit_cell_value_type(ty))
+            )) && args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
         TExprKind::AllocNew { .. } => true,
         TExprKind::PoolSlot { pool, id, .. } => {
@@ -1214,7 +1226,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     // A Shared lock lease never enters the resident JIT.
                     _ => !matches!(method.as_str(), "guard_read" | "guard_edit"),
                 };
+                let cell_value_supported = match &recv.ty {
+                    Type::Apply { name, args }
+                        if matches!(
+                            name.as_str(),
+                            "Cell" | "CellReadGuard" | "CellEditGuard"
+                        ) =>
+                    {
+                        args.first().is_some_and(jit_cell_value_type)
+                    }
+                    _ => true,
+                };
                 method_supported
+                    && cell_value_supported
                     && resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
             }
@@ -1308,6 +1332,30 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
 
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod cell_value_type_tests {
+    use super::jit_cell_value_type;
+    use jet_codegen::AST::Type;
+
+    fn int_map() -> Type {
+        Type::Map {
+            key: Box::new(Type::Int),
+            key_span: None,
+            value: Box::new(Type::Int),
+        }
+    }
+
+    #[test]
+    fn cell_resident_abi_rejects_non_string_maps_inside_wrappers() {
+        assert!(!jit_cell_value_type(&int_map()));
+        assert!(!jit_cell_value_type(&Type::Option(Box::new(int_map()))));
+        assert!(!jit_cell_value_type(&Type::Result {
+            ok: Box::new(int_map()),
+            err: Box::new(Type::String),
+        }));
     }
 }
 

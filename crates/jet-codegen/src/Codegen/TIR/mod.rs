@@ -97,6 +97,8 @@ pub struct JitProgram {
     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
     /// M5: field types parallel to `struct_fields` order.
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
+    /// Declared generic parameter names per struct, in source order.
+    pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
     /// M5: payload field types per `user_Type::user_Variant` pattern prefix.
@@ -1216,6 +1218,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
+    let mut struct_type_params = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
     let mut enum_variant_payload_types = std::collections::HashMap::new();
     enum_variants.insert(
@@ -1236,6 +1239,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     for item in &module.items {
         match item {
             Item::Struct(s) => {
+                struct_type_params.insert(
+                    s.name.clone(),
+                    s.type_params.iter().map(|param| param.name.clone()).collect(),
+                );
                 struct_fields.insert(
                     s.name.clone(),
                     s.fields
@@ -1366,7 +1373,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         }
         for item in &imported.items {
             match item {
-                Item::Struct(s) if s.type_params.is_empty() => {
+                Item::Struct(s) => {
+                    struct_type_params.insert(
+                        s.name.clone(),
+                        s.type_params.iter().map(|param| param.name.clone()).collect(),
+                    );
                     struct_fields.insert(
                         s.name.clone(),
                         s.fields
@@ -1523,6 +1534,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         spawn_lambdas,
         struct_fields,
         struct_field_types,
+        struct_type_params,
         enum_variants,
         enum_variant_payload_types,
         canonical_deopt,

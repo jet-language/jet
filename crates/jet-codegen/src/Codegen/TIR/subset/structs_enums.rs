@@ -279,11 +279,17 @@ pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>)
         // (`TExprKind::Field { boxed: true }`); construction wraps `Box::new(…)`.
         return true;
     }
+    let declared_params = cx.struct_type_params.get(name);
     let ok = fields.iter().all(|(fname, fty)| {
         // A boxed (recursive) edge: its payload struct must itself be covered. The read
         // derefs the `Box` (total fact), so the edge is now in-subset.
         if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
             return boxed_field_payload_covered(fty, cx, seen);
+        }
+        if matches!(fty, Type::Named(param)
+            if declared_params.is_some_and(|params| params.contains(param)))
+        {
+            return true;
         }
         field_ty_covered(fty, cx, seen)
     });

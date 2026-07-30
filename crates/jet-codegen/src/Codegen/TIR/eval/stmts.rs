@@ -1016,9 +1016,32 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Reactive { .. } => Err(unsupported("statement `Reactive`", self.span())),
             TStmt::Layout { .. } => Err(unsupported("statement `Layout`", self.span())),
-            TStmt::ContextBlock { body, .. } => self.exec_stmts(body, scope),
+            TStmt::ContextBlock { guards, body } => {
+                let saved_deadline = self.context_deadline;
+                let result = (|| {
+                    for (name, value) in guards {
+                        if name == crate::Syntax::CTX_FIELD_DEADLINE {
+                            self.context_deadline = Some(match self.eval_expr(value, scope)? {
+                                CtValue::Int(deadline) => deadline,
+                                _ => return Err(unsupported("context deadline", self.span())),
+                            });
+                        }
+                    }
+                    self.exec_stmts(body, scope)
+                })();
+                self.context_deadline = saved_deadline;
+                result
+            }
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
-            TStmt::Shield { .. } => Err(unsupported("statement `Shield`", self.span())),
+            TStmt::Shield { body } => {
+                self.shield_depth += 1;
+                let result = self.exec_stmts(body, scope);
+                self.shield_depth -= 1;
+                if self.shield_depth == 0 {
+                    self.task_wait_cancel_check()?;
+                }
+                result
+            }
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
             TStmt::Transact {
                 snapshots,

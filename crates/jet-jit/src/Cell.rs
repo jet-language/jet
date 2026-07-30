@@ -8,13 +8,14 @@ use jet_codegen::local_cell::{
     JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard,
 };
 use jet_codegen::{AST::CtValue, AST::Type};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::types_meta::JitMeta;
 
 #[derive(Clone)]
 pub(crate) enum CellSchema {
+    Unit,
     Int,
     Float,
     Bool,
@@ -30,8 +31,48 @@ pub(crate) enum CellSchema {
 }
 
 impl CellSchema {
+    fn struct_schema(
+        name: &str,
+        args: &[Type],
+        meta: &JitMeta<'_>,
+    ) -> Result<Option<Self>, String> {
+        let Some((field_names, field_types)) = meta.struct_layout(name) else {
+            return Ok(None);
+        };
+        let params = meta.struct_type_params(name).unwrap_or_default();
+        if params.len() != args.len() {
+            return Err(format!(
+                "jit Cell generic schema arity mismatch for {name}: {} parameters, {} arguments",
+                params.len(),
+                args.len()
+            ));
+        }
+        let subst: HashMap<_, _> = params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        Ok(Some(Self::Struct {
+            name: name.to_string(),
+            fields: field_names
+                .iter()
+                .zip(field_types)
+                .map(|(field, ty)| {
+                    let ty = jet_foundation::Generics::substitute_type(ty, &subst);
+                    Ok((
+                        field.strip_prefix("user_").unwrap_or(field).to_string(),
+                        Self::from_type(&ty, meta)?,
+                    ))
+                })
+                .collect::<Result<_, String>>()?,
+        }))
+    }
+
     pub(crate) fn from_type(ty: &Type, meta: &JitMeta<'_>) -> Result<Self, String> {
         match ty {
+            Type::Named(name) if matches!(name.as_str(), "Unit" | "Void") => {
+                Ok(Self::Unit)
+            }
             Type::Int | Type::IntN { .. } => Ok(Self::Int),
             Type::Float | Type::Float32 => Ok(Self::Float),
             Type::Bool => Ok(Self::Bool),
@@ -55,30 +96,17 @@ impl CellSchema {
             }),
             Type::Tagged { inner, .. } => Self::from_type(inner, meta),
             Type::Named(name) => {
-                let Some((field_names, field_types)) = meta.struct_layout(name) else {
-                    return Ok(Self::Handle);
-                };
-                Ok(Self::Struct {
-                    name: name.clone(),
-                    fields: field_names
-                        .iter()
-                        .zip(field_types)
-                        .map(|(field, ty)| {
-                            Ok((
-                                field.strip_prefix("user_").unwrap_or(field).to_string(),
-                                Self::from_type(ty, meta)?,
-                            ))
-                        })
-                        .collect::<Result<_, String>>()?,
-                })
+                Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle))
             }
-            Type::Apply { .. }
-            | Type::Map { .. }
+            Type::Apply { name, args } => {
+                Ok(Self::struct_schema(name, args, meta)?.unwrap_or(Self::Handle))
+            }
+            Type::Map { .. }
             | Type::Result { .. }
             | Type::Shared(_)
             | Type::Fn { .. }
             | Type::TraitObject(_)
-            | Type::Union(_) => Err(format!("jit Cell value type unsupported: {ty:?}")),
+            | Type::Union(_) => Ok(Self::Handle),
         }
     }
 }
@@ -244,6 +272,7 @@ fn decode_value(
     schema: &CellSchema,
 ) -> Option<CtValue> {
     Some(match schema {
+        CellSchema::Unit => CtValue::Unit,
         CellSchema::Int | CellSchema::Handle => CtValue::Int(raw),
         CellSchema::Float => CtValue::Float(jet_codegen::AST::CtFloat::f64(f64::from_bits(
             raw as u64,
@@ -305,6 +334,7 @@ fn encode_value(
     schema: &CellSchema,
 ) -> Option<i64> {
     match (schema, value) {
+        (CellSchema::Unit, CtValue::Unit) => Some(0),
         (CellSchema::Int | CellSchema::Handle, CtValue::Int(value)) => Some(*value),
         (CellSchema::Float, CtValue::Float(value)) => Some(value.as_f64().to_bits() as i64),
         (CellSchema::Bool, CtValue::Bool(value)) => Some(i64::from(*value)),

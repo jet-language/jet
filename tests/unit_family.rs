@@ -124,6 +124,66 @@ fn run() {
 }
 
 #[test]
+fn poundforce_uses_the_exact_defined_ratio_across_execution_tiers() {
+    let src = r#"
+fn run() {
+    force :: Newton.from_poundforce(10000000000000poundforce) ?? panic("defined force conversion")
+    print(force.raw())
+}
+"#;
+    assert!(
+        include_str!("../crates/jet-codegen/src/Prelude/Units.jet")
+            .contains("poundforce(scale: 44482216152605/10000000000000)"),
+        "the standard unit declaration lost the exact defined pound-force ratio"
+    );
+    jet::compile(src).expect("standard force conversion should compile");
+
+    let (code, stdout, stderr) =
+        tir_support::build_and_run_full("jet_unit_family", "standard_force_ratio", src);
+    assert_eq!((code, stdout.as_str()), (0, "44482216152605.0\n"), "{stderr}");
+
+    let dir = common::unique_tmp("standard_force_ratio_tiers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("standard force conversion must lower through shared TIR");
+    let mut sink = jet::Comptime::DevSink::default();
+    jet::Codegen::TIR::run_program(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        true,
+    )
+    .expect("standard force conversion must run in the evaluator");
+    assert_eq!(sink.stdout, "44482216152605.0\n");
+
+    if jet_jit::cranelift_host_supported() {
+        use jet::JitBackend::{JitBackend, RunOutcome};
+        jet_jit::reset_jit_trace_for_test();
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "44482216152605.0\n"),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("JIT rejected standard force conversion: {diagnostics:?}")
+            }
+        }
+        assert!(jet_jit::jit_executed_for_test());
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "standard force conversion must stay on resident JIT"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn user_dimensions_compose_and_named_derived_units_share_the_structure() {
     let src = r#"
 #UnitFamily(Mass, dimension, base: kilogram) { kilogram }

@@ -399,61 +399,39 @@
         }
     }
 
-    /// D-CONCCOMB1=A: join every handle; fail fast and cancel siblings on error.
-    pub fn jet_task_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
-        let entries: Vec<_> = tasks
+    fn jet_task_entries<T: Send + 'static>(
+        tasks: Vec<JetTask<T>>,
+        operation: &str,
+    ) -> Vec<(super::JetSchedulerJoin<T>, std::sync::Arc<super::JetTaskControl>)> {
+        tasks
             .into_iter()
-            .map(|t| {
+            .map(|task| {
                 (
-                    t.state
+                    task.state
                         .handle
                         .lock()
                         .unwrap()
                         .take()
-                        .expect("all: task already joined"),
-                    t.state.control.clone(),
+                        .unwrap_or_else(|| panic!("{operation}: task already joined")),
+                    task.state.control.clone(),
                 )
             })
-            .collect();
-        super::jet_scheduler_all(entries)
+            .collect()
+    }
+
+    /// D-CONCCOMB1=A: join every handle; fail fast and cancel siblings on error.
+    pub fn jet_task_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
+        super::jet_scheduler_all(jet_task_entries(tasks, "all"))
     }
 
     /// D-CONCCOMB1=A + D-RACEWIN1: first successful result; cancel siblings via scheduler.
     pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
-        let entries: Vec<_> = tasks
-            .into_iter()
-            .map(|t| {
-                (
-                    t.state
-                        .handle
-                        .lock()
-                        .unwrap()
-                        .take()
-                        .expect("race: task already joined"),
-                    t.state.control.clone(),
-                )
-            })
-            .collect();
-        super::jet_scheduler_race(entries)
+        super::jet_scheduler_race(jet_task_entries(tasks, "race"))
     }
 
     /// D-CONCCOMB1=A: first completed result (success or failure path — v1 propagates panic).
     pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
-        let entries: Vec<_> = tasks
-            .into_iter()
-            .map(|t| {
-                (
-                    t.state
-                        .handle
-                        .lock()
-                        .unwrap()
-                        .take()
-                        .expect("any: task already joined"),
-                    t.state.control.clone(),
-                )
-            })
-            .collect();
-        super::jet_scheduler_any(entries)
+        super::jet_scheduler_any(jet_task_entries(tasks, "any"))
     }
 
     /// D-CONCSELECT1=A: fluent select builder accumulated at compile time, executed at `.wait()`.

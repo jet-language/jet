@@ -492,6 +492,11 @@ impl LowerCtx<'_, '_> {
     }
 
     fn cell_unpack_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
+        if matches!(ty, Type::Named(name) if matches!(name.as_str(), "Unit" | "Void"))
+            || matches!(ty, Type::Tuple(fields) if fields.is_empty())
+        {
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
         Ok(match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
             Some(types::F64) => self.b.ins().bitcast(
                 types::F64,

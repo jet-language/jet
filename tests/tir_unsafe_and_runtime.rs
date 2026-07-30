@@ -5,7 +5,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, have_rustc};
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
@@ -475,40 +475,19 @@ fn run() {
     assert_eq!(stdout, "1275\n");
 }
 
-/// D-FANOUT3=C: `tasks.join_all` consumes each handle, waits in list order,
-/// and returns the results in that same order.
-#[test]
-fn task_join_all() {
-    if !have_rustc() {
-        return;
-    }
-    let src = "\
-use core.tasks as tasks
-fn run() {
-    taskgroup group {
-        first :: group.task => 10
-        second :: group.task => 20
-        results :: tasks.join_all([first, second])
-        loop result; results {
-            print(result)
-        }
-    }
-}
-";
-    let (code, stdout) = build_and_run("tir_task_join_all", src);
+fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
+    let (code, stdout) = build_and_run(name, src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "10\n20\n");
+    assert_eq!(stdout, expected_stdout);
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_join_all_parity_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_{name}_parity_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
 
-    let mut bundle = jet::Loader::load_entry(&shown).expect("join_all bundle should load");
+    let mut bundle = jet::Loader::load_entry(&shown).expect("task bundle should load");
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
         .filter(|diagnostic| {
@@ -518,13 +497,13 @@ fn run() {
             )
         })
         .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "join_all must type-check: {errors:?}");
+    assert!(errors.is_empty(), "task program must type-check: {errors:?}");
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
-        "join_all must stay resident-JIT safe: {}",
+        "task program must stay resident-JIT safe: {}",
         jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("join_all must compile in resident JIT");
+    jet_jit::try_compile_bundle(&bundle).expect("task program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -540,21 +519,155 @@ fn run() {
                 if !force_interpreter {
                     assert!(
                         jet_jit::jit_executed_for_test(),
-                        "join_all must execute native resident JIT code"
+                        "task program must execute native resident JIT code"
                     );
                     assert!(
                         !jet_jit::fallback_invoked_for_test(),
-                        "join_all resident JIT must not invoke fallback"
+                        "task program resident JIT must not invoke fallback"
                     );
                     assert!(
                         !jet_jit::deopt_invoked_for_test(),
-                        "join_all resident JIT must not deopt"
+                        "task program resident JIT must not deopt"
                     );
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-                panic!("{tier} rejected join_all: {diagnostics:?}")
+                panic!("{tier} rejected task program: {diagnostics:?}")
             }
+        }
+    }
+}
+
+/// D-FANOUT3=C: `tasks.join_all` consumes each handle, waits in list order,
+/// and returns the results in that same order.
+#[test]
+fn task_join_all() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn work(value: Int, turns: Int) => Int {
+    total := value
+    loop _; 1..turns {
+        total += 1
+        total -= 1
+    }
+    return total
+}
+fn run() {
+    first :: tasks.spawn(() => work(10, 10000))
+    second :: tasks.spawn(() => work(20, 1))
+    third :: tasks.spawn(() => work(30, 100))
+    results :: tasks.join_all([first, second, third])
+    print(results[0], results[1], results[2])
+}
+";
+    assert_task_tier_parity("tir_task_join_all", src, "10\n20\n30\n");
+}
+
+#[test]
+fn task_join_all_allows_nested_loose_spawn_in_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn nested(value: Int) => Int {
+    inner :: tasks.spawn(() => value + 1)
+    return tasks.join_all([inner])[0]
+}
+fn run() {
+    outer :: tasks.spawn(() => nested(40))
+    print(tasks.join_all([outer])[0])
+}
+";
+    assert_task_tier_parity("tir_task_join_all_nested", src, "41\n");
+}
+
+#[test]
+fn task_join_all_parent_deadline_is_e3003_in_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn run() {
+    #Context(deadline: 0) {
+        task :: tasks.spawn(() => 10)
+        tasks.join_all([task])
+    }
+    print(\"unreachable\")
+}
+";
+    let (code, stdout, stderr) =
+        build_and_run_full("jet_tir_test", "tir_task_join_all_deadline", src);
+    assert_eq!(code, 70, "{stderr}");
+    assert_eq!(stdout, "", "{stderr}");
+    assert!(
+        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        "{stderr}"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_task_join_all_deadline_parity_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("deadline bundle should load");
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                jet::Diagnostics::Severity::Error
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "deadline program must type-check: {errors:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "deadline program must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .expect("deadline program must compile in resident JIT");
+
+    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+        jet_jit::reset_jit_trace_for_test();
+        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_ne!(exit_code, 0, "{tier} ignored the expired deadline");
+                assert_eq!(stdout, "", "{tier} continued after the expired deadline");
+                assert!(stderr.contains("E3003"), "{tier}: {stderr}");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                assert!(
+                    diagnostics.iter().any(|diagnostic| diagnostic.code == "E3003"),
+                    "{tier} reported the wrong deadline error: {diagnostics:?}"
+                );
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "deadline program must execute native resident JIT code"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "deadline program resident JIT must not invoke fallback"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "deadline program resident JIT must not deopt"
+            );
         }
     }
 }
