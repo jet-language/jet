@@ -343,6 +343,7 @@ mod tests {
             methods: vec![],
             trait_impls: vec![],
             derives: vec![],
+            auto_derive_default: true,
             is_published_schema: true,
             published_schema_span: None,
             is_single_use: false,
