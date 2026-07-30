@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1335,
-    "rev": 20271,
+    "rev": 20276,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57309,12 +57309,12 @@
       "id": "c0nyir87",
       "num": 1322,
       "title": "Loop over non-copyable list elements: ICE via .cloned() lowering",
-      "body": "",
+      "body": "ICE (I2 violation): looping over a list of non-clonable elements makes codegen emit .cloned()/.clone() on the element type; JetTask implements no Clone, so rustc rejects the generated Rust and the compiler exits 101. Owner ruling in chat (2026-07-30): 'Ok we must fix this issue.'\n\nRepro:\n  use core.tasks as tasks\n  fn run() {\n      handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]\n      loop t; handles { t.wait() }\n  }\njet run --release → internal compiler error, rustc E0277 JetTask<()>: Clone.\n\nDirection: sema/TIR loop lowering must not insert implicit clones for non-Copy/non-Clone element types. A loop over such a list should borrow (if the body only borrows) or consume the list with move-out iteration (t.wait() consumes the handle — same semantics tasks.join_all already has). If neither is provable, emit a real sema diagnostic (registered code + UI snapshot, I4) instead of reaching rustc.\n\nAcceptance: repro runs on AOT, jet run, and interpreter with identical output (I9); an example under examples/features/concurrency or memory with golden; no jit_gaps entry; existing loop goldens stay green. Related: #1323 (*_all helpers) reduces how often users write this loop but does not replace the fix.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -57332,19 +57332,19 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:43.967Z",
-      "updated": "2026-07-30T12:45:49.581Z",
+      "updated": "2026-07-30T14:35:00.360Z",
       "updatedBy": "fable"
     },
     {
       "id": "c0r8y9ik",
       "num": 1323,
       "title": "Task list helpers: spawn_group + full *_all parity set",
-      "body": "",
+      "body": "Owner ruling in chat (2026-07-30): 'WE WANT BEGINNER MAGIC AND EXPERT CONTROL… I personally would prefer a language that let me just write handles.cancel_all() than creating a new loop. REMEMBER WE WANT TO BEAT PYTHON.'\n\nScope: count/list-based task helpers with full parity against the single-handle API.\n1. tasks.spawn_group(n, fn) → [Task] — spawn n tasks from one callable (index-aware form is a design point: fn() vs fn(i)).\n2. List methods on [Task]: wait_all (consumes, returns [T] — reconcile with existing tasks.join_all so there is ONE mechanism, I8; join_all may become the impl or get respelled), cancel_all, detach_all, pause_all, resume_all, trace_all — each the exact list twin of the single-task method.\n\nSemantics live in crates/jet-codegen/src/Prelude (jet_* symbols); engines marshal only (I9). Sema: method table entries for List<Task> receivers with the same effect/ownership rules as the single methods (wait_all/cancel_all consume; pause/resume borrow). Docs: spec surface section + syntax-decisions if any new user-typeable name is minted (I7 — method names on core types may still need a decision record; check precedent). Example with golden proving spawn_group + wait_all + cancel_all on all tiers.\n\nWatch: #1322 (loop-over-task-list ICE) is the underlying footgun these helpers route around; both must land. Duplicate-mechanism check against taskgroup combinators (structured ownership surface, see D-EACH1 verdict notes in syntax-decisions.md).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -57367,19 +57367,19 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.166Z",
-      "updated": "2026-07-30T12:45:49.812Z",
+      "updated": "2026-07-30T14:35:13.225Z",
       "updatedBy": "fable"
     },
     {
       "id": "c0ursuly",
       "num": 1324,
       "title": "Remove S75 fan-out operator f.[...]; keep [T#N]",
-      "body": "",
+      "body": "Owner ruling in chat (2026-07-30): 'yes, remove, dont retire, the old operator. Keep the [T#N]'.\n\nRemove the S75 fan-out call operator f.[a, b, c] (apply one callable across an argument list, producing a fixed-size list) completely: no retired-spelling diagnostic, no compatibility alias — delete the surface. Keep S76 [T#N] fixed-size list types untouched (they are used by other features).\n\nInventory to touch: crates/jet-foundation/src/Syntax.rs S75 registration; lexer/parser paths that recognize f.[…]; sema + TIR lowering for the operator; examples/features/basics/fan_out.jet and fan_out_flatten.jet plus their expected/*.out goldens (delete or rewrite on the D-EACH1 fence, which is the surviving mechanism); any UI snapshots and docs/spec sections (spec.md, syntax-decisions.md needs a removal entry recording the owner ruling; philosophy/architecture mentions if any). rg for 'S75', 'fan_out', 'fan-out', '\\.\\[' to sweep.\n\nAcceptance: grammar no longer parses f.[…] (plain parse error, not a retirement notice); [T#N] tests stay green; formatter/grammar snapshots updated; full sweep shows no dead S75 machinery left (garbage-collection pass); verify-full at the batch boundary.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -57402,14 +57402,14 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.379Z",
-      "updated": "2026-07-30T12:45:50.051Z",
+      "updated": "2026-07-30T14:35:29.085Z",
       "updatedBy": "fable"
     },
     {
       "id": "c0yclhqo",
       "num": 1325,
       "title": "Comprehension surface coherence: loop-header split, labels, map duality",
-      "body": "",
+      "body": "Comprehension-surface coherence analysis (owner-requested). Three wobbles found; each has a ballot drafted and waiting in the decide lane: D-LOOP-HEADER3 (loop-header split), D-LOOPLABEL4 (label placement), D-LOOPMAP1 (map/comprehension duality). Implementation is owner-gated: do NOT start until the owner ratifies the ballots in the Tower UI. After ratification, implement the full ruling + acceptance terms (verify skill owns syntax chores). Background: analysis of composition/surface/structure coherence versus Python comprehensions; goals are versatility, flexibility, simplicity, expressiveness, power.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -57463,8 +57463,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.595Z",
-      "updated": "2026-07-30T13:57:42.691Z",
-      "updatedBy": "owner"
+      "updated": "2026-07-30T14:35:29.303Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0fl0ik7",
@@ -57608,7 +57608,7 @@
       "id": "c0fw3ppx",
       "num": 1331,
       "title": "semindex dossier fixtures broken by E0999 single-marker bracket rule",
-      "body": "",
+      "body": "Marker-registry regression breaks fixtures in two suites (pre-existing on master, found during #1320 verification; likely from 085968dbd single-marker bracket rule).\n\n1. tests/semindex.rs: semindex_dossier_bypass_facts and semindex_dossier_stitches_scattered_members — fixture writes #[allow(lint)] which now trips E0999 (single marker must not use brackets).\n2. crates/jet-parser s61_tests (4 failures): doc_on_a_function_requires_task, adjacent_marker_stacks_share_one_ordered_e0999_rewrite, grouped_function_rules_keep_meta_and_policy_semantics, ordered_function_and_file_groups_format_idempotently — E0355/E0927 (#Task retired → #Job) and rewrite expectations out of date.\n\nDecide per failure whether the fixture is stale (update it to the ratified spelling) or the check regressed (fix the check). Repro: cargo test --test semindex semindex_dossier; cargo test -p jet-parser s61",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e3",
@@ -57636,8 +57636,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:57:47.793Z",
-      "updated": "2026-07-30T14:01:51.449Z",
-      "updatedBy": "claude-merge"
+      "updated": "2026-07-30T14:35:42.935Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0kfmlgc",
@@ -76740,6 +76740,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-30T14:35:42.935Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fw3ppx",
+      "note": "body"
+    },
+    {
+      "at": "2026-07-30T14:35:29.303Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0yclhqo",
+      "note": "body"
+    },
+    {
+      "at": "2026-07-30T14:35:29.086Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ursuly",
+      "note": "body,phase"
+    },
+    {
+      "at": "2026-07-30T14:35:13.225Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r8y9ik",
+      "note": "body,phase"
+    },
+    {
+      "at": "2026-07-30T14:35:00.360Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nyir87",
+      "note": "body,phase"
+    },
+    {
       "at": "2026-07-30T14:06:40.035Z",
       "by": "fable",
       "action": "card.update",
@@ -80203,41 +80238,6 @@
       "action": "card.update",
       "ref": "c07m87c8",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-29T16:25:23.206Z",
-      "by": "bd-1274",
-      "action": "card.claim",
-      "ref": "c07m87c8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T16:24:50.025Z",
-      "by": "e3-bd-1310",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T16:15:07.262Z",
-      "by": "bd-1274",
-      "action": "card.claim",
-      "ref": "c07m87c8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T16:13:11.132Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.update",
-      "ref": "c0ft6gme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T16:13:10.880Z",
-      "by": "e3-bd-771-b2",
-      "action": "card.criteria-meet",
-      "ref": "c0ft6gme",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
