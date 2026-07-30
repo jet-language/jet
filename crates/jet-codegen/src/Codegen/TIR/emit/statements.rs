@@ -506,19 +506,29 @@ fn emit_tir_stmt(
             tmp,
             init,
             kw,
+            move_fields,
             binds,
         } => {
+            let borrow = if *move_fields { "" } else { "&" };
             out.push_str(&format!(
-                "{}let {} = &({});\n",
+                "{}let {} = {}({});\n",
                 pad,
                 tmp,
+                borrow,
                 emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (elem_rust, field_rust) in binds {
-                out.push_str(&format!(
-                    "{}{} {} = ({}).{}.clone();\n",
-                    pad, kw, elem_rust, tmp, field_rust
-                ));
+                if *move_fields {
+                    out.push_str(&format!(
+                        "{}{} {} = ({}).{};\n",
+                        pad, kw, elem_rust, tmp, field_rust
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{}{} {} = ({}).{}.clone();\n",
+                        pad, kw, elem_rust, tmp, field_rust
+                    ));
+                }
             }
         }
         // c109 / D-DESTRUCT1: struct destructure. Mirrors `emit_stmt`'s
@@ -529,19 +539,29 @@ fn emit_tir_stmt(
             tmp,
             init,
             kw,
+            move_fields,
             binds,
         } => {
+            let borrow = if *move_fields { "" } else { "&" };
             out.push_str(&format!(
-                "{}let {} = &({});\n",
+                "{}let {} = {}({});\n",
                 pad,
                 tmp,
+                borrow,
                 emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (local_rust, field_rust) in binds {
-                out.push_str(&format!(
-                    "{}{} {} = ({}).{}.clone();\n",
-                    pad, kw, local_rust, tmp, field_rust
-                ));
+                if *move_fields {
+                    out.push_str(&format!(
+                        "{}{} {} = ({}).{};\n",
+                        pad, kw, local_rust, tmp, field_rust
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{}{} {} = ({}).{}.clone();\n",
+                        pad, kw, local_rust, tmp, field_rust
+                    ));
+                }
             }
         }
         // c109 Phase 26: list destructure. Mirrors `emit_stmt`'s `BindPattern::List`

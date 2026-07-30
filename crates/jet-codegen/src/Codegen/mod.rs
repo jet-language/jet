@@ -54,6 +54,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
+    include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),

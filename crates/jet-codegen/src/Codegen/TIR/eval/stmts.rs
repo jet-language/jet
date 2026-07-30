@@ -81,22 +81,81 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         let defer_mark = self.deferred_closes.len();
+        let guard_mark = self.shared_guards.len();
         for stmt in stmts {
-            let flow = self.exec_stmt(stmt, scope)?;
+            let flow = match self.exec_stmt(stmt, scope) {
+                Ok(flow) => flow,
+                Err(error) => {
+                    let _ = self.finish_eval_scope(defer_mark, guard_mark, scope);
+                    return Err(error);
+                }
+            };
             if let Some(flow) = self.pending_flow.take() {
-                self.run_deferred_closes(defer_mark, scope)?;
+                let preserved = returned_shared_guards(&flow);
+                self.finish_eval_scope_preserving(
+                    defer_mark,
+                    guard_mark,
+                    scope,
+                    &preserved,
+                )?;
                 return Ok(flow);
             }
             match flow {
                 Flow::Normal => {}
                 other => {
-                    self.run_deferred_closes(defer_mark, scope)?;
+                    let preserved = returned_shared_guards(&other);
+                    self.finish_eval_scope_preserving(
+                        defer_mark,
+                        guard_mark,
+                        scope,
+                        &preserved,
+                    )?;
                     return Ok(other);
                 }
             }
         }
-        self.run_deferred_closes(defer_mark, scope)?;
+        self.finish_eval_scope(defer_mark, guard_mark, scope)?;
         Ok(Flow::Normal)
+    }
+
+    fn finish_eval_scope(
+        &mut self,
+        defer_mark: usize,
+        guard_mark: usize,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        self.finish_eval_scope_preserving(defer_mark, guard_mark, scope, &[])
+    }
+
+    fn finish_eval_scope_preserving(
+        &mut self,
+        defer_mark: usize,
+        guard_mark: usize,
+        scope: &mut HashMap<String, CtValue>,
+        preserve: &[usize],
+    ) -> Result<(), Diagnostic> {
+        let deferred_result = self.run_deferred_closes(defer_mark, scope);
+        self.release_shared_guards_except(guard_mark, preserve);
+        deferred_result
+    }
+
+    fn release_shared_guards_except(&mut self, mark: usize, preserve: &[usize]) {
+        let (keep, guard_ids): (Vec<_>, Vec<_>) = self.shared_guards[mark..]
+            .iter()
+            .copied()
+            .partition(|guard| preserve.contains(guard));
+        self.shared_guards.truncate(mark);
+        self.shared_guards.extend(keep);
+        let leases = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            guard_ids
+                .into_iter()
+                .filter_map(|index| runtime.shared_guards.get(index).cloned())
+                .collect::<Vec<_>>()
+        };
+        for lease in leases.into_iter().rev() {
+            lease.release();
+        }
     }
 
     fn run_deferred_closes(
@@ -176,7 +235,11 @@ impl<'a> EvalCtx<'a> {
                         Ok(Flow::Normal)
                     }
                     TPlace::Expr(place_expr)
-                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::Field { .. }) =>
+                        if matches!(
+                            place_expr.kind,
+                            crate::Codegen::TIR::TExprKind::Field { .. }
+                                | crate::Codegen::TIR::TExprKind::SharedGuardValue { .. }
+                        ) =>
                     {
                         if let Some(binop) = op {
                             let current = self.eval_expr(place_expr, scope)?;
@@ -240,12 +303,22 @@ impl<'a> EvalCtx<'a> {
                     std::thread::scope(|threads| {
                         let (sender, receiver) = mpsc::channel();
                         let worker_config = config.clone();
-                        let dispatcher = threads.spawn(move || {
-                            while let Ok(job) = receiver.recv() {
-                                let job_config = (*worker_config).clone();
-                                threads.spawn(move || Self::run_task_job(job_config, job));
-                            }
-                        });
+                        let dispatcher = std::thread::Builder::new()
+                            .name("jet-tir-task-dispatch".to_string())
+                            .stack_size(8 * 1024 * 1024)
+                            .spawn_scoped(threads, move || {
+                                while let Ok(job) = receiver.recv() {
+                                    let job_config = (*worker_config).clone();
+                                    std::thread::Builder::new()
+                                        .name("jet-tir-task".to_string())
+                                        .stack_size(8 * 1024 * 1024)
+                                        .spawn_scoped(threads, move || {
+                                            Self::run_task_job(job_config, job)
+                                        })
+                                        .expect("evaluator task worker");
+                                }
+                            })
+                            .expect("evaluator task dispatcher");
                         self.task_sender = Some(sender);
                         let result = run_body(self);
                         drop(self.task_sender.take());
@@ -274,6 +347,7 @@ impl<'a> EvalCtx<'a> {
             TStmt::While { cond, body, label } => {
                 loop {
                     self.burn()?;
+                    std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
                         break;
                     }
@@ -300,6 +374,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 loop {
                     self.burn()?;
+                    std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
                         break;
                     }
@@ -966,7 +1041,7 @@ impl<'a> EvalCtx<'a> {
                     on_rollback: Vec::new(),
                 });
                 if *uses_stm {
-                    self.shared_transactions.push(HashMap::new());
+                    self.shared_transactions.push(Vec::new());
                 }
                 let flow = self.exec_stmts(body, scope);
                 let frame = self.txn_stack.pop().unwrap_or(super::EvalTxnFrame {
@@ -977,23 +1052,55 @@ impl<'a> EvalCtx<'a> {
                 let staged = if *uses_stm {
                     self.shared_transactions.pop().unwrap_or_default()
                 } else {
-                    HashMap::new()
+                    Vec::new()
                 };
                 match flow {
                     Ok(Flow::Normal) => {
+                        let slots = {
+                            let runtime =
+                                self.runtime.lock().expect("evaluator runtime poisoned");
+                            staged
+                                .iter()
+                                .filter_map(|delta| {
+                                    runtime
+                                        .shared_values
+                                        .get(delta.shared_index)
+                                        .cloned()
+                                        .map(|slot| (delta.shared_index, slot))
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                        let permits = super::shared_protocol::jet_shared_acquire_ordered(
+                            slots
+                                .iter()
+                                .map(|(_, slot)| slot.protocol.clone())
+                                .collect(),
+                        );
+                        for mut delta in staged {
+                            let slot = slots
+                                .iter()
+                                .find_map(|(index, slot)| {
+                                    (*index == delta.shared_index).then_some(slot)
+                                })
+                                .expect("staged Shared delta has a locked slot");
+                            let current = slot
+                                .value
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .clone();
+                            let (_, updated) = self.eval_tlambda_mut_arg(
+                                delta.lambda,
+                                current,
+                                &mut delta.captured,
+                            )?;
+                            *slot
+                                .value
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner()) = updated;
+                        }
+                        drop(permits);
                         for lam in frame.on_commit.into_iter().rev() {
                             let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
-                        }
-                        for (index, value) in staged {
-                            if let Some(slot) = self
-                                .runtime
-                                .lock()
-                                .expect("evaluator runtime poisoned")
-                                .shared_values
-                                .get_mut(index)
-                            {
-                                *slot = value;
-                            }
                         }
                         Ok(Flow::Normal)
                     }
@@ -1099,6 +1206,57 @@ impl<'a> EvalCtx<'a> {
         }
         Ok(Flow::Normal)
     }
+}
+
+fn returned_shared_guards(flow: &Flow) -> Vec<usize> {
+    let Flow::Return(value) = flow else {
+        return Vec::new();
+    };
+    fn collect(value: &CtValue, out: &mut Vec<usize>) {
+        match value {
+            CtValue::Struct { type_name, fields }
+                if type_name == "__JetTirSharedGuard" =>
+            {
+                if let Some(index) = fields.iter().find_map(|(name, value)| {
+                    match (name.as_str(), value) {
+                        ("lease", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                        _ => None,
+                    }
+                }) {
+                    if !out.contains(&index) {
+                        out.push(index);
+                    }
+                }
+            }
+            CtValue::Struct { fields, .. } => {
+                for (_, value) in fields {
+                    collect(value, out);
+                }
+            }
+            CtValue::List(values) => {
+                for value in values {
+                    collect(value, out);
+                }
+            }
+            CtValue::Map(entries) => {
+                for value in entries.values() {
+                    collect(value, out);
+                }
+            }
+            CtValue::Enum { args, .. } => {
+                for (_, value) in args {
+                    collect(value, out);
+                }
+            }
+            CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+                collect(value, out);
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    collect(value, &mut out);
+    out
 }
 
 fn strip_user(name: &str) -> String {

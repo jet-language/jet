@@ -136,9 +136,8 @@ mod jet_txn {
 // dumb runtime (I3). E0746 keeps rejecting irreversible effects inside, so a
 // deferred, all-or-nothing commit is always safe.
 mod jet_stm {
-    use std::any::Any;
     use std::cell::RefCell;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     thread_local! {
         // A stack, so nested `#Transact` blocks each own their own deferred set;
@@ -147,66 +146,41 @@ mod jet_stm {
     }
 
     struct Txn {
-        parts: Vec<Box<dyn Participant>>,
+        parts: Vec<Participant>,
     }
 
-    // One touched handle plus every mutation deferred against it this transaction.
-    // Type-erased behind `dyn Participant` so a single `Vec` holds handles of
-    // different `T`; `as_any_mut` lets `record_edit` re-find and extend the entry
-    // for a handle edited more than once (so its lock is taken exactly once).
-    trait Participant {
-        fn addr(&self) -> usize;
-        fn lock_apply(&mut self, next: &mut dyn FnMut());
-        fn as_any_mut(&mut self) -> &mut dyn Any;
-    }
-
-    struct Cell<T: 'static> {
-        cell: Arc<RwLock<T>>,
+    // One touched Shared protocol plus every type-erased mutation deferred
+    // against it. Payload access stays inside the closure supplied by
+    // JetShared<T>; lock ordering and atomic commit live here.
+    struct Participant {
+        protocol: Arc<crate::JetSharedProtocol>,
         addr: usize,
-        deltas: Vec<Box<dyn FnOnce(&mut T)>>,
-    }
-
-    impl<T: 'static> Participant for Cell<T> {
-        fn addr(&self) -> usize {
-            self.addr
-        }
-        fn lock_apply(&mut self, next: &mut dyn FnMut()) {
-            // Hold this handle's write lock across `next()` so every touched
-            // handle's lock is held at once while the whole transaction applies —
-            // that simultaneity is what makes the commit atomic to observers.
-            let mut guard = self.cell.write().unwrap_or_else(|e| e.into_inner());
-            for delta in self.deltas.drain(..) {
-                delta(&mut *guard);
-            }
-            next();
-        }
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
-        }
+        deltas: Vec<Box<dyn FnOnce()>>,
     }
 
     /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the innermost
     /// open transaction; the actual write happens at `commit()`.
-    pub(crate) fn record_edit<T: 'static>(cell: Arc<RwLock<T>>, delta: Box<dyn FnOnce(&mut T)>) {
-        let addr = Arc::as_ptr(&cell) as *const () as usize;
+    pub(crate) fn record_edit(
+        protocol: Arc<crate::JetSharedProtocol>,
+        delta: Box<dyn FnOnce()>,
+    ) {
+        let addr = Arc::as_ptr(&protocol) as *const () as usize;
         STACK.with(|s| {
             let mut stack = s.borrow_mut();
             let txn = stack
                 .last_mut()
                 .expect("edit_txn called outside a #Transact block (compiler invariant)");
             for p in txn.parts.iter_mut() {
-                if p.addr() == addr {
-                    if let Some(c) = p.as_any_mut().downcast_mut::<Cell<T>>() {
-                        c.deltas.push(delta);
-                        return;
-                    }
+                if p.addr == addr {
+                    p.deltas.push(delta);
+                    return;
                 }
             }
-            txn.parts.push(Box::new(Cell {
-                cell,
+            txn.parts.push(Participant {
+                protocol,
                 addr,
                 deltas: vec![delta],
-            }));
+            });
         });
     }
 
@@ -242,17 +216,21 @@ mod jet_stm {
         }
     }
 
-    // Take every touched handle's write lock in canonical pointer order and hold
-    // them all at once (each stack frame owns one guard) while the buffered
-    // mutations run — atomic and deadlock-free.
-    fn apply(mut parts: Vec<Box<dyn Participant>>) {
-        parts.sort_by_key(|p| p.addr());
-        fn go(parts: &mut [Box<dyn Participant>]) {
-            if let Some((head, rest)) = parts.split_first_mut() {
-                head.lock_apply(&mut || go(rest));
+    // The shared Prelude protocol takes every touched handle's write lock in
+    // canonical pointer order. This adapter only applies buffered payload edits
+    // while those permits remain alive.
+    fn apply(mut parts: Vec<Participant>) {
+        let _permits = crate::jet_shared_acquire_ordered(
+            parts
+                .iter()
+                .map(|participant| participant.protocol.clone())
+                .collect(),
+        );
+        for participant in &mut parts {
+            for delta in participant.deltas.drain(..) {
+                delta();
             }
         }
-        go(&mut parts);
     }
 }
 trait user_Serialize {

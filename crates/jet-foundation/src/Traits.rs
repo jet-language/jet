@@ -2008,7 +2008,7 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
             .all(|(_, field)| field_auto_ok(field, owner)),
         Type::Union(members) => members.iter().all(|member| field_auto_ok(member, owner)),
         Type::Named(n) => n != owner,
-        Type::Apply { .. } => true,
+        Type::Apply { name, .. } => name != Syntax::TYPE_SHARED_GUARD,
         Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }

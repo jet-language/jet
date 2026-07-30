@@ -2168,6 +2168,9 @@ pub enum TStmt {
         tmp: String,
         init: TExpr,
         kw: &'static str,
+        /// Non-copyable guard fields must move out of the owned tuple instead
+        /// of borrowing it and accidentally cloning the guarded value.
+        move_fields: bool,
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
@@ -2184,6 +2187,9 @@ pub enum TStmt {
         tmp: String,
         init: TExpr,
         kw: &'static str,
+        /// Structs containing a SharedGuard are consumed so the owned guard
+        /// moves into the binding instead of cloning its dereferenced payload.
+        move_fields: bool,
         /// `(local_rust_name, field_rust_name)` per bound field, source order.
         binds: Vec<(String, String)>,
     },
@@ -2817,6 +2823,39 @@ pub enum TExprKind {
         recv: Box<TExpr>,
         field: String,
         boxed: bool,
+    },
+    /// D-SHAREDGUARD2=A: compiler-known `guard.value` projection. The public
+    /// guard has no Rust field; it dereferences its owned lock lease.
+    SharedGuardValue {
+        guard: Box<TExpr>,
+        editable: bool,
+    },
+    /// D-SHAREDGUARD1=A: consume one guard and retain the same lock lease while
+    /// narrowing its visible value to a sema-validated field path.
+    SharedGuardMap {
+        guard: Box<TExpr>,
+        path: Vec<String>,
+        editable: bool,
+    },
+    /// D-SHAREDGUARD1=A: consume one guard and create two disjoint views backed
+    /// by the same lock lease. Sema proved the paths do not overlap.
+    SharedGuardSplit {
+        guard: Box<TExpr>,
+        first: Vec<String>,
+        second: Vec<String>,
+        editable: bool,
+    },
+    /// D-SHAREDGUARD1=A: wait on a condition while retaining ownership of the
+    /// edit guard. The runtime performs register/release/park/reacquire/recheck.
+    SharedGuardWait {
+        guard: Box<TExpr>,
+        condition: Box<TExpr>,
+        predicate: Box<TLambda>,
+    },
+    /// D-SHAREDGUARD1=A: wake one or every waiter registered on a Condition.
+    ConditionNotify {
+        condition: Box<TExpr>,
+        all: bool,
     },
     /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)`. `elem` is the Jet element type;
     /// emit spells `(({addr}) as usize as *mut {elem})`.

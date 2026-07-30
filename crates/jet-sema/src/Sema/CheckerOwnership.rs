@@ -1799,6 +1799,40 @@ impl<'a> Checker<'a> {
             .is_some_and(|fact| fact.access == ViewAccess::Write)
     }
 
+    pub(crate) fn is_edit_shared_guard(&self, name: &str) -> bool {
+        self.lookup(name).is_some_and(|info| {
+            matches!(
+                &info.ty,
+                Type::Tagged { marker, inner }
+                    if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                        && matches!(
+                            inner.as_ref(),
+                            Type::Apply { name, .. }
+                                if name == crate::Syntax::TYPE_SHARED_GUARD
+                        )
+            )
+        })
+    }
+
+    pub(crate) fn is_read_shared_guard(&self, name: &str) -> bool {
+        self.lookup(name).is_some_and(|info| {
+            matches!(
+                &info.ty,
+                Type::Apply { name, .. }
+                    if name == crate::Syntax::TYPE_SHARED_GUARD
+            ) || matches!(
+                &info.ty,
+                Type::Tagged { marker, inner }
+                    if marker == crate::AST::SHARED_GUARD_READ_MARKER
+                        && matches!(
+                            inner.as_ref(),
+                            Type::Apply { name, .. }
+                                if name == crate::Syntax::TYPE_SHARED_GUARD
+                        )
+            )
+        })
+    }
+
     pub(crate) fn validate_write_place(&mut self, expr: &Expr, span: Span) {
         let Some(root) = expr_root_ident(expr).map(str::to_string) else {
             return;
@@ -1830,10 +1864,16 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        let Some(info) = self.lookup(&root) else {
+        let Some(info) = self.lookup(&root).cloned() else {
             return;
         };
-        if info.mutable || info.param_conv == Some(AccessConvention::Write) {
+        if self.reject_read_shared_guard_write(expr, span) {
+            return;
+        }
+        if info.mutable
+            || info.param_conv == Some(AccessConvention::Write)
+            || self.is_edit_shared_guard(&root)
+        {
             return;
         }
         let (code, why, fix) = if info.param_conv.is_some() {
@@ -1886,10 +1926,27 @@ impl<'a> Checker<'a> {
                     .insert(root.to_string());
             }
         }
-        self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
         let Some(root) = expr_root_ident(receiver).map(str::to_string) else {
+            self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
             return;
         };
+        if self.is_edit_shared_guard(&root) {
+            return;
+        }
+        if self.is_read_shared_guard(&root) {
+            self.diags.push(Diagnostic::error(
+                "E0205",
+                format!(
+                    "cannot edit through `{root}` — this `SharedGuard` has read access only"
+                ),
+                "a guard from `guard_read()` may inspect the shared value but cannot change it"
+                    .to_string(),
+                "use `guard_edit()` when this scope must change the shared value".to_string(),
+                Some(span),
+            ));
+            return;
+        }
+        self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
         if self.iter_borrowed.contains(&root) {
             self.diags.push(
                 crate::Sema::Diagnostics::collection_changed_in_loop(&root, span),
@@ -1968,6 +2025,19 @@ impl<'a> Checker<'a> {
         };
         if let Some(place) = place {
             self.check_place_change(&place, action, target.span());
+        }
+    }
+
+    pub(crate) fn validate_shared_guard_lvalue(&mut self, target: &LValue) {
+        match target {
+            LValue::Local { .. } => {}
+            LValue::Index { base, span, .. } => {
+                self.reject_read_shared_guard_write(base, *span);
+            }
+            LValue::Field { base, field, span } => {
+                let target = Expr::Field(base.clone(), field.clone(), *span);
+                self.reject_read_shared_guard_write(&target, *span);
+            }
         }
     }
 
@@ -2785,6 +2855,53 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn place_reads_untagged_or_read_shared_guard(&self, expr: &Expr) -> bool {
+        if expr_root_ident(expr).is_some_and(|name| {
+            self.lookup(name)
+                .is_some_and(|info| info.param_conv == Some(AccessConvention::Write))
+        }) {
+            return false;
+        }
+        match expr {
+            Expr::Field(base, field, _) => {
+                if field == "value" {
+                    if let Some(ty) = self.place_expr_type(base) {
+                        if matches!(
+                            &ty,
+                            Type::Apply { name, .. }
+                                if name == crate::Syntax::TYPE_SHARED_GUARD
+                        ) || matches!(
+                            &ty,
+                            Type::Tagged { marker, .. }
+                                if marker == crate::AST::SHARED_GUARD_READ_MARKER
+                        ) {
+                            return true;
+                        }
+                    }
+                }
+                self.place_reads_untagged_or_read_shared_guard(base)
+            }
+            Expr::Index { base, .. } | Expr::Paren(base, _) | Expr::Place(base, _, _) => {
+                self.place_reads_untagged_or_read_shared_guard(base)
+            }
+            _ => false,
+        }
+    }
+
+    fn reject_read_shared_guard_write(&mut self, expr: &Expr, span: Span) -> bool {
+        if !self.place_reads_untagged_or_read_shared_guard(expr) {
+            return false;
+        }
+        self.diags.push(Diagnostic::error(
+            "E0205",
+            "cannot edit through this read-only `SharedGuard` view".to_string(),
+            "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access".to_string(),
+            "keep the edit at the acquisition site, or pass the guard to a `&guard: SharedGuard<T>` helper".to_string(),
+            Some(span),
+        ));
+        true
+    }
+
     fn move_keys_overlap(left: &str, right: &str) -> bool {
         Self::contains_place(left, right) || Self::contains_place(right, left)
     }
@@ -3103,6 +3220,15 @@ impl<'a> Checker<'a> {
             }
             Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
             Type::Named(name) => self.named_sendability_problem(name, &[], seen),
+            Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_GUARD => {
+                Some(SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ThreadConfined(
+                        crate::Syntax::TYPE_SHARED_GUARD.to_string(),
+                    ),
+                })
+            }
             Type::Apply { name, args }
                 if matches!(name.as_str(), "Task" | "Channel" | "Sender") =>
             {
@@ -3546,7 +3672,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) -> Option<Type> {
-        self.finish_shared_closure("read", inner, args, span, false, false)
+        self.finish_shared_closure("read", inner, args, span, false, false, None)
     }
 
     /// D-MEM1 S6 (D-SHARED-API1=A): `shared.edit(f)` — write-locked closure
@@ -3559,7 +3685,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) -> Option<Type> {
-        self.finish_shared_closure("edit", inner, args, span, true, false)
+        self.finish_shared_closure("edit", inner, args, span, true, false, None)
     }
 
     pub(crate) fn finish_expiring_secret_with(
@@ -3569,7 +3695,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let loan = crate::Sema::Diagnostics::expiring_secret_loan_type(inner.clone());
-        let result = self.finish_shared_closure("with", &loan, args, span, false, true);
+        let result = self.finish_shared_closure("with", &loan, args, span, false, true, None);
         let escaped = result
             .as_ref()
             .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
@@ -3595,6 +3721,7 @@ impl<'a> Checker<'a> {
         span: Span,
         param_mutable: bool,
         param_is_secret_loan: bool,
+        expected_return: Option<Type>,
     ) -> Option<Type> {
         if args.len() != 1 {
             self.diags.push(Diagnostic::error(
@@ -3625,7 +3752,7 @@ impl<'a> Checker<'a> {
         }
         let expected = Type::Fn {
             params: vec![inner.clone()],
-            ret: None,
+            ret: expected_return.map(Box::new),
             effect_bound: None,
         };
         let saved_exp = self.expected_type.clone();
@@ -3645,6 +3772,228 @@ impl<'a> Checker<'a> {
             Some(Type::Fn { ret: Some(r), .. }) => Some(*r),
             _ => Some(Type::Named("Unit".to_string())),
         }
+    }
+
+    pub(crate) fn finish_shared_guard_method(
+        &mut self,
+        receiver: &Expr,
+        guard_ty: &Type,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        let Type::Tagged { marker, inner } = guard_ty else {
+            return None;
+        };
+        let Type::Apply {
+            name,
+            args: guard_args,
+        } = inner.as_ref()
+        else {
+            return None;
+        };
+        if name != Syntax::TYPE_SHARED_GUARD || guard_args.len() != 1 {
+            return None;
+        }
+        let value_ty = guard_args[0].clone();
+        let editable = marker == crate::AST::SHARED_GUARD_EDIT_MARKER;
+        let tagged = |ty: Type| Type::Tagged {
+            marker: marker.clone(),
+            inner: Box::new(Type::Apply {
+                name: Syntax::TYPE_SHARED_GUARD.to_string(),
+                args: vec![ty],
+            }),
+        };
+
+        match method {
+            "map" => {
+                if args.len() != 1 {
+                    return Some(self.finish_shared_closure(
+                        "map",
+                        &value_ty,
+                        args,
+                        span,
+                        editable,
+                        false,
+                        None,
+                    ));
+                }
+                let projection = shared_guard_projection(&args[0].expr).filter(|path| {
+                    self.shared_guard_projection_is_stored(&value_ty, path)
+                });
+                if projection.is_none() {
+                    self.diags.push(Diagnostic::error(
+                        "E0215",
+                        "`SharedGuard.map` needs a stored field projection".to_string(),
+                        "a mapped guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places".to_string(),
+                        "write a direct projection such as `guard.map(value => value.field)`"
+                            .to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                if let Expr::Lambda(lambda) = &mut args[0].expr {
+                    lambda.meta.guard_projection = projection;
+                }
+                let projected = self.finish_shared_closure(
+                    "map",
+                    &value_ty,
+                    args,
+                    span,
+                    editable,
+                    false,
+                    None,
+                );
+                self.consume_builtin_receiver(receiver, method);
+                Some(projected.map(tagged))
+            }
+            "split" => {
+                if args.len() != 2 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`split` expects 2 arguments, got {}", args.len()),
+                        "splitting a guard needs two field projections".to_string(),
+                        "write `guard.split(value => value.left, value => value.right)`"
+                            .to_string(),
+                        Some(span),
+                    ));
+                    for arg in args {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(None);
+                }
+                let first_path = shared_guard_projection(&args[0].expr).filter(|path| {
+                    self.shared_guard_projection_is_stored(&value_ty, path)
+                });
+                let second_path = shared_guard_projection(&args[1].expr).filter(|path| {
+                    self.shared_guard_projection_is_stored(&value_ty, path)
+                });
+                if first_path.is_none()
+                    || second_path.is_none()
+                    || first_path == second_path
+                    || first_path
+                        .as_ref()
+                        .zip(second_path.as_ref())
+                        .is_some_and(|(a, b)| a.starts_with(b) || b.starts_with(a))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0216",
+                        "`SharedGuard.split` needs two disjoint field projections".to_string(),
+                        "two editable guards may never point at the same field or at an enclosing and nested field".to_string(),
+                        "project sibling fields, such as `value.left` and `value.right`"
+                            .to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Expr::Lambda(lambda) = &mut args[0].expr {
+                    lambda.meta.guard_projection = first_path;
+                }
+                if let Expr::Lambda(lambda) = &mut args[1].expr {
+                    lambda.meta.guard_projection = second_path;
+                }
+                let (first, second) = args.split_at_mut(1);
+                let first_ty = self.finish_shared_closure(
+                    "split",
+                    &value_ty,
+                    first,
+                    span,
+                    editable,
+                    false,
+                    None,
+                );
+                let second_ty = self.finish_shared_closure(
+                    "split",
+                    &value_ty,
+                    second,
+                    span,
+                    editable,
+                    false,
+                    None,
+                );
+                self.consume_builtin_receiver(receiver, method);
+                Some(first_ty.zip(second_ty).map(|(first, second)| {
+                    Type::Tuple(vec![
+                        ("first".to_string(), Box::new(tagged(first))),
+                        ("second".to_string(), Box::new(tagged(second))),
+                    ])
+                }))
+            }
+            "wait" => {
+                if !editable {
+                    self.diags.push(Diagnostic::error(
+                        "E0205",
+                        "`SharedGuard.wait` needs an edit guard".to_string(),
+                        "waiting releases and reacquires exclusive access before the predicate is checked again".to_string(),
+                        "create this guard with `guard_edit()`".to_string(),
+                        Some(span),
+                    ));
+                }
+                if args.len() != 2 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`wait` expects 2 arguments, got {}", args.len()),
+                        "waiting needs one Condition and one predicate".to_string(),
+                        "write `guard.wait(condition, value => predicate)`".to_string(),
+                        Some(span),
+                    ));
+                    for arg in args {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(None);
+                }
+                let condition_ty = self.infer(&mut args[0].expr);
+                if !matches!(
+                    condition_ty,
+                    Some(Type::Named(ref name)) if name == Syntax::TYPE_CONDITION
+                ) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        "`SharedGuard.wait` needs a Condition first".to_string(),
+                        "the Condition owns the waiter set notified by `notify_one` and `notify_all`".to_string(),
+                        "pass a value created with `Condition.new()`".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                let predicate = self.finish_shared_closure(
+                    "wait",
+                    &value_ty,
+                    &mut args[1..],
+                    span,
+                    false,
+                    false,
+                    Some(Type::Bool),
+                );
+                if predicate != Some(Type::Bool) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        "`SharedGuard.wait` predicate must return Bool".to_string(),
+                        "the guard sleeps until this predicate becomes true".to_string(),
+                        "return a Bool condition from the predicate".to_string(),
+                        Some(args[1].expr.span()),
+                    ));
+                }
+                Some(Some(Type::Result {
+                    ok: Box::new(Type::Named("Unit".to_string())),
+                    err: Box::new(Type::String),
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    fn shared_guard_projection_is_stored(&self, root: &Type, path: &[String]) -> bool {
+        let mut owner = root.clone();
+        for field in path {
+            if self.field_is_computed(&owner, field) {
+                return false;
+            }
+            let Some(next) = self.projected_field_type(owner, field) else {
+                // Ordinary field inference reports an unknown field. This
+                // helper only adds the place-vs-value law for computed fields.
+                return true;
+            };
+            owner = next;
+        }
+        true
     }
 
     /// D-MEM1 S6 (D-POOLID-API1=A): `pool.add(val)` — inserts, consumes `val` (a
@@ -3762,6 +4111,30 @@ impl<'a> Checker<'a> {
         }
         Some(Type::Option(Box::new(elem_ty)))
     }
+}
+
+fn shared_guard_projection(expr: &Expr) -> Option<Vec<String>> {
+    let Expr::Lambda(lambda) = expr else {
+        return None;
+    };
+    let [param] = lambda.params.as_slice() else {
+        return None;
+    };
+    let crate::AST::LambdaBody::Expr(body) = &lambda.body else {
+        return None;
+    };
+
+    let mut cursor = body.as_ref();
+    let mut fields = Vec::new();
+    while let Expr::Field(base, field, _) = cursor {
+        fields.push(field.clone());
+        cursor = base;
+    }
+    if !matches!(cursor, Expr::Ident(name, _) if name == &param.name) || fields.is_empty() {
+        return None;
+    }
+    fields.reverse();
+    Some(fields)
 }
 
 fn tracks_named_move(name: &str) -> bool {

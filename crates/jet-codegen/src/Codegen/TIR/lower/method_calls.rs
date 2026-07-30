@@ -42,6 +42,7 @@ use crate::Codegen::TIR::lower::core_module_path_from_receiver;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr_as_mut_place;
+use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting;
@@ -274,6 +275,102 @@ pub(crate) fn lower_method_call(
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
 ) -> TExpr {
+    let guard_receiver = tir_recv_jet_ty(receiver, env).and_then(|ty| match ty {
+        Type::Tagged { marker, inner } => match inner.as_ref() {
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+            {
+                Some((
+                    args[0].clone(),
+                    marker == crate::AST::SHARED_GUARD_EDIT_MARKER,
+                ))
+            }
+            _ => None,
+        },
+        _ => None,
+    });
+    if let Some((inner, editable)) = guard_receiver {
+        match (method, args) {
+            ("map", [arg]) => {
+                let Expr::Lambda(lambda) = &arg.expr else {
+                    unreachable!("sema requires a SharedGuard.map projection lambda");
+                };
+                let path = lambda
+                    .meta
+                    .guard_projection
+                    .clone()
+                    .expect("sema supplies a SharedGuard.map projection");
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                    kind: TExprKind::SharedGuardMap {
+                        guard: Box::new(lower_expr(receiver, cx, env)),
+                        path,
+                        editable,
+                    },
+                };
+            }
+            ("split", [first, second]) => {
+                let (Expr::Lambda(first), Expr::Lambda(second)) =
+                    (&first.expr, &second.expr)
+                else {
+                    unreachable!("sema requires SharedGuard.split projection lambdas");
+                };
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                    kind: TExprKind::SharedGuardSplit {
+                        guard: Box::new(lower_expr(receiver, cx, env)),
+                        first: first
+                            .meta
+                            .guard_projection
+                            .clone()
+                            .expect("sema supplies the first SharedGuard.split projection"),
+                        second: second
+                            .meta
+                            .guard_projection
+                            .clone()
+                            .expect("sema supplies the second SharedGuard.split projection"),
+                        editable,
+                    },
+                };
+            }
+            ("wait", [condition, predicate]) => {
+                let Expr::Lambda(predicate) = &predicate.expr else {
+                    unreachable!("sema requires a SharedGuard.wait predicate lambda");
+                };
+                let expected = std::slice::from_ref(&inner);
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                    kind: TExprKind::SharedGuardWait {
+                        guard: Box::new(lower_expr(receiver, cx, env)),
+                        condition: Box::new(lower_expr(&condition.expr, cx, env)),
+                        predicate: Box::new(lower_lambda_expecting_host_borrow(
+                            predicate,
+                            cx,
+                            env,
+                            expected,
+                            false,
+                        )),
+                    },
+                };
+            }
+            _ => {}
+        }
+    }
+    if matches!(
+        tir_recv_jet_ty(receiver, env),
+        Some(Type::Named(name)) if name == Syntax::TYPE_CONDITION
+    ) && args.is_empty()
+        && matches!(method, "notify_one" | "notify_all")
+    {
+        return TExpr {
+            ty: unit_type(),
+            kind: TExprKind::ConditionNotify {
+                condition: Box::new(lower_expr(receiver, cx, env)),
+                all: method == "notify_all",
+            },
+        };
+    }
+
     // Comptime fragment globals carry values but no local type slot. Recover
     // the two opaque regex receiver types from that canonical value instead
     // of misclassifying `binding.method()` as a static call.
@@ -2622,6 +2719,32 @@ pub(crate) fn lower_method_call(
                 })),
             };
         }
+        if is_shared && matches!(method, "guard_read" | "guard_edit") && args.is_empty() {
+            let inner = match &recv_peek {
+                Some(Type::Shared(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let marker = if method == "guard_edit" {
+                crate::AST::SHARED_GUARD_EDIT_MARKER
+            } else {
+                crate::AST::SHARED_GUARD_READ_MARKER
+            };
+            let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Tagged {
+                marker: marker.to_string(),
+                inner: Box::new(Type::Apply {
+                    name: Syntax::TYPE_SHARED_GUARD.to_string(),
+                    args: vec![inner],
+                }),
+            });
+            return TExpr {
+                ty,
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    method: method.to_string(),
+                    args: Vec::new(),
+                })),
+            };
+        }
         if is_expiring_secret && method == "with" && args.len() == 1 {
             let mut recv_shape = recv_peek.as_ref();
             while let Some(Type::Tagged { inner, .. }) = recv_shape {
@@ -3712,6 +3835,17 @@ pub(crate) fn lower_method_call(
                         widen_to_vec: false,
                         widen_to_union: None,
                     }],
+                },
+            };
+        }
+        if type_name == Syntax::TYPE_CONDITION && method == "new" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named(Syntax::TYPE_CONDITION.to_string()),
+                kind: TExprKind::StaticCall {
+                    owner: rooted_owner("jet_std::JetCondition"),
+                    owner_type: None,
+                    method: TMethodRef::bare("new"),
+                    args: Vec::new(),
                 },
             };
         }

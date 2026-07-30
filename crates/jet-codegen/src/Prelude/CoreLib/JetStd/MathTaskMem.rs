@@ -626,30 +626,61 @@
         Closed,
     }
 
-    // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared handle,
-    // "a copyable door". `Shared.new(x)` constructs; `.read(f)`/`.edit(f)` run a
-    // closure against a read- or write-locked view, the lock scoped to the
-    // closure call only (no guard object ever escapes it). Cloning is always a
-    // cheap `Arc` clone, never a deep copy of `T` — that's what lets it cross a
-    // `tasks.spawn` boundary with no `take`.
-    pub struct JetShared<T>(std::sync::Arc<std::sync::RwLock<T>>);
-    impl<T> JetShared<T> {
+    // D-MEM1 S6 / D-SHAREDGUARD1=A: `Shared<T>` is a copyable lock handle.
+    // Beginner closures and expert owned guards share this one lock.
+    struct JetSharedCell<T> {
+        protocol: std::sync::Arc<crate::JetSharedProtocol>,
+        value: std::cell::UnsafeCell<T>,
+    }
+
+    // jet:shared-guard-internal-begin
+    // SAFETY: JetSharedProtocol grants either shared read permits or one
+    // exclusive edit permit before any payload reference is created.
+    unsafe impl<T: Send> Send for JetSharedCell<T> {}
+    unsafe impl<T: Send + Sync> Sync for JetSharedCell<T> {}
+    // jet:shared-guard-internal-end
+
+    pub struct JetShared<T>(std::sync::Arc<JetSharedCell<T>>);
+    impl<T: 'static> JetShared<T> {
         pub fn new(value: T) -> Self {
-            JetShared(std::sync::Arc::new(std::sync::RwLock::new(value)))
+            JetShared(std::sync::Arc::new(JetSharedCell {
+                protocol: crate::JetSharedProtocol::new(),
+                value: std::cell::UnsafeCell::new(value),
+            }))
         }
         pub fn read<F, R>(&self, f: F) -> R
         where
             F: FnOnce(&T) -> R,
         {
-            let guard = self.0.read().unwrap_or_else(|e| e.into_inner());
-            f(&*guard)
+            let _permit = self
+                .0
+                .protocol
+                .acquire(false, || false)
+                .expect("uncancelled Shared read acquires");
+            // jet:shared-guard-internal-begin
+            // SAFETY: the read permit is held through the callback.
+            f(unsafe { &*self.0.value.get() })
+            // jet:shared-guard-internal-end
         }
         pub fn edit<F, R>(&self, f: F) -> R
         where
             F: FnOnce(&mut T) -> R,
         {
-            let mut guard = self.0.write().unwrap_or_else(|e| e.into_inner());
-            f(&mut *guard)
+            let _permit = self
+                .0
+                .protocol
+                .acquire(true, || false)
+                .expect("uncancelled Shared edit acquires");
+            // jet:shared-guard-internal-begin
+            // SAFETY: the exclusive permit is held through the callback.
+            f(unsafe { &mut *self.0.value.get() })
+            // jet:shared-guard-internal-end
+        }
+        pub fn guard_read(&self) -> JetSharedGuard<T> {
+            JetSharedGuard::read(self.0.clone())
+        }
+        pub fn guard_edit(&self) -> JetSharedGuard<T> {
+            JetSharedGuard::edit(self.0.clone())
         }
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
         // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
@@ -668,7 +699,18 @@
             F: FnOnce(&mut T) + 'static,
             T: 'static,
         {
-            super::jet_stm::record_edit(self.0.clone(), Box::new(f));
+            let cell = self.0.clone();
+            let protocol = cell.protocol.clone();
+            super::jet_stm::record_edit(
+                protocol,
+                Box::new(move || {
+                    // jet:shared-guard-internal-begin
+                    // SAFETY: jet_stm holds this Shared protocol's exclusive
+                    // permit while applying every deferred edit.
+                    f(unsafe { &mut *cell.value.get() })
+                    // jet:shared-guard-internal-end
+                }),
+            );
         }
     }
     impl<T> Clone for JetShared<T> {
@@ -682,6 +724,251 @@
     impl<T> super::JetShow for JetShared<T> {
         fn jet_show(&self) -> String {
             "Shared(..)".to_string()
+        }
+    }
+
+    trait JetSharedLease {
+        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit>;
+        fn editable(&self) -> bool;
+        fn root_ptr(&self) -> *mut ();
+    }
+
+    struct JetSharedRootLease<T: 'static> {
+        permit: std::sync::Arc<crate::JetSharedPermit>,
+        cell: std::sync::Arc<JetSharedCell<T>>,
+    }
+
+    impl<T: 'static> JetSharedLease for JetSharedRootLease<T> {
+        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit> {
+            self.permit.clone()
+        }
+        fn editable(&self) -> bool {
+            self.permit.editable()
+        }
+        fn root_ptr(&self) -> *mut () {
+            assert!(self.permit.held(), "SharedGuard lease is released");
+            self.cell.value.get().cast::<()>()
+        }
+    }
+
+    /// Owned lock token. `Rc` deliberately makes guards task-local and
+    /// non-cloneable; mapped and split guards share only the private lease.
+    pub struct JetSharedGuard<T: 'static> {
+        lease: std::rc::Rc<dyn JetSharedLease>,
+        project: std::rc::Rc<dyn Fn(*mut ()) -> *mut T>,
+        editable: bool,
+    }
+
+    impl<T: 'static> JetSharedGuard<T> {
+        fn read(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
+            let permit = cell
+                .protocol
+                .acquire(false, || false)
+                .expect("uncancelled Shared guard acquires");
+            Self {
+                lease: std::rc::Rc::new(JetSharedRootLease {
+                    permit,
+                    cell,
+                }),
+                project: std::rc::Rc::new(|root| root.cast::<T>()),
+                editable: false,
+            }
+        }
+
+        fn edit(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
+            let permit = cell
+                .protocol
+                .acquire(true, || false)
+                .expect("uncancelled Shared guard acquires");
+            Self {
+                lease: std::rc::Rc::new(JetSharedRootLease {
+                    permit,
+                    cell,
+                }),
+                project: std::rc::Rc::new(|root| root.cast::<T>()),
+                editable: true,
+            }
+        }
+
+        pub fn map_read<U: 'static, F>(self, project: F) -> JetSharedGuard<U>
+        where
+            F: FnOnce(&T) -> &U,
+        {
+            let root = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: the lease keeps the root alive and holds a read or edit
+            // permit; sema proved this closure is one stored-field projection.
+            let projected = unsafe { project(&*root) as *const U as *mut U };
+            // jet:shared-guard-internal-end
+            JetSharedGuard {
+                lease: self.lease.clone(),
+                project: std::rc::Rc::new(move |_| projected),
+                editable: false,
+            }
+        }
+
+        pub fn map_edit<U: 'static, F>(self, project: F) -> JetSharedGuard<U>
+        where
+            F: FnOnce(&mut T) -> &mut U,
+        {
+            assert!(self.editable, "read SharedGuard used for edit map");
+            let root = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: the editable lease holds the exclusive permit, and sema
+            // proved this closure is one stored-field projection.
+            let projected = unsafe { project(&mut *root) as *mut U };
+            // jet:shared-guard-internal-end
+            JetSharedGuard {
+                lease: self.lease.clone(),
+                project: std::rc::Rc::new(move |_| projected),
+                editable: true,
+            }
+        }
+
+        pub fn split_read<A: 'static, B: 'static, F>(
+            self,
+            project: F,
+        ) -> (JetSharedGuard<A>, JetSharedGuard<B>)
+        where
+            F: FnOnce(&T) -> (&A, &B),
+        {
+            let root = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: the lease holds a read or edit permit. Sema proved both
+            // projections are stored and disjoint.
+            let (first, second) = unsafe { project(&*root) };
+            let first = first as *const A as *mut A;
+            let second = second as *const B as *mut B;
+            // jet:shared-guard-internal-end
+            (
+                JetSharedGuard {
+                    lease: self.lease.clone(),
+                    project: std::rc::Rc::new(move |_| first),
+                    editable: false,
+                },
+                JetSharedGuard {
+                    lease: self.lease.clone(),
+                    project: std::rc::Rc::new(move |_| second),
+                    editable: false,
+                },
+            )
+        }
+
+        pub fn split_edit<A: 'static, B: 'static, F>(
+            self,
+            project: F,
+        ) -> (JetSharedGuard<A>, JetSharedGuard<B>)
+        where
+            F: FnOnce(&mut T) -> (&mut A, &mut B),
+        {
+            assert!(self.editable, "read SharedGuard used for edit split");
+            let root = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: the editable lease holds the exclusive permit. One
+            // closure creates both references, so Rust verifies disjointness.
+            let (first, second) = unsafe { project(&mut *root) };
+            let first = first as *mut A;
+            let second = second as *mut B;
+            // jet:shared-guard-internal-end
+            (
+                JetSharedGuard {
+                    lease: self.lease.clone(),
+                    project: std::rc::Rc::new(move |_| first),
+                    editable: true,
+                },
+                JetSharedGuard {
+                    lease: self.lease.clone(),
+                    project: std::rc::Rc::new(move |_| second),
+                    editable: true,
+                },
+            )
+        }
+
+        pub fn wait<F>(&mut self, condition: &JetCondition, ready: F) -> Result<(), String>
+        where
+            F: Fn(&T) -> bool,
+        {
+            if !self.editable {
+                return Err("a condition wait needs an edit guard".to_string());
+            }
+            let permit = self.lease.permit();
+            match crate::jet_shared_condition_wait(
+                &permit,
+                &condition.inner,
+                || Ok::<bool, ()>(ready(self)),
+                || {
+                    std::sync::Arc::new(JetSchedulerConditionWaiter {
+                        slot: super::ParkSlot::new(),
+                    })
+                },
+            ) {
+                Ok(()) => Ok(()),
+                Err(crate::JetConditionWaitError::Cancelled) => {
+                    Err("condition wait cancelled".to_string())
+                }
+                Err(crate::JetConditionWaitError::Predicate(())) => {
+                    unreachable!("native predicate is infallible")
+                }
+            }
+        }
+    }
+
+    impl<T: 'static> std::ops::Deref for JetSharedGuard<T> {
+        type Target = T;
+        fn deref(&self) -> &T {
+            let value = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: the lease holds the matching read or write lock while
+            // this reference exists; the projection is sema-validated.
+            unsafe { &*value }
+            // jet:shared-guard-internal-end
+        }
+    }
+
+    impl<T: 'static> std::ops::DerefMut for JetSharedGuard<T> {
+        fn deref_mut(&mut self) -> &mut T {
+            assert!(self.editable, "read SharedGuard used for edit");
+            let value = (self.project)(self.lease.root_ptr());
+            // jet:shared-guard-internal-begin
+            // SAFETY: an editable lease holds the exclusive lock.
+            unsafe { &mut *value }
+            // jet:shared-guard-internal-end
+        }
+    }
+
+    struct JetSchedulerConditionWaiter {
+        slot: std::sync::Arc<super::ParkSlot>,
+    }
+
+    impl crate::JetConditionWaiter for JetSchedulerConditionWaiter {
+        fn park(&self) -> Result<(), ()> {
+            super::jet_scheduler_yield("Shared condition", &self.slot, None);
+            Ok(())
+        }
+
+        fn wake(&self) {
+            super::jet_scheduler_wake(&self.slot);
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct JetCondition {
+        inner: std::sync::Arc<crate::JetConditionProtocol>,
+    }
+
+    impl JetCondition {
+        pub fn new() -> Self {
+            Self {
+                inner: crate::JetConditionProtocol::new(),
+            }
+        }
+
+        pub fn notify_one(&self) {
+            self.inner.notify_one();
+        }
+
+        pub fn notify_all(&self) {
+            self.inner.notify_all();
         }
     }
 

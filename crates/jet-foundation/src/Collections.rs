@@ -18,6 +18,8 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
     Syntax::TYPE_RANGE,
+    Syntax::TYPE_SHARED_GUARD,
+    Syntax::TYPE_CONDITION,
     "Bag",
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
@@ -250,6 +252,14 @@ pub fn builtin_method_return(
         // placeholder-gate note as `Pool` above — `finish_shared_read`/
         // `finish_shared_edit` compute the real (closure-derived) return type.
         Type::Shared(inner) => shared_method_return(inner, method, arg_count),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+        {
+            shared_guard_method_return(&args[0], method, arg_count)
+        }
+        Type::Named(name) if name == Syntax::TYPE_CONDITION => {
+            condition_method_return(method, arg_count)
+        }
         // D-REACT1=B: reactive handle methods. `Signal.get()/set(v)`, `Derived.get()`.
         Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => {
             signal_method_return(args, method, arg_count)
@@ -474,6 +484,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
+        }
+        (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_CONDITION => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_CONDITION.to_string())))
         }
         (Type::Named(n), "new", 1) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
@@ -925,6 +938,59 @@ fn pool_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
 fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
+        ("guard_read", 0) => Some(Some(shared_guard_type(
+            inner.clone(),
+            crate::AST::SHARED_GUARD_READ_MARKER,
+        ))),
+        ("guard_edit", 0) => Some(Some(shared_guard_type(
+            inner.clone(),
+            crate::AST::SHARED_GUARD_EDIT_MARKER,
+        ))),
+        _ => None,
+    }
+}
+
+fn shared_guard_type(inner: Type, marker: &str) -> Type {
+    Type::Tagged {
+        marker: marker.to_string(),
+        inner: Box::new(Type::Apply {
+            name: Syntax::TYPE_SHARED_GUARD.to_string(),
+            args: vec![inner],
+        }),
+    }
+}
+
+fn shared_guard_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        // Sema refines projection types and reapplies the hidden access tag.
+        ("map", 1) => Some(Some(Type::Apply {
+            name: Syntax::TYPE_SHARED_GUARD.to_string(),
+            args: vec![inner.clone()],
+        })),
+        ("split", 2) => Some(Some(Type::Tuple(vec![
+            (
+                "first".to_string(),
+                Box::new(Type::Apply {
+                    name: Syntax::TYPE_SHARED_GUARD.to_string(),
+                    args: vec![inner.clone()],
+                }),
+            ),
+            (
+                "second".to_string(),
+                Box::new(Type::Apply {
+                    name: Syntax::TYPE_SHARED_GUARD.to_string(),
+                    args: vec![inner.clone()],
+                }),
+            ),
+        ]))),
+        ("wait", 2) => Some(None),
+        _ => None,
+    }
+}
+
+fn condition_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("notify_one" | "notify_all", 0) => Some(None),
         _ => None,
     }
 }

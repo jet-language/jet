@@ -1173,8 +1173,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
             THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
-            THostCall::Method { recv, args, .. } => {
-                resident_safe_expr(recv, callees)
+            THostCall::Method {
+                recv,
+                method,
+                args,
+            } => {
+                !matches!(method.as_str(), "guard_read" | "guard_edit")
+                    && resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
             }
             THostCall::Helper { helper, args }

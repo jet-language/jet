@@ -834,6 +834,64 @@ impl Cx {
         contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
     }
 
+    pub(crate) fn type_contains_shared_guard(&self, ty: &Type) -> bool {
+        fn payload_contains(
+            cx: &Cx,
+            payload: &VariantPayload,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => contains(cx, ty, seen),
+                VariantPayload::Named(fields) => {
+                    fields.iter().any(|field| contains(cx, &field.ty, seen))
+                }
+            }
+        }
+
+        fn named_contains(cx: &Cx, name: &str, seen: &mut HashSet<String>) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            cx.struct_fields
+                .get(name)
+                .is_some_and(|fields| fields.iter().any(|(_, ty)| contains(cx, ty, seen)))
+                || cx.enum_variants.get(name).is_some_and(|variants| {
+                    variants
+                        .iter()
+                        .any(|(_, payload)| payload_contains(cx, payload, seen))
+                })
+        }
+
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => true,
+                Type::Named(name) => named_contains(cx, name, seen),
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(cx, arg, seen))
+                        || named_contains(cx, name, seen)
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                    contains(cx, key, seen) || contains(cx, value, seen)
+                }
+                Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
+                Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
+                Type::FixedList { elem, .. } => contains(cx, elem, seen),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|ty| contains(cx, ty, seen))
+                        || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
+                }
+                _ => false,
+            }
+        }
+
+        contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
+    }
+
     /// Render a type whose view-bearing leaves borrow the function's hidden
     /// owner lifetime. Wrappers stay wrappers; only references and generated
     /// aggregate types receive the lifetime argument.
@@ -1113,6 +1171,11 @@ impl Cx {
                 if name == Syntax::TYPE_TASKGROUP && !self.type_names.contains(name) =>
             {
                 format!("{}jet_std::JetTaskGroup", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_CONDITION && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetCondition", self.root_prefix)
             }
             Type::Named(name) if name == "Error" => "String".to_string(),
             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
@@ -1684,6 +1747,15 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetMeasurement<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+            {
+                format!(
+                    "{}jet_std::JetSharedGuard<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
@@ -3296,7 +3368,11 @@ pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bo
     })
 }
 
-fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSet<String>) -> bool {
+pub(crate) fn field_type_cloneable(
+    ty: &Type,
+    types: &HashSet<String>,
+    param_names: &HashSet<String>,
+) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -3314,6 +3390,7 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
+        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => false,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_cloneable(a, types, param_names)),
@@ -3372,7 +3449,12 @@ pub(crate) fn field_type_comparable(
         // surfaces once one of these lands as a tuple field (`tasks.channel<T>()`'s
         // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Bag/Deque/…)
         // is still checked structurally through its args below.
-        Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
+        Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "Task" | "Sender" | "Receiver" | Syntax::TYPE_SHARED_GUARD
+            ) =>
+        {
             false
         }
         // D-MEM1 S6: `Pool<T>` is a live arena handle (`JetPool`), never comparable
@@ -3435,7 +3517,12 @@ pub(crate) fn field_type_hashable(
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
         // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as `field_type_comparable`.
-        Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
+        Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "Task" | "Sender" | "Receiver" | Syntax::TYPE_SHARED_GUARD
+            ) =>
+        {
             false
         }
         // D-MEM1 S6: same `Pool`/`Id` split as `field_type_comparable` above.

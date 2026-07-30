@@ -18,6 +18,7 @@ use crate::Codegen::TIR::emit_tir_place;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
 use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::bin_match_scan_closure_ex;
 use crate::Codegen::TIR::str_match_scan_closure_ex;
@@ -40,6 +41,63 @@ use crate::Codegen::TIR::TTypedTextForm;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
+use crate::Codegen::TIR::struct_field_type;
+
+fn emit_tir_lambda(lam: &TLambda) -> String {
+    let move_kw = if lam.is_move { "move " } else { "" };
+    let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
+    let wrapped = if lam.arc {
+        format!("std::sync::Arc::new({closure})")
+    } else if lam.boxed {
+        format!("Box::new({closure})")
+    } else {
+        closure
+    };
+    if lam.prep.is_empty() {
+        wrapped
+    } else {
+        format!("{{ {} {} }}", lam.prep, wrapped)
+    }
+}
+
+fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
+    let mut projection = "__jet_guard_value".to_string();
+    let mut value_ty = match guard_ty {
+        Type::Tagged { inner, .. } => match inner.as_ref() {
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+            {
+                args[0].clone()
+            }
+            _ => panic!("SharedGuard projection TIR lost its guarded type"),
+        },
+        Type::Apply { name, args }
+            if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+        {
+            args[0].clone()
+        }
+        _ => panic!("SharedGuard projection TIR has a non-guard receiver"),
+    };
+    for field in path {
+        projection.push('.');
+        projection.push_str(&emit_field_rust(cx, &value_ty, field));
+        value_ty = struct_field_type(cx, &value_ty, field)
+            .unwrap_or_else(|| panic!("SharedGuard projection TIR has unknown field `{field}`"));
+    }
+    projection
+}
+
+fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
+    if let TExprKind::Local(local) = &recv.kind {
+        return local.rust_name();
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in emit_tir_expr(recv, cx).bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("expr-{hash:016x}")
+}
 
 pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) -> String {
     match call {
@@ -73,6 +131,15 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .map(|a| emit_tir_expr(a, cx))
                 .collect::<Vec<_>>()
                 .join(", ");
+            if matches!(&recv.ty, Type::Shared(_))
+                && matches!(method.as_str(), "guard_read" | "guard_edit")
+            {
+                let lock = shared_lock_receipt_id(recv, cx);
+                return format!(
+                    "{{ /* jet-shared-lock-order-receipt: lock={lock}; acquire={method}; order=source */ ({}).{method}({arg_str}) }}",
+                    emit_tir_expr(recv, cx)
+                );
+            }
             format!("({}).{method}({arg_str})", emit_tir_expr(recv, cx))
         }
         THostCall::FixedListIndex { base, index } => format!(
@@ -1398,6 +1465,63 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 read
             }
         }
+        TExprKind::SharedGuardValue { guard, .. } => {
+            format!("(*({}))", emit_tir_expr(guard, cx))
+        }
+        TExprKind::SharedGuardMap {
+            guard,
+            path,
+            editable,
+        } => {
+            let projection = emit_shared_guard_projection(cx, &guard.ty, path);
+            let method = if *editable { "map_edit" } else { "map_read" };
+            let borrow = if *editable { "&mut " } else { "&" };
+            format!(
+                "({}).{method}(|__jet_guard_value| {borrow}{})",
+                emit_tir_expr(guard, cx),
+                projection
+            )
+        }
+        TExprKind::SharedGuardSplit {
+            guard,
+            first,
+            second,
+            editable,
+        } => {
+            let first = emit_shared_guard_projection(cx, &guard.ty, first);
+            let second = emit_shared_guard_projection(cx, &guard.ty, second);
+            let method = if *editable { "split_edit" } else { "split_read" };
+            let borrow = if *editable { "&mut " } else { "&" };
+            let fields = match &e.ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => Vec::new(),
+            };
+            let tuple = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{{ let (__jet_first, __jet_second) = ({}).{method}(|__jet_guard_value| ({borrow}{}, {borrow}{})); {} {{ {}: __jet_first, {}: __jet_second }} }}",
+                emit_tir_expr(guard, cx),
+                first,
+                second,
+                tuple,
+                mangle("first"),
+                mangle("second"),
+            )
+        }
+        TExprKind::SharedGuardWait {
+            guard,
+            condition,
+            predicate,
+        } => format!(
+            "({}).wait(&({}), {})",
+            emit_tir_expr(guard, cx),
+            emit_tir_expr(condition, cx),
+            emit_tir_lambda(predicate)
+        ),
+        TExprKind::ConditionNotify { condition, all } => format!(
+            "({}).notify_{}()",
+            emit_tir_expr(condition, cx),
+            if *all { "all" } else { "one" }
+        ),
         TExprKind::PtrFromAddr { elem, addr } => {
             format!(
                 "(({}) as usize as *mut {})",
@@ -1831,22 +1955,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // resolved at lowering off `Lambda.meta`; emit only assembles, byte-for-byte
         // `emit_lambda`: `{move }|params| body`, wrapped `Box::new(…)` when it escapes,
         // and prefixed with the `{ <prep> … }` block when there are cloned captures.
-        TExprKind::Lambda(lam) => {
-            let move_kw = if lam.is_move { "move " } else { "" };
-            let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
-            let wrapped = if lam.arc {
-                format!("std::sync::Arc::new({})", closure)
-            } else if lam.boxed {
-                format!("Box::new({})", closure)
-            } else {
-                closure
-            };
-            if lam.prep.is_empty() {
-                wrapped
-            } else {
-                format!("{{ {} {} }}", lam.prep, wrapped)
-            }
-        }
+        TExprKind::Lambda(lam) => emit_tir_lambda(lam),
         TExprKind::InlineBlock(stmts) => {
             let mut rendered = String::from("{\n");
             emit_tir_lambda_block(stmts, cx, &mut rendered, 1);

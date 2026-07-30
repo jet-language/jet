@@ -1363,9 +1363,19 @@ impl<'a> Checker<'a> {
                             Type::Apply { name, .. } if name == "ExpiringSecret"
                         )
             );
-            // Fact tags are type-transparent. Method lookup always uses the
-            // carried value's type; the fact dataflow pass tracks the tag.
+            // Most fact tags are type-transparent. SharedGuard's compiler-only
+            // tag is different: it carries the read/edit capability needed by
+            // method lookup and must survive until ownership and TIR lowering.
             let recv_ty = match recv_ty {
+                Type::Tagged { marker, inner }
+                    if matches!(
+                        marker.as_str(),
+                        crate::AST::SHARED_GUARD_READ_MARKER
+                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                    ) =>
+                {
+                    Type::Tagged { marker, inner }
+                }
                 Type::Tagged { inner, .. } => *inner,
                 other => other,
             };
@@ -3060,6 +3070,48 @@ impl<'a> Checker<'a> {
                     return result;
                 }
             }
+            let shared_guard_ty = match &recv_ty {
+                Type::Tagged { marker, inner }
+                    if matches!(
+                        marker.as_str(),
+                        crate::AST::SHARED_GUARD_READ_MARKER
+                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                    ) && matches!(
+                        inner.as_ref(),
+                        Type::Apply { name, .. }
+                            if name == crate::Syntax::TYPE_SHARED_GUARD
+                    ) =>
+                {
+                    Some(recv_ty.clone())
+                }
+                Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_GUARD => {
+                    let editable = match &**receiver {
+                        Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
+                            info.param_conv == Some(AccessConvention::Write)
+                        }),
+                        _ => false,
+                    };
+                    Some(Type::Tagged {
+                        marker: if editable {
+                            crate::AST::SHARED_GUARD_EDIT_MARKER
+                        } else {
+                            crate::AST::SHARED_GUARD_READ_MARKER
+                        }
+                        .to_string(),
+                        inner: Box::new(recv_ty.clone()),
+                    })
+                }
+                _ => None,
+            };
+            if let Some(shared_guard_ty) = shared_guard_ty {
+                if let Some(result) =
+                    self.finish_shared_guard_method(receiver, &shared_guard_ty, method, args, span)
+                {
+                    *recv_type_out = Some(crate::Syntax::TYPE_SHARED_GUARD.to_string());
+                    *resolved_ret_out = result.clone();
+                    return result;
+                }
+            }
             // D-SIMD2 / D-LINALG1: methods on the built-in math value types
             // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(.Max)`, `m.matmul(n)`).
             // Operator overloading on this closed family is blessed; named methods are
@@ -3384,6 +3436,9 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some(name) = nominal_recv {
+                    if name == crate::Syntax::TYPE_CONDITION {
+                        *recv_type_out = Some(name.to_string());
+                    }
                     if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") {
                         *recv_type_out = Some(name.to_string());
                     }

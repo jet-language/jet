@@ -42,7 +42,19 @@ fn bind_resource_param(
     let resource = matches!(convention, AccessConvention::Move)
         && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.close_types.contains(name));
     if !resource {
-        env.bind(source_name, ordinary_slot, Some(ty.clone()));
+        let local_ty = match ty {
+            Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => Type::Tagged {
+                marker: if convention == AccessConvention::Write {
+                    crate::AST::SHARED_GUARD_EDIT_MARKER
+                } else {
+                    crate::AST::SHARED_GUARD_READ_MARKER
+                }
+                .to_string(),
+                inner: Box::new(ty.clone()),
+            },
+            _ => ty.clone(),
+        };
+        env.bind(source_name, ordinary_slot, Some(local_ty));
         return;
     }
     let guard_name = format!("__jet_resource_param_{source_name}");

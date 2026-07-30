@@ -6,9 +6,7 @@ use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::wrong_core_arity;
-use crate::Sema::Diagnostics::{
-    collection_changed_in_loop, expr_root_ident, suggest_field, type_fix_hint,
-};
+use crate::Sema::Diagnostics::{suggest_field, type_fix_hint};
 use crate::Syntax;
 use std::collections::HashSet;
 impl<'a> Checker<'a> {
@@ -268,55 +266,7 @@ impl<'a> Checker<'a> {
                 }
             });
             if Collections::builtin_needs_mut_receiver(recv_ty, method) {
-                if let Some(root) = expr_root_ident(receiver) {
-                    let root = root.to_string();
-                    if self.in_lambda_body {
-                        self.inferred_lambda_mut_captures.insert(root.clone());
-                    }
-                    let rspan = receiver.span();
-                    self.check_owner_change(
-                        &root,
-                        &format!("be changed by `.{method}()`"),
-                        rspan,
-                    );
-                    if self.iter_borrowed.contains(&root) {
-                        self.diags.push(collection_changed_in_loop(&root, rspan));
-                    }
-                    if let Some(info) = self.lookup(&root) {
-                        if !info.mutable {
-                            let (what, fix) = if root == Syntax::KW_SELF {
-                                (
-                                    format!(
-                                        "`.{}()` edits `{}`, but this method has read access only",
-                                        method,
-                                        Syntax::KW_SELF
-                                    ),
-                                    format!(
-                                        "declare the enclosing method with `{}{}`",
-                                        Syntax::SIGIL_WRITE,
-                                        Syntax::KW_SELF
-                                    ),
-                                )
-                            } else {
-                                (
-                                    format!(
-                                        "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
-                                        root,
-                                        method
-                                    ),
-                                    format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
-                                )
-                            };
-                            self.diags.push(Diagnostic::error(
-                                "E0202",
-                                what,
-                                "this method edits the collection in place; write access (`&`) is required".to_string(),
-                                fix,
-                                Some(rspan),
-                            ));
-                        }
-                    }
-                }
+                self.check_mutating_method_receiver(receiver, method, receiver.span());
             }
             // D-PROCESS-SESSION2=D: the capability report stays an open
             // Set<String>, but a close literal typo of a stable fact gets a
@@ -448,6 +398,17 @@ impl<'a> Checker<'a> {
                 match method {
                     "read" => return self.finish_shared_read(inner, args, span),
                     "edit" => return self.finish_shared_edit(inner, args, span),
+                    "guard_read" | "guard_edit" if self.lexical_tail_len() >= 8 => {
+                        self.diags.push(Diagnostic::lint(
+                            "L0206",
+                            format!(
+                                "`Shared.{method}()` keeps its lock through a long lexical scope"
+                            ),
+                            "the guard releases at scope exit, so later statements and nested guard acquisitions run while this lock is held".to_string(),
+                            "move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order".to_string(),
+                            Some(span),
+                        ));
+                    }
                     _ => {}
                 }
             }

@@ -1,0 +1,30 @@
+// D-SHAREDGUARD1=A / D-SHAREDGUARD2=A: short Shared.read/edit closures remain
+// the default. Expert guards can span helpers and wait without missing a wake.
+struct WorkQueue {
+    jobs: [Int],
+    capacity: Int,
+}
+
+fn produce(queue: Shared<WorkQueue>, changed: Condition) {
+    guard :: queue.guard_edit()
+    guard.wait(changed, value => value.jobs.len() < value.capacity) ?? panic("wait failed")
+    guard.value.jobs.push(7)
+    changed.notify_all()
+}
+
+fn consume(queue: Shared<WorkQueue>, changed: Condition) {
+    guard :: queue.guard_edit()
+    _ :: guard.value.jobs.pop()
+    changed.notify_one()
+}
+
+fn run() {
+    queue := Shared.new(WorkQueue.{ jobs: [1], capacity: 1 })
+    changed := Condition.new()
+    taskgroup workers {
+        producer :: workers.task => produce(queue, changed)
+        consume(queue, changed)
+        producer.join()
+    }
+    print(queue.read(value => value.jobs.first() ?? 0))
+}

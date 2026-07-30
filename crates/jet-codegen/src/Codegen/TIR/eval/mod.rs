@@ -20,11 +20,16 @@ mod uninit_semantics {
     include!("../../../Prelude/Uninit.rs");
 }
 
+#[allow(dead_code)]
+mod shared_protocol {
+    include!("../../../Prelude/SharedProtocol.rs");
+}
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 
 use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use super::Cx;
@@ -336,7 +341,7 @@ pub(super) struct EvalCtx<'a> {
     /// Handle-backed runtime state is shared by lexical task children. The TIR
     /// and local variable scopes remain borrowed by each evaluator context.
     runtime: Arc<Mutex<EvalRuntime<'a>>>,
-    shared_transactions: Vec<HashMap<usize, CtValue>>,
+    shared_transactions: Vec<Vec<EvalSharedDelta<'a>>>,
     /// Spawn bodies are lowered separately because native tiers compile them as
     /// independent functions. The evaluator records each outcome behind a task
     /// handle, then observes it only at join/group boundaries.
@@ -349,6 +354,8 @@ pub(super) struct EvalCtx<'a> {
     yield_scope: Option<HashMap<String, CtValue>>,
     /// `scope.guard` cleanups — run LIFO when the enclosing function returns.
     scope_guards: Vec<&'a TIR::TLambda>,
+    /// Owned Shared lock leases acquired by this evaluator context.
+    shared_guards: Vec<usize>,
     /// Nested `#Transact` frames for auto-snapshot + commit/rollback hooks.
     txn_stack: Vec<EvalTxnFrame<'a>>,
 }
@@ -357,6 +364,12 @@ pub(super) struct EvalTxnFrame<'a> {
     pub(super) snapshots: Vec<(String, CtValue)>,
     pub(super) on_commit: Vec<&'a TIR::TLambda>,
     pub(super) on_rollback: Vec<&'a TIR::TLambda>,
+}
+
+pub(super) struct EvalSharedDelta<'a> {
+    pub(super) shared_index: usize,
+    pub(super) lambda: &'a TIR::TLambda,
+    pub(super) captured: HashMap<String, CtValue>,
 }
 
 enum EvalCallable<'a> {
@@ -375,11 +388,85 @@ struct EvalStream<'a> {
 struct EvalRuntime<'a> {
     callables: Vec<EvalCallable<'a>>,
     streams: Vec<EvalStream<'a>>,
-    shared_values: Vec<CtValue>,
+    shared_values: Vec<Arc<EvalSharedState>>,
+    shared_guards: Vec<Arc<shared_protocol::JetSharedPermit>>,
+    shared_conditions: Vec<Arc<shared_protocol::JetConditionProtocol>>,
     clocks: Vec<i64>,
     task_groups: Vec<Vec<usize>>,
     tasks: Vec<Option<EvalTask>>,
     completion_order: AtomicU64,
+}
+
+struct EvalSharedState {
+    value: Mutex<CtValue>,
+    protocol: Arc<shared_protocol::JetSharedProtocol>,
+}
+
+impl EvalSharedState {
+    fn new(value: CtValue) -> Self {
+        Self {
+            value: Mutex::new(value),
+            protocol: shared_protocol::JetSharedProtocol::new(),
+        }
+    }
+
+    fn acquire(
+        self: &Arc<Self>,
+        editable: bool,
+        cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<Arc<shared_protocol::JetSharedPermit>> {
+        self.protocol.acquire(editable, || {
+            cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
+        })
+    }
+}
+
+struct EvalConditionWaiter {
+    notified: Mutex<bool>,
+    wake: Condvar,
+    cancel: Option<Arc<AtomicBool>>,
+}
+
+impl EvalConditionWaiter {
+    fn new(cancel: Option<Arc<AtomicBool>>) -> Self {
+        Self {
+            notified: Mutex::new(false),
+            wake: Condvar::new(),
+            cancel,
+        }
+    }
+}
+
+impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
+    fn park(&self) -> Result<(), ()> {
+        let mut notified = self
+            .notified
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while !*notified {
+            if self
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            {
+                return Err(());
+            }
+            let (next, _) = self
+                .wake
+                .wait_timeout(notified, std::time::Duration::from_millis(10))
+                .unwrap_or_else(|error| error.into_inner());
+            notified = next;
+        }
+        Ok(())
+    }
+
+    fn wake(&self) {
+        *self
+            .notified
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = true;
+        self.wake.notify_one();
+    }
 }
 
 struct EvalTask {
@@ -491,6 +578,8 @@ impl EvalRuntime<'_> {
             callables: Vec::new(),
             streams: Vec::new(),
             shared_values: Vec::new(),
+            shared_guards: Vec::new(),
+            shared_conditions: Vec::new(),
             clocks: Vec::new(),
             task_groups: Vec::new(),
             tasks: Vec::new(),
@@ -580,6 +669,7 @@ impl<'a> EvalCtx<'a> {
             yield_consumer: None,
             yield_scope: None,
             scope_guards: Vec::new(),
+            shared_guards: Vec::new(),
             txn_stack: Vec::new(),
         };
         let mut scope = job.captured;
@@ -837,6 +927,7 @@ impl<'a> EvalCtx<'a> {
             unreachable!("burn with fuel 0 always errors");
         }
         self.call_depth += 1;
+        let guard_mark = self.scope_guards.len();
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name.strip_prefix("user_").unwrap_or(name.as_str());
             let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
@@ -845,21 +936,29 @@ impl<'a> EvalCtx<'a> {
                 scope.insert(name.clone(), value);
             }
         }
-        let result = match self.exec_stmts(&func.body, scope)? {
-            Flow::Return(v) => Ok(v),
-            Flow::Normal => Ok(CtValue::Unit),
-            other => Err(unsupported(
-                &format!("control flow {other:?} escaping function"),
-                self.span(),
-            )),
+        let result = match self.exec_stmts(&func.body, scope) {
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(Flow::Normal) => Ok(CtValue::Unit),
+            Ok(other) => Err(unsupported(
+                    &format!("control flow {other:?} escaping function"),
+                    self.span(),
+                )),
+            Err(error) => Err(error),
         };
         // Run scope.guard cleanups LIFO, matching Drop order in AOT/JIT.
-        let guards: Vec<_> = self.scope_guards.drain(..).rev().collect();
+        let guards: Vec<_> = self.scope_guards.drain(guard_mark..).rev().collect();
+        let mut cleanup_result = Ok(());
         for lam in guards {
-            let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
+            if let Err(error) = self.eval_tlambda(lam, Vec::new(), scope) {
+                cleanup_result = Err(error);
+                break;
+            }
         }
         self.call_depth -= 1;
-        result
+        match (result, cleanup_result) {
+            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+            (Ok(value), Ok(())) => Ok(value),
+        }
     }
 
     fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
@@ -1255,6 +1354,7 @@ pub fn run_program_with_structs(
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
+        shared_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
@@ -1320,6 +1420,7 @@ pub fn run_named_func(
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
+        shared_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
@@ -1493,6 +1594,7 @@ fn eval_expr_hook(
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
+        shared_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
@@ -1579,6 +1681,7 @@ fn eval_block_hook(
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
+        shared_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = globals;

@@ -1146,6 +1146,34 @@ impl<'a> Checker<'a> {
                 if let Some(arg_ty) = &arg_ty {
                     let param_ty = self.resolve_type(param_ty.clone());
                     let mut arg_ty = self.resolve_type(arg_ty.clone());
+                    if *param_conv == AccessConvention::Write
+                        && matches!(
+                            &param_ty,
+                            Type::Apply { name, .. }
+                                if name == crate::Syntax::TYPE_SHARED_GUARD
+                        )
+                        && !matches!(
+                            &arg_ty,
+                            Type::Tagged { marker, .. }
+                                if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                        )
+                        && !matches!(
+                            &arg.expr,
+                            Expr::Ident(name, _)
+                                if self.lookup(name).is_some_and(|info| {
+                                    info.param_conv == Some(AccessConvention::Write)
+                                })
+                        )
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0205",
+                            "a read `SharedGuard` cannot enter a write helper".to_string(),
+                            "the helper can edit through this parameter, so its caller must hold an exclusive Shared guard".to_string(),
+                            "create the guard with `guard_edit()` before passing it with `&`"
+                                .to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    }
                     if param_ty != arg_ty
                         && self.implicitly_convert_unit(&mut arg.expr, &param_ty, &arg_ty)
                     {

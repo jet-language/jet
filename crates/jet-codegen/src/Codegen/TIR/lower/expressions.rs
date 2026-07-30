@@ -1924,6 +1924,39 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             let recv = lower_expr(receiver, cx, env);
+            if member == "value" {
+                if let Type::Apply { name, args } = recv.ty.clone() {
+                    if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                        return TExpr {
+                            ty: args[0].clone(),
+                            kind: TExprKind::SharedGuardValue {
+                                guard: Box::new(recv),
+                                editable: false,
+                            },
+                        };
+                    }
+                }
+                if let Type::Tagged { marker, inner } = recv.ty.clone() {
+                    if matches!(
+                        marker.as_str(),
+                        crate::AST::SHARED_GUARD_READ_MARKER
+                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                    ) {
+                        if let Type::Apply { name, args } = inner.as_ref() {
+                            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                                return TExpr {
+                                    ty: args[0].clone(),
+                                    kind: TExprKind::SharedGuardValue {
+                                        guard: Box::new(recv),
+                                        editable: marker
+                                            == crate::AST::SHARED_GUARD_EDIT_MARKER,
+                                    },
+                                };
+                            }
+                        }
+                    }
+                }
+            }
             // D-FIELDPOL1: a computed field is not a Rust struct member — sema
             // (`CheckerFieldPolicy`) already synthesized it as a getter method
             // on `s.methods`; route the read to a call of that method instead

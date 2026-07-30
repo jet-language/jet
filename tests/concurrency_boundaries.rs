@@ -47,6 +47,22 @@ fn assert_rejected(source: &str, code: &str) {
 }
 
 #[test]
+fn shared_guard_cannot_cross_a_task_boundary() {
+    assert_rejected(
+        r#"
+use core.tasks as tasks
+fn run() {
+    shared := Shared.new(1)
+    guard :: shared.guard_read()
+    worker :: tasks.spawn(() => print(guard.value))
+    worker.join()
+}
+"#,
+        "E1102",
+    );
+}
+
+#[test]
 fn signal_crosses_task_and_channel_without_rustc_send_ice() {
     let task_source = r#"
 use core.reactive as reactive

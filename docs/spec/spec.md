@@ -477,6 +477,36 @@ the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
 handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
 boundary with no `^`.
 
+Expert code can hold the same lock across helper calls (D-SHAREDGUARD1=A,
+D-SHAREDGUARD2=A):
+
+```jet
+space_ready :: Condition.new()
+guard :: queue.guard_edit()
+guard.wait(space_ready, q => q.jobs.len() < q.capacity) ?? panic("wait failed")
+guard.value.jobs.push(job)
+space_ready.notify_one()
+```
+
+`guard_read()` and `guard_edit()` return an owned `SharedGuard<T>`. The guard
+releases on every exit. `.map(value => value.field)` narrows one guard to a
+field. `.split(first, second)` creates two guards only when sema proves the
+field paths are disjoint; both guards retain the original lock and provenance.
+Guards are task-local and cannot be copied or sent.
+The public `SharedGuard<T>` name is safe at helper boundaries: a normal
+parameter reads it, while `&guard: SharedGuard<T>` requires and preserves edit
+access. A returned or stored public guard keeps read access; perform edits at
+the acquisition site or through an explicit write helper.
+
+`Condition.new()` creates a wait set. `guard.wait(condition, predicate)`
+requires an edit guard. It registers before release, reacquires the same lock,
+and checks the predicate again. Cancellation unregisters the waiter before the
+guard's final release. `notify_one()` wakes one waiter; `notify_all()` wakes
+all waiters. Short `.read` and `.edit` closures remain the default.
+
+See `examples/features/memory/shared_guard_queue.jet` for a bounded queue that
+covers the notify-before-park race.
+
 Inside a `#Transact` block (D-STM1), a `Shared<T>.edit` joins the block's
 atomic commit instead of locking on its own line: every touched handle changes
 together or not at all, and no other task ever sees a half-applied change. The

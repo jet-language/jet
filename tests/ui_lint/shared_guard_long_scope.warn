@@ -1,0 +1,7 @@
+Warning [L0206]: `Shared.guard_edit()` keeps its lock through a long lexical scope
+  --> tests/ui_lint/shared_guard_long_scope.jet:3:21
+    |
+  3 |     guard :: shared.guard_edit()
+    |                     ^^^^^^^^^^
+ Why: the guard releases at scope exit, so later statements and nested guard acquisitions run while this lock is held
+ Fix: move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order

@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1317,
-    "rev": 19997,
+    "nextNum": 1319,
+    "rev": 20172,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "radar:e5"
       ]
     },
-    "completionCursor": "2026-07-29T23:19:33.764Z"
+    "completionCursor": "2026-07-30T01:14:44.382Z"
   },
   "epochs": [
     {
@@ -46770,12 +46770,67 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "## Goal\nShip D-LOCALCELL1=A: one non-sendable `Cell<T>` family for local interior mutability, with value ops and runtime-checked guards.\n\n## Law (ratified)\n- Keep `Shared<T>` as the cross-task synchronized default.\n- One local `Cell<T>`: get/set/replace/init plus read/edit/guard methods.\n- Runtime borrow state: many readers or one writer; guards carry view provenance.\n- Sema rejects task, channel, Shared, and parallel crossings of `Cell`.\n\n## Scope\nIn: `Cell<T>` type and methods; guard map/split; diagnostics; local cache examples.\nOut: Shared guards/Condition (#1202); pin (#1200); second BorrowCell type.\n\n## Owned paths\n- corelib `Cell` implementation + sema sendability / crossing checks\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: lazy line-index cache on a local syntax tree\n- docs/reference/core-library.md + spec notes\n\n## Steps\n1. Add `Cell<T>.new` and value methods (`get`/`set`/`replace`/`get_or_set` as needed).\n2. Add `read`/`edit` closures and `guard_read`/`guard_edit` with runtime conflict checks.\n3. Guard mapping/splitting preserves the dynamic loan; release on all exits.\n4. Sema: reject Cell across tasks/channels/Shared/parallel.\n5. Teach value access vs guard access clearly in docs.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–4. Proof: ownership + concurrency reject tests; local-cache example golden.\n\n## Blockers\nblockedBy: none. D-LOCALCELL1 ratified (=A). Syntax chores if `Cell` needs Syntax.rs entry.\n",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "core-five-1201",
       "log": [
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Review follow-up 84834b023 restores canonical task-boundary precedence: Cell guard captures in tasks now emit E1102 and never aggregate-storage E0215; non-task lambda capture remains E0215. Added a focused assertion for both read and edit guards. Proof: focused concurrency regression green, local_cell_tiers 6/6, and E0215 UI snapshots green unblessed."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Implemented local Cell interior mutability and guard APIs through ea674de43 (on top of c8f9f3e1d, a74f1540b, 61d16b367, 116db21c1). Added registered E0215 with exact UI snapshots; direct and recursively nested tuple guards remain legal, while aggregate storage, generic direct temporaries, and lambda capture reject before codegen. Proof: normal-stack local_cell_tiers 6/6 across AOT, resident JIT without fallback/deopt, forced interpreter, TIR shape, E0211 linearity, and hostile E0215 exact-count cases; E0215 UI snapshots 2/2 unblessed. diagnostics_coverage was 9/11: unrelated baseline failures remain for missing snapshots E0031/E0034/E0048/E0139/E0320/E0342/E0346/E0350/E0412-E0418/E0761/E0994/E2111/E3204 and unexpected registered codes E0334/E0920/E1109/E2407/L3101."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Integration stack-overflow fixed in 61d16b367. Root cause: the #1201 Cell projection/method arms enlarged every recursive eval_expr frame, including non-Cell Display evaluation, enough to overflow a normal 2 MiB test thread. Moved those unchanged semantics into dedicated cold helpers. Proof: exact previously-red imported Display repro passes; full ordinary-stack unit_family 44/44 passes; local_cell_tiers 5/5 passes with AOT/resident/forced-evaluator parity; cargo check -p jet-codegen passes; one-file diff check passes. Awaiting independent review."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Material-fix recheck: a74f1540b fixes resident execution and sema guard non-cloneability; local_cell_tiers passes 5/5 with E0211 and no deopt/fallback. New I9 blocker: resident JIT frame cleanup transfers only one directly returned Cell guard (functions_compile.rs/lower_ctx.rs/Cell.rs). A tuple, struct, or list containing split/moved guards is recursively preserved by AOT/evaluator but resident JIT drops the underlying slots before caller use. Generalize return transfer to recursively retain every guard handle in aggregate results, or prove sema forbids the shape (it currently does not). Not safe to integrate."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Reviewer blockers fixed in a74f1540b: Cell now lowers through a resident Cranelift marshalling adapter that calls canonical Prelude policy; guard frames clean up on normal, early-return, and trap paths; Cell guards are non-cloneable with pre-codegen E0211. Proof: local_cell_tiers 5/5 passes with exact AOT/resident/forced-interpreter parity, resident JIT executed with no deopt/fallback, including Cell<[Int]?> cache; hostile cleanup/reborrow unit passes; targeted UI snapshot passes. Awaiting independent re-review."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Coordination blocker: the sole core-five worktree must be deleted before the requested CheckerOwnership wave. Current uncommitted Cell review fixes include sema guard non-cloneability and resident JIT adapter work. Please checkpoint the owned fix promptly; codex-core-five will preserve a named handoff branch and will not integrate the card before its review closes."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Independent review found two blockers in c8f9f3e1d. Resident Cranelift rejects Cell construction/method/projection lowering in jit/safety.rs, so default jet run deopts and violates I9; the committed output-only default-tier test is false-green. Also Diagnostics::is_cloneable_rec treats CellReadGuard/CellEditGuard as cloneable through the generic Type::Apply arm, so ~guard passes sema and can leak to rustc instead of E0211. The current uncommitted local_cell_tiers tests correctly expose both gaps. Commit is not safe to integrate."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Implemented in c8f9f3e1d. Proof: cargo check -p jet-codegen -p jet-jit PASS; local_cell_tiers 4/4 PASS (AOT, default jet run/evaluator deopt, exact split tuple/move-only shape); ownership local_cell 7/7 PASS; concurrency local_cell 3/3 and nested rejects 2/2 PASS; local_cache golden PASS; local_cell UI snapshots PASS; cached diff check PASS. Root audited the 41-file Cell-only cache and exact mixed-file exclusions. Awaiting fresh-context reviewer; builder has not self-verified."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "AOT local-cache golden and exact canonical runtime harness pass. Extracted one Prelude/LocalCell.rs used by emitted code and the pending evaluator adapter; sema now records map/split projection paths as facts. Added full-surface AOT/default tier fixture. Final TIR/evaluator hooks remain serialized behind the uncommitted #1287 TIR seams."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Built the local Cell runtime with Rc, UnsafeCell, and a one-thread borrow counter. Added shared loan tokens for guard map and split, unwind-release tests, Cell sendability checks, Shared.new rejection, Core docs, and a local-cache example. Scoped crossing tests pass. Final lowering and runtime proof wait for the #1239 shared-file commit and current #1292 compile stabilization."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1201",
+          "text": "Started implementation of ratified D-LOCALCELL1=A in sole core-five worktree. Scope: Local Cell API, runtime guards, task-boundary rejection, diagnostics, example, docs, and tier-parity proof."
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -46786,38 +46841,38 @@
         {
           "n": 1,
           "text": "A read receiver can update private local state without Arc or operating-system lock overhead.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1201",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.647Z"
+          "evidence": "Commit c8f9f3e1d adds Rc+UnsafeCell JetCell with no Arc, atomics, or OS lock; AOT and default-tier full-surface tests pass.",
+          "at": "2026-07-30T02:27:46.939Z"
         },
         {
           "n": 2,
           "text": "Runtime read and write guards enforce many readers or one writer and release on every exit path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1201",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.648Z"
+          "evidence": "Commit c8f9f3e1d implements many-reader/one-writer runtime loans with shared guard tokens and Drop release. local_cell_tiers 4/4 and ownership Cell tests 7/7 pass, including unwind/release behavior.",
+          "at": "2026-07-30T02:27:50.946Z"
         },
         {
           "n": 3,
           "text": "Guard mapping and splitting preserve the original dynamic loan.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1201",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.648Z"
+          "evidence": "Commit c8f9f3e1d carries sema-proved projection paths into structured TIR and uses canonical map/split guards in AOT and evaluator deopt. local_cell_tiers exact split tuple/move-only regression passes.",
+          "at": "2026-07-30T02:27:55.894Z"
         },
         {
           "n": 4,
           "text": "Cross-task use is rejected unless the value uses Shared<T> or another synchronized type.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1201",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.648Z"
+          "evidence": "Commit c8f9f3e1d rejects direct and nested Cell/guard crossings through tasks, task groups, channels, Shared, and parallel adapters. concurrency Cell tests 3/3 plus nested rejection tests 2/2 pass.",
+          "at": "2026-07-30T02:28:01.477Z"
         }
       ],
       "refs": [
@@ -46829,11 +46884,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.086Z",
-      "updated": "2026-07-28T21:37:47.770Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T04:44:50.266Z",
+      "updatedBy": "core-five-1201",
       "workOrder": 470,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T04:44:50.265Z"
     },
     {
       "id": "c0zywkq7",
@@ -46844,7 +46900,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nShip D-SHAREDGUARD1=A: expert `guard_read` / `guard_edit` and `Condition` on `Shared<T>`, keeping beginner `read`/`edit` closures unchanged.\n\n## Law (ratified)\n- Short closures remain the default.\n- Guards are owned lock tokens with safe cleanup on return/error/panic/cancel.\n- Wait atomically registers, releases, parks, reacquires, and rechecks the predicate.\n- Cancellation unregisters before guard release.\n- Lock-order receipts cover nested guards; dossier/audit integration where grant graph already exists.\n\n## Scope\nIn: Shared guard APIs, Condition, map/split, wait protocols, diagnostics for long lock scopes.\nOut: Mutex/RwLock/Condvar family; changing beginner Shared surface; Cell (#1201) except parallel teaching.\n\n## Owned paths\n- `Shared` corelib + runtime wait/park\n- sema cleanup tracking for guards\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: bounded work queue with full/empty wait\n- docs + lock-order audit output\n\n## Steps\n1. Add `guard_read` / `guard_edit` without changing `read`/`edit`.\n2. Map/split guards preserve lock + provenance.\n3. Add `Condition` with `wait` / `notify_one` / `notify_all` semantics as ratified.\n4. Prove no lost wakeups; cancel/panic/return always release and unregister.\n5. Lock-order / nested-guard audit facts; diagnostics for long scopes.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency stress for wait; cancellation races; beginner API unchanged snapshot/tests.\n\n## Blockers\nblockedBy: none. D-SHAREDGUARD1 ratified (=A).\n",
       "blockedBy": [
@@ -46852,6 +46908,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-memory-wave",
+          "text": "Done: D-SHAREDGUARD1=A and D-SHAREDGUARD2=A ship one canonical Shared guard/Condition protocol across AOT, default run, and evaluator deopt. Reviewer verified criteria 1–5."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-memory-wave",
+          "text": "Scoped proof passed: shared_guards 9/9, SharedProtocol 4/4, ownership guard 10/10, ownership full 160/160, UI/lint snapshots, concurrency boundary, golden unsafe stripping, and beginner Shared tier parity. Independent review found no remaining issues."
+        },
         {
           "at": "2026-07-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -46871,47 +46937,47 @@
         {
           "n": 1,
           "text": "Experts can hold a Shared read or write guard across several helper calls when required.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.864Z"
+          "status": "verified",
+          "metBy": "codex-memory-wave",
+          "verifiedBy": "review-1202-final",
+          "evidence": "Reviewer inspected the final diff and ran `scripts/agent/jet-env cargo test --test shared_guards`: 9/9 passed. Named guards span helpers; returned and nested-stored guards pass AOT and default execution.",
+          "at": "2026-07-30T07:09:46.181Z"
         },
         {
           "n": 2,
           "text": "Mapped and split guards preserve the original lock and view provenance.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.865Z"
+          "status": "verified",
+          "metBy": "codex-memory-wave",
+          "verifiedBy": "review-1202-final",
+          "evidence": "Reviewer inspected per-view edit authority and map/split provenance gates. `shared_guards` 9/9 includes mapped/split disjoint writes on AOT and default; builder UI evidence covers computed/overlap rejection.",
+          "at": "2026-07-30T07:09:46.470Z"
         },
         {
           "n": 3,
           "text": "A wait operation atomically releases and reacquires the write guard without lost wakeups.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.865Z"
+          "status": "verified",
+          "metBy": "codex-memory-wave",
+          "verifiedBy": "review-1202-final",
+          "evidence": "Reviewer ran `scripts/agent/jet-env cargo test -p jet-codegen shared_protocol_tests`: 4/4 passed, including notify-between-register-and-park and ordered protocol acquisition; queue parity passes in `shared_guards`.",
+          "at": "2026-07-30T07:09:46.730Z"
         },
         {
           "n": 4,
           "text": "Cancellation, panic, return, and error propagation always release guards and unregister waiters.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.865Z"
+          "status": "verified",
+          "metBy": "codex-memory-wave",
+          "verifiedBy": "review-1202-final",
+          "evidence": "Reviewer protocol and scope-cleanup inspection found cancellation/panic/return/error cleanup preserved. `shared_guards` 9/9 and `shared_protocol_tests` 4/4 cover release, unregister, reacquire, and returned/stored lease preservation.",
+          "at": "2026-07-30T07:09:46.984Z"
         },
         {
           "n": 5,
           "text": "The beginner Shared.read and Shared.edit closure surface stays unchanged.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.865Z"
+          "status": "verified",
+          "metBy": "codex-memory-wave",
+          "verifiedBy": "review-1202-final",
+          "evidence": "Reviewer diff confirms `Shared.read`/`Shared.edit` remain unchanged and expert guard/Condition APIs are additive. Existing builder evidence plus final 9/9 parity suite is consistent across AOT/default.",
+          "at": "2026-07-30T07:09:47.242Z"
         }
       ],
       "refs": [
@@ -46923,11 +46989,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.283Z",
-      "updated": "2026-07-28T21:37:48.100Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T07:10:09.928Z",
+      "updatedBy": "codex-memory-wave",
       "workOrder": 480,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-07-30T07:10:09.928Z"
     },
     {
       "id": "c0kyjd7a",
@@ -50966,12 +51033,47 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "## Goal\nImplement both ratified rulings on this card:\n- D-FANOUT3=C: ship `tasks.join_all(handles)` on `core.tasks`.\n- D-EACH1=C: fenced-name expansion plus numbered names from a range (`<: t1..t8 :>`).\n\nThen rewrite `examples/features/memory/shared_transact.jet` to stop pasting eight spawn/wait lines.\n\n## Law (ratified)\n### join_all\n- `tasks.join_all([Task<T>]) => [T]`: wait in list order; consume each handle.\n- Docs state when to use it vs `g.all` inside a taskgroup.\n- Does not replace taskgroups for structured ownership.\n\n### fenced names (D-EACH1=C)\n- `<: … :>` expands a statement once per entry; lock-step when multiple fences appear.\n- Range form `<: t1..t8 :>` in a binding target generates `t1`…`t8`.\n- Not a list value; not S75 fan-out; not destructuring.\n- Lexer: `<:` / `:>` longest-match digraphs; `:>` in `suppresses_terminator`; neither in `ends_statement`.\n- Allowed in binding targets and expression statements; not in if/loop/switch headers or item decls in this pass.\n- Diagnostics (I4): empty fence; duplicate name; disagreeing fence counts; rejected position; double-bind; each with UI snapshot.\n- Spans: every expanded copy points at original line + entry.\n- Formatter emission + fmt stability; wrapping rule for wide fences.\n- Tooling: jump-to-definition / search must understand generated range names.\n\n## Scope\nIn: lexer/parser expansion, sema, fmt, diagnostics+snapshots, `join_all`, example rewrite, Syntax.rs + syntax-decisions + grammar regen.\nOut: changing S75; adding `g.borrow`; reopening D-FANOUT3 to drop join_all.\n\n## Owned paths\n- `crates/jet-foundation` Syntax + lexer/terminator tables\n- parser expansion + span mapping\n- `core.tasks` `join_all`\n- formatter + grammar packages\n- `examples/features/memory/shared_transact.jet`\n- dedicated fence + join_all examples (I5)\n- diagnostic registry + UI snapshots\n- `docs/spec/syntax-decisions.md`\n\n## Steps\n1. Syntax.rs entries + syntax-decisions log for fence digraphs, range form, and `join_all` library surface as required by verify skill.\n2. Lexer digraphs + terminator behavior; parser expansion with lock-step and range binding; per-copy spans.\n3. Implement `tasks.join_all`; tests for order, consumption, L1101 interaction.\n4. Diagnostics + UI snapshots for every fence error class.\n5. Formatter + grammar regen + snapshot bless.\n6. Rewrite shared_transact: prefer either range fences + expanded waits, or list + `join_all` (both legal; pick the form that best teaches the demo’s `#Transact` point without eight pasted lines). Add a second small example if one form would otherwise go unshown.\n7. Verify skill closeout; independent review.\n\n## Acceptance / proof\nExisting syntax criteria plus behavioral proof: shared_transact golden unchanged in output; fence and join_all tests green; grammars regenerated.\n\n## Blockers\nblockedBy: none. D-EACH1 and D-FANOUT3 both ratified (=C).\n",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "core-five-1239",
       "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Review completed with an additional hard I9 blocker: join_all lowers to TaskGroupAll, and forced interpreter executes its own selection/cancellation loop instead of calling the same Prelude jet_task_all semantics as AOT. Success-only output parity does not cover panic, cancellation, or deadline behavior. Required closeout: one Prelude implementation with evaluator/JIT marshalling only, loose tasks.spawn three-tier proof, dedicated executable/golden example, and the comment-safe structural formatter fix."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Independent review found blockers in the a189670e7/8e583913b/f5da9a143 patch. Formatter/Statements.rs uses split_whitespace over fenced source fragments: jet fmt on a fenced lambda containing an inline comment can move the body onto the comment line, comment out the body, and duplicate the comment. The card also lacks an executable/golden join_all example, and its runtime parity test exercises g.task handles rather than the documented loose tasks.spawn handles. Parser-focused tests pass; broader reruns are blocked by live unrelated #1292 edits. Not safe to integrate."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1239",
+          "text": "Resolved the first reviewer findings in commit f5da9a143. The formatter now keeps lexer-recognized string and character literal slices byte-exact, so it does not collapse interior spaces. The parser prepass now keeps nested lambda and struct-literal braces inside the complete fenced statement. Resident-tier tests now require native JIT execution and reject both fallback and deopt. Proof: jet-parser FencedNames 8/8; tests/fenced_names 2/2; tir_unsafe_and_runtime task_join_all 2/2; cached diff check clean. Card remains in verify for reviewer recheck."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1239",
+          "text": "Implementation complete in commits a189670e7 (ordered consuming tasks.join_all) and 8e583913b (fenced statements, docs, grammars, diagnostics, tooling, examples). Proof green: jet-parser FencedNames 6/6; five focused UI snapshots; semindex_indexes_generated_fenced_range_names; fenced_names AOT + resident JIT no-deopt + forced interpreter parity; task_join_all 2/2 with ownership/order and three-tier parity; focused goldens basics/fenced_names and memory/shared_transact. git diff --cached --check was clean before commit. Ready for fresh-context review; builder has not self-verified."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1239",
+          "text": "D-EACH1 implementation checkpoint: lexer/parser/formatter focused suite is green 6/6, including longest-match digraphs, close-terminator suppression, numbered binding and receiver-expression ranges, lock-step fences, four parser diagnostics, single formatter emission, wide wrapping, and fmt stability. Authority conflict resolved in favor of the owner/card acceptance example: `<: t1..t8 :>.wait()` is supported and shared_transact uses it; the lower technical sentence limiting ranges to binding targets is stale. Downstream UI/semindex/golden/tier proof and grammar regeneration are temporarily blocked by incomplete external #1299 Syntax/effect compilation."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1239",
+          "text": "D-FANOUT3 join_all slice committed as a189670e7. Focused proof: cargo test --test tir_unsafe_and_runtime task_join_all -- --nocapture (2/2 green), covering ordered AOT output, resident JIT with no deopt, forced interpreter parity, handle/list consumption, duplicate and reused-handle E0121, borrowed-list E0201, and no L1101 after consumption. Fence-specific criteria remain open; holding parser/Syntax/docs until #1259 releases shared paths."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1239",
+          "text": "Started implementation in codex/core-five worktree. Scope: fenced-name statement expansion, join_all, diagnostics, tooling, docs, examples, and focused proof."
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -50997,38 +51099,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1239",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T00:52:16.263Z"
+          "evidence": "Commit 8e583913b adds D-EACH1=C to crates/jet-foundation/src/Syntax.rs and defines SIGIL_FENCE_OPEN/CLOSE in Syntax/core_surface.rs.",
+          "at": "2026-07-30T02:09:10.579Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1239",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T00:52:16.263Z"
+          "evidence": "Commit 8e583913b records D-EACH1=C / D-FANOUT3=C in docs/spec/syntax-decisions.md, including range reuse, lock-step expansion, token/terminator law, formatter law, and join_all ownership/order.",
+          "at": "2026-07-30T02:09:19.349Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1239",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T00:52:16.263Z"
+          "evidence": "Ran scripts/agent/jet-env jet self devtools grammars successfully; commit 8e583913b contains regenerated fence-sigil entries in editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/tree-sitter/grammar.js, and editors/zed/languages/jet/highlights.scm.",
+          "at": "2026-07-30T02:09:25.252Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1239",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T00:52:16.263Z"
+          "evidence": "Blessed and re-ran focused UI snapshots for E0368 empty fence, E0369 duplicate, E0370 mismatched counts, E0371 rejected position, and E0118 generated double-bind; all five pass and are committed in 8e583913b.",
+          "at": "2026-07-30T02:09:33.599Z"
         }
       ],
       "refs": [
@@ -51040,11 +51142,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T19:32:53.509Z",
-      "updated": "2026-07-28T21:37:46.707Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T03:12:55.860Z",
+      "updatedBy": "codex-core-five-review",
       "workOrder": 430,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T03:05:14.709Z"
     },
     {
       "id": "c0ahqhoi",
@@ -52137,7 +52240,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "All seven ballots on this card are ratified: PREF1=A, ONELINE1=A, ELSEIF1=A, LINT1=A, VALUE1=A, FMT1=C, TEACH1=A. Build exactly that ruling.\n\n1. Add the lint. It warns on a multi-line braced if/else and on any `else if` chain, and points at the ordered arm-table spelling. It stays silent when the whole branch is one simple source line, in both effect and value position (ONELINE1, VALUE1).\n2. Register the diagnostic code with what/why/fix text, add its ui_lint snapshot, and add the row to docs/spec/diagnostics.md. No snapshot means no diagnostic (I4).\n3. Apply TEACH1: every feature example must pass the new lint. Rewrite the ones that do not.\n4. Leave the formatter alone beyond spacing, arrows, and indent (FMT1=C). It never rewrites a braced if into a table.\n5. Syntax chores: add the Syntax.rs row and the syntax-decisions.md log line, regenerate the devtools grammars, and rebless snapshots.\n\nOwned paths: crates/jet-sema/src/Sema/CheckerCore/statements.rs, crates/jet-foundation/src/Syntax.rs, tests/ui_lint, docs/spec/diagnostics.md, docs/spec/syntax-decisions.md, examples/features/**.\n\nProof: cargo test --test ui_lint and --test diagnostics_coverage are green; every touched example compiles and runs; the example corpus is lint-clean; independent review closes.",
       "blockedBy": [
@@ -52151,6 +52254,26 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Integrated on master in f0b574092; all criteria independently verified; single worktree removed and layout check clean."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "L0507 trigger snapshot passes; migrated examples check clean, full golden traversal found no L0507 teaching failures before unrelated shared-tree failures; grammar check passes."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Cross-card coordination: #1239 join_all is committed. Fenced-name implementation is waiting on this card's parser/formatter/Syntax hunks. Please commit/release those paths at the next compile-green checkpoint; #1239 will preserve your patch and use isolated hunks."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "codex-core-five",
+          "text": "Started the five-card core batch in the single .claude/worktrees/core-five worktree. The card has no open owner gate."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-bd-1307",
@@ -52171,74 +52294,74 @@
         {
           "n": 1,
           "text": "Owner ballots on this card are ratified",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:06:28.000Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent authority review found all seven owner ballots attached to #1259 ratified and the implementation aligned with their rulings.",
+          "at": "2026-07-30T02:47:34.751Z"
         },
         {
           "n": 2,
           "text": "Lint + ui_lint snapshot match the ratified triggers",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:06:28.188Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "The focused L0507 ui_lint snapshot passes on main and matches the ratified multiline-brace and else-if triggers while leaving one-line forms quiet.",
+          "at": "2026-07-30T02:47:35.009Z"
         },
         {
           "n": 3,
           "text": "Examples and docs match TEACH1 / house style",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:06:28.378Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirms feature examples and documentation use the ratified arm-table teaching style; scoped golden proof passes on main.",
+          "at": "2026-07-30T02:47:35.268Z"
         },
         {
           "n": 4,
           "text": "Independent review closes; no owned worktree left",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:06:28.581Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "codex-core-five-review",
+          "evidence": "Independent review closed with no findings on the integrated patch. The worktree path is absent, git worktree list shows only master, and scripts/agent/check-worktree-layout.sh passes. The named foreign handoff branch preserves non-owned commits without an orphaned worktree.",
+          "at": "2026-07-30T04:01:51.388Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:10:08.524Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirms Syntax.rs records the ratified D-BRANCH preference, lint, formatting, value, and teaching rulings.",
+          "at": "2026-07-30T02:47:35.525Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:10:08.525Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirms docs/spec/syntax-decisions.md records the ratified branch preference, trigger, and teaching law.",
+          "at": "2026-07-30T02:47:35.787Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:10:08.525Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "All four generated editor grammar artifacts carry the integrated syntax state, and the focused grammar suite passed.",
+          "at": "2026-07-30T02:47:36.046Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T11:10:08.525Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "The L0507 warning snapshot is re-blessed, independently reviewed, and passes the focused snapshot harness on main.",
+          "at": "2026-07-30T02:47:36.317Z"
         }
       ],
       "refs": [
@@ -52251,11 +52374,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T11:06:01.607Z",
-      "updated": "2026-07-28T22:08:23.799Z",
-      "updatedBy": "e3-bd-1307",
+      "updated": "2026-07-30T04:01:58.547Z",
+      "updatedBy": "codex-core-five",
       "workOrder": 410,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-07-30T04:01:58.547Z"
     },
     {
       "id": "c0tc1fgq",
@@ -54245,21 +54369,37 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "core.mem uninit documents large fixed I/O buffers as its canonical use, but fixed-array index-assign through TIR was left as a follow-up, so the stated systems job does not ship.\n\n1. Make `[T#N]` index-write work through TIR. The gap is acknowledged at examples/features/memory/uninit_buffer.jet:1-4; find the missing lowering and implement it rather than widening the example around it.\n2. Keep the safety story intact: writing an uninit fixed array element and then reading it back must be safe by the same rules that govern the rest of core.mem.\n3. Extend uninit_buffer.jet past the scalar case to fill an uninit buffer and read it back.\n4. Add the golden and make sure it passes on both lenses.\n\nOwned paths: crates/jet-codegen/src/Codegen/TIR/lower/, the core.mem uninit path, examples/features/memory/uninit_buffer.jet, examples/features/memory/uninit.jet.\n\nProof: the fill-and-read golden passes under jet run and AOT; a targeted TIR test covers the index write; golden.rs still finds no \"unsafe\" in the generated Rust outside audited regions; independent review closes.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Fixed-list uninit tracks per-index initialization and uses a vetted MaybeUninit wrapper across AOT/JIT/interpreter. New four-test target and scoped run/AOT golden pass."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Shared core-five compile blocker: the new TExprKind::Index uninit_fixed field leaves jet-jit/src/jit/lower_ctx.rs:18214 with an incomplete pattern. Please repair in #1287 ownership; #1201/#1304 will not absorb the unrelated hunk."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "codex-core-five",
+          "text": "Started the five-card core batch in the single .claude/worktrees/core-five worktree. The card has no open owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "uninit fixed-array fill+read golden passes under jet run and AOT",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T14:38:38.860Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirmed tests/uninit_fixed.rs passed 11/11 and the fixed-array case matches interpreter, resident JIT without deopt or fallback, default jet run, and AOT; dynamic OOB reports E0953 on the resident JIT path.",
+          "at": "2026-07-30T02:47:33.443Z"
         }
       ],
       "refs": [
@@ -54269,11 +54409,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:38.492Z",
-      "updated": "2026-07-28T21:37:45.918Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T02:47:49.776Z",
+      "updatedBy": "codex-core-five",
       "workOrder": 400,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-07-30T02:47:49.776Z"
     },
     {
       "id": "c0icnkbf",
@@ -54629,48 +54770,107 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
-      "plan": "Ratified: D-DIMENSION-OPEN1=D — open dimensions plus a full SI prelude written in ordinary Jet, with no compiler table.\n\n1. Replace the closed `PHYSICAL_DIMENSIONS` `[i32;3]` table at Syntax.rs:261-267 with an open exponent map keyed by declared base dimensions. Do this before unit facts and snapshots serialize the old shape; that is the pay-up-front reason this ranked first.\n2. Let a `#UnitFamily` opt into minting a dimension, so a user axis takes part in the same algebra as the built-ins.\n3. Move the five built-in dimensions out of the compiler and into prelude declarations, written in the exact surface a user gets.\n4. Add the rest of the batteries to the prelude: all seven SI base dimensions and the standard derived units — newton, joule, watt, pascal, hertz, volt and the rest — with high-precision scale factors.\n5. Nominal sharing then only ever applies to third-party dimensions, because the standard ones live in one shared prelude. State that in the spec entry.\n6. Syntax chores: Syntax.rs rows, syntax-decisions.md log line, regenerate devtools grammars, rebless snapshots.\n\nOwned paths: crates/jet-foundation/src/Syntax.rs, crates/jet-sema/src/Sema/Bundle.rs, the quantity and unit checking in crates/jet-sema/src/Sema/CheckerCoreLib/, the prelude source under crates/jet-codegen/src/Prelude/, examples/features/types/.\n\nProof: targeted tests showing a user `#UnitFamily(Mass)` takes part in multiplication and division; kg times meter now types; meter over second still derives Speed; an SI derived unit from the prelude checks end to end; example golden; independent review closes.",
+      "plan": "Ratified: D-DIMENSION-OPEN1=D — open dimensions plus a full SI prelude written in ordinary Jet, with no compiler table. Derived-name spelling pending D-DERIVED-DIMENSION-CLAIM1 (owner leans A; question q0w4b9xl answered 2026-07-30 — see ballot explainer).\n\nPrecision and speed law (answers q0w4b9xl): a derived family's base member is coherent — exactly 1 of the product of its base dimensions' base units (1 newton = 1 kg*m/s/s). Every other unit of a dimension is an exact arbitrary-precision rational scale from that anchor (D-QUANTITY-DECL1). No pairwise conversion tables: any conversion is one ratio of two exact rationals folded at compile time; implicit conversion only when exact, lossy conversion only through the explicit rounded form (D-UNIT-CONV1) — at most one rounding, only on request. Units erase after sema; a conversion is one runtime multiply (plus one add for affine), same-unit math costs zero.\n\n1. Replace the closed PHYSICAL_DIMENSIONS [i32;3] table at Syntax.rs:261-267 with an open exponent map keyed by declared base dimensions. Do this before unit facts and snapshots serialize the old shape; that is the pay-up-front reason this ranked first.\n2. Let a #UnitFamily opt into minting a dimension, so a user axis takes part in the same algebra as the built-ins.\n3. Move the five built-in dimensions out of the compiler and into prelude declarations, written in the exact surface a user gets.\n4. Ship the full default battery in the prelude, all with exact rational scales: all 7 SI base dimensions (Length, Mass, Time, Current, Temperature, AmountOfSubstance, LuminousIntensity); all 22 SI named derived units (hertz, newton, pascal, joule, watt, coulomb, volt, farad, ohm, siemens, weber, tesla, henry, lumen, lux, becquerel, gray, sievert, katal, radian, steradian, degree Celsius); the SI prefix ladder; accepted non-SI units (litre, tonne, minute, hour, day, degree/arcmin/arcsec, electronvolt, dalton, astronomical unit, bar, mmHg); customary units with exact defined scales (inch, foot, yard, mile, ounce, pound, pound-force, psi, gallon, mph). Electronics coverage is mandatory: ampere base; volt/ohm/farad/henry/siemens/weber/tesla/coulomb coherent derived.\n5. Nominal sharing then only ever applies to third-party dimensions, because the standard ones live in one shared prelude. State that in the spec entry.\n6. Syntax chores: Syntax.rs rows, syntax-decisions.md log line, regenerate devtools grammars, rebless snapshots.\n\nOwned paths: crates/jet-foundation/src/Syntax.rs, crates/jet-sema/src/Sema/Bundle.rs, the quantity and unit checking in crates/jet-sema/src/Sema/CheckerCoreLib/, the prelude source under crates/jet-codegen/src/Prelude/, examples/features/types/.\n\nProof: targeted tests showing a user #UnitFamily(Mass) takes part in multiplication and division; kg times meter now types; meter over second still derives Speed; an SI derived unit from the prelude checks end to end; 4newton == 4kg*1m/1s/1s type-identity test; pound-force to newton converts by the exact defined ratio with no drift; a lossy conversion is a compile error naming the rounded fix; example golden; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "core-five-1292",
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "dimension_1292_finish",
+          "text": "Final review copy fix 86c76c50d replaces the Force-specific base: newton guidance with generic base: member_name. Energy/joule unit regression asserts the fix, and the updated filtered UI snapshot passes unblessed."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "dimension_1292_finish",
+          "text": "Reviewer fixes committed in 2fcc62237: strict dimension opt-in, canonical core.units ownership, path-independent package identities, qualified aliases plus deterministic ambiguity, required derived base anchors, structural Quantity generic bounds across AOT/evaluator/resident JIT, and checked ApiFreeze ownership. Proof: unit_family 50/50; filtered derived-base UI snapshot unblessed 1/1; final qualified/ambiguity regression; diff check all green."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "dimension_1292_finish",
+          "text": "Implemented in b65ccd470. Open package-nominal exponent maps replace the compiler table; ordinary Prelude/Units.jet supplies the full standard catalog lazily; derived claims and rational/symbolic/conventional/measured provenance preserve one sema conversion path. Proof: unit_family 45/45 on normal stack, custom dimensions on AOT/evaluator/resident JIT, default jet run example, UI/API/parser/sema/fmt/foundation tests green."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Coordination blocker: owner explicitly requires the sole .claude/worktrees/core-five worktree deleted before the serial CheckerOwnership wave. This card currently owns all remaining dimension AST/Syntax/sema edits plus Prelude/Units.jet in that worktree. Please checkpoint the complete owned WIP promptly and release the worktree; codex-core-five will retain a named handoff branch and will not discard or integrate the card."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "dimension_1292_finish",
+          "text": "Implementation resumed after ratified dimension, derived-claim, and scale-provenance decisions. Building the open algebra, ordinary Prelude catalog, syntax/docs, and tier proof."
+        },
+        {
+          "at": "2026-07-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1292",
+          "text": "Paused only non-rational standard scales on D-UNIT-SCALE-PROVENANCE1. BIPM defines degrees with pi; BIPM/CODATA publishes dalton-to-kilogram with uncertainty, so neither can honestly enter the exact-rational scale table."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1292",
+          "text": "Resumed after D-DERIVED-DIMENSION-CLAIM1=A. Implementing open package-nominal axes, derived dimension expressions with coherent base anchors, and the ratified exact-scale SI/domain battery. Shared-tree work will use only disjoint hunks after per-file ownership checks."
+        },
+        {
+          "at": "2026-07-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "cursor-fable",
+          "text": "Answered owner question q0w4b9xl on D-DERIVED-DIMENSION-CLAIM1: option A gains a coherent-anchor rule (derived base member = exactly 1 of the coherent base-unit product; all other units exact rational scales from it), so mixed units like pound-force convert by one exact ratio folded at compile time — at most one rounding, only on request, one multiply at runtime. Ballot option A, explainer, and plan updated; full default unit battery enumerated."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1292",
+          "text": "Paused only the derived-name slice on D-DERIVED-DIMENSION-CLAIM1. The current syntax can mint base axes but cannot name a structural derived dimension without creating a false new axis."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1292",
+          "text": "Started open-dimension implementation. Ratified surface is #UnitFamily(Name, dimension). Designed a sorted package-nominal exponent map with structural algebra and stable serialization. Shared worktree currently blocks AST/items.rs, Sema/mod.rs, Sema/Bundle.rs, Codegen/Context.rs, Syntax.rs, and docs; no blocked file changed."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "dimension_1292_finish",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:50:55.728Z"
+          "evidence": "b65ccd470 removes the closed PHYSICAL_DIMENSIONS table and registers dimension/base surface constants in Syntax.rs.",
+          "at": "2026-07-30T04:00:25.295Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "dimension_1292_finish",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:50:55.728Z"
+          "evidence": "b65ccd470 records D-DIMENSION-OPEN1=D, D-DERIVED-DIMENSION-CLAIM1=A, and D-UNIT-SCALE-PROVENANCE1=A in docs/spec/syntax-decisions.md.",
+          "at": "2026-07-30T04:00:29.523Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "dimension_1292_finish",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:50:55.728Z"
+          "evidence": "`jet self devtools grammars` regenerated VS Code, TextMate, tree-sitter, and Zed grammar outputs; all four were already canonical, so no generated diff remained.",
+          "at": "2026-07-30T04:00:35.888Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "dimension_1292_finish",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:50:55.728Z"
+          "evidence": "b65ccd470 reblesses the former closed-set fixture as E0905 unresolved derived-dimension coverage and adds E0127 measured-scale provenance coverage; targeted diagnostic_snapshots tests pass.",
+          "at": "2026-07-30T04:00:41.872Z"
         }
       ],
       "refs": [
@@ -54678,11 +54878,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:48:54.387Z",
-      "updated": "2026-07-28T21:37:44.203Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T04:30:36.212Z",
+      "updatedBy": "dimension_1292_finish",
       "workOrder": 330,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T01:22:28.326Z"
     },
     {
       "id": "c06k73ro",
@@ -55230,48 +55431,79 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Ratified: D-EFFECT-DECL1=A — optional `effect FS.Read` declarations, and a root becomes checked once anything is declared under it.\n\n1. Mint the reserved `effect` keyword into the D-EFF4/D-EFF5 slot.\n2. Add the declaration form `effect FS.Read`. Declarations are package-scoped facts.\n3. Once any leaf is declared under a root in a package's view, an undeclared leaf under that root is a resolution error with did-you-mean. A root nobody declared under keeps today's mint-on-use freedom.\n4. The checked flag is per root, per package view, over the package's own declarations plus its dependencies' declared leaves.\n5. `pkg.jet` budgets and `#Caps` and `#Grant` arguments resolve against the same names, so a typo cannot silently mint a budget line either.\n6. Declare the stdlib's own leaves in the prelude, so a day-one user gets typo protection on the common roots having written nothing.\n7. Tree matching is unchanged.\n8. Register the resolution error with what/why/fix text and its UI snapshot (I4). Syntax chores: Syntax.rs rows for the keyword and declaration, syntax-decisions.md log line, regenerate devtools grammars, rebless snapshots.\n\nOwned paths: crates/jet-sema/src/Sema/Effects.rs, the pkg.jet reader, crates/jet-foundation/src/Syntax.rs, the prelude effect declarations, tests/ui, docs/spec/.\n\nProof: targeted tests for `=[FS.Raed]=>` now erroring with did-you-mean, an undeclared root still minting freely, a pkg.jet budget typo caught, and a dependency's declared leaves counting in the view; independent review closes.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Diagnosis detail: resolve_effect_name is called by Bundle::validate_declared_effects at Bundle.rs:231, but no Checker field read exists anywhere; effect_facts is only initialized. Either connect it to an intended checker resolution site or remove the field and constructor plumbing. The dead field blocks every sema-linked test under deny(warnings)."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Diagnosis detail: resolve_effect_name is called by Bundle::validate_declared_effects (Bundle.rs:231), but no  use exists anywhere; the Checker field is only initialized. Either connect it to an intended checker resolution site or remove it and constructor plumbing. Current dead field blocks every sema-linked test under deny(warnings)."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Shared compile blocker: jet-sema deny(warnings) reports Checker.effect_facts at Sema/mod.rs:1126 is never read. #1239 parser tests are green but UI snapshots/semindex/golden/tier proof cannot run until #1299 uses or removes the field."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Effect declarations, checked package-view roots, Prelude leaves, E0750 suggestion, Caps/Grant/pkg budget resolution, formatter, dependency-view tests, and UI snapshot pass targeted proof."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-root",
+          "text": "Cross-card coordination: #1239 fenced-name syntax is waiting on this card's AST/parser/Syntax/docs hunks. Please commit/release those paths at the next compile-green checkpoint; #1239 will preserve your patch and isolate its own hunks."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "codex-core-five",
+          "text": "Started the five-card core batch in the single .claude/worktrees/core-five worktree. The card has no open owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "effect FS.Read declarations parse and register as package-scoped facts, minting the reserved effect keyword",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:32:41.842Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Focused effect-declaration parser, formatter, registration, and golden tests pass on main; independent review confirms effect Root.Leaf is registered as a package-view fact and erased before TIR.",
+          "at": "2026-07-30T02:47:33.699Z"
         },
         {
           "n": 2,
           "text": "an undeclared leaf under a declared root is a resolution error with did-you-mean; an undeclared root keeps mint-on-use freedom",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:32:42.096Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Focused declaration-law and E0750 UI tests pass on main: undeclared leaves under declared roots get resolution errors with suggestions, while undeclared roots remain open.",
+          "at": "2026-07-30T02:47:33.963Z"
         },
         {
           "n": 3,
           "text": "pkg.jet budgets and #Caps and #Grant arguments resolve against the same names",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:32:42.364Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Focused #Caps, #Grant, and package-budget typo tests pass on main and resolve through the same effect-name registry.",
+          "at": "2026-07-30T02:47:34.226Z"
         },
         {
           "n": 4,
           "text": "the prelude declares the stdlib leaves so a new user gets typo protection with no declarations of their own",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:32:42.632Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirms Prelude leaves seed the package-view registry; focused no-user-declaration typo snapshot and effect golden pass. The full effects-suite lambda stack overflow is pre-existing and outside this declaration criterion.",
+          "at": "2026-07-30T02:47:34.483Z"
         }
       ],
       "refs": [
@@ -55279,11 +55511,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:49:16.130Z",
-      "updated": "2026-07-28T21:37:43.969Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T02:47:50.052Z",
+      "updatedBy": "codex-core-five",
       "workOrder": 320,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-07-30T02:47:50.052Z"
     },
     {
       "id": "c06cwjlo",
@@ -55706,12 +55939,62 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Ratified: D-INTLIT-WIDTH1=F and D-VERDICT-1304-1. One widening law across whole numbers and decimals. Gated on D-NUMWIDEN-CROSS1 for the boundary between the two kinds; everything below is the within-kind work, which the cross-kind pick does not change.\n\n1. Order each numeric family by value containment: a type widens into another when every one of its values is held exactly. Whole numbers: I8 into I16 into I32 into I64, U8 into U16 into U32 into U64, and each unsigned type into the next wider signed one. Decimals: F32 into Float.\n2. Apply that ordering as an implicit coercion at operators, at arguments, at returns, and at assignment. The type of a mixed expression is the wider of the two.\n3. Refuse a mix with no common wider type, such as U8 with I8, and keep today's E0109 for it with copy that says why neither holds the other.\n4. Never narrow on its own, anywhere. Narrowing stays destination-owned and fallible per D-SHAPE-CONVERT1.\n5. A numeral takes its narrowest holding type and then widens by the same rule. Keep the compile-time range check: an out-of-range numeral is an error naming the width and the limit, as E1003 already does for a typed head.\n6. Leave overflow alone. D-NUMOPS1 traps at every width, and widening never changes where a trap happens, because a widened value is exact.\n7. Delete the conversion ceremony this makes unnecessary in the stdlib and the examples, so the corpus teaches the new law rather than the old one.\n8. Amend the spec: S42's separation of named widths, D-FLOATW1's F32-with-Float error and its convert fix-it, and the E0109 copy that currently says the two sides must match. Register the amended texts with UI snapshots (I4).\n9. Syntax chores: syntax-decisions.md amendment rows with the decision ids, regenerate devtools grammars, rebless snapshots.\n10. Once D-NUMWIDEN-CROSS1 is ratified, implement its pick as the one boundary rule and state it in the same spec entry.\n\nOwned paths: crates/jet-sema (numeric typing, coercion, E0109 and E1003), crates/jet-codegen (widening at lowering, both lenses), crates/jet-foundation/src/Syntax.rs, docs/spec/syntax-decisions.md, tests/ui, tests/cffi.rs, examples/features/.\n\nProof: targeted tests for each widening pair, for a refused mix with no common wider type, for a refused narrowing, and for an out-of-range numeral; cffi_named_pure_callback_has_stable_c_symbol passes without weakening what it tests; a trap test proving overflow still stops at the declared width; both lenses agree; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "core-five-1304",
       "log": [
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1304",
+          "text": "Final reviewer-fix commit 44f76c8fe closes the stale evidence blockers. The claimed typed-binding gap is not a valid surface: D-BIND-BARE1 retired initialized `name: Type :: value` and `name: Type := value`, the parser rejects it with E0003, and initialized local bindings cannot populate Binding.ty; reopening it would contradict ratified authority. Replaced the obsolete valid `1 + 2.5` E0109 fixture with incomparable U8 + I8, regenerated E0109, and repaired stale representative E0108/E0119 pages. Rewrote the numeric reference around the one containment law, corrected the binary inference comment, and removed the unreachable Int/Float never-mix branch. Final proof after commits caae2e5e8, ca8f2af0c, d637e253b, and 44f76c8fe: `cargo test --test numeric_widening -- --nocapture` 8/8 across AOT, resident JIT trace, and forced interpreter; unblessed filtered mixed_numbers UI 1/1; unblessed `cargo test --test gen_errors gen_error_pages -- --nocapture` 1/1; `git diff --check` clean."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Material-fix recheck: d637e253b closes the missing call surfaces (function values, user/static/trait methods, inline/imported calls, fan-out, variadics, builtins), but #1304 remains blocked. CheckerCore/bindings.rs still rejects nonliteral typed-binding widening; the stale never-mix comment remains in CheckerInfer/binary.rs; core-library numeric docs and E0109 reference still teach no widening; mixed_numbers UI still expects 1 + 2.5 to fail although D-NUMWIDEN-CROSS1=E makes it compile. Fix typed bindings and replace stale docs/UI with valid incomparable/narrowing cases before re-review."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1304",
+          "text": "Reviewer-fix commit d637e253b centralizes non-Write numeric argument coercion across ordinary/static/trait methods, function values, inline and imported modules, fan-out, builtin/variadic and specialized call finishers. Bare operator literals now use a containing typed peer or the narrowest holding integer type, so I8/U8 + 1 stays beginner-friendly while U8 + 256 joins at U16; destination-owned U8.{256} still reports E1003 and lexer limits retain E0007. Added exact E0104/E0109 approx UI snapshots. Resident-tier tests now assert jit_executed=true, fallback=false, deopt=false instead of checking subprocess text. Proof: cargo test --test numeric_widening (8/8 AOT/resident/forced-interpreter) and unblessed filtered approx diagnostic snapshots (1/1) pass. Discovered separate AOT trait-object local-variable boxing bug and recorded #1318."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Final independent review added a second criterion-7 blocker: typed binding initialization in CheckerCore/bindings.rs explicitly refuses nonliteral width widening, so small: I8 cannot initialize wide: I16. The one destination-wide law therefore still changes by syntactic context. Also remove the stale CheckerInfer/binary.rs comment that says widths never mix implicitly. Centralize widening across calls and typed bindings, then rerun the complete matrix."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Review expanded the same systemic blocker: widening is not centralized at the argument-coercion seam. In addition to function-value and user-method calls, inline-module and cross-file/import calls in CheckerCoreLib/imports.rs, trait method arguments in CheckerItems.rs, and fan-out function application in CheckerInfer/expr.rs skip widen_numeric_expr; specialized method finishers may also drift. Surface spelling or module boundary therefore changes numeric meaning. Fix one shared non-Write argument coercion path and prove every call family."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five-review",
+          "text": "Independent review found a remaining criterion-7 blocker after ca8f2af0c. infer_call_value in CheckerInfer/calls/helpers_call_values.rs and check_method_args in CheckerItems.rs compare got != param_ty directly and emit E0112 without calling the shared numeric widening seam. A function value (x: I16) called with I8 and a user method taking I16 both reject instead of widening. Route non-Write arguments through widen_numeric_expr before assignability/type errors and add tier tests. Current commits are not safe to integrate."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1304",
+          "text": "Reviewer finding resolved in ca8f2af0c: sema now consumes the compiler-private approx marker through redundant transparent parentheses at the shared widening seam, covering operators, arguments, returns, and assignments. Focused parenthesized regression passed AOT, resident JIT with no tier0 deopt marker, and forced interpreter (1/1). Complete tests/numeric_widening.rs matrix passed 6/6. git diff --cached --check was clean; commit contains only owned #1304 hunks and test."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1304",
+          "text": "Implemented caae2e5e8. Focused numeric matrix 5/5, canonical Prelude test, UI snapshot, grammar no-drift, both examples across AOT/JIT/interpreter, and exact C callback compile/link/threaded runtime pass. Full CFFI has 14 unrelated stale E3201 fixtures tracked on #1317. Ready for batch review."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Coordination: five-card batch is integrated on master as f0b574092. Owner requires .claude/worktrees/core-five deleted before the serial memory wave. Please commit or otherwise preserve #1304's owned numeric/Units changes and release this worktree promptly; do not discard them."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1304",
+          "text": "Started implementation in shared core-five worktree. Inspecting existing numeric typing and runtime trap seams before edits."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-prep",
@@ -55741,102 +56024,103 @@
         {
           "n": 1,
           "text": "cffi_named_pure_callback_has_stable_c_symbol passes without weakening what it tests",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:38:44.191Z"
+          "evidence": "Commit caae2e5e8 updates the canonical C fixture dependency, preserves named callback ABI facts, emits extern-C function pointer bridge types, and the exact compile-link-threaded runtime test returns 42/10/40.",
+          "at": "2026-07-30T03:01:08.252Z"
         },
         {
           "n": 2,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:52:12.165Z"
+          "evidence": "Commit caae2e5e8 records the numeric containment and checked-crossing law in crates/jet-foundation/src/Syntax/math_layout.rs.",
+          "at": "2026-07-30T03:01:08.518Z"
         },
         {
           "n": 3,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:52:12.165Z"
+          "evidence": "Commit caae2e5e8 amends S42, D-FLOATW1, and D-NUMWIDEN-CROSS1=E in docs/spec/syntax-decisions.md.",
+          "at": "2026-07-30T03:01:08.772Z"
         },
         {
           "n": 4,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:52:12.165Z"
+          "evidence": "Ran jet self devtools grammars after the Syntax update; generated grammars had no drift.",
+          "at": "2026-07-30T03:01:09.037Z"
         },
         {
           "n": 5,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:52:12.165Z"
+          "evidence": "E0109 int_width_mismatch snapshot was re-blessed after review and passed with no update variable.",
+          "at": "2026-07-30T03:01:09.289Z"
         },
         {
           "n": 6,
           "text": "D-NUMWIDEN-CROSS1 is ratified and the implemented boundary rule matches the pick",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:54:49.839Z"
+          "evidence": "D-NUMWIDEN-CROSS1=E is ratified; caae2e5e8 uses free exact crossings, Prelude checked crossings, and explicit approx opt-out.",
+          "at": "2026-07-30T03:01:09.556Z"
         },
         {
           "n": 7,
           "text": "every lossless widening pair inside each family is implicit at operators, arguments, returns, and assignment; the mixed expression takes the wider type",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:54:50.102Z"
+          "evidence": "tests/numeric_widening.rs passes 5/5 and covers all containment pairs plus operator, argument, return, assignment, and expression result typing.",
+          "at": "2026-07-30T03:01:09.826Z"
         },
         {
           "n": 8,
           "text": "a mix with no common wider type is still refused, and no value ever narrows on its own",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:54:50.362Z"
+          "evidence": "tests/numeric_widening.rs refuses incomparable mixes and implicit narrowing; focused UI proof passes.",
+          "at": "2026-07-30T03:01:10.090Z"
         },
         {
           "n": 9,
           "text": "an out-of-range numeral is a compile error naming the width and the limit, and overflow still traps at the declared width",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:54:50.631Z"
+          "evidence": "Focused numeric proof keeps E1003 range rejection and verifies declared-width overflow plus Float 2^53+1 and F32 2^24+1 checked-crossing traps across AOT, resident JIT, and forced interpreter.",
+          "at": "2026-07-30T03:01:10.327Z"
         },
         {
           "n": 10,
           "text": "S42, D-FLOATW1, and the E0109 copy are amended with UI snapshots updated; the stdlib and examples drop the conversion ceremony this removes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "core-five-1304",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:54:50.888Z"
+          "evidence": "Commit caae2e5e8 amends spec/diagnostic/UI copy and removes obsolete conversion ceremony from sized integer/float examples; their AOT, default JIT, and forced-interpreter outputs match.",
+          "at": "2026-07-30T03:01:10.616Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-28T15:10:34.383Z",
-      "updated": "2026-07-28T21:37:46.963Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-30T04:00:53.964Z",
+      "updatedBy": "core-five-1304",
       "workOrder": 440,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T04:00:53.964Z"
     },
     {
       "id": "c0e1tb2n",
@@ -56571,39 +56855,51 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Reproduce one Shared<Int>.edit scalar write under AOT, default resident JIT, and forced interpreter. Route resident scalar edit writeback through the existing Shared runtime handle, not a test shim. Prove byte-identical value and tier behavior; add the focused case to the Shared parity corpus.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "core-five-1313",
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1313",
+          "text": "Implemented a8917cc32: scalar inline callbacks now reuse the existing writable-scalar stack adapter, and Shared edit writes back the callback's final value. Focused three-tier parity proof passed; no fallback or deopt. Ready for independent review and criteria verification."
+        },
+        {
+          "at": "2026-07-30",
+          "by": "core-five-1313",
+          "text": "Started: reproduce Shared<Int>.edit scalar writeback across AOT, resident JIT, and forced interpreter. Trace adapters to the shared Prelude runtime handle before editing."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Shared<Int>.edit persists scalar writes identically under AOT, resident JIT, and forced interpreter",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T19:59:41.730Z"
+          "status": "verified",
+          "metBy": "core-five-1313",
+          "verifiedBy": "codex-core-five-review-1313",
+          "evidence": "Fresh static review found no standards/spec gaps in a8917cc32: it forwards the callback's final scalar value through the existing JIT host adapter and preserves Prelude/runtime semantics. The exact three-tier test recorded by the implementer passed; a fresh rerun was blocked only by live unrelated #1292 parser edits.",
+          "at": "2026-07-30T03:17:54.453Z"
         },
         {
           "n": 2,
           "text": "Focused parity proof asserts native tier execution without fallback and byte-identical output",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T19:59:41.935Z"
+          "status": "verified",
+          "metBy": "core-five-1313",
+          "verifiedBy": "codex-core-five-review-1313",
+          "evidence": "Independent review confirmed the focused test requires resident JIT execution, rejects deopt and fallback, and compares complete ProgramOutput byte-for-byte against forced interpreter and AOT. git diff --check is clean and no I9 drift was found.",
+          "at": "2026-07-30T03:17:54.287Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-29T19:59:36.526Z",
-      "updated": "2026-07-29T19:59:41.935Z",
-      "updatedBy": "codex-root",
+      "updated": "2026-07-30T03:17:54.453Z",
+      "updatedBy": "codex-core-five-review-1313",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-30T00:14:58.508Z"
     },
     {
       "id": "c06wg4vc",
@@ -56614,30 +56910,41 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Restore PoolId equality through the canonical trait/type path, prove stale generations remain unequal without weakening allocator safety, then rerun the exact test and verify-full.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Canonical Id<T> equality now ignores phantom payload traits; dedicated non-Equatable payload regression passes. Exact allocator test reaches the unrelated shared Cell unsafe-prelude failure."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "codex-core-five",
+          "text": "Started the five-card core batch in the single .claude/worktrees/core-five worktree. The card has no open owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "PoolId values support == through the canonical equality mechanism, and reused slots never compare equal to stale generations.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:01:31.127Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent clean review on main confirmed canonical PoolId equality is isolated and generation-aware; tests/pool_id_equality.rs passed 3/3, including stale-slot reuse inequality.",
+          "at": "2026-07-30T02:47:32.408Z"
         },
         {
           "n": 2,
           "text": "The exact allocator_families regression passes; targeted allocator safety tests and verify-full are rerun with independent review.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:01:38.118Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent review confirmed the exact allocator_families regression and targeted allocator safety proof passed on main; no scoped findings. The unrelated verify-full #1165 failure does not weaken this criterion.",
+          "at": "2026-07-30T02:47:32.667Z"
         }
       ],
       "refs": [
@@ -56648,8 +56955,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-29T23:01:12.826Z",
-      "updated": "2026-07-29T23:01:38.118Z",
-      "updatedBy": "codex-e3-1300"
+      "updated": "2026-07-30T02:47:49.187Z",
+      "updatedBy": "codex-core-five",
+      "completedAt": "2026-07-30T02:47:49.187Z"
     },
     {
       "id": "c0t0lsh7",
@@ -56660,30 +56968,41 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Preserve qualified function identity through TIR lowering/evaluation, prove colliding module functions remain distinct, then rerun the exact test and verify-full.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-30",
+          "by": "codex-core-five",
+          "text": "Qualified TIR evaluator identities preserved; exact build_entry collision regression passes."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "codex-core-five",
+          "text": "Started the five-card core batch in the single .claude/worktrees/core-five worktree. The card has no open owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Qualified static functions retain collision-free module identity through TIR lowering and compile-time evaluation.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:01:42.668Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "Independent clean review on main confirmed qualified static function identity survives TIR lowering and compile-time evaluation without module collisions.",
+          "at": "2026-07-30T02:47:32.926Z"
         },
         {
           "n": 2,
           "text": "The exact build_entry regression passes; qualified collision cases and verify-full are rerun with independent review.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:01:45.647Z"
+          "status": "verified",
+          "metBy": "codex-core-five",
+          "verifiedBy": "core-five-review",
+          "evidence": "The exact build_entry qualified-collision regression passed on main; independent diff review found no identity or scope regression. The unrelated verify-full #1165 failure is outside this criterion.",
+          "at": "2026-07-30T02:47:33.175Z"
         }
       ],
       "refs": [
@@ -56694,8 +57013,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-29T23:01:16.340Z",
-      "updated": "2026-07-29T23:01:45.647Z",
-      "updatedBy": "codex-e3-1300"
+      "updated": "2026-07-30T02:47:49.474Z",
+      "updatedBy": "codex-core-five",
+      "completedAt": "2026-07-30T02:47:49.473Z"
     },
     {
       "id": "c0oss0a5",
@@ -56770,6 +57090,87 @@
       "updated": "2026-07-29T23:52:49.369Z",
       "updatedBy": "e3-batch-review",
       "completedAt": "2026-07-29T23:52:49.369Z"
+    },
+    {
+      "id": "c0mfdhwp",
+      "num": 1317,
+      "title": "CFFI tests need canonical local C dependencies after E3201",
+      "body": "The full CFFI test suite has 14 stale fixtures that now fail project loading with E3201 because their pkg.jet overlays reference C providers without declaring a canonical local C dependency. The named pure callback regression is repaired and green; these remaining fixture migrations are separate existing test debt.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Update only the affected cffi test fixtures to declare real local C dependencies in pkg.jet. Do not add PATH shims or weaken E3201. Prove all 48 cffi tests pass through the canonical provider and bridge path.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "All CFFI fixtures that reference C providers declare canonical local C dependencies; no PATH shim or E3201 bypass is introduced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T02:55:08.061Z"
+        },
+        {
+          "n": 2,
+          "text": "scripts/agent/jet-env full cargo test --test cffi passes all 48 tests.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T02:55:08.316Z"
+        },
+        {
+          "n": 3,
+          "text": "Independent review confirms the migration preserves provider, build, and ABI coverage.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-30T02:55:08.578Z"
+        }
+      ],
+      "refs": [
+        "tests/cffi.rs",
+        "docs/spec/architecture.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T02:55:00.950Z",
+      "updated": "2026-07-30T02:55:08.847Z",
+      "updatedBy": "core-five-root"
+    },
+    {
+      "id": "c0awzf12",
+      "num": 1318,
+      "title": "Trait-object list variable is not boxed for AOT",
+      "body": "AOT codegen accepts a struct literal in a trait-object list but fails when the same implementing value comes from a local variable. Repro: trait Sink { fn take(self, value: Float) => Float }; struct Holder { impl Sink { ... } }; fn run() { holder :: Holder.{}; sinks :: [Sink].{holder} }. Front-end accepts it, then generated Rust contains `let user_sinks: Vec<Box<dyn user_Sink>> = vec![user_holder];`; rustc E0308 expects Box<dyn user_Sink> and suggests Box::new(user_holder). Discovered while proving #1304 call seams on 2026-07-29. Existing literal form `[Sink].{Holder.{}}` works. Scope is the AOT trait-object collection coercion only; do not fold it into numeric widening.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "needs-triage"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-30T03:31:49.688Z",
+      "updated": "2026-07-30T03:31:49.688Z",
+      "updatedBy": "core-five-1304"
     }
   ],
   "decisions": [
@@ -73837,6 +74238,155 @@
       "created": "2026-07-29T16:58:49.664Z",
       "outcome": "D",
       "ratifiedAt": "2026-07-29"
+    },
+    {
+      "id": "D-DERIVED-DIMENSION-CLAIM1",
+      "cardId": "c03gs87j",
+      "group": "syntax",
+      "title": "Name a structural derived dimension",
+      "gist": "How ordinary Jet source gives a standard name to a dimension made from other dimensions.",
+      "lesson": "A base dimension is one independent axis, such as Mass, Length, or Time. A derived dimension combines those axes. Force is Mass times Length divided by Time twice.\n\nJet can calculate that structure when values multiply and divide. The result has a safe type even when nobody names it.\n\nD-DIMENSION-OPEN1 also requires standard derived units such as newton and joule in ordinary Jet source. A unit suffix needs a declared family member. The current ruled spelling can only mint a new independent axis, so it cannot honestly declare newton as Force.\n\nThis choice adds the missing claim. The claim must preserve the structural identity. It must not create a second Force axis or hide a compiler table.",
+      "explainer": "Owner question (2026-07-30): how do mixed units such as pound-force and newton stay exact and fast, and what ships by default?\n\nPrecision comes from one coherent anchor, not pairwise conversion tables. Under A, a derived family's base member is coherent: exactly 1 of the product of its base dimensions' base units. So 1 newton = 1 kilogram*meter/second/second by construction. Every other unit of that dimension is an exact arbitrary-precision rational scale from that anchor (ratified D-QUANTITY-DECL1). Nearly every standard unit is defined exactly against SI: the pound is exactly 0.45359237 kg and standard gravity is exactly 9.80665 m/s^2, so 1 pound-force = 4.4482216152605 newton exactly. Any conversion between two units of one dimension is a single ratio of two exact rationals, folded at compile time. Implicit conversion happens only when exact; anything lossy requires the explicit rounded form (ratified D-UNIT-CONV1). A value therefore rounds at most once, and only when the program asks.\n\nSpeed: dimensions and units erase after sema. A conversion is one runtime multiply (plus one add for affine units such as celsius) against a compile-time constant. Same-unit arithmetic costs zero.\n\nCoverage is a prelude duty already ratified in D-DIMENSION-OPEN1=D and applies regardless of this ballot's outcome: all seven SI base dimensions; every SI named derived unit (hertz, newton, pascal, joule, watt, coulomb, volt, farad, ohm, siemens, weber, tesla, henry, lumen, lux, becquerel, gray, sievert, katal, radian, steradian, degree Celsius); the SI prefix ladder; accepted non-SI units (litre, tonne, minute, hour, day, degree, electronvolt, dalton, astronomical unit, bar, mmHg); and customary units with exact defined scales (inch, foot, yard, mile, ounce, pound, pound-force, psi, gallon, mph). Electronics is fully covered: ampere is a base dimension; volt, ohm, farad, henry, siemens, weber, tesla, and coulomb are coherent derived families. This ballot only decides the spelling that lets ordinary Jet source declare those derived families.",
+      "story": "Maya writes a mechanics simulator. She wants `4newton` to match the type of `4kg * 1meter / 1second / 1second` without compiler magic.",
+      "inWild": "fn push(force: Quantity<Force, Float>) {\n    print(force)\n}\n\nfn run() {\n    calculated :: 4kg * 1meter / 1second / 1second\n    named :: 4newton\n    push(calculated)\n    push(named)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dimension expression in the family header",
+          "detail": "A derived family states its structure beside its name. Its base member is coherent: exactly one of the product of the base dimensions' base units. Every other member, including foreign units like pound-force, is an exact rational scale from that anchor. Members then use the existing unit-family scale and offset rules. Base families keep the short `dimension` flag.",
+          "technical": "Extend the existing `#UnitFamily` marker with a `dimension:` expression over declared dimension names and `*` or `/`. Sema normalizes the expression to the same open exponent map used by value arithmetic. The base member is pinned coherent (1 newton = 1 kilogram*meter/second/second), so structurally computed quantities and named members share one exact scale spine. Non-coherent units (pound-force, psi) are ordinary scaled members; every conversion is one exact rational ratio folded at compile time per D-QUANTITY-DECL1 and D-UNIT-CONV1. Cycles, unknown names, affine factors, and zero or overflowing exponents are errors.",
+          "code": "#UnitFamily(Mass, dimension, base: kilogram) {\n    kilogram\n}\n\n#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {\n    newton                                        // coherent: 1 kg*m/s/s exactly\n    kilonewton(scale: 1000)\n    poundforce(scale: 44482216152605/10000000000000)  // = 4.4482216152605 N, exact by definition\n}\n\nforce :: 4newton\nmixed :: 4newton + 2poundforce                    // exact rational fold, one multiply at runtime"
+        },
+        {
+          "key": "B",
+          "name": "A member gives the structural witness",
+          "detail": "The base member states one exact unit equation. Jet gets the family dimension and scale from that equation. Other members remain relative to the base.",
+          "technical": "Extend unit-member metadata with one `equals:` quantity expression on the canonical base member. Sema evaluates only exact unit products and ratios at compile time. The family receives the witness dimension and scale. Cycles and affine witness units are errors.",
+          "code": "#UnitFamily(Force, base: newton) {\n    newton(equals: 1kilogram * 1meter / 1second / 1second)\n    kilonewton(scale: 1000)\n}\n\nforce :: 4newton"
+        },
+        {
+          "key": "C",
+          "name": "Ordinary named quantity functions",
+          "detail": "The prelude defines functions that build structural quantities. No family claims the dimension. Users write multiplication with the named function instead of a numeric suffix.",
+          "technical": "Add no derived-family grammar. Prelude functions return the inferred structural Quantity type from ordinary value arithmetic. Base unit suffixes stay available. Derived names are values, not UnitFamily members, so formatting uses base-unit products.",
+          "code": "fn newton(value: Float) => Quantity<Force, Float> {\n    return value * 1kilogram * 1meter / 1second / 1second\n}\n\nforce :: newton(4)\n// `4newton` is not a unit literal"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "F#",
+          "note": "A derived unit names an equation over existing measures. The compiler keeps the normalized structure.",
+          "code": "[<Measure>] type kg\n[<Measure>] type m\n[<Measure>] type s\n[<Measure>] type N = kg m / s^2"
+        },
+        {
+          "lang": "C++ mp-units",
+          "note": "A named derived dimension is an alias for a normalized equation. Units then attach scales to that dimension.",
+          "code": "struct force_dimension : derived_dimension<isq::mass, isq::length, inverse<isq::time, 2>> {};"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The family header owns family identity, so it is the clearest place to state that Force is an existing structure. Base and derived units keep one mechanism. Pinning the base member coherent gives one exact scale spine, so mixed units such as pound-force convert by a single exact ratio.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It hides a type-level fact inside one value member and makes readers derive family identity from a scale witness."
+          },
+          {
+            "key": "C",
+            "reason": "It loses the `4newton` unit literal and makes standard derived units feel unlike the base units."
+          }
+        ],
+        "tradeoff": "The marker gains a small compile-time dimension-expression grammar. It reuses existing names and arithmetic marks, and sema erases the result before runtime."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T00:25:08.696Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-UNIT-SCALE-PROVENANCE1",
+      "cardId": "c03gs87j",
+      "group": "syntax",
+      "title": "Represent standard unit scales that are not exact rationals",
+      "gist": "How Jet ships degrees, daltons, and conventional mmHg honestly without weakening the exact-rational unit spine.",
+      "lesson": "Most standard unit conversions are exact rational numbers. One inch is exactly 0.0254 metre. One pound-force is exactly 4.4482216152605 newton. Jet can reduce those ratios at compile time.\n\nThree required cases need more provenance. A degree is exactly pi/180 radian. That definition is exact, but pi is irrational, not a rational number. A dalton is one twelfth of a carbon-12 atom's mass. Its value in kilograms is measured, and the current BIPM/CODATA value carries uncertainty. Millimetre of mercury is convention-sensitive: NIST distinguishes a conventional coefficient from a physical mercury column and does not present plain mmHg as one timeless exact definition.\n\nThe 2026 BIPM SI Brochure states 1 degree = pi/180 radian and 1 dalton = 1.66053906892(52)e-27 kilogram. CODATA reports relative uncertainty 3.1e-10 for the dalton-to-kilogram value. Sources: https://doi.org/10.59161/AUEZ1291, https://physics.nist.gov/cuu/pdf/JPCRD2022CODATA.pdf, and https://www.nist.gov/pml/special-publication-811/nist-guide-si-appendix-b-conversion-factors/nist-guide-si-appendix-b8.\n\nCalling these plain exact rationals would be false or ambiguous. Omitting them would break the ratified full standard battery. This choice adds the smallest honest representation.",
+      "explainer": "",
+      "story": "Leila mixes telescope angles in degrees with a simulation in radians, compares molecular masses in daltons with a balance model in kilograms, and imports a clinical pressure in mmHg. She needs all three conversions, and she needs Jet to distinguish exact definitions, measured values, and named conventions.",
+      "inWild": "angle :: 90degree\nphase :: angle.to<Radian>()\n\nmass :: 12dalton\nkg_mass :: mass.to<Kilogram>()\n\npressure :: 120mmHg\n// Angle is exact-by-definition through pi.\n// Mass is measured. Pressure names a published convention.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed scale provenance; measured crossings stay explicit",
+          "detail": "Unit declarations have four honest scale classes: exact rational, exact symbolic, conventional, and measured. Degrees use an exact symbolic pi ratio. Daltons use a versioned central value, uncertainty, and source. Conventional mmHg names its published coefficient and source instead of pretending to be a physical mercury column. Rational and symbolic definitions keep the ordinary conversion path. A measured crossing must use the existing explicit rounded conversion form, whose audit output names the value, uncertainty, and source.",
+          "technical": "Extend the unit scale fact from one rational to a tagged value: Rational(num, den), SymbolicPi(num, den), Conventional(decimal, source_id), or Measured(decimal, standard_uncertainty, source_id). SymbolicPi is folded once at the destination numeric precision; it is exact-by-definition even though a finite numeric result rounds. Measured facts are never labeled exact and never enter implicit conversion. Conventional facts retain their named standard and provenance. The prelude pins BIPM, CODATA, and NIST editions. API facts and diagnostics preserve every tag and source. Same-unit arithmetic stays zero-cost; a conversion remains one multiply.",
+          "code": "#UnitFamily(Angle, dimension, base: radian) {\n    radian\n    degree(scale: pi / 180)\n}\n\n#UnitFamily(Mass, dimension, base: kilogram) {\n    kilogram\n    dalton(scale: measured(\n        1.66053906892e-27,\n        uncertainty: 0.00000000052e-27,\n        source: \"BIPM-2026/CODATA-2022\"\n    ))\n}\n\n#UnitFamily(Pressure, dimension: Force / Length / Length, base: pascal) {\n    pascal\n    mmHg(scale: conventional(133.3224, source: \"NIST-SP811\"))\n}\n\nkg_mass :: mass.to<Kilogram>(rounding: .nearest)"
+        },
+        {
+          "key": "B",
+          "name": "Typed provenance; measured crossings are automatic",
+          "detail": "Use the same four scale classes, but a measured unit converts automatically through its current central value. Audit output still exposes the uncertainty and source. This is the smoothest beginner experience, but ordinary arithmetic can silently depend on a measured constant that may change with a later CODATA edition.",
+          "technical": "Same representation as A. The type checker admits Measured in implicit conversion and codegen multiplies by the pinned central value. The result type does not carry uncertainty because Jet has no uncertainty-propagating quantity in this card.",
+          "code": "mass :: 12dalton\nkg_mass :: mass + 1kilogram\n// automatic central-value conversion; audit reports CODATA provenance"
+        },
+        {
+          "key": "C",
+          "name": "Exact scales only; defer the exceptional units",
+          "detail": "Keep rational scales only. Ship all unambiguous exactly defined rational units now, but omit degree, arcminute, arcsecond, dalton, and mmHg until a later constants or uncertainty system exists.",
+          "technical": "No representation change. This preserves the current exact law but violates the ratified requirement that the default prelude include every listed standard unit.",
+          "code": "// degree, dalton, and mmHg are unavailable in this release"
+        },
+        {
+          "key": "D",
+          "name": "Freeze decimal approximations as rationals",
+          "detail": "Write long decimal approximations for pi/180, the dalton conversion, and mmHg, then treat those finite decimals as exact rational scales. It is simple and fast, but it makes a false precision claim, hides the dalton's measurement uncertainty, and erases the mmHg convention.",
+          "technical": "No new fact shape. The prelude stores finite decimals as rational numerators and denominators. Diagnostics and audit output cannot distinguish definitions, approximations, and measurements.",
+          "code": "degree(scale: 0.017453292519943295)\ndalton(scale: 0.00000000000000000000000000166053906892)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "BIPM SI Brochure",
+          "note": "The current authoritative table writes angular scales with pi and writes the dalton with parenthesized uncertainty. It does not present either as an exact decimal ratio.",
+          "code": "1 degree = (pi/180) rad\n1 Da = 1.660 539 068 92(52) × 10^-27 kg"
+        },
+        {
+          "lang": "Scientific constants databases",
+          "note": "CODATA versions measured constants and publishes the value, standard uncertainty, relative uncertainty, and source edition together.",
+          "code": "dalton: central value + standard uncertainty + CODATA edition"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the batteries, the precision claim, and the audit trail. Exact definitions stay convenient and fast. Measured crossings remain available but cannot masquerade as exact arithmetic.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It silently inserts a measured central value into ordinary arithmetic without carrying uncertainty."
+          },
+          {
+            "key": "C",
+            "reason": "It breaks the owner's full standard-unit requirement."
+          },
+          {
+            "key": "D",
+            "reason": "It labels approximations and measurements as exact, which is unacceptable for scientific work."
+          }
+        ],
+        "tradeoff": "Dalton-to-kilogram conversion has explicit rounding ceremony. The diagnostic can show the exact fix and the pinned BIPM/CODATA provenance."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-30T01:22:28.105Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-30"
     }
   ],
   "questions": [
@@ -74544,6 +75094,118 @@
       "created": "2026-07-28T20:46:33.701Z",
       "answeredAt": "2026-07-28",
       "answeredBy": "e3-prep"
+    },
+    {
+      "id": "q0w4b9xl",
+      "cardId": "c03gs87j",
+      "decisionId": "D-DERIVED-DIMENSION-CLAIM1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Conceptually I think I like A the most, but it isnt clear to me how this would work with different types of units. Like if we wanted to use measurements that compared pounds force to newtons or speed, but then if you dont have all the conversions directly and precisely then values could be off. We want extreme precision where possible while keeping exceptional speed. REMEMBER, BY DEFAULT WE NEED TO SUPPORT EVERY SINGLE UNIT OF MEASURE THAT IS STANDARD, including support for things like electronics with voltage, amperage, inductance, impedence, resistance, force, pressure, etc. EVERYTHING that would be a standard tool in the domain of ANY scientist, researcher, engineer, mathemetiian, or analyst",
+      "status": "answered",
+      "answer": "A handles mixed units through one coherent anchor, never pairwise conversion tables. A derived family's base member is pinned coherent: exactly 1 of the product of its base dimensions' base units, so 1 newton = 1 kg*m/s/s by construction. Every other unit of that dimension — kilonewton, pound-force, psi — is an exact arbitrary-precision rational scale from that anchor. Pound-force is exact, not approximate: the pound (0.45359237 kg) and standard gravity (9.80665 m/s^2) are exact by international definition, so 1 lbf = 4.4482216152605 N exactly. Nearly every standard unit has such an exact SI definition. PRECISION: any conversion is one ratio of two exact rationals, folded at compile time (already ratified in D-QUANTITY-DECL1); implicit conversion happens only when exact, and lossy conversion requires the explicit rounded form (D-UNIT-CONV1) — so a value rounds at most once, and only when you ask. SPEED: units erase after sema; a conversion is one runtime multiply (plus one add for affine units like celsius) against a compile-time constant, and same-unit math costs zero. COVERAGE: the ratified D-DIMENSION-OPEN1=D prelude ships every standard unit by default — all 7 SI base dimensions; all 22 SI named derived units (hertz, newton, pascal, joule, watt, coulomb, volt, farad, ohm, siemens, weber, tesla, henry, lumen, lux, becquerel, gray, sievert, katal, radian, steradian, degree Celsius); the SI prefix ladder; accepted non-SI units (litre, tonne, minute/hour/day, degree, electronvolt, dalton, astronomical unit, bar, mmHg); and customary units with exact defined scales (inch, foot, yard, mile, ounce, pound, pound-force, psi, gallon, mph). Electronics is fully covered: ampere is a base dimension, and volt/ohm/farad/henry/siemens/weber/tesla/coulomb are coherent derived families. Ballot updated: option A now states the coherent-anchor rule and shows pound-force as an exact scaled member; the explainer carries the precision/speed/coverage model; the card plan enumerates the full default battery.",
+      "created": "2026-07-30T01:06:52.548Z",
+      "answeredAt": "2026-07-30",
+      "answeredBy": "cursor-fable"
+    },
+    {
+      "id": "q0xrj127",
+      "cardId": "c0b0tifp",
+      "decisionId": null,
+      "by": "codex-core-five",
+      "kind": "message",
+      "text": "Five-card batch is integrated on master as f0b574092. The owner requires .claude/worktrees/core-five deleted before the serial CheckerOwnership wave. Please commit/preserve your #1304 numeric/Units patch and release the worktree, then mark this message done.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T02:50:16.477Z"
+    },
+    {
+      "id": "q07og4e2",
+      "cardId": "c03gs87j",
+      "decisionId": null,
+      "by": "codex-core-five",
+      "kind": "message",
+      "text": "Coordination: the shared core-five worktree must now be deleted before the serial CheckerOwnership wave. It still contains your untracked crates/jet-codegen/src/Prelude/Units.jet plus a rustfmt-only EffectBudget.rs edit. Please checkpoint/preserve the owned Units.jet work and either absorb or explicitly release the formatting edit, then confirm the worktree is safe to remove. I will not discard or stage either path.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:01:55.824Z"
+    },
+    {
+      "id": "q0u8wzxp",
+      "cardId": "c0pbnytf",
+      "decisionId": null,
+      "by": "codex-core-five",
+      "kind": "message",
+      "text": "Coordination: the shared core-five worktree must be deleted before the serial CheckerOwnership wave. It now has uncommitted reviewer-style changes in FencedNames.rs, tests/fenced_names.rs, and tests/tir_unsafe_and_runtime.rs on top of your commits a189670e7/8e583913b. Please checkpoint/preserve those edits and arrange a durable branch/integration target for your two commits, then confirm codex/core-five can be removed. I will not stage or discard this foreign work.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:02:38.547Z"
+    },
+    {
+      "id": "q06kld2u",
+      "cardId": "c0wpp6cz",
+      "decisionId": null,
+      "by": "codex-core-five",
+      "kind": "message",
+      "text": "Coordination: commit c8f9f3e1d is preserved only on codex/core-five, whose worktree the owner requires deleted before the CheckerOwnership wave. A fresh read-only review is running now. Please be ready to integrate or name a durable handoff branch after review; I will not delete the only ref.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:03:44.596Z"
+    },
+    {
+      "id": "q09nw8jq",
+      "cardId": "c0i11n7j",
+      "decisionId": null,
+      "by": "codex-core-five",
+      "kind": "message",
+      "text": "Coordination: commit a8917cc32 is preserved only in the codex/core-five history, whose worktree must be deleted. Please arrange independent review/integration or a named durable handoff ref; I will not delete its only branch.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:03:44.783Z"
+    },
+    {
+      "id": "q0v0bm9k",
+      "cardId": "c0wpp6cz",
+      "decisionId": null,
+      "by": "codex-core-five-review",
+      "kind": "message",
+      "text": "Fresh review: c8f9f3e1d is not integration-safe. Required fixes are resident Cranelift Cell lowering with no deopt/fallback, and sema non-cloneability for CellReadGuard/CellEditGuard so ~guard emits E0211 before codegen. The dirty local_cell_tiers additions are required regression tests.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:10:09.187Z"
+    },
+    {
+      "id": "q07bm3vg",
+      "cardId": "c0pbnytf",
+      "decisionId": null,
+      "by": "codex-core-five-review",
+      "kind": "message",
+      "text": "Fresh review blockers: fenced formatter corrupts inline comments via split_whitespace; add a comment-preservation regression and structural formatter fix. Also add executable/golden join_all teaching and prove loose tasks.spawn handles, not only g.task handles. Current commits are not integration-safe.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:11:19.589Z"
+    },
+    {
+      "id": "q0plh561",
+      "cardId": "c0b0tifp",
+      "decisionId": null,
+      "by": "codex-core-five-review",
+      "kind": "message",
+      "text": "Fresh review blocker: numeric widening is missing in infer_call_value and check_method_args. Function-value and user-method I8→I16 arguments still emit E0112. Reuse widen_numeric_expr for non-Write params and add tier regressions before integration.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T03:16:01.499Z"
+    },
+    {
+      "id": "q08yu0eq",
+      "cardId": "c0zywkq7",
+      "decisionId": null,
+      "by": "core-five-integrator",
+      "kind": "message",
+      "text": "Integration coordination: the completed core-five batch must cherry-pick into master, but #1202 currently owns an uncommitted overlapping patch there. Please commit and leave master clean as soon as your coherent slice is ready, then note the commit on #1202. Do not discard either stream.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-30T04:47:47.752Z"
     }
   ],
   "ideas": [
@@ -74918,6 +75580,1231 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-30T07:10:09.928Z",
+      "by": "codex-memory-wave",
+      "action": "card.update",
+      "ref": "c0zywkq7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T07:10:05.938Z",
+      "by": "codex-memory-wave",
+      "action": "card.update",
+      "ref": "c0zywkq7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T07:09:47.243Z",
+      "by": "review-1202-final",
+      "action": "card.criteria-verify",
+      "ref": "c0zywkq7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-30T07:09:46.985Z",
+      "by": "review-1202-final",
+      "action": "card.criteria-verify",
+      "ref": "c0zywkq7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T07:09:46.731Z",
+      "by": "review-1202-final",
+      "action": "card.criteria-verify",
+      "ref": "c0zywkq7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T07:09:46.470Z",
+      "by": "review-1202-final",
+      "action": "card.criteria-verify",
+      "ref": "c0zywkq7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T07:09:46.181Z",
+      "by": "review-1202-final",
+      "action": "card.criteria-verify",
+      "ref": "c0zywkq7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T06:52:14.235Z",
+      "by": "codex-memory-wave",
+      "action": "card.criteria-meet",
+      "ref": "c0zywkq7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-30T06:52:10.210Z",
+      "by": "codex-memory-wave",
+      "action": "card.criteria-meet",
+      "ref": "c0zywkq7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T06:52:06.151Z",
+      "by": "codex-memory-wave",
+      "action": "card.criteria-meet",
+      "ref": "c0zywkq7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T06:52:01.830Z",
+      "by": "codex-memory-wave",
+      "action": "card.criteria-meet",
+      "ref": "c0zywkq7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T06:51:57.492Z",
+      "by": "codex-memory-wave",
+      "action": "card.criteria-meet",
+      "ref": "c0zywkq7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T05:24:24.639Z",
+      "by": "codex-memory-wave",
+      "action": "card.update",
+      "ref": "c0zywkq7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T04:49:22.334Z",
+      "by": "codex-memory-wave",
+      "action": "card.claim",
+      "ref": "c0zywkq7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T04:47:47.753Z",
+      "by": "core-five-integrator",
+      "action": "message.add",
+      "ref": "q08yu0eq",
+      "note": "#1202"
+    },
+    {
+      "at": "2026-07-30T04:44:50.266Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T04:41:42.958Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T04:30:36.212Z",
+      "by": "dimension_1292_finish",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T04:27:15.567Z",
+      "by": "dimension_1292_finish",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T04:02:10.615Z",
+      "by": "codex-memory-wave",
+      "action": "card.claim",
+      "ref": "c0zywkq7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T04:01:58.547Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T04:01:51.388Z",
+      "by": "codex-core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T04:01:46.874Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T04:00:53.964Z",
+      "by": "core-five-1304",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T04:00:47.728Z",
+      "by": "dimension_1292_finish",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T04:00:41.872Z",
+      "by": "dimension_1292_finish",
+      "action": "card.criteria-meet",
+      "ref": "c03gs87j",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T04:00:35.888Z",
+      "by": "dimension_1292_finish",
+      "action": "card.criteria-meet",
+      "ref": "c03gs87j",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T04:00:29.523Z",
+      "by": "dimension_1292_finish",
+      "action": "card.criteria-meet",
+      "ref": "c03gs87j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T04:00:25.295Z",
+      "by": "dimension_1292_finish",
+      "action": "card.criteria-meet",
+      "ref": "c03gs87j",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T03:55:07.105Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:48:57.289Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:47:24.623Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:42:21.630Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:40:36.697Z",
+      "by": "core-five-1304",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:31:49.688Z",
+      "by": "core-five-1304",
+      "action": "card.add",
+      "ref": "c0awzf12",
+      "note": "Trait-object list variable is not boxed for AOT"
+    },
+    {
+      "at": "2026-07-30T03:19:13.354Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:19:08.472Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:17:54.603Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:17:54.453Z",
+      "by": "codex-core-five-review-1313",
+      "action": "card.criteria-verify",
+      "ref": "c0i11n7j",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T03:17:54.287Z",
+      "by": "codex-core-five-review-1313",
+      "action": "card.criteria-verify",
+      "ref": "c0i11n7j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T03:16:40.418Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:16:01.712Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:16:01.499Z",
+      "by": "codex-core-five-review",
+      "action": "message.add",
+      "ref": "q0plh561",
+      "note": "#1304"
+    },
+    {
+      "at": "2026-07-30T03:14:28.965Z",
+      "by": "core-five-1304",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:12:55.861Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:11:19.750Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:11:19.589Z",
+      "by": "codex-core-five-review",
+      "action": "message.add",
+      "ref": "q07bm3vg",
+      "note": "#1239"
+    },
+    {
+      "at": "2026-07-30T03:10:09.385Z",
+      "by": "codex-core-five-review",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:10:09.187Z",
+      "by": "codex-core-five-review",
+      "action": "message.add",
+      "ref": "q0v0bm9k",
+      "note": "#1201"
+    },
+    {
+      "at": "2026-07-30T03:05:14.710Z",
+      "by": "core-five-1239",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T03:03:44.783Z",
+      "by": "codex-core-five",
+      "action": "message.add",
+      "ref": "q09nw8jq",
+      "note": "#1313"
+    },
+    {
+      "at": "2026-07-30T03:03:44.596Z",
+      "by": "codex-core-five",
+      "action": "message.add",
+      "ref": "q06kld2u",
+      "note": "#1201"
+    },
+    {
+      "at": "2026-07-30T03:02:38.547Z",
+      "by": "codex-core-five",
+      "action": "message.add",
+      "ref": "q0u8wzxp",
+      "note": "#1239"
+    },
+    {
+      "at": "2026-07-30T03:01:55.824Z",
+      "by": "codex-core-five",
+      "action": "message.add",
+      "ref": "q07og4e2",
+      "note": "#1292"
+    },
+    {
+      "at": "2026-07-30T03:01:21.650Z",
+      "by": "dimension_1292_finish",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T03:01:10.896Z",
+      "by": "core-five-1304",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T03:01:10.617Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-30T03:01:10.327Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-30T03:01:10.090Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-30T03:01:09.826Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-30T03:01:09.556Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-30T03:01:09.289Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-30T03:01:09.037Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T03:01:08.772Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T03:01:08.518Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T03:01:08.252Z",
+      "by": "core-five-1304",
+      "action": "card.criteria-meet",
+      "ref": "c0b0tifp",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:55:08.847Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0mfdhwp",
+      "note": "refs"
+    },
+    {
+      "at": "2026-07-30T02:55:08.578Z",
+      "by": "core-five-root",
+      "action": "card.criteria-add",
+      "ref": "c0mfdhwp",
+      "note": "#3 Independent review confirms the migration preserves provider"
+    },
+    {
+      "at": "2026-07-30T02:55:08.317Z",
+      "by": "core-five-root",
+      "action": "card.criteria-add",
+      "ref": "c0mfdhwp",
+      "note": "#2 scripts/agent/jet-env full cargo test --test cffi passes all"
+    },
+    {
+      "at": "2026-07-30T02:55:08.062Z",
+      "by": "core-five-root",
+      "action": "card.criteria-add",
+      "ref": "c0mfdhwp",
+      "note": "#1 All CFFI fixtures that reference C providers declare canonic"
+    },
+    {
+      "at": "2026-07-30T02:55:00.952Z",
+      "by": "core-five-root",
+      "action": "card.add",
+      "ref": "c0mfdhwp",
+      "note": "CFFI tests need canonical local C dependencies after E3201"
+    },
+    {
+      "at": "2026-07-30T02:50:16.477Z",
+      "by": "codex-core-five",
+      "action": "message.add",
+      "ref": "q0xrj127",
+      "note": "#1304"
+    },
+    {
+      "at": "2026-07-30T02:48:55.149Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T02:47:50.343Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T02:47:50.053Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T02:47:49.776Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c05p1lv8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T02:47:49.474Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0t0lsh7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T02:47:49.187Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c06wg4vc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-30T02:47:36.317Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-30T02:47:36.046Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-30T02:47:35.787Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-30T02:47:35.526Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-30T02:47:35.269Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:47:35.009Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:47:34.751Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q4t3oj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:47:34.484Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0325rmi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T02:47:34.227Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0325rmi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:47:33.963Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0325rmi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:47:33.699Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0325rmi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:47:33.443Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c05p1lv8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:47:33.175Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0t0lsh7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:47:32.926Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c0t0lsh7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:47:32.667Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c06wg4vc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:47:32.408Z",
+      "by": "core-five-review",
+      "action": "card.criteria-verify",
+      "ref": "c06wg4vc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:46:26.771Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-30T02:46:26.519Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-30T02:46:26.242Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-30T02:46:25.975Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-30T02:46:25.712Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:46:25.440Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:46:25.183Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0q4t3oj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:46:24.925Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0325rmi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T02:46:24.661Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0325rmi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:46:24.399Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0325rmi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:46:24.147Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0325rmi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:46:23.892Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c05p1lv8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:46:23.640Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0t0lsh7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:46:23.379Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c0t0lsh7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:46:23.123Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c06wg4vc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:46:22.850Z",
+      "by": "codex-core-five",
+      "action": "card.criteria-meet",
+      "ref": "c06wg4vc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:28:27.187Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T02:28:01.477Z",
+      "by": "core-five-1201",
+      "action": "card.criteria-meet",
+      "ref": "c0wpp6cz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T02:27:55.895Z",
+      "by": "core-five-1201",
+      "action": "card.criteria-meet",
+      "ref": "c0wpp6cz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:27:50.946Z",
+      "by": "core-five-1201",
+      "action": "card.criteria-meet",
+      "ref": "c0wpp6cz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:27:46.940Z",
+      "by": "core-five-1201",
+      "action": "card.criteria-meet",
+      "ref": "c0wpp6cz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T02:09:39.547Z",
+      "by": "core-five-1239",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T02:09:33.600Z",
+      "by": "core-five-1239",
+      "action": "card.criteria-meet",
+      "ref": "c0pbnytf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-30T02:09:25.252Z",
+      "by": "core-five-1239",
+      "action": "card.criteria-meet",
+      "ref": "c0pbnytf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-30T02:09:19.349Z",
+      "by": "core-five-1239",
+      "action": "card.criteria-meet",
+      "ref": "c0pbnytf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T02:09:10.579Z",
+      "by": "core-five-1239",
+      "action": "card.criteria-meet",
+      "ref": "c0pbnytf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T01:56:29.621Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-UNIT-SCALE-PROVENANCE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T01:31:43.192Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:27:29.591Z",
+      "by": "core-five-1292",
+      "action": "decision.update",
+      "ref": "D-UNIT-SCALE-PROVENANCE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T01:26:11.060Z",
+      "by": "core-five-1239",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T01:23:54.371Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:23:48.067Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:22:28.326Z",
+      "by": "core-five-1292",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T01:22:28.105Z",
+      "by": "core-five-1292",
+      "action": "decision.add",
+      "ref": "D-UNIT-SCALE-PROVENANCE1",
+      "note": "Represent standard unit scales that are not exact rationals"
+    },
+    {
+      "at": "2026-07-30T01:17:46.439Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:16:16.675Z",
+      "by": "core-five-1292",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T01:15:02.917Z",
+      "by": "core-five-1292",
+      "action": "card.claim",
+      "ref": "c03gs87j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T01:14:44.382Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-30T01:14:44.382Z"
+    },
+    {
+      "at": "2026-07-30T01:14:23.778Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DERIVED-DIMENSION-CLAIM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-30T01:12:03.798Z",
+      "by": "cursor-fable",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-30T01:11:39.290Z",
+      "by": "cursor-fable",
+      "action": "question.answer",
+      "ref": "q0w4b9xl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T01:11:25.848Z",
+      "by": "cursor-fable",
+      "action": "decision.update",
+      "ref": "D-DERIVED-DIMENSION-CLAIM1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T01:08:22.087Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:08:21.868Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:08:21.643Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c05p1lv8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:08:21.422Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0t0lsh7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:08:21.118Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c06wg4vc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T01:06:52.548Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0w4b9xl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:54:45.422Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T00:54:45.198Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T00:51:01.244Z",
+      "by": "core-five-root",
+      "action": "card.update",
+      "ref": "c05p1lv8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T00:47:29.131Z",
+      "by": "core-five-1239",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:47:23.432Z",
+      "by": "core-five-1239",
+      "action": "card.claim",
+      "ref": "c0pbnytf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:33:15.619Z",
+      "by": "core-five-1292",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:31:44.701Z",
+      "by": "core-five-1304",
+      "action": "card.update",
+      "ref": "c0b0tifp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:31:41.321Z",
+      "by": "core-five-1304",
+      "action": "card.claim",
+      "ref": "c0b0tifp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:26:26.394Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-30T00:25:08.696Z",
+      "by": "core-five-1292",
+      "action": "decision.add",
+      "ref": "D-DERIVED-DIMENSION-CLAIM1",
+      "note": "Name a structural derived dimension"
+    },
+    {
+      "at": "2026-07-30T00:19:32.258Z",
+      "by": "core-five-1292",
+      "action": "card.update",
+      "ref": "c03gs87j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:16:07.167Z",
+      "by": "core-five-1292",
+      "action": "card.claim",
+      "ref": "c03gs87j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:14:58.508Z",
+      "by": "core-five-1313",
+      "action": "card.update",
+      "ref": "c0i11n7j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:14:58.273Z",
+      "by": "core-five-1313",
+      "action": "card.criteria-meet",
+      "ref": "c0i11n7j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-30T00:14:58.067Z",
+      "by": "core-five-1313",
+      "action": "card.criteria-meet",
+      "ref": "c0i11n7j",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-30T00:02:52.185Z",
+      "by": "core-five-1239",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:02:46.260Z",
+      "by": "core-five-1201",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:02:46.025Z",
+      "by": "core-five-1201",
+      "action": "card.claim",
+      "ref": "c0wpp6cz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:02:39.757Z",
+      "by": "core-five-1304",
+      "action": "card.claim",
+      "ref": "c0b0tifp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:02:39.556Z",
+      "by": "core-five-1292",
+      "action": "card.claim",
+      "ref": "c03gs87j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:02:34.683Z",
+      "by": "core-five-1239",
+      "action": "card.claim",
+      "ref": "c0pbnytf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-30T00:02:33.125Z",
+      "by": "core-five-1313",
+      "action": "card.update",
+      "ref": "c0i11n7j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-30T00:02:29.076Z",
+      "by": "core-five-1313",
+      "action": "card.claim",
+      "ref": "c0i11n7j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T23:58:34.215Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:58:34.000Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c05p1lv8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:58:33.774Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0325rmi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:58:33.556Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c0t0lsh7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:58:33.332Z",
+      "by": "codex-core-five",
+      "action": "card.update",
+      "ref": "c06wg4vc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:58:21.430Z",
+      "by": "codex-core-five",
+      "action": "card.claim",
+      "ref": "c0q4t3oj",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T23:58:21.113Z",
+      "by": "codex-core-five",
+      "action": "card.claim",
+      "ref": "c05p1lv8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T23:58:20.884Z",
+      "by": "codex-core-five",
+      "action": "card.claim",
+      "ref": "c0325rmi",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T23:58:20.669Z",
+      "by": "codex-core-five",
+      "action": "card.claim",
+      "ref": "c0t0lsh7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T23:58:20.447Z",
+      "by": "codex-core-five",
+      "action": "card.claim",
+      "ref": "c06wg4vc",
+      "note": ""
+    },
     {
       "at": "2026-07-29T23:52:49.369Z",
       "by": "e3-batch-review",
@@ -77192,1231 +79079,6 @@
       "action": "card.criteria-meet",
       "ref": "c08z8u2c",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-29T11:58:10.120Z",
-      "by": "burndown-orch",
-      "action": "card.update",
-      "ref": "c02hbqjf",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-29T11:58:00.541Z",
-      "by": "burndown-orch",
-      "action": "card.criteria-add",
-      "ref": "c0u592bs",
-      "note": "#4 An adversarial AOT, resident, and forced-deopt corpus covers"
-    },
-    {
-      "at": "2026-07-29T11:58:00.294Z",
-      "by": "burndown-orch",
-      "action": "card.criteria-add",
-      "ref": "c0u592bs",
-      "note": "#3 Migration plans preserve serde wire keys and execute rename,"
-    },
-    {
-      "at": "2026-07-29T11:58:00.045Z",
-      "by": "burndown-orch",
-      "action": "card.criteria-add",
-      "ref": "c0u592bs",
-      "note": "#2 Primitive and container decoding preserves exact AOT laws fo"
-    },
-    {
-      "at": "2026-07-29T11:57:59.793Z",
-      "by": "burndown-orch",
-      "action": "card.criteria-add",
-      "ref": "c0u592bs",
-      "note": "#1 Forced per-function TIR deopt dispatches named, generic, enu"
-    },
-    {
-      "at": "2026-07-29T11:57:52.503Z",
-      "by": "burndown-orch",
-      "action": "card.update",
-      "ref": "c0u592bs",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-29T11:57:43.059Z",
-      "by": "burndown-orch",
-      "action": "card.add",
-      "ref": "c0u592bs",
-      "note": "Canonical Codable semantics survive TIR deopt"
-    },
-    {
-      "at": "2026-07-29T11:37:39.323Z",
-      "by": "e3-bd-1258",
-      "action": "card.update",
-      "ref": "c02cun0p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T11:37:39.060Z",
-      "by": "e3-bd-1258",
-      "action": "card.update",
-      "ref": "c02cun0p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T11:37:38.783Z",
-      "by": "e3-1258-review",
-      "action": "card.criteria-verify",
-      "ref": "c02cun0p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T11:37:38.537Z",
-      "by": "e3-1258-review",
-      "action": "card.criteria-verify",
-      "ref": "c02cun0p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T11:37:38.289Z",
-      "by": "e3-1258-review",
-      "action": "card.criteria-verify",
-      "ref": "c02cun0p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T11:37:38.029Z",
-      "by": "e3-1258-review",
-      "action": "card.criteria-verify",
-      "ref": "c02cun0p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T11:37:37.782Z",
-      "by": "e3-bd-1258",
-      "action": "card.criteria-meet",
-      "ref": "c02cun0p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T11:37:15.720Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T11:27:01.114Z",
-      "by": "e3-bd-1258",
-      "action": "card.update",
-      "ref": "c02cun0p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T11:27:00.879Z",
-      "by": "e3-bd-1258",
-      "action": "card.criteria-meet",
-      "ref": "c02cun0p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T11:26:54.251Z",
-      "by": "e3-bd-1258",
-      "action": "card.criteria-meet",
-      "ref": "c02cun0p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T11:26:54.077Z",
-      "by": "e3-bd-1258",
-      "action": "card.criteria-meet",
-      "ref": "c02cun0p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T11:11:55.238Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T11:11:38.633Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.claim",
-      "ref": "c08z8u2c",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T11:06:04.800Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T11:05:38.439Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
-      "ref": "c08z8u2c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T11:05:38.224Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
-      "ref": "c08z8u2c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T11:05:37.969Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.criteria-meet",
-      "ref": "c08z8u2c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T10:59:40.220Z",
-      "by": "e3-1282-rereview",
-      "action": "card.update",
-      "ref": "c01xexf7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:59:36.326Z",
-      "by": "e3-1282-rereview",
-      "action": "card.criteria-verify",
-      "ref": "c01xexf7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T10:59:27.715Z",
-      "by": "e3-1282-rereview",
-      "action": "card.criteria-verify",
-      "ref": "c01xexf7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T10:59:22.941Z",
-      "by": "e3-1282-rereview",
-      "action": "card.criteria-verify",
-      "ref": "c01xexf7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T10:47:18.892Z",
-      "by": "e3-bd-1282",
-      "action": "card.update",
-      "ref": "c01xexf7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T10:38:41.828Z",
-      "by": "e3-review-1284",
-      "action": "card.update",
-      "ref": "c083yh6b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:38:41.572Z",
-      "by": "e3-review-1284",
-      "action": "card.criteria-verify",
-      "ref": "c083yh6b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T10:38:41.363Z",
-      "by": "e3-review-1284",
-      "action": "card.criteria-verify",
-      "ref": "c083yh6b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T10:38:41.156Z",
-      "by": "e3-review-1284",
-      "action": "card.criteria-verify",
-      "ref": "c083yh6b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T10:34:11.977Z",
-      "by": "e3-bd-1282",
-      "action": "card.update",
-      "ref": "c01xexf7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:34:11.752Z",
-      "by": "e3-bd-1282",
-      "action": "card.criteria-meet",
-      "ref": "c01xexf7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T10:34:11.557Z",
-      "by": "e3-bd-1282",
-      "action": "card.criteria-meet",
-      "ref": "c01xexf7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T10:34:11.358Z",
-      "by": "e3-bd-1282",
-      "action": "card.criteria-meet",
-      "ref": "c01xexf7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T10:34:02.012Z",
-      "by": "e3-bd-1282",
-      "action": "card.claim",
-      "ref": "c01xexf7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T10:31:37.789Z",
-      "by": "e3-bd-1284",
-      "action": "card.update",
-      "ref": "c083yh6b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:31:37.429Z",
-      "by": "e3-bd-1284",
-      "action": "card.criteria-meet",
-      "ref": "c083yh6b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T10:31:37.063Z",
-      "by": "e3-bd-1284",
-      "action": "card.criteria-meet",
-      "ref": "c083yh6b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T10:31:36.756Z",
-      "by": "e3-bd-1284",
-      "action": "card.criteria-meet",
-      "ref": "c083yh6b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T10:18:33.893Z",
-      "by": "e3-bd-1284",
-      "action": "card.update",
-      "ref": "c083yh6b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:18:28.091Z",
-      "by": "e3-bd-1284",
-      "action": "card.claim",
-      "ref": "c083yh6b",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T10:18:19.168Z",
-      "by": "e3-bd-1258",
-      "action": "card.claim",
-      "ref": "c02cun0p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T10:18:00.760Z",
-      "by": "e3-bd-1282",
-      "action": "card.update",
-      "ref": "c01xexf7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T10:18:00.539Z",
-      "by": "e3-bd-1282",
-      "action": "card.claim",
-      "ref": "c01xexf7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T10:17:46.337Z",
-      "by": "e3-bd-1307-b2",
-      "action": "card.claim",
-      "ref": "c08z8u2c",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T02:14:02.369Z",
-      "by": "e3-review-1280-codex",
-      "action": "card.update",
-      "ref": "c0uyofkz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T02:14:02.144Z",
-      "by": "e3-review-1280-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0uyofkz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T02:14:01.946Z",
-      "by": "e3-review-1280-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0uyofkz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T02:14:01.752Z",
-      "by": "e3-review-1280-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0uyofkz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T02:13:34.420Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.update",
-      "ref": "c0zmsead",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-29T02:13:34.206Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.update",
-      "ref": "c0zmsead",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T02:13:33.975Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zmsead",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T02:13:33.768Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zmsead",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T02:13:33.574Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zmsead",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T02:13:33.371Z",
-      "by": "e3-review-1281-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zmsead",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T02:11:47.714Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.update",
-      "ref": "c0zmsead",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:59:05.766Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.update",
-      "ref": "c0uyofkz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:58:58.060Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0uyofkz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:58:57.803Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0uyofkz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:58:57.545Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0uyofkz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:56:59.405Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.update",
-      "ref": "c0zmsead",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:56:59.168Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zmsead",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-29T01:56:58.932Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zmsead",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:56:58.695Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zmsead",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:56:58.452Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zmsead",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:49:31.211Z",
-      "by": "e3-review-1309-codex",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:49:25.975Z",
-      "by": "e3-review-1309-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0r586su",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:49:05.393Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:49:05.167Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0r586su",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:48:49.386Z",
-      "by": "e3-review-1309-codex",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:48:29.620Z",
-      "by": "e3-review-1309-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0r586su",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:48:29.384Z",
-      "by": "e3-review-1309-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0r586su",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:45:20.400Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:45:20.169Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0r586su",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:45:19.977Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0r586su",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:44:32.646Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.update",
-      "ref": "c0zmsead",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:41:21.697Z",
-      "by": "e3-bd-1281-codex",
-      "action": "card.claim",
-      "ref": "c0zmsead",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T01:41:08.400Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.update",
-      "ref": "c0uyofkz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:40:54.788Z",
-      "by": "e3-bd-1280-codex",
-      "action": "card.claim",
-      "ref": "c0uyofkz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T01:40:44.183Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:40:43.948Z",
-      "by": "e3-bd-1309-codex",
-      "action": "card.claim",
-      "ref": "c0r586su",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T01:39:37.254Z",
-      "by": "burndown-orch",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:30:01.999Z",
-      "by": "e3-review-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:29:55.195Z",
-      "by": "e3-review-1279-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0rsejxo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:29:49.100Z",
-      "by": "e3-review-1279-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0rsejxo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:29:42.608Z",
-      "by": "e3-review-1279-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0rsejxo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:27:27.982Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:27:27.731Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0rsejxo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:21:41.597Z",
-      "by": "e3-review-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:21:19.956Z",
-      "by": "e3-review-1289-codex",
-      "action": "card.update",
-      "ref": "c0smiy2v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:21:13.522Z",
-      "by": "e3-review-1289-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0smiy2v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:21:13.323Z",
-      "by": "e3-review-1289-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0smiy2v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:21:13.127Z",
-      "by": "e3-review-1289-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0smiy2v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:19:32.285Z",
-      "by": "e3-review-1272-codex",
-      "action": "card.update",
-      "ref": "c00xmw8t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:19:32.047Z",
-      "by": "e3-review-1272-codex",
-      "action": "card.criteria-verify",
-      "ref": "c00xmw8t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:16:20.576Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.update",
-      "ref": "c0smiy2v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:16:12.929Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0smiy2v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:16:12.680Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0smiy2v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:16:12.433Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0smiy2v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:16:11.418Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:16:11.189Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0rsejxo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T01:16:10.994Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0rsejxo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T01:16:10.781Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0rsejxo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:09:51.708Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:08:41.711Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:08:22.112Z",
-      "by": "e3-review-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:06:07.339Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.update",
-      "ref": "c00xmw8t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:06:06.483Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.update",
-      "ref": "c0rsejxo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:06:02.086Z",
-      "by": "e3-bd-1279-codex",
-      "action": "card.claim",
-      "ref": "c0rsejxo",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T01:06:01.285Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.criteria-meet",
-      "ref": "c00xmw8t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T01:04:46.426Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T01:03:54.731Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.update",
-      "ref": "c0smiy2v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T01:02:17.903Z",
-      "by": "e3-bd-1289-codex",
-      "action": "card.claim",
-      "ref": "c0smiy2v",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:58:54.696Z",
-      "by": "e3-review-1286-codex",
-      "action": "card.update",
-      "ref": "c02n9rz3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:58:54.404Z",
-      "by": "e3-review-1286-codex",
-      "action": "card.criteria-verify",
-      "ref": "c02n9rz3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:56:14.850Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.update",
-      "ref": "c00xmw8t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:56:14.562Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.criteria-meet",
-      "ref": "c00xmw8t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:51:42.603Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.update",
-      "ref": "c02n9rz3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:51:36.621Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.criteria-meet",
-      "ref": "c02n9rz3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:49:06.254Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T00:48:00.759Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.claim",
-      "ref": "c00xmw8t",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:46:08.940Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.update",
-      "ref": "c00xmw8t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:46:08.699Z",
-      "by": "e3-bd-1272-codex",
-      "action": "card.claim",
-      "ref": "c00xmw8t",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:44:59.836Z",
-      "by": "e3-review-1290-codex",
-      "action": "card.update",
-      "ref": "c0zdohbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:44:55.098Z",
-      "by": "e3-review-1290-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zdohbb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T00:44:48.992Z",
-      "by": "e3-review-1290-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0zdohbb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:41:51.067Z",
-      "by": "e3-review-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:41:15.540Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.update",
-      "ref": "c02n9rz3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:41:11.152Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.criteria-meet",
-      "ref": "c02n9rz3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:36:05.102Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.update",
-      "ref": "c0zdohbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:36:00.119Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zdohbb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T00:35:55.330Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zdohbb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:34:31.160Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.release",
-      "ref": "c08z8u2c",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-29T00:34:30.963Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T00:31:39.794Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.update",
-      "ref": "c02n9rz3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:31:35.290Z",
-      "by": "e3-bd-1286-codex",
-      "action": "card.claim",
-      "ref": "c02n9rz3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:28:38.040Z",
-      "by": "e3-review-1301-codex",
-      "action": "card.update",
-      "ref": "c0a31c6z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:28:33.061Z",
-      "by": "e3-review-1301-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0a31c6z",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T00:28:28.790Z",
-      "by": "e3-review-1301-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0a31c6z",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T00:28:23.313Z",
-      "by": "e3-review-1301-codex",
-      "action": "card.criteria-verify",
-      "ref": "c0a31c6z",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:23:13.056Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.update",
-      "ref": "c0zdohbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:23:07.127Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zdohbb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T00:23:01.698Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0zdohbb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:22:20.357Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.claim",
-      "ref": "c0a31c6z",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:22:16.734Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.update",
-      "ref": "c0a31c6z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:22:16.501Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0a31c6z",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-29T00:22:16.294Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0a31c6z",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-29T00:22:16.075Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.criteria-meet",
-      "ref": "c0a31c6z",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:16:36.812Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.update",
-      "ref": "c0a31c6z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T00:16:30.435Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.update",
-      "ref": "c0a31c6z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-29T00:14:54.905Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.update",
-      "ref": "c0zdohbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:14:50.891Z",
-      "by": "e3-bd-1290-codex",
-      "action": "card.claim",
-      "ref": "c0zdohbb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:14:15.557Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.update",
-      "ref": "c08z8u2c",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:14:03.619Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.update",
-      "ref": "c0a31c6z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:14:02.062Z",
-      "by": "e3-bd-1307-codex",
-      "action": "card.claim",
-      "ref": "c08z8u2c",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:13:59.466Z",
-      "by": "e3-bd-1301-codex",
-      "action": "card.claim",
-      "ref": "c0a31c6z",
-      "note": ""
-    },
-    {
-      "at": "2026-07-29T00:01:24.784Z",
-      "by": "e3-bd-root-review",
-      "action": "card.update",
-      "ref": "c07pjh6w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-29T00:01:24.496Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c07pjh6w",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-29T00:01:24.254Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c07pjh6w",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-29T00:01:24.000Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c07pjh6w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-29T00:01:23.755Z",
-      "by": "e3-bd-root-review",
-      "action": "card.update",
-      "ref": "c07z598z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T23:55:25.414Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0r586su",
-      "note": "track"
-    },
-    {
-      "at": "2026-07-28T23:55:21.225Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lw893m",
-      "note": "track"
-    },
-    {
-      "at": "2026-07-28T23:02:56.929Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-add",
-      "ref": "c0r586su",
-      "note": "#3 a fresh independent reviewer approves the diff and scoped pr"
-    },
-    {
-      "at": "2026-07-28T23:02:56.681Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-add",
-      "ref": "c0r586su",
-      "note": "#2 BudgetProviders scoped tests and tests/ban_bare_panic.rs pas"
-    },
-    {
-      "at": "2026-07-28T23:02:56.440Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-add",
-      "ref": "c0r586su",
-      "note": "#1 the two new Source/BudgetProviders.rs bare panics use the co"
-    },
-    {
-      "at": "2026-07-28T23:02:51.161Z",
-      "by": "e3-bd-root-review",
-      "action": "card.add",
-      "ref": "c0r586su",
-      "note": "BudgetProviders bare-panic allowance drift"
-    },
-    {
-      "at": "2026-07-28T23:01:45.312Z",
-      "by": "e3-bd-root-review",
-      "action": "card.update",
-      "ref": "c0tsprkx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T22:59:10.700Z",
-      "by": "e3-bd-root-review",
-      "action": "card.update",
-      "ref": "c0tsprkx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T22:49:27.406Z",
-      "by": "e3-bd-root-review",
-      "action": "card.update",
-      "ref": "c0tsprkx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T22:49:16.483Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c0tsprkx",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

@@ -40,6 +40,9 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_TASKGROUP) {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_CONDITION) {
+        return true;
+    }
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
@@ -81,6 +84,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_reactive_ty(&ty, cx)
         || is_covered_event_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
+        || is_covered_shared_guard_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
         || is_covered_vault_ty(&ty, cx)
@@ -173,6 +177,16 @@ pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
 /// `Arc::clone` directly (see `emit_tir_call_args`).
 pub(crate) fn is_covered_shared_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(ty, Type::Shared(inner) if is_subset_param_ty(inner, cx))
+}
+
+pub(crate) fn is_covered_shared_guard_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if name == crate::Syntax::TYPE_SHARED_GUARD
+                && args.len() == 1
+                && is_subset_param_ty(&args[0], cx)
+    )
 }
 
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: a concurrency handle type `Task<T>` /

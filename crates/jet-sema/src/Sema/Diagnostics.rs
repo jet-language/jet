@@ -286,7 +286,14 @@ fn is_cloneable_rec(
             visiting.remove(name);
             result
         }
-        Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite") => false,
+        Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "MutationPlan" | "VaultWrite" | Syntax::TYPE_SHARED_GUARD
+            ) =>
+        {
+            false
+        }
         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
         Type::Apply { args, .. } => args
             .iter()
@@ -1258,6 +1265,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
+        Syntax::TYPE_CONDITION => Some(Type::Named(Syntax::TYPE_CONDITION.to_string())),
         _ => None,
     }
 }

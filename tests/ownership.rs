@@ -147,6 +147,253 @@ fn run() {
 }
 
 #[test]
+fn shared_edit_guard_spans_helper_calls() {
+    let src = r#"
+struct Queue { items: [Int] }
+
+impl Queue {
+    fn add(&self, value: Int) {
+        self.items.push(value)
+    }
+
+    fn count(self) => Int {
+        return self.items.len()
+    }
+}
+
+fn run() {
+    queue := Shared.new(Queue.{ items: [Int].{} })
+    other := Shared.new(Queue.{ items: [Int].{} })
+    guard :: queue.guard_edit()
+    other_guard :: other.guard_read()
+    guard.value.add(1)
+    guard.value.add(2)
+    print(other_guard.value.count())
+    print(guard.value.count())
+}
+"#;
+    let output =
+        jet::compile(src).expect("an edit guard must preserve one write loan across helper calls");
+    let first = output
+        .rust
+        .find("jet-shared-lock-order-receipt: lock=user_queue; acquire=guard_edit; order=source")
+        .expect("first lock receipt needs identity and acquisition mode");
+    let second = output
+        .rust
+        .find("jet-shared-lock-order-receipt: lock=user_other; acquire=guard_read; order=source")
+        .expect("second lock receipt needs identity and acquisition mode");
+    assert!(
+        first < second,
+        "nested-lock audit receipts must preserve source acquisition order"
+    );
+}
+
+#[test]
+fn shared_read_guard_value_is_not_writable() {
+    let src = r#"
+struct Counter { value: Int }
+
+fn run() {
+    counter := Shared.new(Counter.{ value: 0 })
+    guard :: counter.guard_read()
+    guard.value.value += 1
+}
+"#;
+    let diagnostics =
+        jet::compile(src).expect_err("a read guard must not grant write access to its value");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0205"),
+        "expected the ordinary read-only write diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn shared_guard_public_type_annotation_resolves() {
+    let src = r#"
+fn inspect(guard: SharedGuard<Int>) {
+    print(guard.value)
+}
+
+fn run() {
+    shared := Shared.new(1)
+    guard :: shared.guard_edit()
+    inspect(guard)
+    guard.value += 1
+}
+"#;
+    jet::compile(src).expect("SharedGuard<T> must be a public, annotatable expert type");
+}
+
+#[test]
+fn shared_read_guard_cannot_enter_write_helper() {
+    let src = r#"
+fn bump(&guard: SharedGuard<Int>) {
+    guard.value += 1
+}
+
+fn run() {
+    shared := Shared.new(1)
+    guard := shared.guard_read()
+    bump(&guard)
+}
+"#;
+    let diagnostics =
+        jet::compile(src).expect_err("a write helper must require an edit SharedGuard");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0205"),
+        "expected read-vs-edit guard diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn returned_public_guard_is_read_only_without_write_helper_access() {
+    let src = r#"
+fn acquire(shared: Shared<Int>) => SharedGuard<Int> {
+    return shared.guard_edit()
+}
+
+fn run() {
+    shared := Shared.new(1)
+    guard := acquire(shared)
+    guard.value += 1
+}
+"#;
+    let diagnostics =
+        jet::compile(src).expect_err("an untagged returned guard must not regain edit access");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0205"),
+        "expected returned guard access diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn shared_guard_map_and_split_preserve_disjoint_places() {
+    let src = r#"
+struct Pair { left: Int, right: Int }
+
+fn run() {
+    first := Shared.new(Pair.{ left: 1, right: 2 })
+    mapped :: first.guard_edit().map(value => value.left)
+    mapped.value += 1
+
+    second := Shared.new(Pair.{ left: 3, right: 4 })
+    (left, right) :: second.guard_edit().split(
+        value => value.left,
+        value => value.right
+    )
+    left.value += 1
+    right.value += 1
+}
+"#;
+    jet::compile(src).expect("mapped and split guards must preserve safe field provenance");
+}
+
+#[test]
+fn shared_guard_split_rejects_overlapping_places() {
+    let src = r#"
+struct Pair { left: Int, right: Int }
+
+fn run() {
+    shared := Shared.new(Pair.{ left: 1, right: 2 })
+    guard :: shared.guard_edit()
+    _ :: guard.split(value => value.left, value => value.left)
+}
+"#;
+    let diagnostics = jet::compile(src).expect_err("split guard projections must be disjoint");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0216"),
+        "expected a projection error: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn shared_guard_is_owned_and_noncloneable() {
+    let src = r#"
+fn run() {
+    shared := Shared.new(1)
+    guard :: shared.guard_read()
+    _ :: ~guard
+}
+"#;
+    let diagnostics = jet::compile(src).expect_err("a lock token must have one owner");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0211"),
+        "expected the noncloneable-value diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn shared_guard_wait_requires_edit_access_and_bool_predicate() {
+    let read_src = r#"
+fn run() {
+    shared := Shared.new(1)
+    changed := Condition.new()
+    guard :: shared.guard_read()
+    _ :: guard.wait(changed, value => value == 1)
+}
+"#;
+    let diagnostics =
+        jet::compile(read_src).expect_err("waiting must require an exclusive guard");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0205"),
+        "expected the read-guard wait diagnostic: {diagnostics:?}"
+    );
+
+    let predicate_src = r#"
+fn run() {
+    shared := Shared.new(1)
+    changed := Condition.new()
+    guard :: shared.guard_edit()
+    _ :: guard.wait(changed, value => value)
+}
+"#;
+    let diagnostics =
+        jet::compile(predicate_src).expect_err("a wait predicate must return Bool");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0112" | "E0113")),
+        "expected the predicate diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn shared_guard_long_scope_has_lock_order_lint() {
+    let src = r#"
+fn run() {
+    shared := Shared.new(1)
+    guard :: shared.guard_edit()
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+}
+"#;
+    let output = jet::compile(src).expect("a long guard scope is legal expert code");
+    let lint = output
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0206")
+        .expect("long guard scopes must produce an audit lint");
+    assert!(
+        lint.fix.contains("stable order"),
+        "the lint must teach nested lock order: {lint:?}"
+    );
+}
+
+#[test]
 fn mutate_required_at_call_site() {
     let src = r#"
 fn touch(n: &Int) {
@@ -571,7 +818,7 @@ fn if_expression_prefix_reads_use_the_call_access_frame() {
 fn both(value: &Int, count: Int) { value += count }
 fn run() {
     value := 1
-    both(&value, if true { seen :: value; seen } else { 0 })
+    both(&value, if true -> { seen :: value; seen } else -> { 0 })
 }
 "#;
     let diags =
@@ -603,7 +850,7 @@ fn evaluated_statement_accesses_are_scoped_and_mode_aware() {
 fn both(values: [Int], count: Int) { print(values.len() + count) }
 fn run() {
     values := [1, 2]
-    both(values, if true { values = [3]; 1 } else { 0 })
+    both(values, if true -> { values = [3]; 1 } else -> { 0 })
 }
 "#;
     let diags =
@@ -665,10 +912,10 @@ struct Work { callback: fn() => Int }
 fn both(values: &[Int], work: Work) { values.push(work.callback()) }
 fn run() {
     values := [1, 2]
-    both(&values, if true {
+    both(&values, if true -> {
         work :: Work.{ callback: () => values.len() }
         work
-    } else {
+    } else -> {
         Work.{ callback: () => 0 }
     })
 }
@@ -980,7 +1227,7 @@ fn run() { print(0) }
 fn wrapped_and_branch_returned_views_stay_live_through_outer_calls() {
     for view in [
         "(first(values))",
-        "if true { first(values) } else { first(values) }",
+        "if true -> { first(values) } else -> { first(values) }",
         "Val(first(values)) ?? first(values)",
     ] {
         let src = format!(
@@ -2641,13 +2888,16 @@ fn run() {
     let out = jet::compile(src).expect("range window must compile");
     let check = out
         .rust
-        .find("let user_window = jet_view_new")
+        .find(" = jet_view_range_new")
         .expect("view helper call");
-    let helper = out.rust.find("fn jet_view_new").expect("view helper definition");
+    let helper = out
+        .rust
+        .find("fn jet_view_range_new")
+        .expect("view helper definition");
     assert!(helper < check, "bounds-checking helper must exist before use");
     assert!(out
         .rust
-        .contains("a < 0 || b < 0 || a > b || b >= len"));
+        .contains("jet_checked_range_bounds(xs.len() as i64, range, \"view\""));
 }
 
 #[test]

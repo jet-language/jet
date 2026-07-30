@@ -95,7 +95,16 @@ snapshots):
   captures and values that workers cannot safely share or transfer.
 - `Shared<T>` is the explicit shared-mutation path. Its `read` and `edit`
   closures use a lock-scoped view. `#Transact` uses the same handles and commits
-  their changes atomically.
+  their changes atomically. Expert `SharedGuard<T>` values retain that lock
+  across calls. Mapped and split guards retain the original lock identity.
+  `Condition` wait registers, releases, parks, reacquires, and rechecks as one
+  runtime protocol; guard and waiter cleanup runs on every exit. Lock
+  acquisition, writer fairness, waiter claiming, and cancellation cleanup live
+  only in `Prelude/SharedProtocol.rs`. Native payloads and the TIR evaluator
+  call that protocol as marshalling adapters. Generated Rust includes a
+  source-order acquisition receipt with a stable lock identity and access mode
+  for every guard acquisition; consumers reconstruct nested order from receipt
+  sequence. L0206 flags long scopes and teaches stable nested-lock order.
 - `Signal<T>`, `Derived<T>`, and `Computed<T>` use lock-ordered `Arc` storage
   with the same public API. A handle may cross a task, task group, channel, or
   parallel adapter without a data race and without a rustc `Send` ICE.

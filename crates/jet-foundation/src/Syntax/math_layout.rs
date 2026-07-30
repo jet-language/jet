@@ -226,6 +226,10 @@ pub fn is_db_value_variant(variant: &str) -> bool {
 
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
+/// D-SHAREDGUARD2=A: named expert lock token returned by Shared.guard_*.
+pub const TYPE_SHARED_GUARD: &str = "SharedGuard";
+/// D-SHAREDGUARD2=A: explicit wait/notification handle for Shared guards.
+pub const TYPE_CONDITION: &str = "Condition";
 
 /// S68 / D-IFGUARD1=A (ratified): `if` is the one branching keyword, including
 /// ordered subjectless statement/value guard tables.

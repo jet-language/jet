@@ -445,6 +445,7 @@ impl<'a> Checker<'a> {
                         return;
                     }
                     self.check_lvalue_change(target, "be assigned");
+                    self.validate_shared_guard_lvalue(target);
                     // Beginner magic: place type feeds `.{…}` / `.Variant` on the RHS.
                     let saved_expected = self.expected_type.clone();
                     if let Some(place_ty) = self.lvalue_type(target) {
@@ -1075,7 +1076,10 @@ impl<'a> Checker<'a> {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if let Some(info) = self.lookup(&root) {
-                                    if !info.mutable && !self.is_write_view(&root) {
+                                    if !info.mutable
+                                        && !self.is_write_view(&root)
+                                        && !self.is_edit_shared_guard(&root)
+                                    {
                                         let is_self = root == Syntax::KW_SELF;
                                         let what = if is_self {
                                             format!(

@@ -3013,6 +3013,30 @@ impl<'a> Checker<'a> {
     /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
+        // D-SHAREDGUARD2=A: the guard's held value is a compiler-known place,
+        // not a stored public struct field. The hidden tag records whether the
+        // place is read-only or editable while diagnostics show one public
+        // `SharedGuard<T>` type.
+        if member == "value" {
+            if let Type::Apply { name, args } = t {
+                if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                    return Some(args[0].clone());
+                }
+            }
+            if let Type::Tagged { marker, inner } = t {
+                if matches!(
+                    marker.as_str(),
+                    crate::AST::SHARED_GUARD_READ_MARKER
+                        | crate::AST::SHARED_GUARD_EDIT_MARKER
+                ) {
+                    if let Type::Apply { name, args } = inner.as_ref() {
+                        if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                            return Some(args[0].clone());
+                        }
+                    }
+                }
+            }
+        }
         if let Type::Named(type_name) = t {
             // D-SWIZZLE1: named lane swizzles on vector/SIMD types (not matrices).
             if is_swizzleable_math_type(type_name) && !self.registry.contains(type_name) {

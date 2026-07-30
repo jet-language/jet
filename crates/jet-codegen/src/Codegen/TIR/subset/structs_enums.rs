@@ -8,6 +8,7 @@ use crate::Codegen::TIR::is_covered_distinct_ty;
 use crate::Codegen::TIR::is_covered_fallible_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
+use crate::Codegen::TIR::is_covered_shared_guard_ty;
 use crate::Codegen::TIR::is_covered_shared_ty;
 use crate::Codegen::TIR::is_type_var_param_ty;
 use std::collections::HashSet;
@@ -140,7 +141,9 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
             enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
         }
         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` enum payload.
-        Type::Apply { .. } => is_covered_pool_ty(ty, cx),
+        Type::Apply { .. } => {
+            is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx)
+        }
         Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,
     }
@@ -384,9 +387,14 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         Type::Map { key, value, .. } => {
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, ty)| field_ty_covered(ty, cx, seen)),
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
         // D-MEM1 S6: a bare (non-optional) `Pool<T>`/`Id<T>`/`Shared<T>` field.
-        Type::Apply { .. } => is_covered_pool_ty(ty, cx),
+        Type::Apply { .. } => {
+            is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx)
+        }
         Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,
     }

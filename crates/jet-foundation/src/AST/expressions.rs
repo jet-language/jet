@@ -194,6 +194,10 @@ pub struct LambdaMeta {
     pub result_loop: bool,
     pub loop_result_type: Option<Type>,
     pub loop_label: Option<(String, Span)>,
+    /// D-SHAREDGUARD1=A: sema-validated direct field path for a guard
+    /// `map`/`split` projection. Lowering consumes this fact without
+    /// re-validating the source lambda.
+    pub guard_projection: Option<Vec<String>>,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

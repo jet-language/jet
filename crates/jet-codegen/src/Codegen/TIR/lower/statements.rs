@@ -478,6 +478,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     .unwrap_or_default(),
                 _ => HashMap::new(),
             };
+            let move_fields = fields.iter().any(|field| {
+                field_tys
+                    .get(&field.name)
+                    .is_some_and(|ty| cx.type_contains_shared_guard(ty))
+            });
             let tmp = format!("__jet_d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let mut binds = Vec::new();
@@ -495,6 +500,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 tmp,
                 init,
                 kw,
+                move_fields,
                 binds,
             };
         }
@@ -512,6 +518,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
                 _ => Vec::new(),
             };
+            let move_fields = canonical
+                .iter()
+                .any(|(_, ty)| cx.type_contains_shared_guard(ty));
             let tmp = format!("__jet_d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let mut binds = Vec::new();
@@ -525,6 +534,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 tmp,
                 init,
                 kw,
+                move_fields,
                 binds,
             };
         }
@@ -787,6 +797,16 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 &ty,
                 Type::Named(n) if (n == "Reader" || n == "Cursor")
                     && !cx.type_names.contains(n.as_str())
+            )
+            || matches!(
+                &ty,
+                Type::Tagged { marker, inner }
+                    if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                        && matches!(
+                            inner.as_ref(),
+                            Type::Apply { name, .. }
+                                if name == Syntax::TYPE_SHARED_GUARD
+                        )
             );
             let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
                 "let mut"

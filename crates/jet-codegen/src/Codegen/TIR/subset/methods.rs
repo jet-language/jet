@@ -209,9 +209,43 @@ pub(crate) fn method_call_in_subset(
         };
     }
     if recv_type.as_deref() == Some("Shared") {
-        return matches!(method, "read" | "edit")
-            && args.len() == 1
-            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
+        return match method {
+            "read" | "edit" => {
+                args.len() == 1
+                    && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+            }
+            "guard_read" | "guard_edit" => args.is_empty(),
+            _ => false,
+        };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_SHARED_GUARD) {
+        return match method {
+            "map" => {
+                args.len() == 1
+                    && matches!(&args[0].expr, Expr::Lambda(lam)
+                        if lam.meta.guard_projection.is_some()
+                            && lambda_in_subset(lam, cx, locals))
+            }
+            "split" => {
+                args.len() == 2
+                    && args.iter().all(|arg| matches!(
+                        &arg.expr,
+                        Expr::Lambda(lam)
+                            if lam.meta.guard_projection.is_some()
+                                && lambda_in_subset(lam, cx, locals)
+                    ))
+            }
+            "wait" => {
+                args.len() == 2
+                    && expr_in_subset(&args[0].expr, cx, locals)
+                    && matches!(&args[1].expr, Expr::Lambda(lam)
+                        if lambda_in_subset(lam, cx, locals))
+            }
+            _ => false,
+        };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_CONDITION) {
+        return matches!(method, "notify_one" | "notify_all") && args.is_empty();
     }
     if recv_type.as_deref() == Some("ExpiringSecret") {
         if method == "new"
@@ -424,6 +458,7 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    ("Condition", "new", 0) => return true,
                     ("ExpiringSecret", "new", 3) => {
                         return args
                             .iter()

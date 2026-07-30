@@ -86,21 +86,25 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         type_params = add_view_lifetime_generic(type_params);
     }
     let has_fn_field = s.fields.iter().any(|f| matches!(f.ty, Type::Fn { .. }));
+    let has_shared_guard_field = s
+        .fields
+        .iter()
+        .any(|f| cx.type_contains_shared_guard(&f.ty));
     let mut derives: Vec<&str> = Vec::new();
-    if !has_fn_field && s.type_params.is_empty() {
+    if !has_fn_field && !has_shared_guard_field && s.type_params.is_empty() {
         derives.push("Debug");
     }
-    if cx.cloneable.contains(&s.name) {
+    if cx.cloneable.contains(&s.name) && !has_shared_guard_field {
         derives.push("Clone");
     }
-    if cx.comparable.contains(&s.name) {
+    if cx.comparable.contains(&s.name) && !has_shared_guard_field {
         derives.push("PartialEq");
     }
-    if cx.hashable.contains(&s.name) {
+    if cx.hashable.contains(&s.name) && !has_shared_guard_field {
         derives.push("Eq");
         derives.push("Hash");
     }
-    if cx.partial_ord.contains(&s.name) {
+    if cx.partial_ord.contains(&s.name) && !has_shared_guard_field {
         derives.push("PartialOrd");
     }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
@@ -145,7 +149,8 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
-    if (cx.auto_equatable.contains(&s.name) || cx.partial_ord.contains(&s.name))
+    if !has_shared_guard_field
+        && (cx.auto_equatable.contains(&s.name) || cx.partial_ord.contains(&s.name))
         && !cx
             .trait_methods
             .contains(&(s.name.clone(), "equal".to_string()))
@@ -239,7 +244,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         } else {
             tp_bounds
         };
-        if cx.auto_printable.contains(&s.name) {
+        if cx.auto_printable.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
                 tp_bounds,
@@ -261,7 +266,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             debug_tp_bounds = add_view_lifetime_generic(debug_tp_bounds);
         }
         let debug_body = struct_jet_debug_body(s, has_fn_field);
-        if cx.auto_debug.contains(&s.name) {
+        if cx.auto_debug.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
                 debug_tp_bounds,
@@ -270,7 +275,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 debug_body
             ));
         }
-        if cx.auto_printable.contains(&s.name) && !cx.display_types.contains(&s.name) {
+        if cx.auto_printable.contains(&s.name)
+            && !has_shared_guard_field
+            && !cx.display_types.contains(&s.name)
+        {
             out.push_str(&format!(
                 "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 tp_bounds,
@@ -284,7 +292,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         let show_body = struct_jet_debug_body(s, has_fn_field);
         let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
         let type_arg = if has_view_field { "<'__jet_view>" } else { "" };
-        if cx.auto_printable.contains(&s.name) {
+        if cx.auto_printable.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
                 user_type_rust(&s.name),
@@ -292,14 +300,17 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             ));
         }
         let debug_body = struct_jet_debug_body(s, has_fn_field);
-        if cx.auto_debug.contains(&s.name) {
+        if cx.auto_debug.contains(&s.name) && !has_shared_guard_field {
             out.push_str(&format!(
                 "impl{impl_generic} JetDebug for {}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
                 user_type_rust(&s.name),
                 debug_body
             ));
         }
-        if cx.auto_printable.contains(&s.name) && !cx.display_types.contains(&s.name) {
+        if cx.auto_printable.contains(&s.name)
+            && !has_shared_guard_field
+            && !cx.display_types.contains(&s.name)
+        {
             out.push_str(&format!(
                 "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 user_type_rust(&s.name),
@@ -984,46 +995,54 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
         let empty = std::collections::HashSet::new();
+        let has_shared_guard = members
+            .iter()
+            .any(|member| cx.type_contains_shared_guard(member));
         let hashable = members
             .iter()
             .all(|m| crate::Codegen::Context::field_type_hashable(m, &cx.hashable, &empty));
-        let mut derives = vec!["Debug", "Clone", "PartialEq"];
-        if hashable {
+        let mut derives = Vec::new();
+        if !has_shared_guard {
+            derives.extend(["Debug", "Clone", "PartialEq"]);
+        }
+        if !has_shared_guard && hashable {
             derives.push("Eq");
             derives.push("Hash");
         }
-        out.push_str(&format!(
-            "#[derive({})]\npub enum user_{name} {{\n",
-            derives.join(", ")
-        ));
+        if !derives.is_empty() {
+            out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+        }
+        out.push_str(&format!("pub enum user_{name} {{\n"));
         for m in &members {
             let tag = crate::AST::union_member_tag(m);
             out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
         }
         out.push_str("}\n\n");
-        out.push_str(&format!(
-            "impl JetShow for user_{name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
-        ));
-        for m in &members {
-            let tag = crate::AST::union_member_tag(m);
+        if !has_shared_guard {
             out.push_str(&format!(
-                "            Self::{tag}(v) => crate::jet_debug_union(v.jet_show()),\n"
+                "impl JetShow for user_{name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
+            ));
+            for m in &members {
+                let tag = crate::AST::union_member_tag(m);
+                out.push_str(&format!(
+                    "            Self::{tag}(v) => crate::jet_debug_union(v.jet_show()),\n"
+                ));
+            }
+            out.push_str("        }\n    }\n}\n\n");
+            out.push_str(&format!(
+                "impl JetDebug for user_{name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
+            ));
+            for m in &members {
+                let tag = crate::AST::union_member_tag(m);
+                out.push_str(&format!(
+                    "            Self::{tag}(v) => crate::jet_debug_union(v.jet_debug()),\n"
+                ));
+            }
+            out.push_str("        }\n    }\n}\n\n");
+            out.push_str(&format!(
+                "impl JetDisplay for user_{name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
             ));
         }
-        out.push_str("        }\n    }\n}\n\n");
-        out.push_str(&format!(
-            "impl JetDebug for user_{name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
-        ));
-        for m in &members {
-            let tag = crate::AST::union_member_tag(m);
-            out.push_str(&format!(
-                "            Self::{tag}(v) => crate::jet_debug_union(v.jet_debug()),\n"
-            ));
-        }
-        out.push_str("        }\n    }\n}\n\n");
-        out.push_str(&format!(
-            "impl JetDisplay for user_{name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
-        ));
         if encode_unions.contains(&name) {
             out.push_str(&format!(
                 "impl user_Encode for user_{name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
@@ -1195,18 +1214,28 @@ fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
-    let mut derives = vec!["Debug"];
-    if cx.cloneable.contains(&e.name) {
+    let has_shared_guard = e.variants.iter().any(|variant| match &variant.payload {
+        VariantPayload::Unit => false,
+        VariantPayload::Single(ty, _) => cx.type_contains_shared_guard(ty),
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .any(|field| cx.type_contains_shared_guard(&field.ty)),
+    });
+    let mut derives = Vec::new();
+    if !has_shared_guard {
+        derives.push("Debug");
+    }
+    if !has_shared_guard && cx.cloneable.contains(&e.name) {
         derives.push("Clone");
     }
-    if cx.comparable.contains(&e.name) {
+    if !has_shared_guard && cx.comparable.contains(&e.name) {
         derives.push("PartialEq");
     }
-    if cx.hashable.contains(&e.name) {
+    if !has_shared_guard && cx.hashable.contains(&e.name) {
         derives.push("Eq");
         derives.push("Hash");
     }
-    if cx.partial_ord.contains(&e.name) {
+    if !has_shared_guard && cx.partial_ord.contains(&e.name) {
         derives.push("PartialOrd");
     }
     if let Some(tag) = e.c_layout_tag() {
@@ -1220,11 +1249,10 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         emit_c_enum_declaration(e, tag, out);
         out.push_str(&format!("#[repr({repr})]\n"));
     }
-    out.push_str(&format!(
-        "#[derive({})]\npub enum user_{} {{\n",
-        derives.join(", "),
-        e.name
-    ));
+    if !derives.is_empty() {
+        out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+    }
+    out.push_str(&format!("pub enum user_{} {{\n", e.name));
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
@@ -1252,7 +1280,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
-    if (cx.auto_equatable.contains(&e.name) || cx.partial_ord.contains(&e.name))
+    if !has_shared_guard
+        && (cx.auto_equatable.contains(&e.name) || cx.partial_ord.contains(&e.name))
         && !cx
             .trait_methods
             .contains(&(e.name.clone(), "equal".to_string()))
@@ -1262,7 +1291,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             e.name
         ));
     }
-    if cx.partial_ord.contains(&e.name)
+    if !has_shared_guard
+        && cx.partial_ord.contains(&e.name)
         && !cx
             .trait_methods
             .contains(&(e.name.clone(), "compare".to_string()))
@@ -1272,21 +1302,24 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             e.name
         ));
     }
-    if cx.auto_printable.contains(&e.name) {
+    if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
             "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
             e.name,
             enum_jet_render_body(e)
         ));
     }
-    if cx.auto_debug.contains(&e.name) {
+    if !has_shared_guard && cx.auto_debug.contains(&e.name) {
         out.push_str(&format!(
             "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
             e.name,
             enum_jet_render_body(e)
         ));
     }
-    if cx.auto_printable.contains(&e.name) && !cx.display_types.contains(&e.name) {
+    if !has_shared_guard
+        && cx.auto_printable.contains(&e.name)
+        && !cx.display_types.contains(&e.name)
+    {
         out.push_str(&format!(
             "impl JetDisplay for user_{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
             e.name

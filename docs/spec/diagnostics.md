@@ -257,11 +257,14 @@ renumbered, and no new `W` code may be allocated.
 | E0212 | sema  | an owner is moved, replaced, or resized while a live view still points into its storage (D-MEM1 S9, card #649) |
 | E0213 | sema  | `&` window operand is not a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
 | E0214 | sema  | teaching: retired `.view(a..b)` → bare range place `[a..b]` (D-SHAPE-PLACE1=A) |
+| E0215 | sema  | `SharedGuard.map` projection is not a stable stored field place (D-SHAREDGUARD1) |
+| E0216 | sema  | `SharedGuard.split` projections overlap or are not stable stored field places (D-SHAREDGUARD1) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
 | L0205 | jetpack | build sandboxing is unavailable and fallback is allowed by policy (U28, D-JPK-NODAEMON1) |
+| L0206 | sema  | a `SharedGuard` lock spans a long lexical scope (D-SHAREDGUARD1) |
 | L1401 | jet   | compiler-extension finding from a configured component (D-DX5-HOOK1) |
 | E1402 | jet   | compiler-extension host failure (load/analyze/validate fail-closed, D-DX5-HOOK1) |
 | E0301 | sema  | `impl` for unknown type                   |
@@ -1692,6 +1695,9 @@ front-end `.jet` diagnostics).
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency has no lockfile until `jet fetch --lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet fetch --lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
+| L0206 | `` `Shared.{method}()` keeps its lock through a long lexical scope ``. | A `SharedGuard` releases at scope exit, so later statements and nested guard acquisitions run while this lock is held. | Move the guarded work into a smaller block. When nesting guards is necessary, acquire them in one stable order. |
+| E0215 | `` `SharedGuard.map` needs a stored field projection ``. | A mapped guard must keep a stable stored place inside the value protected by the original lock. A computed field is a value, not a place. | Use a direct stored-field projection such as `guard.map(value => value.field)`. |
+| E0216 | `` `SharedGuard.split` needs two disjoint field projections ``. | Two child guards must preserve non-overlapping provenance under one original lock. Equal, enclosing, nested, or computed projections cannot prove that law. | Project two stored sibling fields, such as `value.left` and `value.right`. |
 | L1401 | `` compiler-extension `{rule}` ({severity}): {message} `` | A configured compiler-extension component (`JET_COMPILER_EXTENSION`) reported this finding after type checking (D-DX5-HOOK1). V1 surfaces findings as lints; wall with `policy.lints.deny`. | Address the finding, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
 | E1402 | `` compiler-extension failed: {message} `` | The configured compiler-extension component could not complete `analyze`, or returned an invalid response (D-DX5-HOOK1). Guests are sandboxed; failures stay Jet-owned (I2). | Fix the component, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
 

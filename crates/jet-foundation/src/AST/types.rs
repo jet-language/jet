@@ -106,6 +106,9 @@ pub const SYSTEM_CLOCK_MARKER: &str = "\0clock.system";
 /// Internal provenance for the temporary read-only value lent by
 /// `ExpiringSecret.with`. It cannot be named in source or stored anywhere.
 pub const EXPIRING_SECRET_LOAN_MARKER: &str = "\0expiring_secret.loan";
+/// Compiler-only access modes for the single public `SharedGuard<T>` type.
+pub const SHARED_GUARD_READ_MARKER: &str = "\0shared_guard.read";
+pub const SHARED_GUARD_EDIT_MARKER: &str = "\0shared_guard.edit";
 
 /// Internal provenance for the open terminal capability-key set.
 /// The NUL prefix keeps the marker unspellable in Jet source.
@@ -575,6 +578,8 @@ impl Type {
                     CORE_CRYPTO_NOMINAL_MARKER
                         | DETERMINISTIC_CLOCK_MARKER
                         | EXPIRING_SECRET_LOAN_MARKER
+                        | SHARED_GUARD_READ_MARKER
+                        | SHARED_GUARD_EDIT_MARKER
                         | SYSTEM_CLOCK_MARKER
                         | TERMINAL_FACT_SET_MARKER
                 ) =>
@@ -652,6 +657,8 @@ impl Type {
                     CORE_CRYPTO_NOMINAL_MARKER
                         | DETERMINISTIC_CLOCK_MARKER
                         | EXPIRING_SECRET_LOAN_MARKER
+                        | SHARED_GUARD_READ_MARKER
+                        | SHARED_GUARD_EDIT_MARKER
                         | SYSTEM_CLOCK_MARKER
                         | TERMINAL_FACT_SET_MARKER
                 ) =>

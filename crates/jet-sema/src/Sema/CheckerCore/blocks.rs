@@ -78,5 +78,14 @@ impl<'a> Checker<'a> {
             }
             false
         }
+
+        pub(crate) fn lexical_tail_len(&self) -> usize {
+            self.stmt_tail_len
+                + self
+                    .liveness_frames
+                    .iter()
+                    .map(|(_, len)| *len)
+                    .sum::<usize>()
+        }
     
 }

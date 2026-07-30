@@ -12097,6 +12097,13 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
+            TExprKind::SharedGuardValue { .. }
+            | TExprKind::SharedGuardMap { .. }
+            | TExprKind::SharedGuardSplit { .. }
+            | TExprKind::SharedGuardWait { .. }
+            | TExprKind::ConditionNotify { .. } => {
+                Err("SharedGuard operations deopt to the canonical evaluator".to_string())
+            }
             TExprKind::DefaultLit => Err("jit default literal unsupported".to_string()),
             TExprKind::ConstRef(name) => {
                 let value = self
