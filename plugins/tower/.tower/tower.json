@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1373,
-    "rev": 21252,
+    "rev": 21254,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61224,7 +61224,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T21:15:34.975Z",
-      "updated": "2026-07-31T23:34:38.777Z",
+      "updated": "2026-07-31T23:44:22.218Z",
       "updatedBy": "cursor-grok",
       "claimedAt": "2026-07-31T23:15:45.636Z"
     }
@@ -80959,10 +80959,10 @@
         },
         {
           "key": "C",
-          "name": "Hybrid: reject by default, expert cycle module later",
-          "detail": "Default Jet rejects Shared cycles with a clear diagnostic (A). Expert opt-in lives behind one explicit mechanism on a follow-on card. Examples include Shared.Weak<T> or a #AllowSharedCycle attribute. That follow-on must ship with full I9 and free-or-leak proof before it is usable. This card closes on the reject path. The expert path is named and blocked until that card lands.",
-          "technical": "Implement A's diagnostic now. Record the expert surface as a blocked follow-on with acceptance that includes Prelude semantics, weak or cycle-break API, I9 proof, and free-or-leak measurement. Do not ship a partial expert API here.",
-          "code": "struct Node { next: Shared<Node>? }  // E???? today\n// later (other card): next: Shared.Weak<Node>?  // free-safe back edge"
+          "name": "Both now: beginner-safe Shared + expert cycles on this card",
+          "detail": "One Shared mechanism (I8). Beginner path never builds an immortal graph by accident: either construction that would cycle needs an explicit expert form, or cycles free when external roots drop — with a clear diagnostic if the beginner form is wrong. Expert path ships in the same delivery: intentional Shared graphs (weak back-edges or equivalent), full I9 on AOT / jet run / interpreter, and a free-or-leak proof. No follow-on card for the expert surface. No parking in jit_gaps.",
+          "technical": "Implement reject-or-require-opt-in for the accidental beginner cycle, plus the expert cycle/weak API, Prelude free-or-leak law, I9 adapters only, example+golden, and a free-or-leak measurement test — all acceptance for this card.",
+          "code": "struct Node { next: Shared<Node>? }  // beginner: clear diagnostic or free-safe\nstruct Node { next: Shared.Weak<Node>? } // expert: intentional cycle, frees — ships here"
         },
         {
           "key": "D",
@@ -80991,45 +80991,40 @@
       ],
       "rec": "C",
       "recommendation": {
-        "why": "C keeps beginners safe now with one clear diagnostic. It preserves I9 on the reject path. It names the expert cycle story as a full I9 follow-on. It avoids shipping a half-working Shared graph.",
+        "why": "Matches the owner rule: beginner magic and full expert control in one delivery. C (revised) keeps Shared one mechanism, stops accidental leaks for beginners, and ships expert cycle graphs now with I9 and free-or-leak proof — not a later card.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "A is correct for safety but leaves experts without a named path to intentional graphs; C keeps A's default and schedules the expert surface."
+            "reason": "Reject-only gives beginner safety but denies expert graphs entirely. Owner wants expert control out of the box."
           },
           {
             "key": "B",
-            "reason": "B is the complete product story for graphs, but it must not land as a silent default while free-or-leak law is unfinished; C sequences reject-first then expert opt-in with proof."
+            "reason": "Execute-all as the silent default risks beginner immortal graphs unless free law is perfect; revised C keeps beginner default safe and still ships B's expert power now."
           },
           {
             "key": "D",
-            "reason": "D leaves ICE and tier disagreement as the user experience, which violates Jet's rustc-hidden and tier-parity invariants."
+            "reason": "Documenting ICE/unsupported violates I2 spirit and leaves both facets unfinished."
           }
         ],
-        "tradeoff": "C delays runnable Shared cycles until a follow-on ships Weak or equivalent; until then cyclic Shared types are compile errors, not runtime surprises."
+        "tradeoff": "This card's scope grows: reject/opt-in beginner path plus expert cycle API, I9, and free-or-leak proof all close together. That is the point — no deferred expert half."
       },
       "hybrid": {
         "result": "C",
-        "synthesis": "C takes A's immediate reject diagnostic and B's requirement that any execute path include full I9 plus free-or-leak measurement, behind an explicit expert surface on a later card.",
+        "synthesis": "Harvest A's beginner non-leak default and B's full execute/I9/free-or-leak expert path into one option that ships both now.",
         "harvest": [
           {
             "key": "A",
-            "aspect": "Named diagnostic; no accidental un-freeable graphs.",
-            "use": "Default closeout for this card."
+            "aspect": "Beginners never accidentally immortalize a graph.",
+            "use": "Default/diagnostic path for ordinary Shared."
           },
           {
             "key": "B",
-            "aspect": "Full tier parity and free-or-leak proof.",
-            "use": "Acceptance law for the expert follow-on."
-          },
-          {
-            "key": "D",
-            "aspect": "Honest status from #1353.",
-            "use": "Motivation only; not an option to keep."
+            "aspect": "Intentional cycles run on every tier with free-or-leak proof.",
+            "use": "Expert Shared cycle/weak surface on this card."
           }
         ]
       },
-      "checkInstructions": "Pick A, B, C, or D. Recommended: C (reject Shared cycles by default; name expert cycle/weak path as a follow-on with full I9). After pick, acceptance is: implement the chosen path end-to-end, or for C close this card on the reject diagnostic and open the blocked expert follow-on.",
+      "checkInstructions": "Pick A/B/C/D. Guidance already recorded: both beginner magic and full expert control now — no later. Recommended revised C. After ratify: implement the whole dual surface on this card (I9 + free-or-leak); do not split expert to a follow-on.",
       "draft": false,
       "status": "open",
       "created": "2026-07-31T23:15:45.377Z"
@@ -81943,9 +81938,11 @@
       "by": "owner",
       "kind": "question",
       "text": "None of this later bullshit. Give me full expert control out of the box NOW, but keep the beginner magic philosophy. We need both.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-31T23:30:29.357Z"
+      "status": "answered",
+      "answer": "Agreed — no deferred expert path.\n\nRevised ballot option C (and the recommendation) to match: one Shared mechanism, beginner-safe by default (no accidental immortal graphs), and full expert cycle control shipping on this same card with I9 plus free-or-leak proof. Not a follow-on. Not “JIT later.”\n\nA alone = beginner only. B alone as silent default = expert power without a sharp beginner guard. D = leave ICE — out.\n\nWhen you ratify, pick revised C (or B if you want cycles as the unguarded default). I’ll implement whichever you pick as a complete dual-facet surface on #1372.",
+      "created": "2026-07-31T23:30:29.357Z",
+      "answeredAt": "2026-07-31",
+      "answeredBy": "cursor-grok"
     }
   ],
   "ideas": [
@@ -82261,6 +82258,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-31T23:44:22.218Z",
+      "by": "cursor-grok",
+      "action": "question.answer",
+      "ref": "q0csewey",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:44:21.987Z",
+      "by": "cursor-grok",
+      "action": "decision.update",
+      "ref": "D-SHARED-CYCLE1",
+      "note": ""
+    },
     {
       "at": "2026-07-31T23:34:38.777Z",
       "by": "cursor-grok",
@@ -85746,20 +85757,6 @@
       "action": "card.criteria-verify",
       "ref": "c0qxofha",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:14:55.441Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0qxofha",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T17:14:55.219Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0qxofha",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
