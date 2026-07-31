@@ -14,8 +14,6 @@ sema rewrite) into core nodes engines already handle.
 
 | Surface | Core form | Card |
 |---|---|---|
-| `f.[a, b, c]` (S75 fan-out) | `ListLit` of `Call`s (`FixedList` / empty `List`) | #779 |
-| `[f.[a, b], c]` flatten (S75) | sema rewrite → flat `ListLit` of `Call`s | #779 |
 
 ## Still wide (ranked #779; next shrink slices)
 
@@ -40,7 +38,4 @@ Literals (`IntLit`/`FloatLit`/`BoolLit`/`CharLit`/`StrLit` plain), `Local`,
 
 ## Proof
 
-- Fan-out example + TIR test: `examples/features/basics/fan_out.jet`,
-  `tests/tir_core_and_closures.rs::fan_out_operator`.
-- Flatten demo (zero engine-file changes): `examples/features/basics/fan_out_flatten.jet`.
 - No new `tests/jit_gaps.txt` entries on this wave.

@@ -418,12 +418,6 @@ impl<'a> InlineAlwaysScan<'a> {
             // doc comment on `scan_expr`. Not descended into.
             Expr::Lambda(_) => {}
             Expr::PtrFromAddr { addr, .. } => self.scan_expr(addr),
-            Expr::FanOut { callee, items, .. } => {
-                self.scan_expr(callee);
-                for i in items {
-                    self.scan_expr(i);
-                }
-            }
             Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.scan_expr(inner),
             Expr::IncDec { operand, .. } => self.scan_expr(operand),

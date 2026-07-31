@@ -328,12 +328,6 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             rewrite_field_refs(then_value, names, receiver);
             rewrite_field_refs(else_value, names, receiver);
         }
-        Expr::FanOut { callee, items, .. } => {
-            rewrite_field_refs(callee, names, receiver);
-            for e in items {
-                rewrite_field_refs(e, names, receiver);
-            }
-        }
         Expr::Paren(inner, _) => rewrite_field_refs(inner, names, receiver),
         Expr::Spread(inner, _) => rewrite_field_refs(inner, names, receiver),
         // Leaves, and `Lambda` (a separate scope — not walked, matching

@@ -2580,32 +2580,10 @@ projects declared files, links package binaries into `.jetos/profile/bin`,
 writes user service units under `.config/systemd/user`, and records
 `.jetos/proof/user-<name>.json`.
 
-## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
-
-### Fan-out `f.[a, b, c]`
-
-`f.[a, b, c]` is syntactic sugar that expands to `[f(a), f(b), f(c)]`. The
-callee `f` must be a one-argument function; each item is type-checked against
-`f`'s parameter type. The result type is `[R#N]` where `R` is `f`'s return
-type and `N` is the number of items.
-
-```ebnf
-fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
-```
-
-```jet
-fn double(n: Int) => Int { return n * 2; }
-
-doubled :: double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
-```
-
-Errors: **E0961** if the callee is not a one-argument function; **E0962** if an
-item's type doesn't match the parameter type.
-
-### Fixed-size list `[T#N]`
+## Fixed-size list `[T#N]` (S76)
 
 `[T#N]` is a type refinement meaning "a list of exactly N elements of type T."
-It is produced by fan-out and can be destructured with an exact-count pattern.
+It can be destructured with an exact-count pattern.
 At codegen it erases to `Vec<T>` (same as plain `[T]`).
 
 ```ebnf

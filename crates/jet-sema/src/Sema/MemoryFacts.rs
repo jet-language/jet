@@ -515,12 +515,6 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
                 collect_expr_idents(&arg.expr, out);
             }
         }
-        Expr::FanOut { callee, items, .. } => {
-            collect_expr_idents(callee, out);
-            for item in items {
-                collect_expr_idents(item, out);
-            }
-        }
         Expr::Binary(_, left, right, _) => {
             collect_expr_idents(left, out);
             collect_expr_idents(right, out);

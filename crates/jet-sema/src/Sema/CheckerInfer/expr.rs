@@ -21,51 +21,6 @@ fn field_path(expr: &Expr) -> Option<String> {
     }
 }
 
-/// S75 / #779: `[f.[a, b], c]` flattens to `[f(a), f(b), c]` before typing.
-/// Only Ident callees expand (same gate as fan-out lowering); other shapes stay
-/// so `infer_fan_out` can diagnose.
-fn flatten_fan_out_in_list(elems: &mut Vec<Expr>) {
-    if !elems.iter().any(|e| matches!(e, Expr::FanOut { .. })) {
-        return;
-    }
-    let mut out = Vec::with_capacity(elems.len());
-    for e in std::mem::take(elems) {
-        match e {
-            Expr::FanOut {
-                callee,
-                items,
-                span,
-            } => match *callee {
-                Expr::Ident(name, name_span) => {
-                    for item in items {
-                        let item_span = item.span();
-                        out.push(Expr::Call(Call {
-                            name: name.clone(),
-                            name_span,
-                            args: vec![CallArg {
-                                convention: AccessConvention::Read,
-                                expr: item,
-                                span: item_span,
-                                flags: CallArgFlags::default(),
-                                label: None,
-                                spread: false,
-                            }],
-                            range_checked: false,
-                        }));
-                    }
-                }
-                other => out.push(Expr::FanOut {
-                    callee: Box::new(other),
-                    items,
-                    span,
-                }),
-            },
-            other => out.push(other),
-        }
-    }
-    *elems = out;
-}
-
 impl<'a> Checker<'a> {
     pub(crate) fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
         self.infer(e)
@@ -1049,10 +1004,8 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::ListLit(elems, span) => {
-                // S75: fan-out inside a list literal flattens — `[f.[a,b], c]` ≡ `[f(a), f(b), c]`.
                 // Rewrite before typing so the list sees call results, not nested `[T#N]`.
                 // #779 demo: surface-only change; engines never learn a new construct.
-                flatten_fan_out_in_list(elems);
                 if !elems.is_empty()
                     && !matches!(self.expected_type.as_ref(), Some(Type::FixedList { .. }))
                 {
@@ -1927,11 +1880,6 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-            Expr::FanOut {
-                callee,
-                items,
-                span,
-            } => self.infer_fan_out(callee, items, *span),
             // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
             // the Comptime interpreter resolves the value. In runtime code: E2712.
             Expr::ComptimeSplice { name, span, value } => {
@@ -2404,144 +2352,6 @@ impl<'a> Checker<'a> {
         Some(tuple_ty)
     }
 
-    pub(crate) fn infer_fan_out(
-        &mut self,
-        callee: &mut Box<Expr>,
-        items: &mut Vec<Expr>,
-        _span: Span,
-    ) -> Option<Type> {
-        let callee_span = callee.span();
-
-                // `print` is a builtin that doesn't live in scope as an ident — special-case it so
-        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `#NoPrelude`.
-        if let Expr::Ident(name, _) = callee.as_ref() {
-            if name == Syntax::BUILTIN_PRINT && !self.no_prelude {
-                self.borrow_ctx = true;
-                for item in items.iter_mut() {
-                    if let Some(t) = self.infer(item) {
-                        if !is_printable(&t, self.registry, self.trait_reg)
-                            && !self.is_unit_type(&t)
-                        {
-                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!("secret-bearing `{}` cannot be printed", t.name()),
-                                    "printing could copy cryptographic secret material into terminal output or logs".to_string(),
-                                    "print a public operation label or key identifier instead".to_string(),
-                                    Some(item.span()),
-                                ));
-                            } else { self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`{}` doesn't know how to show {}",
-                                    Syntax::BUILTIN_PRINT,
-                                    t.show()
-                                ),
-                                "print shows values that have a display".to_string(),
-                                "print one of its parts instead".to_string(),
-                                Some(item.span()),
-                            )); }
-                        }
-                    }
-                }
-                self.borrow_ctx = false;
-                return None;
-            }
-        }
-
-        let callee_ty = self.infer(callee);
-
-        // E0961: callee must be a one-argument function.
-        let (param_ty, ret_ty) = match callee_ty {
-            None => {
-                for item in items.iter_mut() {
-                    self.infer(item);
-                }
-                return None;
-            }
-            Some(Type::Fn {
-                ref params,
-                ref ret,
-                ..
-            }) if params.len() == 1 => (params[0].clone(), ret.as_ref().map(|r| *r.clone())),
-            Some(ref other) => {
-                let msg = if let Type::Fn { params, .. } = other {
-                    format!(
-                        "fan-out `.[` needs a one-argument function, but this one takes {} argument{}",
-                        params.len(),
-                        if params.len() == 1 { "" } else { "s" }
-                    )
-                } else {
-                    format!(
-                        "fan-out `.[` needs a one-argument function, but this is {}",
-                        other.show()
-                    )
-                };
-                self.diags.push(Diagnostic::error(
-                    "E0961",
-                    msg,
-                    "`f.[a, b, c]` expands to `[f(a), f(b), f(c)]` — `f` must accept exactly one argument".to_string(),
-                    "use a one-argument function as the fan-out callee".to_string(),
-                    Some(callee_span),
-                ));
-                for item in items.iter_mut() {
-                    self.infer(item);
-                }
-                return None;
-            }
-        };
-
-        // E0962: each item must match the parameter type.
-        let mut had_error = false;
-        for (i, item) in items.iter_mut().enumerate() {
-            let saved = self.expected_type.clone();
-            self.expected_type = Some(param_ty.clone());
-            let item_ty = self.infer(item);
-            self.expected_type = saved;
-            if let Some(got) = item_ty {
-                let got = self.widen_numeric_argument(
-                    item,
-                    got,
-                    &param_ty,
-                    crate::AST::AccessConvention::Read,
-                );
-                if got != param_ty {
-                    had_error = true;
-                    self.diags.push(Diagnostic::error(
-                        "E0962",
-                        format!(
-                            "fan-out item {} is {}, but the function expects {}",
-                            i + 1,
-                            got.show(),
-                            param_ty.show()
-                        ),
-                        "each item in `f.[a, b, c]` is passed as the argument to `f`".to_string(),
-                        type_fix_hint(&param_ty, &got),
-                        Some(item.span()),
-                    ));
-                }
-            }
-        }
-
-        if had_error {
-            return None;
-        }
-
-        let Some(elem) = ret_ty else {
-            // void callee: side effects only, no list produced
-            return None;
-        };
-        let len = items.len() as u64;
-        if len == 0 {
-            Some(Type::List(Box::new(elem)))
-        } else {
-            Some(Type::FixedList {
-                elem: Box::new(elem),
-                len,
-                len_symbol: None,
-            })
-        }
-    }
 
     pub(crate) fn infer_map_lit(
         &mut self,

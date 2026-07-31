@@ -352,7 +352,6 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
             }
         }
         Expr::If { cond, then_value, else_value, .. } => { collect_expr_operations(cond, out); collect_expr_operations(then_value, out); collect_expr_operations(else_value, out); }
-        Expr::FanOut { callee, items, .. } => { collect_expr_operations(callee, out); for item in items { collect_expr_operations(item, out); } }
         _ => {}
     }
 }

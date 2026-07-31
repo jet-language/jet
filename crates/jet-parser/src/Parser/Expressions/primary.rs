@@ -410,12 +410,7 @@ impl<'a> Parser<'a> {
                         return self.struct_lit_after_name(type_name, type_args, span);
                     }
                     if matches!(self.peek().kind, TokKind::Dot) {
-                        let dot_span = self.bump().span;
-                        // S75 (2026-06-16): `ident.[a, b, c]` fan-out
-                        if matches!(self.peek().kind, TokKind::LBracket) {
-                            let callee = Box::new(Expr::Ident(type_name, span));
-                            return self.parse_fan_out_bracket(callee, dot_span);
-                        }
+                        self.bump();
                         // D-CAP9: postfix `name.*` — dereference a raw pointer.
                         // Returning the `Deref` lets `expr_postfix`'s loop pick up a
                         // following `.field`, giving `name.*.field`.

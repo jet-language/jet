@@ -1222,12 +1222,6 @@ impl<'a> Checker<'a> {
             Expr::PtrFromAddr { addr, .. } => {
                 self.collect_evaluated_expr_accesses(addr, mode, bound, out);
             }
-            Expr::FanOut { callee, items, .. } => {
-                self.collect_evaluated_expr_accesses(callee, mode, bound, out);
-                for item in items {
-                    self.collect_evaluated_expr_accesses(item, mode, bound, out);
-                }
-            }
             Expr::StrMatchLit(..)
             | Expr::BinMatchLit(..)
             | Expr::Int(..)

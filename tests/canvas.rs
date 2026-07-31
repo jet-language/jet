@@ -208,7 +208,7 @@ const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) => Int {
 
 fn list_total() => Int {
     xs :: [1, 2, 3]
-    ys :: to_int.[1, 2]
+    ys :: [to_int(1), to_int(2)]
     return xs[0] + ys[0]
 }
 
@@ -1102,7 +1102,7 @@ fn run() {
 
 fn demo() => Int {
     xs :: [1, 2, 3]
-    ys :: to_int.[1, 2]
+    ys :: [to_int(1), to_int(2)]
     return xs[0] + ys[0]
 }
 
@@ -1134,17 +1134,6 @@ fn run() {
     let removed = fs::read_to_string(&multi_path).unwrap();
     assert!(removed.contains("[1, 2, 3]"), "{removed}");
     assert!(!removed.contains("[1, 2, 3, 4]"), "{removed}");
-
-    let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("fanout graph");
-    let (fan_start, fan_end) = source_span_near(&graph, "\"title\":\"fanout\"");
-    let revision = jet::Canvas::source_revision(&removed);
-    let append = format!(
-        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
-        revision, fan_start, fan_end
-    );
-    jet::Canvas::apply_transaction_json(&multi_path, &append).expect("append fanout");
-    let fanout = fs::read_to_string(&multi_path).unwrap();
-    assert!(fanout.contains("to_int.[1, 2, 3]"), "{fanout}");
 }
 
 #[test]

@@ -296,12 +296,6 @@ pub(crate) fn walk_expr_for_const_refs(
             walk_stmts_for_const_refs(else_body, const_names, taken);
             walk_expr_for_const_refs(else_value, const_names, taken);
         }
-        Expr::FanOut { callee, items, .. } => {
-            walk_expr_for_const_refs(callee, const_names, taken);
-            for item in items {
-                walk_expr_for_const_refs(item, const_names, taken);
-            }
-        }
         Expr::Paren(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
         Expr::Spread(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
     }
@@ -416,9 +410,6 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
                 || expr_refs_name(else_value, name)
                 || then_body.iter().any(|s| stmt_refs_name(s, name))
                 || else_body.iter().any(|s| stmt_refs_name(s, name))
-        }
-        Expr::FanOut { callee, items, .. } => {
-            expr_refs_name(callee, name) || items.iter().any(|e| expr_refs_name(e, name))
         }
         Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)

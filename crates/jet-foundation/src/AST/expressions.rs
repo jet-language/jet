@@ -555,14 +555,6 @@ pub enum Expr {
         addr: Box<Expr>,
         span: Span,
     },
-    /// S75 (2026-06-16): `callee.[item0, item1, …]` — fan-out, desugars to
-    /// `[callee(item0), callee(item1), …]`. Items are typed by `callee`'s
-    /// parameter type (expected-type elaboration). Result type is `[T#N]` (S76).
-    FanOut {
-        callee: Box<Expr>,
-        items: Vec<Expr>,
-        span: Span,
-    },
     /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
     /// context (derive body, `#Known {}` block, comptime binding RHS), looks
     /// up `name` in the comptime scope. Outside comptime context: E2712.
@@ -628,7 +620,6 @@ impl Expr {
             | Expr::PatternTest { span: s, .. }
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
-            | Expr::FanOut { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
             | Expr::ComptimeSplice { span: s, .. }
             | Expr::CompareChain { span: s, .. }

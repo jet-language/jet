@@ -1,5 +1,5 @@
 //! Call/method dispatch for the interpreter: `eval_call`, `eval_method`,
-//! `eval_fan_out`, `eval_require`, `eval_embed_file`. These are further
+//! `eval_require`, `eval_embed_file`. These are further
 //! `impl Interp` methods; the struct and spine live in `interp.rs`.
 
 #[path = "../SequenceParity.rs"]
@@ -808,46 +808,6 @@ pub fn eval_net_fetch(
 }
 
 impl<'a> Interp<'a> {
-    /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
-    /// docs/spec/spec.md (S75 fan-out). Comptime only supports
-    /// the named-one-arg-function callee case; sources/type-constructor
-    /// callees are jetpack-module-specific sugar handled structurally by the
-    /// jetpack module evaluator (src/jetpack/modeval.rs), not here.
-    pub(in super::super) fn eval_fan_out(
-        &mut self,
-        callee: &Expr,
-        items: &[Expr],
-        span: Span,
-        scope: &mut HashMap<String, CtValue>,
-    ) -> Result<CtValue, Diagnostic> {
-        let Expr::Ident(name, _) = callee else {
-            return Err(unsupported("this fan-out callee", callee.span()));
-        };
-        let func = self
-            .funcs
-            .get(name.as_str())
-            .copied()
-            .ok_or_else(|| unsupported(&format!("calling `{}`", name), span))?;
-        if func.params.len() != 1 {
-            return Err(unsupported(
-                &format!("`{}` (fan-out needs a one-argument function)", name),
-                span,
-            ));
-        }
-        let param_name = func.params[0].name.clone();
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            let arg = self.eval(item, scope)?;
-            let mut frame = HashMap::new();
-            frame.insert(param_name.clone(), arg);
-            let v = match self.exec_block(&func.body, &mut frame)? {
-                Flow::Return(v) => v,
-                _ => CtValue::Unit,
-            };
-            out.push(v);
-        }
-        Ok(CtValue::List(out))
-    }
 
     pub(in super::super) fn eval_call(
         &mut self,

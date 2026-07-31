@@ -285,11 +285,6 @@ impl<'a> TaintCtx<'a> {
             Expr::If { then_value, else_value, .. } => {
                 self.union([then_value.as_ref(), else_value.as_ref()])
             }
-            Expr::FanOut { callee, items, .. } => {
-                let mut tags = self.tags_of(callee);
-                tags.extend(self.union(items));
-                tags
-            }
             Expr::PtrFromAddr { addr, .. } => self.tags_of(addr),
             Expr::Int(..)
             | Expr::Float(..)
@@ -471,10 +466,6 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(then_value);
                 self.check_block(else_body);
                 self.check_expr(else_value);
-            }
-            Expr::FanOut { callee, items, .. } => {
-                self.check_expr(callee);
-                items.iter().for_each(|e| self.check_expr(e));
             }
             Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
             Expr::Lambda(l) => self.check_lambda(l),

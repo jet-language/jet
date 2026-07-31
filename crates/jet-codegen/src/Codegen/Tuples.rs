@@ -287,12 +287,6 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_expr(&a.expr, out);
             }
         }
-        Expr::FanOut { callee, items, .. } => {
-            collect_tuple_shapes_from_expr(callee, out);
-            for item in items {
-                collect_tuple_shapes_from_expr(item, out);
-            }
-        }
         Expr::PtrFromAddr { addr, .. } => collect_tuple_shapes_from_expr(addr, out),
         Expr::Paren(inner, _) => collect_tuple_shapes_from_expr(inner, out),
         Expr::Spread(inner, _) => collect_tuple_shapes_from_expr(inner, out),

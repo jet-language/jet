@@ -1567,8 +1567,6 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
                 .or_else(|| then_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
                 .or_else(|| else_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
         }
-        Expr::FanOut { callee, items, .. } => expr_handle_escape(callee, handle)
-            .or_else(|| items.iter().find_map(|e| expr_handle_escape(e, handle))),
         Expr::PtrFromAddr { addr, .. } => expr_handle_escape(addr, handle),
         // A lambda that captures the handle smuggles it out — the closure can
         // outlive the grant. Count a reference unless a lambda param shadows the

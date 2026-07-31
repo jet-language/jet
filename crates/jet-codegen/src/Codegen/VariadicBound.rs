@@ -337,10 +337,6 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
             expr_references_ident(callee, name)
                 || args.iter().any(|a| expr_references_ident(&a.expr, name))
         }
-        Expr::FanOut { callee, items, .. } => {
-            expr_references_ident(callee, name)
-                || items.iter().any(|i| expr_references_ident(i, name))
-        }
         Expr::Binary(_, l, r, _) => {
             expr_references_ident(l, name) || expr_references_ident(r, name)
         }

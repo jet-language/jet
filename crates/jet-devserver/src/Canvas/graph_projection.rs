@@ -452,7 +452,6 @@ fn stmt_row_step(stmt: &Stmt) -> i32 {
 fn multi_input_item_count(expr: &Expr) -> usize {
     match expr {
         Expr::ListLit(items, _) => items.len(),
-        Expr::FanOut { items, .. } => items.len(),
         _ => 0,
     }
 }
@@ -1506,72 +1505,6 @@ fn project_expr_node(
                     &input,
                     x - 220,
                     y + i as i32 * 74,
-                );
-            }
-            Some(add_pin(
-                g,
-                &node_id,
-                "value",
-                "output",
-                &expr_type(g, index, expr),
-                "",
-                false,
-            ))
-        }
-        Expr::FanOut {
-            callee,
-            items,
-            span,
-        } => {
-            let node_id = format!("{}:expr:{ordinal}:fanout", g.graph_id);
-            add_node(
-                g,
-                &node_id,
-                "function_pure",
-                "fanout",
-                (*span).into(),
-                x,
-                y,
-                vec!["multi-input"],
-                vec!["append_multi_input", "edit_inline_expr", "source_jump"],
-            );
-            let callee_pin = add_pin(g, &node_id, "callee", "input", "Fn", "", false);
-            connect_expr_to_input(
-                g,
-                index,
-                src,
-                callee,
-                ordinal * 1000,
-                "callee",
-                &node_id,
-                &callee_pin,
-                x - 220,
-                y,
-            );
-            for (i, item) in items.iter().enumerate() {
-                let ty = expr_type(g, index, item);
-                let input = add_pin(
-                    g,
-                    &node_id,
-                    &format!("item{}", i + 1),
-                    "input",
-                    &ty,
-                    "",
-                    false,
-                );
-                set_pin_source_span(g, &input, item.span().into());
-                set_pin_append(g, &input, "remove_multi_input_element", i);
-                connect_expr_to_input(
-                    g,
-                    index,
-                    src,
-                    item,
-                    ordinal * 1000 + i + 1,
-                    &format!("item{}", i + 1),
-                    &node_id,
-                    &input,
-                    x - 220,
-                    y + (i as i32 + 1) * 74,
                 );
             }
             Some(add_pin(

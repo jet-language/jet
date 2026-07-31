@@ -767,10 +767,6 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // c109 Phase 11: fan-out `f.[a, b, c]` (S75/S76). Covered when the callee is
         // in-subset (a plain top-level fn ident, or any in-subset callee value) and
         // every item is in-subset.
-        Expr::FanOut { callee, items, .. } => {
-            fan_out_callee_in_subset(callee, cx, locals)
-                && items.iter().all(|i| expr_in_subset(i, cx, locals))
-        }
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`).
         // Covered when the callee is in-subset (a fn-typed local, a fn-name value, or
         // a lambda) and every arg is in-subset. The AST path emits `({callee})({args})`
@@ -869,34 +865,3 @@ pub(crate) fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) 
     }
 }
 
-/// c109 Phase 11: is a fan-out callee (`f` in `f.[a, b, c]`) in-subset? The AST
-/// path routes an `Ident` callee through `emit_call` (handling builtins) and any
-/// other callee through `(f)(item)` (a fn-value call). We cover ONLY the cleanest,
-/// byte-reproducible case: an `Ident` that resolves to a *plain top-level function*
-/// (in `cx.sigs`, not a local, not an extern/FFI or unqualified-module-import call,
-/// not a builtin like `print`/`panic`). Those lower exactly as the Phase-1 `Call`
-/// arm does (a synthetic single-arg call). A fn-value callee (`(f)(item)`) needs the
-/// deferred Fn-typed-value emit, so it stays on the AST path.
-pub(crate) fn fan_out_callee_in_subset(callee: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
-    let Expr::Ident(name, _) = callee else {
-        return false;
-    };
-    !locals.contains(name)
-        && cx.sigs.contains_key(name)
-        && !cx.extern_funcs.contains_key(name)
-        && !cx.unqualified_inline.contains_key(name)
-        && !cx.unqualified_file.contains_key(name)
-        // Exclude the ambient builtins `emit_call` special-cases before the plain
-        // dispatch (a user-defined fn of the same name is in `cx.sigs`, so the
-        // `contains_key` above already admits it — but a bare builtin name with no
-        // user sig would have failed `contains_key`; guard anyway for clarity).
-        && name != Syntax::BUILTIN_PRINT
-        && name != Syntax::BUILTIN_PANIC
-        && name != Syntax::BUILTIN_INPUT
-        && name != Syntax::BUILTIN_REQUIRE
-        && name != Syntax::BUILTIN_REQUIRE_EQ
-        && name != Syntax::BUILTIN_EXPECT
-        && name != Syntax::BUILTIN_WRAPPING
-        && name != Syntax::BUILTIN_SATURATING
-        && name != Syntax::BUILTIN_CHECKED
-}

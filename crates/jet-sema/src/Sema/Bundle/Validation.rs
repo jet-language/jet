@@ -975,12 +975,6 @@ pub(crate) fn collect_core_expr(
             collect_core_stmts(else_body, imports, used, spans, ffi_cb);
             collect_core_expr(else_value, imports, used, spans, ffi_cb);
         }
-        Expr::FanOut { callee, items, .. } => {
-            collect_core_expr(callee, imports, used, spans, ffi_cb);
-            for item in items {
-                collect_core_expr(item, imports, used, spans, ffi_cb);
-            }
-        }
         Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)

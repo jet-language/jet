@@ -8797,7 +8797,7 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
 }
 
 fn gap() => Int {
-    doubled :: add1.[40, 1]
+    doubled :: [add1(40), add1(1)]
     [a, b] :: doubled
     return a + b
 }
@@ -8833,7 +8833,7 @@ fn run() {
         RunOutcome::Problems(ds) => panic!("mixed/deopt program must run: {ds:?}"),
     };
     jet_jit::set_trace_tiers(false);
-    assert_eq!(stdout.trim(), "43", "fan-out deopt should print 43, got {stdout:?}");
+    assert_eq!(stdout.trim(), "43", "mixed-tier deopt should print 43, got {stdout:?}");
     assert!(
         jet_jit::deopt_invoked_for_test() || jet_jit::jit_executed_for_test(),
         "mixed/deopt path must record tier execution"

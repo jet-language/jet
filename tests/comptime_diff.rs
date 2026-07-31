@@ -922,28 +922,6 @@ fn run() {
     );
 }
 
-#[test]
-fn fan_out_comptime_matches_runtime() {
-    let stdout = compile_and_run(
-        r#"
-fn double(x: Int) => Int {
-    return x * 2
-}
-
-#Known doubled :: double.[1, 2, 3]
-
-fn run() {
-    c :: double.[1, 2, 3]
-    print("{doubled}")
-    print("{c}")
-}
-"#,
-    );
-    assert_eq!(
-        stdout.lines().collect::<Vec<_>>(),
-        vec!["[2, 4, 6]", "[2, 4, 6]"]
-    );
-}
 
 #[test]
 fn ordinary_bindings_fold_when_possible_and_silently_fall_back() {

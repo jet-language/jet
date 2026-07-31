@@ -302,12 +302,6 @@ pub(crate) fn rewrite_inline_calls_expr(
             rewrite_inline_calls_stmts(else_body, siblings, modname);
             rewrite_inline_calls_expr(else_value, siblings, modname);
         }
-        Expr::FanOut { callee, items, .. } => {
-            rewrite_inline_calls_expr(callee, siblings, modname);
-            for item in items.iter_mut() {
-                rewrite_inline_calls_expr(item, siblings, modname);
-            }
-        }
         Expr::Paren(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
         Expr::Spread(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
     }

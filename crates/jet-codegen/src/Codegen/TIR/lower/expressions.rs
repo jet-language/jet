@@ -240,7 +240,6 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::OrFallback { .. } => "OrFallback",
         Expr::TupleLit(..) => "TupleLit",
         Expr::Lambda(..) => "Lambda",
-        Expr::FanOut { .. } => "FanOut",
         Expr::PtrFromAddr { .. } => "PtrFromAddr",
         Expr::TypedLit { .. } => "TypedLit",
         Expr::Paren(..) => "Paren",
@@ -2666,55 +2665,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         // #779 / D-ONECORE1: fan-out `f.[a, b, c]` desugars at lowering to a
         // `ListLit` of synthetic `Call`s (S75/S76). Engines never see a FanOut node.
-        Expr::FanOut { callee, items, .. } => {
-            let Expr::Ident(name, _) = callee.as_ref() else {
-                unreachable!("gate proved fan-out callee is a plain fn ident");
-            };
-            let sig = cx.sigs.get(name);
-            let borrow = matches!(
-                sig.and_then(|ps| ps.first()),
-                Some((AccessConvention::Read, t)) if !t.is_scalar()
-            );
-            let calls: Vec<TExpr> = items
-                .iter()
-                .map(|item| {
-                    let value = lower_expr(item, cx, env);
-                    TExpr {
-                        ty: call_return_type(cx, name),
-                        kind: TExprKind::Call {
-                            name: name.clone(),
-                            args: vec![TCallArg {
-                                value,
-                                borrow,
-                                mut_borrow: false,
-                                clone: false,
-                                arc_clone: false,
-                                fn_coerce: None,
-                                widen_to_vec: false,
-                                widen_to_union: None,
-                            }],
-                        },
-                    }
-                })
-                .collect();
-            let elem_ty = call_return_type(cx, name);
-            let len = items.len() as u64;
-            if len == 0 {
-                TExpr {
-                    ty: Type::List(Box::new(elem_ty)),
-                    kind: TExprKind::ListLit(calls),
-                }
-            } else {
-                TExpr {
-                    ty: Type::FixedList {
-                        elem: Box::new(elem_ty),
-                        len,
-                        len_symbol: None,
-                    },
-                    kind: TExprKind::ListLit(calls),
-                }
-            }
-        }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is
         // `Ptr<elem>` (`ptr_type`), total from the node's `elem`. The element's Rust type
         // is resolved here (`cx.rust_type`) so emit makes no decision (I3). The cast is

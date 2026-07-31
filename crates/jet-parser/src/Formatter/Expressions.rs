@@ -1163,17 +1163,6 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
-            Expr::FanOut { callee, items, .. } => {
-                self.fmt_expr(callee, Prec::Postfix);
-                self.write(".[");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.fmt_expr(item, Prec::OrFallback);
-                }
-                self.write("]");
-            }
             // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`.
             Expr::PtrFromAddr {
                 alias, elem, addr, ..

@@ -626,10 +626,6 @@ impl<'a> StateCtx<'a> {
                 self.check_block(else_body);
                 self.check_expr(else_value);
             }
-            Expr::FanOut { items, callee, .. } => {
-                self.check_expr(callee);
-                items.iter().for_each(|e| self.check_expr(e));
-            }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
             Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
             Expr::OrFallback {

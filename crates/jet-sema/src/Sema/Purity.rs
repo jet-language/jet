@@ -521,17 +521,6 @@ fn check_pure_expr_with_path(
             }
             None
         }
-        Expr::FanOut { callee, items, .. } => {
-            if let Some(d) = rec!(callee) {
-                return Some(d);
-            }
-            for item in items {
-                if let Some(d) = rec!(item) {
-                    return Some(d);
-                }
-            }
-            None
-        }
         Expr::TupleLit(fields, _, _) => {
             for (_, v) in fields {
                 if let Some(d) = rec!(v) {
@@ -1047,17 +1036,6 @@ fn walk_expr_for_calls(
                     walk_expr_for_calls(
                         &arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags,
                     );
-                    if !diags.is_empty() {
-                        return;
-                    }
-                }
-            }
-        }
-        Expr::FanOut { callee, items, .. } => {
-            walk_expr_for_calls(callee, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            if diags.is_empty() {
-                for item in items {
-                    walk_expr_for_calls(item, root_fn, funcs_sig, ast_funcs, path, visited, diags);
                     if !diags.is_empty() {
                         return;
                     }

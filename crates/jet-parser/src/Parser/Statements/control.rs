@@ -2152,7 +2152,6 @@ impl<'a> Parser<'a> {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
-                    | Expr::FanOut { .. }
                     // D-CTMARKER1=C: `$name;` as a standalone statement — valid in comptime contexts.
                     | Expr::ComptimeSplice { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).

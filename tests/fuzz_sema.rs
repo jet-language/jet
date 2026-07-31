@@ -159,7 +159,7 @@ fn inc(x: Int) => Int {
 }
 
 fn run() {
-    ys :: [Int#3].{ inc.[1, 2, 3] }
+    ys :: [Int#3].{ inc(1), inc(2), inc(3) }
     print(ys[2])
 }
 "#
@@ -193,7 +193,7 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
             "{src}\n#Invariant(\"value >= 0 && value < 3\")\n_FuzzIndex{n} :: distinct Int\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
         ),
         _ => format!(
-            "{src}\nfn _fuzz_inc_{n}(x: Int) -> Int {{\n    return x + 1\n}}\nfn _fuzz_fanout_{n}() -> [Int#3] {{\n    return _fuzz_inc_{n}.[1, 2, 3]\n}}\n"
+            "{src}\nfn _fuzz_inc_{n}(x: Int) -> Int {{\n    return x + 1\n}}\nfn _fuzz_fixed_{n}() -> [Int#3] {{\n    return [_fuzz_inc_{n}(1), _fuzz_inc_{n}(2), _fuzz_inc_{n}(3)]\n}}\n"
         ),
     }
 }

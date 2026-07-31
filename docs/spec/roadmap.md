@@ -74,7 +74,7 @@ diagnostics E3101/E3102/E3103/E3112; the I1 amendment (D-LL1) recorded in
 none, enforced by `tests/golden.rs`). Deferred (open ballots): arenas (D-REF2),
 wider `core.mem` API (D-LL3, name TBD).
 
-**Post-v1 language features already shipped on `master`:** fan-out `f.[…]` (S75)
+**Post-v1 language features already shipped on `master`:**
 and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 `spec.md` and `syntax-decisions.md`.
 

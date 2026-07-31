@@ -24,7 +24,6 @@ guaranteeing accuracy.
 | `if subject == { arm -> … }` dispatch | `TExprKind::Match` |
 | `expr?` / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
 | `loop x; iter { … }` | `TExprKind::ForIn` → iterator protocol |
-| `f.[a, b, c]` (S75) | `ListLit` of `Call`s (`FixedList`/`List`) — #779 |
 | `[f.[a, b], c]` flatten | sema rewrite → flat `Call`s in `ListLit` — #779 |
 | `loop { … }` | `TExprKind::Loop` |
 | `#MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |

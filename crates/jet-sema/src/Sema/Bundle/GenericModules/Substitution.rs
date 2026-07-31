@@ -271,12 +271,6 @@ pub(super) fn substitute_expr(
             *elem = crate::Generics::substitute_type(elem, types);
             substitute_expr(addr, types, values);
         }
-        Expr::FanOut { callee, items, .. } => {
-            substitute_expr(callee, types, values);
-            items
-                .iter_mut()
-                .for_each(|value| substitute_expr(value, types, values));
-        }
     }
 }
 

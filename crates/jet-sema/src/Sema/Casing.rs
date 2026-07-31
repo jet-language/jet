@@ -406,9 +406,6 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             expr_names(cond, out); stmt_names(then_body, out); expr_names(then_value, out);
             stmt_names(else_body, out); expr_names(else_value, out);
         }
-        Expr::FanOut { callee, items, .. } => {
-            expr_names(callee, out); for item in items { expr_names(item, out); }
-        }
         Expr::PtrFromAddr { addr, .. } => expr_names(addr, out),
         Expr::Char(..) | Expr::Int(..) | Expr::Float(..) | Expr::Bool(..)
         | Expr::Ident(..) | Expr::UnitLit { .. } | Expr::Absent(_)

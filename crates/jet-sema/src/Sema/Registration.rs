@@ -673,12 +673,6 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
                 expr_uses(&a.expr, name, other);
             }
         }
-        Expr::FanOut { callee, items, .. } => {
-            expr_uses(callee, name, other);
-            for item in items {
-                expr_uses(item, name, other);
-            }
-        }
         Expr::Binary(_, l, r, _) => {
             expr_uses(l, name, other);
             expr_uses(r, name, other);

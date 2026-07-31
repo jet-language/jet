@@ -372,7 +372,7 @@ fn run() {
     print(callback(narrow) == 7.0)
     print(numeric_helpers.accept(narrow) == 7.0)
     print(holder.accept(narrow) == 7.0)
-    widened :: accept_float.[narrow]
+    widened :: [accept_float(narrow)]
     print(widened[0] == 7.0)
 }
 "#;

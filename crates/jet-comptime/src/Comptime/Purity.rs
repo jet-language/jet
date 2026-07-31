@@ -378,12 +378,6 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
             }
         }
         Expr::PtrFromAddr { addr, .. } => walk_expr_nodes(addr, include_suppressed, f),
-        Expr::FanOut { callee, items, .. } => {
-            walk_expr_nodes(callee, include_suppressed, f);
-            for item in items {
-                walk_expr_nodes(item, include_suppressed, f);
-            }
-        }
     }
 }
 

@@ -8,12 +8,7 @@ impl<'a> Parser<'a> {
             loop {
                 match &self.peek().kind {
                     TokKind::Dot => {
-                        let dot = self.bump().span;
-                        // S75 (2026-06-16): `f.[a, b, c]` fan-out — `.` immediately followed by `[`
-                        if matches!(self.peek().kind, TokKind::LBracket) {
-                            expr = self.parse_fan_out_bracket(Box::new(expr), dot)?;
-                            continue;
-                        }
+                        self.bump();
                         // D-CAP9: postfix `p.*` — dereference a raw pointer. The `.`
                         // followed by `*` reads as deref (it composes with a further
                         // `.field`, giving `p.*.field`). Gated to `#Unsafe` in sema.
@@ -383,38 +378,8 @@ impl<'a> Parser<'a> {
             Ok(expr)
         }
     
-        /// S75 (2026-06-16): parse `.[item, …]` after the `.` has already been consumed.
         /// `dot_span` is the span of the consumed `.`. Called from both `expr_primary`
         /// (for `ident.[…]`) and `expr_postfix` (for chained `expr.[…]`).
-        pub(super) fn parse_fan_out_bracket(
-            &mut self,
-            callee: Box<Expr>,
-            dot_span: Span,
-        ) -> Result<Expr, Diagnostic> {
-            self.bump(); // consume `[`
-            let mut items = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RBracket) {
-                loop {
-                    items.push(self.expr()?);
-                    if matches!(self.peek().kind, TokKind::RBracket) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between fan-out items")?;
-                    if matches!(self.peek().kind, TokKind::RBracket) {
-                        break; // trailing comma
-                    }
-                }
-            }
-            self.expect(TokKind::RBracket, "to close the fan-out `.[`")?;
-            let close = self.toks[self.pos - 1].span;
-            let span = Span::new(dot_span.start, close.end);
-            Ok(Expr::FanOut {
-                callee,
-                items,
-                span,
-            })
-        }
-    
         pub(in crate::Parser) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
             match expr {
                 Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),

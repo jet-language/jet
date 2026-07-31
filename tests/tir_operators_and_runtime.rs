@@ -113,7 +113,7 @@ saved :: archive(^\"vault\")
     assert_eq!(stdout, "42\nhello\nvault\n");
 }
 
-/// c109 Phase 26: fan-out result-list destructuring.
+/// c109 Phase 26: fixed-size result-list destructuring.
 #[test]
 fn list_destructure() {
     if !have_rustc() {
@@ -124,7 +124,7 @@ fn double(n: Int) => Int {
     return (n * 2)
 }
 fn run() {
-    doubled :: double.[1, 2, 3]
+    doubled :: [double(1), double(2), double(3)]
     [a, b, c] :: doubled
     print(a)
     print(b)

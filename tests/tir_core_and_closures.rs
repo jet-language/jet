@@ -378,31 +378,6 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// The fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]` (S75/S76) over a
-/// plain top-level function. #779: lowers to `TExprKind::ListLit` of Calls
-/// (FixedList type) — no `FanOut` TIR node.
-#[test]
-fn fan_out_operator() {
-    if !have_rustc() {
-        return;
-    }
-    let src = "\
-fn double(n: Int) => Int {
-    return (n * 2)
-}
-fn calc() => Int {
-    doubled := double.[1, 2, 3]
-    print(doubled)
-    return doubled[1]
-}
-fn run() {
-    print(calc())
-}
-";
-    let (code, stdout) = build_and_run("tir_fan_out", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "[2, 4, 6]\n4\n");
-}
 
 /// A call whose callee has a Fn-typed parameter (`apply(f, x)`) now routes
 /// through the TIR with the required fn-value coercion. The test proves that

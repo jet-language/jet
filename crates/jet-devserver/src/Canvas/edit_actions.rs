@@ -1203,7 +1203,7 @@ pub(super) fn apply_append_multi_input(
         ));
     };
     let (span, count) = match target {
-        MultiInputTarget::List { span, count } | MultiInputTarget::FanOut { span, count } => {
+        MultiInputTarget::List { span, count } => {
             (span, count)
         }
     };
@@ -1662,7 +1662,6 @@ fn find_pattern_span_in_children(
 
 enum MultiInputTarget {
     List { span: SourceSpan, count: usize },
-    FanOut { span: SourceSpan, count: usize },
 }
 
 fn find_multi_input_target(
@@ -1805,12 +1804,6 @@ fn find_multi_input_in_expr(
                 count: items.len(),
             });
         }
-        Expr::FanOut { items, span, .. } if same_span((*span).into(), node_span) => {
-            *out = Some(MultiInputTarget::FanOut {
-                span: (*span).into(),
-                count: items.len(),
-            });
-        }
         _ => walk_expr_children_for_multi_input(expr, node_span, out),
     }
 }
@@ -1830,12 +1823,6 @@ fn walk_expr_children_for_multi_input(
             find_multi_input_in_expr(receiver, node_span, out);
             for arg in args {
                 find_multi_input_in_expr(&arg.expr, node_span, out);
-            }
-        }
-        Expr::FanOut { callee, items, .. } => {
-            find_multi_input_in_expr(callee, node_span, out);
-            for item in items {
-                find_multi_input_in_expr(item, node_span, out);
             }
         }
         Expr::ListLit(items, _) => {
@@ -1991,20 +1978,13 @@ fn find_multi_input_element_in_stmt(
 fn find_multi_input_element_in_expr(
     expr: &Expr,
     node_span: SourceSpan,
-    element_span: SourceSpan,
+    _element_span: SourceSpan,
     found: &mut bool,
 ) {
     if *found {
         return;
     }
     match expr {
-        Expr::ListLit(items, span) | Expr::FanOut { items, span, .. }
-            if same_span((*span).into(), node_span) =>
-        {
-            *found = items
-                .iter()
-                .any(|item| same_span(item.span().into(), element_span));
-        }
         _ => {
             let mut nested = None;
             walk_expr_children_for_multi_input(expr, node_span, &mut nested);

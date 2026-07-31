@@ -254,7 +254,7 @@ fn run() {
     assert_eq!(stdout, "7\n-1\n");
 }
 
-/// c109 (B2): a fixed-size-list type `[E#N]` as a param (fed a fan-out result) and
+/// c109 (B2): a fixed-size-list type `[E#N]` as a param and
 /// as a struct field routes through the TIR (rendered `Vec<E>`).
 #[test]
 fn fixed_size_list_param_and_field() {
@@ -270,8 +270,8 @@ fn firstof(xs: [Int#3]) => Int {
     return xs[0]
 }
 fn run() {
-    print(firstof(double.[1, 2, 3]))
-    g :: Grid.{ row: double.[1, 2, 3] }
+    print(firstof([double(1), double(2), double(3)]))
+    g :: Grid.{ row: [double(1), double(2), double(3)] }
     print(g.row[1])
 }
 ";

@@ -734,10 +734,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::Operator,
     },
     HighlightToken {
-        text: OP_FAN_OUT,
-        class: HighlightClass::Operator,
-    },
-    HighlightToken {
         text: TYPE_FIXED_SIZE_SEP,
         class: HighlightClass::Sigil,
     },
@@ -1043,7 +1039,7 @@ use super::{
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, VALIDATE_CHECK_FN,
     LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,
-    OP_CARET_EQ, OP_EQ, OP_FALLBACK, OP_FAN_OUT, OP_GE, OP_GT, OP_LAMBDA_ARROW, OP_LE, OP_LT,
+    OP_CARET_EQ, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LAMBDA_ARROW, OP_LE, OP_LT,
     OP_MINUS, OP_MINUS_EQ, OP_MINUS_MINUS, OP_NAMED_CTOR, OP_NE, OP_NOT, OP_OPTIONAL_CHAIN,
     OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,
     OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_STAR,

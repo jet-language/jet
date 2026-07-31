@@ -192,12 +192,6 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                     .iter()
                     .any(|arg| gc_expr_references_ident(&arg.expr, name))
         }
-        Expr::FanOut { callee, items, .. } => {
-            gc_expr_references_ident(callee, name)
-                || items
-                    .iter()
-                    .any(|item| gc_expr_references_ident(item, name))
-        }
         Expr::Binary(_, left, right, _) => {
             gc_expr_references_ident(left, name) || gc_expr_references_ident(right, name)
         }

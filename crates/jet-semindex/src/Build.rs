@@ -2164,12 +2164,6 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             });
             structural_slot(ctx, "else_value", StructuralSlotKind::Scalar, |ctx| collect_expr(else_value, mp, ctx));
         }
-        AST::Expr::FanOut { callee, items, .. } => {
-            structural_slot(ctx, "callee", StructuralSlotKind::Scalar, |ctx| collect_expr(callee, mp, ctx));
-            structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
-                for item in items { collect_expr(item, mp, ctx); }
-            });
-        }
         AST::Expr::Int(_, _, _, _)
         | AST::Expr::Float(_, _, _)
         | AST::Expr::Bool(_, _)

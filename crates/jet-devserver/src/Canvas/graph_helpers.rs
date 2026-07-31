@@ -129,7 +129,6 @@ pub(super) fn expr_title(expr: &Expr) -> &'static str {
         Expr::Index { .. } => "index",
         Expr::Slice { .. } => "slice",
         Expr::CallValue { .. } => "call value",
-        Expr::FanOut { .. } => "fanout",
         Expr::Deref(_, _) | Expr::RawOf(_, _) | Expr::PtrFromAddr { .. } => "unsafe expr",
         Expr::OrFallback { .. } => "fallback",
         Expr::PatternTest { .. } => "pattern test",

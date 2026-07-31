@@ -520,10 +520,11 @@ short-circuiting on None; non-optional left side E0047. `??` is the single
 fallback for both `T?` and `T ? E`: `x ?? default`, `x ?? return`,
 `x ?? panic("…")`. `or` is not an operator.
 
-**S75 — Fan-out**: `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]`; `f` must be a
-one-argument callable; items typed by f's param; result `[T#N]`. Flattens
-inside an enclosing list literal; no spread `f.[*xs]` (E0961/E0962).
-**D-FANOUT2**: no second fan-out axis (`s.{…}`) without real-use evidence.
+**S75 — Fan-out: REMOVED** (D-VERDICT-1324-1, owner ruling 2026-07-30).
+`f.[a, b, c]` is gone, not deprecated: the operator, its `.[` sigil, and its
+E0961/E0962 diagnostics are deleted, with no retired-spelling notice and no
+compatibility alias. `f.[…]` is now an ordinary parse error. S76 `[T#N]`
+fixed-size lists are unaffected. **D-FANOUT2** (no `s.{…}` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = .{…}` on
 lane/vector types; overlapping writes diagnosed (E3110/E3111).
@@ -599,7 +600,7 @@ bodies; no higher-kinded types.
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
-refinement of `[T]`, lowered to a **real stack array**. `::` + literal/fan-out
+refinement of `[T]`, lowered to a **real stack array**. `::` + literal
 ⇒ `[T#N]`; widens one-way to `[T]` (by copy); `.map` preserves N; `.len` is a
 compile-time constant; length-changing ops rejected (E0963–E0965).
 
@@ -5259,7 +5260,7 @@ binding or expression statement per name. Multiple fences on the same statement
 advance in lock-step. An ascending numbered-name range such as
 `<: task1..task8 :>` may bind names and reuse them in a later expression fence.
 The fence is statement expansion, not a list,
-destructure, or S75 fan-out. `<:` and `:>` are longest-match digraphs; `:>`
+destructure. `<:` and `:>` are longest-match digraphs; `:>`
 suppresses line termination and neither digraph ends a statement. The formatter
 retains one authored fence and wraps wide explicit fences one name per line.
 `tasks.join_all([Task<T>]) => [T]` separately consumes free task handles and
