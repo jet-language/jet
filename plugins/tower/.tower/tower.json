@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1363,
-    "rev": 20862,
+    "rev": 20867,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59751,12 +59751,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nMake function values in lists/maps runnable on every tier with one meaning (I9). Fix AOT ICE (Box<dyn Fn> not Clone) and JIT map-dispatch segfault; keep sema acceptance (S47).\n\n## Law\n- Named fns coerce to function values; storing them in collections is valid.\n- No new syntax, deps, or I9 carve-outs. No jit_gaps parking.\n- Prefer Rc/Arc (or borrow without clone) over Box+cloned in emit; engines marshal only.\n\n## Steps\n1. Reproduce both cards' repros on JIT and AOT; capture failure modes.\n2. Fix AOT emit for function-typed list/map elements (clone/share strategy).\n3. Fix JIT host path for map.get → call through function values.\n4. Add golden example for string→fn dispatch; prove jet run and jet run --release.\n5. Confirm no jit_gaps entry; independent review + criteria verify; done.\n\n## Owned paths\ncodegen Prelude/AOT emit for fn values, JIT lower/call for dyn fn in collections, examples/features, golden expected, maybe map get Option handling. Touch only what the fix needs.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "closed: fn values as Rc/Arc; fn_coerce matched; Grok review APPROVE after callbacks AOT fix. Commits f76fb0476+."
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -59772,38 +59777,38 @@
         {
           "n": 1,
           "text": "List-of-functions repro ([double, triple] + loop + call) runs with identical output on default jet run and jet run --release",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "fn_list.jet: jet run + jet run --release both print 20 30 after Rc fn values",
-          "at": "2026-07-31T19:15:35.728Z"
+          "verifiedBy": "cursor-grok-review",
+          "evidence": "list repro JIT+AOT 20/30; independent Grok review APPROVE",
+          "at": "2026-07-31T19:31:05.998Z"
         },
         {
           "n": 2,
           "text": "Map dispatch repro ([String: fn(String)=>String] + .get + .Val(f) match + call) runs with identical output on default jet run and jet run --release; no segfault, no ICE",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "fn_map dispatch: jet run + --release print quoted hi; no segfault/ICE",
-          "at": "2026-07-31T19:15:36.012Z"
+          "verifiedBy": "cursor-grok-review",
+          "evidence": "fn_dispatch_map JIT+AOT; Grok review APPROVE",
+          "at": "2026-07-31T19:31:06.205Z"
         },
         {
           "n": 3,
           "text": "Golden example under examples/features/ demonstrating the string->function dispatch-table idiom, with expected output (I5)",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "examples/features/collections/fn_dispatch_map.jet + expected; golden filter ok",
-          "at": "2026-07-31T19:15:36.445Z"
+          "verifiedBy": "cursor-grok-review",
+          "evidence": "fn_dispatch_map.jet + expected; golden ok",
+          "at": "2026-07-31T19:31:06.406Z"
         },
         {
           "n": 4,
           "text": "No new tests/jit_gaps.txt entry; interpreter/deopt tier honors the same Prelude semantics if reached (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "no jit_gaps entry; same Rc representation for AOT; JIT runs same programs",
-          "at": "2026-07-31T19:15:36.759Z"
+          "verifiedBy": "cursor-grok-review",
+          "evidence": "no jit_gaps; callbacks/parameter_modes AOT fixed via fn_coerce",
+          "at": "2026-07-31T19:31:06.609Z"
         }
       ],
       "refs": [
@@ -59818,9 +59823,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T15:17:31.083Z",
-      "updated": "2026-07-31T19:15:36.759Z",
+      "updated": "2026-07-31T19:31:07.164Z",
       "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T19:06:23.950Z"
+      "completedAt": "2026-07-31T19:31:07.164Z"
     },
     {
       "id": "c026wswl",
@@ -79999,6 +80004,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-31T19:31:07.164Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0a7ntql",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T19:31:06.610Z",
+      "by": "cursor-grok-review",
+      "action": "card.criteria-verify",
+      "ref": "c0a7ntql",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T19:31:06.406Z",
+      "by": "cursor-grok-review",
+      "action": "card.criteria-verify",
+      "ref": "c0a7ntql",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T19:31:06.205Z",
+      "by": "cursor-grok-review",
+      "action": "card.criteria-verify",
+      "ref": "c0a7ntql",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T19:31:05.998Z",
+      "by": "cursor-grok-review",
+      "action": "card.criteria-verify",
+      "ref": "c0a7ntql",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-31T19:15:36.759Z",
       "by": "cursor-grok",
       "action": "card.criteria-meet",
@@ -83462,41 +83502,6 @@
       "action": "card.add",
       "ref": "c04w9mi3",
       "note": "Bounded channel example: capacity backpressure and N-worker limiting"
-    },
-    {
-      "at": "2026-07-30T18:41:56.312Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0awzf12",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-07-30T18:41:42.017Z",
-      "by": "codex-root",
-      "action": "card.claim",
-      "ref": "c0fl0ik7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-30T18:41:33.970Z",
-      "by": "codex-root",
-      "action": "card.claim",
-      "ref": "c0kfmlgc",
-      "note": ""
-    },
-    {
-      "at": "2026-07-30T18:41:25.930Z",
-      "by": "codex-root",
-      "action": "card.claim",
-      "ref": "c0awzf12",
-      "note": ""
-    },
-    {
-      "at": "2026-07-30T18:41:17.382Z",
-      "by": "codex-root",
-      "action": "card.claim",
-      "ref": "c05t5bb1",
-      "note": ""
     }
   ],
   "nextNum": 368,
