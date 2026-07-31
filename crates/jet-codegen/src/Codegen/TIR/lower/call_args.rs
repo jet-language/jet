@@ -191,6 +191,13 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
+    // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
+    let value = match (&conv, value) {
+        (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
+            super::preserve_typed_list_shape(v, want, cx)
+        }
+        (_, v) => v,
+    };
     let clone = !resource_move
         && (a.flags.implicit_clone
         || matches!(

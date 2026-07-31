@@ -37,3 +37,11 @@ Error [E0367]: pattern `String` needs a leading `.`
     |         ^^^^^^
  Why: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
  Fix: write `.String(…)`
+
+Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+  --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
+    |
+ 21 |     show(Light.Fade(1), Ok(1), 2)
+    |                         ^^^^
+ Why: `Ok` builds the success side of a `T ? E` result
+ Fix: use it in a `T ? E` return type, a `T ? E` binding annotation, or a call that expects one

@@ -594,7 +594,13 @@ impl<'a> Checker<'a> {
             // width is rejected (E1003) — there is no silent truncation.
             Expr::Int(n, span, width, _) => {
                 let (n, span) = (*n, *span);
-                if let Some(Type::IntN { signed, bits }) = self.expected_type.clone() {
+                // Peel transparent `#Tag T` so a `[U8]`/`#Tag U8` expected type
+                // still elaborates literal width (D-SG9 / D-TAG1).
+                let expected = match self.expected_type.clone() {
+                    Some(Type::Tagged { inner, .. }) => Some(*inner),
+                    other => other,
+                };
+                if let Some(Type::IntN { signed, bits }) = expected {
                     let (lo, hi) = crate::AST::int_range(signed, bits);
                     if (n as i128) < lo || (n as i128) > hi {
                         self.diags.push(int_range_error(signed, bits, span));
@@ -942,7 +948,11 @@ impl<'a> Checker<'a> {
                 self.check_view_use(name, *span);
                 // Card #1361 / I2: reading an owner while an exclusive window
                 // into it is live must be a Jet diagnostic, not rustc E0503.
-                {
+                // Skip when this Ident is only a projection base (`pair.left`,
+                // `&pair.right`, assign LValue) — those set
+                // `suppress_partial_move_root_read`; the full Field/Index place
+                // is checked separately.
+                if !self.suppress_partial_move_root_read {
                     let read_expr = Expr::Ident(name.clone(), *span);
                     self.check_place_read(&read_expr, *span);
                 }

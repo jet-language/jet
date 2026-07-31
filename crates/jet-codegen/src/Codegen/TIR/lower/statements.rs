@@ -392,8 +392,8 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
 /// elaborates the head away. Preserve the asserted list shape:
 /// the value already has the exact expected list type, so the wrapper is not
 /// another list dimension.
-fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -> TExpr {
-    if !matches!(expected, Type::List(_)) {
+pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -> TExpr {
+    if !matches!(expected, Type::List(_) | Type::FixedList { .. }) {
         return expr;
     }
     let mut expr = match expr {
@@ -412,18 +412,37 @@ fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -> TExpr {
         }
         other => other,
     };
-    let Type::List(expected_elem) = expected else {
-        return expr;
+    let expected_elem = match expected {
+        Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
+        _ => return expr,
     };
-    let trait_name = match expected_elem.as_ref() {
+    // D-SG9: typed `[U8].{…}` / `[I32].{…}` heads must drive each element's
+    // Rust integer suffix. Sema may leave bare `IntLit(_, None)` when the list
+    // type comes from the head alone; retag from the expected element type so
+    // emit produces `104u8` rather than `104i64` (I2).
+    if let Type::IntN { signed, bits } = expected_elem {
+        if let TExprKind::ListLit(elems) = &mut expr.kind {
+            for elem in elems.iter_mut() {
+                if let TExprKind::IntLit(_, width) = &mut elem.kind {
+                    *width = Some((*signed, *bits));
+                    elem.ty = expected_elem.clone();
+                }
+            }
+            expr.ty = expected.clone();
+            return expr;
+        }
+    }
+    let trait_name = match expected_elem {
         Type::TraitObject(names) if names.len() == 1 => names.first(),
         Type::Named(name) if cx.trait_names.contains(name) => Some(name),
         _ => None,
     };
     let Some(trait_name) = trait_name else {
+        expr.ty = expected.clone();
         return expr;
     };
     let TExprKind::ListLit(elems) = &mut expr.kind else {
+        expr.ty = expected.clone();
         return expr;
     };
     for elem in elems {

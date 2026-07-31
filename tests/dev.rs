@@ -7799,8 +7799,15 @@ fn cranelift_covers_shield_region() {
 
 #[test]
 fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
-    let out = run_cranelift_without_fallback(
-        r#"use core.tasks as tasks
+    // Shield + channel cancel nests enough Cranelift/runtime frames that the
+    // default libtest worker stack overflows on this host; match other heavy
+    // Cranelift cases and run under a larger dedicated stack.
+    std::thread::Builder::new()
+        .name("shield_cancel".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let out = run_cranelift_without_fallback(
+                r#"use core.tasks as tasks
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
     (ack_sender, ack) :: tasks.channel<Int>()
@@ -7816,11 +7823,14 @@ fn run() {
     sender.send(42)
     ack.receive() ?? panic("closed")
 }
-
 "#,
-        "shield_cancel",
-    );
-    assert_eq!(out.stdout, "42\n");
+                "shield_cancel",
+            );
+            assert_eq!(out.stdout, "42\n");
+        })
+        .expect("spawn shield_cancel worker")
+        .join()
+        .expect("shield_cancel worker panicked");
 }
 
 #[test]

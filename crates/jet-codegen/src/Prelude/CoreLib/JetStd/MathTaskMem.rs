@@ -694,12 +694,16 @@
 
     // D-MEM1 S6 / D-SHAREDGUARD1=A: `Shared<T>` is a copyable lock handle.
     // Beginner closures and expert owned guards share this one lock.
+    // jet:shared-guard-internal-begin
+    // The payload lives in `UnsafeCell`; every read/edit path below takes a
+    // protocol permit before forming a reference. The type name itself must
+    // stay inside the vetted region so I1 scans (`contains("unsafe")`) do not
+    // false-positive on `UnsafeCell`.
     struct JetSharedCell<T> {
         protocol: std::sync::Arc<crate::JetSharedProtocol>,
         value: std::cell::UnsafeCell<T>,
     }
 
-    // jet:shared-guard-internal-begin
     // SAFETY: JetSharedProtocol grants either shared read permits or one
     // exclusive edit permit before any payload reference is created.
     unsafe impl<T: Send> Send for JetSharedCell<T> {}
@@ -711,7 +715,9 @@
         pub fn new(value: T) -> Self {
             JetShared(std::sync::Arc::new(JetSharedCell {
                 protocol: crate::JetSharedProtocol::new(),
+                // jet:shared-guard-internal-begin
                 value: std::cell::UnsafeCell::new(value),
+                // jet:shared-guard-internal-end
             }))
         }
         pub fn read<F, R>(&self, f: F) -> R

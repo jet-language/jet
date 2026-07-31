@@ -557,9 +557,19 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
-        TExprKind::IntLit(n, width) => match width {
-            Some((signed, bits)) => format!("{}{}{}", n, if *signed { 'i' } else { 'u' }, bits),
-            None => format!("{}i64", n),
+        // When width is missing but the TIR type is a fixed IntN (typed list
+        // elements, contextual bindings), prefer that over default `i64`.
+        TExprKind::IntLit(n, width) => {
+            let resolved = width.or_else(|| match &e.ty {
+                Type::IntN { signed, bits } => Some((*signed, *bits)),
+                _ => None,
+            });
+            match resolved {
+                Some((signed, bits)) => {
+                    format!("{}{}{}", n, if signed { 'i' } else { 'u' }, bits)
+                }
+                None => format!("{}i64", n),
+            }
         },
         // D-FLOATW1: emit `f32` suffix when the sema-resolved width is F32.
         TExprKind::FloatLit(v) => {
@@ -1808,10 +1818,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 },
                 _ => None,
             };
+            let list_elem_ty = match &e.ty {
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(inner.as_ref()),
+                _ => None,
+            };
             let parts = elems
                 .iter()
                 .map(|elem| {
-                    let value = emit_tir_expr(elem, cx);
+                    // D-SG9: a `[U8]`/`[I32]` typed list must emit matching suffixes
+                    // even when an element IntLit still carries width None.
+                    let value = match (list_elem_ty, &elem.kind) {
+                        (
+                            Some(Type::IntN { signed, bits }),
+                            TExprKind::IntLit(n, width),
+                        ) if width.is_none() => {
+                            format!("{}{}{}", n, if *signed { 'i' } else { 'u' }, bits)
+                        }
+                        _ => emit_tir_expr(elem, cx),
+                    };
                     if let Some(trait_rust) = &trait_rust {
                         if !matches!(elem.ty, Type::TraitObject(_)) {
                             return format!("Box::new({value}) as Box<dyn {trait_rust}>");

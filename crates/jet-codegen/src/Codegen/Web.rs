@@ -965,7 +965,15 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Absent => true,
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
-        E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
+        E::CoreCall { module, method, args, .. } => {
+            let arity_ok = if method == "mount" {
+                // D-UI-MOUNT1=A: 2-arg or 3-arg (constraint) — same as tir_core_call.
+                matches!(args.len(), 2 | 3)
+            } else {
+                web_core_arity(module, method) == Some(args.len())
+            };
+            arity_ok && args.iter().all(web_expr_supported)
+        }
         E::HandleMethod { recv, op, args } => {
             web_js_handle_method_supported(op, args.len())
                 && web_expr_supported(recv)

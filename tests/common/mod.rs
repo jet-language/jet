@@ -497,6 +497,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");
     s = strip_vetted_module(&s, "jet_ws_upgrade");
+    // D-TASKBORROW1=A: scoped taskgroup lifetime erasure (mirrors golden.rs).
+    s = strip_vetted_module(&s, "jet_taskgroup_scoped");
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");

@@ -2794,7 +2794,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     | Type::Float
                     | Type::Float32
             ) {
-                t.ty = head;
+                t.ty = head.clone();
+            }
+            // D-SG9: retag list-element IntLits from a `[U8]`/`[I32]`/… head so
+            // emit uses the right Rust suffix even if sema left width unset.
+            if let Type::List(elem) | Type::FixedList { elem, .. } = &head {
+                if let Type::IntN { signed, bits } = elem.as_ref() {
+                    if let TExprKind::ListLit(elems) = &mut t.kind {
+                        for el in elems.iter_mut() {
+                            if let TExprKind::IntLit(_, width) = &mut el.kind {
+                                *width = Some((*signed, *bits));
+                                el.ty = elem.as_ref().clone();
+                            }
+                        }
+                    }
+                }
             }
             t
         },

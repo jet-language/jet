@@ -534,6 +534,17 @@ pub(crate) fn render_lambda_str(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String
     render_lambda_str_expecting(lam, cx, env, None)
 }
 
+/// Like [`render_lambda_str`], but force `Arc` wrapping for hosts that require
+/// `Send + Sync` (UI `reactive_render` / portable `button` `on_click`). Escaping
+/// Fn values otherwise prefer `Rc`, which is not Sync and fails rustc for those
+/// prelude signatures.
+pub(crate) fn render_lambda_str_sync(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
+    let mut tl = lower_lambda(lam, cx, env);
+    tl.arc = true;
+    tl.rc = false;
+    wrap_lowered_lambda(&tl)
+}
+
 /// D-MEM1 S6: `render_lambda_str`, but seeding the closure param(s) with an
 /// expected type when the source has no annotation (`Shared<T>.read(s => …)`'s
 /// bare `s`) — needed so a chained field/method read off the param resolves

@@ -1023,7 +1023,13 @@ impl<'a> Checker<'a> {
                                 !sig.is_extern,
                             );
                         }
+                        // Move sites are diagnosed as E0219 (pin/change), not E0220.
+                        let suppress = checker.suppress_partial_move_root_read;
+                        if arg.convention == AccessConvention::Move {
+                            checker.suppress_partial_move_root_read = true;
+                        }
                         let inferred = checker.infer(&mut arg.expr);
+                        checker.suppress_partial_move_root_read = suppress;
                         checker.check_call_argument_captures(&arg.expr);
                         inferred
                     }));
@@ -1133,7 +1139,13 @@ impl<'a> Checker<'a> {
                                 !sig.is_extern,
                             );
                         }
+                        // Move sites are diagnosed as E0219 (pin/change), not E0220.
+                        let suppress = checker.suppress_partial_move_root_read;
+                        if arg.convention == AccessConvention::Move {
+                            checker.suppress_partial_move_root_read = true;
+                        }
                         let inferred = checker.infer(&mut arg.expr);
+                        checker.suppress_partial_move_root_read = suppress;
                         checker.check_call_argument_captures(&arg.expr);
                         inferred
                     })

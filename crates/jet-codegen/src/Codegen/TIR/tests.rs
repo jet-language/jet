@@ -1384,6 +1384,7 @@ fn greet() => String { return input() }
             params: vec![Type::Int],
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
+            return_view_provenance: None,
         };
         assert!(field_ty_covered(&fn_ty, &cx, &mut HashSet::new()));
     }

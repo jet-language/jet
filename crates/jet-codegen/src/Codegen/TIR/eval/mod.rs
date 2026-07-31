@@ -2210,6 +2210,7 @@ mod tests {
             completion,
             completion_order,
             cancel: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
         }
     }
 
