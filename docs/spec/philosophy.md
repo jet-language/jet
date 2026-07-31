@@ -161,8 +161,10 @@ loved by experts.
   Gating ratified as S58 (`core.mem` import + `#Unsafe("reason")` blocks,
   Zig-style allocators). Onboarding materials never mention it until
   needed.
-- **C FFI is a needed future addition** (S59 ships in **Epoch 2**,
-  E2-M14). Rust FFI (M7) ships first; the C ABI story follows in v2.
+- **C FFI shipped** (S59, Epoch 2 E2-M14): `use c.<lib>` modules,
+  `#Bindgen`/`#Extern` overlays, and inline `#FFI(c|cpp|asm)` under
+  `#Unsafe`. Rust FFI (M7) shipped first. Remaining C ABI correctness
+  work is tracked on #180/#436.
 - **Purity is a product feature, not just a comptime detail.** An explicit
   `=[]=>` effect row marks a function as pure (S60, as respelled by
   D-SHAPE8=A). This can eventually let Jet replace Nix for declarative

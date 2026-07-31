@@ -88,7 +88,7 @@ fn equal_split_compiles_and_runs() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        a.width == b.width
+        a.width == b.width,
         a.width + b.width == 200.0
     }
     aw :: form.value(form.h("a", "width"))
@@ -114,7 +114,7 @@ fn min_max_bounds_clamp() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        x.width >= 50.0
+        x.width >= 50.0,
         x.width <= 80.0
     }
     xv :: form.h("x", "width")
@@ -140,7 +140,7 @@ fn proportional_split_via_addition() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        a.width == b.width + b.width
+        a.width == b.width + b.width,
         a.width + b.width == 300.0
     }
     aw :: form.value(form.h("a", "width"))
@@ -190,7 +190,7 @@ fn duplicate_constraint_is_lint_not_error() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        a.width >= 80.0
+        a.width >= 80.0,
         a.width >= 80.0
     }
     print("ok")
@@ -221,7 +221,7 @@ fn infeasible_required_constraints_report_conflict() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        a.width >= 100.0
+        a.width >= 100.0,
         a.width <= 50.0
     }
     print("feasible={(form.is_feasible())}")
@@ -252,7 +252,7 @@ fn infeasible_value_read_panics_loudly() {
     let src = r#"
 fn run() {
     form :: Layout.{
-        a.width >= 100.0
+        a.width >= 100.0,
         a.width <= 50.0
     }
     print("{(form.value(form.h("a", "width")))}")

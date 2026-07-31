@@ -351,6 +351,8 @@ impl<'a> Parser<'a> {
     }
 
     /// D-LAYOUT-CTOR1: parse `name :: Layout.{ … }` into `Stmt::Layout`.
+    /// Body is a D-DOTCTOR3 element list of `Constraint` exprs (comma/semi),
+    /// not a statement block — same separator convention as `[T].{ … }`.
     fn layout_ctor_binding(&mut self) -> Result<Stmt, Diagnostic> {
         let (name, name_span) = self.expect_ident("for the layout binding name")?;
         let mutable = self.expect_bind_sigil()?;
@@ -375,11 +377,36 @@ impl<'a> Parser<'a> {
         }
         let type_tok = self.bump(); // `Layout`
         self.expect(TokKind::Dot, "before the layout constraint body")?;
-        self.expect(TokKind::LBrace, "to open a Layout typed literal")?;
         self.in_layout_body += 1;
-        let mut body = self.block_stmts();
+        let lit_body =
+            self.typed_lit_body_for_head(&Type::Named(Syntax::LAYOUT_TYPE.to_string()))?;
         self.in_layout_body -= 1;
         let end = self.toks[self.pos - 1].span.end;
+        let elems = match lit_body {
+            TypedLitBody::Elements(elems) => elems,
+            TypedLitBody::Empty => Vec::new(),
+            TypedLitBody::Fields(_)
+            | TypedLitBody::Entries(_)
+            | TypedLitBody::Value(_) => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "a `{}.{{ … }}` body is a comma-separated list of constraints",
+                        Syntax::LAYOUT_TYPE
+                    ),
+                    format!(
+                        "write comparisons separated by commas, e.g. `label.width >= 80.0, input.left == label.right`"
+                    ),
+                    format!(
+                        "write `{name} {} {}.{{ constraint, … }}`",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::LAYOUT_TYPE
+                    ),
+                    Some(name_span),
+                ));
+            }
+        };
+        let mut body: Vec<Stmt> = elems.into_iter().map(Stmt::Expr).collect();
         for stmt in &mut body {
             desugar_layout_anchors(&name, stmt);
         }

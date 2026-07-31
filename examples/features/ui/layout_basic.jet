@@ -1,12 +1,13 @@
 // Constraint layout — Cassowary-style solver (Tower c28/ca3ynsl,
 // D-LAYOUT1=A / D-LAYOUT-GATES1=A / D-LAYOUT-CTOR1). `name :: Layout.{ … }`
-// is a D-DOTCTOR3 typed literal whose body is `Constraint` elements (GATE 1
-// blesses `>=`/`<=`/`==` to return a `Constraint` instead of `Bool`, closed
-// to this type family only — same category as D-SIMD2). `box.anchor` reads
-// (`left`/`right`/`width`/`top`/`bottom`/`height`) auto-vivify a box scoped
-// to the layout; `self.anchor` is the container box named after the binding.
-// `left`/`right`/`width` are horizontal (`HVar`), `top`/`bottom`/`height`
-// are vertical (`VVar`) — mixing axes is a compile error (E2932).
+// is a D-DOTCTOR3 typed literal whose body is comma-separated `Constraint`
+// elements (GATE 1 blesses `>=`/`<=`/`==` to return a `Constraint` instead
+// of `Bool`, closed to this type family only — same category as D-SIMD2).
+// `box.anchor` reads (`left`/`right`/`width`/`top`/`bottom`/`height`)
+// auto-vivify a box scoped to the layout; `self.anchor` is the container
+// box named after the binding. `left`/`right`/`width` are horizontal
+// (`HVar`), `top`/`bottom`/`height` are vertical (`VVar`) — mixing axes is
+// a compile error (E2932).
 //
 // A two-column form: the label column has a minimum width, the input column
 // fills the rest of the row, and a fixed gap separates them. All three
@@ -14,8 +15,8 @@
 // read back with `.value()`.
 fn run() {
     form :: Layout.{
-        label.width >= 80.0
-        label.right + 16.0 == input.left
+        label.width >= 80.0,
+        label.right + 16.0 == input.left,
         label.width + 16.0 + input.width == self.width
     }
     // `self.width` inside the literal vivifies the container box
@@ -26,7 +27,5 @@ fn run() {
     form.suggest(form.h("form", "width"), 300.0)
     label_w :: form.value(form.h("label", "width"))
     input_w :: form.value(form.h("input", "width"))
-    print("label width: {label_w}")
-    print("input width: {input_w}")
-    print("feasible: {(form.is_feasible())}")
+    print("label width: {label_w}", "input width: {input_w}", "feasible: {(form.is_feasible())}")
 }

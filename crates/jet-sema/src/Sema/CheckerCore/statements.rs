@@ -2356,17 +2356,17 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::error(
                                     "E2933",
                                     format!(
-                                        "this line inside `{} {} {}.{{ … }}` doesn't produce a constraint (found `{}`)",
+                                        "this element inside `{} {} {}.{{ … }}` doesn't produce a constraint (found `{}`)",
                                         name,
                                         Syntax::SIGIL_BIND_IMMUT,
                                         Syntax::LAYOUT_TYPE,
                                         t.as_ref().map(|ty| ty.name()).unwrap_or_default()
                                     ),
                                     format!(
-                                        "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`)",
+                                        "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated",
                                         Syntax::LAYOUT_TYPE
                                     ),
-                                    "write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`".to_string(),
+                                    "write a comparison, e.g. `label.width >= 80.0`".to_string(),
                                     Some(e.span()),
                                 ));
                             } else if is_constraint && !seen_constraints.insert(fp) {

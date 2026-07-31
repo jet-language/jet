@@ -535,11 +535,9 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-LAYOUT1: `layout form { … }`. The parser desugared every
-            // `box.anchor` read into a `name.h(box, anchor)`/`name.v(box,
-            // anchor)` method call at parse time (D-LAYOUT1, `Parser/
-            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` — print the typed-literal
-            // surface; re-sugar `h`/`v` calls back to `box.anchor` / `self.anchor`.
+            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` — typed-literal element
+            // body (comma-separated Constraints). Re-sugar `h`/`v` calls back
+            // to `box.anchor` / `self.anchor`.
             Stmt::Layout { name, body, .. } => {
                 self.write(&format!(
                     "{} {} {}.{{",
@@ -550,7 +548,17 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 let resugared: Vec<Stmt> =
                     body.iter().map(|s| resugar_layout_stmt(name, s)).collect();
-                self.with_indent(|f| f.fmt_block_stmts(&resugared));
+                self.with_indent(|f| {
+                    for (i, stmt) in resugared.iter().enumerate() {
+                        if i > 0 {
+                            f.newline();
+                        }
+                        f.fmt_stmt(stmt);
+                        if i + 1 < resugared.len() {
+                            f.write(",");
+                        }
+                    }
+                });
                 self.end_block();
             }
             // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.

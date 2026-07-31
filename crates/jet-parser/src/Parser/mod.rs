@@ -209,14 +209,10 @@ struct Parser<'a> {
     type_generic_truncated: bool,
     /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
     pub_file_default: bool,
-    /// D-LAYOUT1 / D-LAYOUT-CTOR1: >0 while parsing a `Layout.{ … }` body. The
-    /// general "bare expression statement" rule (E0003) only allows
-    /// calls/field reads/assignments as a statement — a plain `>=`/`<=`/`==`
-    /// comparison is normally a no-op. Inside a layout body it's a constraint
-    /// element with a real side effect (GATE 1 desugars it to a
-    /// solver-registering call), so the parser lets `Expr::Binary` through
-    /// here; sema (E2932/E2933) enforces that it's actually a valid
-    /// constraint, not the parser.
+    /// D-LAYOUT1 / D-LAYOUT-CTOR1: >0 while parsing a `Layout.{ … }` body.
+    /// Retained for forks/probes; constraint elements are parsed as typed-
+    /// literal exprs (not bare expression statements), so the E0003
+    /// comparison-as-statement carve-out is unused on the happy path.
     in_layout_body: usize,
     /// >0 while a one-line effect-only `if` body is being parsed. The body's
     /// statement may end at an adjacent `else` instead of a line terminator.

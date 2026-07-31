@@ -1198,7 +1198,7 @@ implemented.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2932 | layout constraint mixes a horizontal and vertical value (`{lt}` and `{rt}`) | `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout. | Compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis). |
-| E2933 | this line inside `{name} :: Layout.{{ … }}` doesn't produce a constraint (found `{ty}`) | Every element directly inside a `Layout.{ … }` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`. |
+| E2933 | this element inside `{name} :: Layout.{{ … }}` doesn't produce a constraint (found `{ty}`) | Every element directly inside a `Layout.{ … }` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated like other typed-literal element bodies. | Write a comparison, e.g. `label.width >= 80.0`. |
 | E2934 | this constraint repeats one already written in this `Layout.{{ … }}` body | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
 | E2935 | `` `layout` is retired `` | Constraint layouts use typed-literal construction. | Write `` `{name} :: Layout.{{ … }}` ``. |
 | E2936 | the constraint-layout type is named `Layout`, not `LayoutHandle` | One name for the solver/container value (I8). | Write `Layout` instead of `LayoutHandle`. |

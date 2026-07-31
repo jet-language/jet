@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
         }
 
         /// D-DOTCTOR3: parse `{ … }` body shaped for `head`.
-        pub(super) fn typed_lit_body_for_head(
+        pub(in crate::Parser) fn typed_lit_body_for_head(
             &mut self,
             head: &Type,
         ) -> Result<TypedLitBody, Diagnostic> {
@@ -129,6 +129,9 @@ impl<'a> Parser<'a> {
             match head {
                 Type::Map { .. } => self.finish_typed_lit_entries(),
                 Type::List(_) | Type::FixedList { .. } => self.finish_typed_lit_elements(),
+                // D-LAYOUT-CTOR1: `Layout.{ … }` is an element body of
+                // `Constraint`s — same comma/semi separators as `[T].{ … }`.
+                Type::Named(n) if n == Syntax::LAYOUT_TYPE => self.finish_typed_lit_elements(),
                 Type::Named(_) | Type::Apply { .. }
                     if brace_body_looks_like_fields(&self.toks, self.pos) =>
                 {
@@ -152,7 +155,7 @@ impl<'a> Parser<'a> {
                 }
                 elems.push(self.list_elem()?);
             }
-            self.expect(TokKind::RBrace, "to close a typed list literal")?;
+            self.expect(TokKind::RBrace, "to close a typed literal")?;
             Ok(TypedLitBody::Elements(elems))
         }
 

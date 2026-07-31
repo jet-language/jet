@@ -2165,8 +2165,8 @@ fn fmt_layout_block_round_trips_byte_for_byte() {
     let src = "\
 fn run() {
     form :: Layout.{
-        label.width >= 80.0
-        label.right + 16.0 == input.left
+        label.width >= 80.0,
+        label.right + 16.0 == input.left,
         label.width + 16.0 + input.width == self.width
     }
     w :: form.value(form.h(\"label\", \"width\"))

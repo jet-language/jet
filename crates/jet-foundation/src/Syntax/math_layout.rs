@@ -53,16 +53,17 @@ pub const LAYOUT_HANDLE_TYPE_RETIRED: &str = "LayoutHandle";
 pub const LAYOUT_HANDLE_TYPE: &str = LAYOUT_TYPE;
 
 /// D-LAYOUT-CTOR1 (D-VERDICT-1306-1): `name :: Layout.{ … }` — a D-DOTCTOR3
-/// typed-literal construction whose body is a sequence of `Constraint`
-/// elements. Binds `name` (a `Layout`) in the enclosing scope (the handle
-/// outlives the literal, unlike `taskgroup`/`region`, since solved values
-/// are read after layout is defined). Each body line must be a
-/// `>=`/`<=`/`==` comparison of layout values (a `Constraint`); the parser
-/// desugars bare `box.anchor` reads (`left`/`right`/`top`/`bottom`/`width`/
-/// `height`) into `name.h(box, anchor)` / `name.v(box, anchor)` calls, and
-/// `self.anchor` vivifies the container box named after the binding.
-/// Sema/codegen treat those exactly like any other `Layout` method call —
-/// no parallel checking mechanism; GATE 1/2 do all the real work.
+/// typed-literal construction whose body is a comma-separated sequence of
+/// `Constraint` elements (same separators as `[T].{ … }`). Binds `name` (a
+/// `Layout`) in the enclosing scope (the handle outlives the literal, unlike
+/// `taskgroup`/`region`, since solved values are read after layout is
+/// defined). Each element must be a `>=`/`<=`/`==` comparison of layout
+/// values (a `Constraint`); the parser desugars bare `box.anchor` reads
+/// (`left`/`right`/`top`/`bottom`/`width`/`height`) into
+/// `name.h(box, anchor)` / `name.v(box, anchor)` calls, and `self.anchor`
+/// vivifies the container box named after the binding. Sema/codegen treat
+/// those exactly like any other `Layout` method call — no parallel checking
+/// mechanism; GATE 1/2 do all the real work.
 ///
 /// Retired `layout NAME { … }` keyword (D-LAYOUT1) is E2935 only.
 pub const FOREIGN_LAYOUT_KW: &str = "layout";
