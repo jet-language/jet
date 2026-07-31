@@ -465,3 +465,197 @@ fn run() {
         "safe control must lower through the synchronized Shared<T> runtime"
     );
 }
+
+// D-TASKBORROW1=A (card #1199): a `taskgroup` joins every child, so a child may
+// borrow places the owner still holds. Reads are free; writes are admitted only
+// when sema proves the places disjoint. `tasks.spawn`, channels, and detach keep
+// the ownership-only rules.
+
+fn assert_accepted(source: &str) -> jet::CompileOutput {
+    match jet::compile(source) {
+        Ok(output) => output,
+        Err(diagnostics) => panic!(
+            "source must compile, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect::<Vec<_>>()
+        ),
+    }
+}
+
+const PARTICLES: &str = r#"
+struct Particle { position: Int, velocity: Int }
+"#;
+
+#[test]
+fn taskgroup_child_reads_borrowed_stack_data() {
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        window :: particles[0..1]
+        a :: g.task => window[0].position
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_accepted(&source);
+}
+
+#[test]
+fn taskgroup_children_borrow_disjoint_write_places() {
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
+    taskgroup g {{
+        left :: &particles[0]
+        right :: &particles[2]
+        a :: g.task => {{
+            left.position += left.velocity
+            left.position
+        }}
+        b :: g.task => {{
+            right.position += right.velocity
+            right.position
+        }}
+        print(g.all([a, b]))
+    }}
+}}
+"#
+    );
+    let output = assert_accepted(&source);
+    assert!(
+        output.rust.contains("spawn_scoped"),
+        "a borrowed taskgroup child must launch through the scoped path whose loan the group closes at join"
+    );
+}
+
+#[test]
+fn taskgroup_children_writing_one_place_are_rejected() {
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        one :: &particles[0]
+        two :: &particles[0]
+        a :: g.task => {{
+            one.position += 1
+            one.position
+        }}
+        b :: g.task => {{
+            two.position += 1
+            two.position
+        }}
+        print(g.all([a, b]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1101");
+}
+
+#[test]
+fn taskgroup_read_and_write_of_one_place_are_rejected() {
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        writer :: &particles[0]
+        reader :: particles[0..1]
+        a :: g.task => {{
+            writer.position += 1
+            writer.position
+        }}
+        b :: g.task => reader[0].position
+        print(g.all([a, b]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1101");
+}
+
+#[test]
+fn detached_task_still_rejects_a_borrowed_capture() {
+    let source = format!(
+        r#"use core.tasks as tasks
+{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    left :: &particles[0]
+    worker :: tasks.spawn(() => left.position)
+    print(worker.join())
+}}
+"#
+    );
+    assert_rejected(&source, "E1102");
+}
+
+#[test]
+fn nested_taskgroups_track_their_own_borrows() {
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
+    taskgroup outer {{
+        left :: &particles[0]
+        a :: outer.task => {{
+            left.position += 1
+            left.position
+        }}
+        taskgroup inner {{
+            right :: &particles[2]
+            b :: inner.task => {{
+                right.position += 1
+                right.position
+            }}
+            print(inner.all([b]))
+        }}
+        print(outer.all([a]))
+    }}
+}}
+"#
+    );
+    assert_accepted(&source);
+}
+
+#[test]
+fn a_group_cannot_lend_an_owner_declared_inside_its_own_block() {
+    // The owner drops before the group joins, so the loan could outlive it.
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    taskgroup g {{
+        particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+        left :: &particles[0]
+        a :: g.task => {{
+            left.position += 1
+            left.position
+        }}
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1102");
+}
+
+#[test]
+fn a_taskgroup_parameter_cannot_lend_a_borrow() {
+    // The join runs in the caller's frame, so this frame cannot prove the
+    // borrowed owner outlives it.
+    let source = r#"
+fn spawn_view(group: TaskGroup, values: View<Int>) {
+    task :: group.task => values[0]
+    print(task.join())
+}
+fn run() {}
+"#;
+    assert_rejected(source, "E1102");
+}

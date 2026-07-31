@@ -324,9 +324,11 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
         .filter(|n| env.locals.contains_key(n))
         .map(|name| JitSpawnCapture {
             clone_at_spawn: cloned.contains(name.as_str()),
+            // D-TASKBORROW1=A: a borrowed split-view crosses as its window
+            // handle, not as the element type its Jet binding shows.
             ty: env
-                .ty_of(&name)
-                .clone()
+                .split_view_handle(&name)
+                .or_else(|| env.ty_of(&name))
                 .unwrap_or_else(|| Type::Named("Unit".to_string())),
             name,
         })

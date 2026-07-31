@@ -30,6 +30,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         gc_locals: env.gc_locals.clone(),
         uninit_fixed_locals: env.uninit_fixed_locals.clone(),
         gc_return: env.gc_return,
+        split_view_handles: env.split_view_handles.clone(),
         cloned_types: env.cloned_types.clone(),
     }
 }

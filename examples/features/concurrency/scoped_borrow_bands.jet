@@ -1,0 +1,33 @@
+// D-TASKBORROW1=A: a taskgroup joins every child, so a child may borrow a place
+// its owner still holds. Reads are free. Writes are admitted only where sema can
+// prove the places never overlap — here, two constant indexes into one list.
+// The loan opens before the child launches and closes when the group joins, so
+// the owner sees every write once the block ends.
+struct Particle {
+    position: Int
+    velocity: Int
+}
+
+fn run() {
+    particles := [Particle].{
+        .{position: 10, velocity: 2},
+        .{position: 20, velocity: 3},
+        .{position: 30, velocity: 4}
+    }
+    taskgroup g {
+        left :: &particles[0]
+        right :: &particles[2]
+        moved_left :: g.task => {
+            left.position += left.velocity
+            left.position
+        }
+        moved_right :: g.task => {
+            right.position += right.velocity
+            right.position
+        }
+        print(g.all([moved_left, moved_right]))
+    }
+    print(particles[0].position)
+    print(particles[1].position)
+    print(particles[2].position)
+}

@@ -2236,7 +2236,8 @@ impl<'a> Checker<'a> {
                             constant_value: None,
                         },
                     );
-                    self.taskgroup_stack.push(TaskGroupCtx::new(name.clone()));
+                    self.taskgroup_stack
+                        .push(TaskGroupCtx::new(name.clone(), *name_span));
                     self.check_block(body, false);
                     let join_start = body.len();
                     self.append_taskgroup_auto_joins(body);

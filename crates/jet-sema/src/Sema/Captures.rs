@@ -551,6 +551,23 @@ pub(crate) fn lvalue_refs_name(lv: &LValue, name: &str) -> bool {
     }
 }
 
+/// Does `stmt` use `name` anywhere, including inside a lambda body?
+///
+/// `stmt_refs_name` stops at the lambda boundary on purpose. The split-view
+/// planner needs the other answer: a `taskgroup` child that borrows a place
+/// uses it inside a lambda, and missing that use would end the place's live
+/// range too early and emit a borrow of a temporary instead of a real split.
+pub(crate) fn stmt_uses_name_through_lambdas(stmt: &Stmt, name: &str) -> bool {
+    if stmt_refs_name(stmt, name) {
+        return true;
+    }
+    let mut bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut written = HashSet::new();
+    stmt_collect_captures(stmt, &mut bound, &mut read, &mut written);
+    read.contains(name) || written.contains(name)
+}
+
 pub(crate) fn lambda_collect_captures(
     body: &LambdaBody,
     params: &HashSet<String>,

@@ -2161,11 +2161,36 @@ fn add_work(group: TaskGroup, value: Int) {
 ```
 
 A spawn through a `TaskGroup` parameter may capture only copied or moved owned
-values. It may not capture a `view`. `TaskGroup` remains a scoped authority, not
+values. It may not capture a `view`: the group joins in the caller's frame, so
+this frame cannot prove a borrowed owner outlives the loan. `TaskGroup` remains a scoped authority, not
 a general value: it is illegal in fields, returns, local declarations, lambda
 parameters, and escaping closures. The parameter carries the lexical group's
 internal collector. A task spawned by a helper therefore remains owned by the
 caller's group and is cancelled and joined at that outer scope's exit.
+
+#### Borrowed captures in a group child (D-TASKBORROW1=A)
+
+A lexical group joins every child before its block returns, so a child may
+borrow places the owner still holds — the loan opens before the child launches
+and closes at the join. Reads are borrowed freely. A write borrow is admitted
+only where the compiler proves the places never overlap; distinct fields and
+distinct constant indexes are disjoint, and anything dynamic is treated as
+overlapping. Two children reaching one place is **E1101**.
+
+```jet
+taskgroup g {
+    left :: &particles[0]
+    right :: &particles[2]
+    a :: g.task => { left.position += left.velocity; left.position }
+    b :: g.task => { right.position += right.velocity; right.position }
+    print(g.all([a, b]))
+}
+```
+
+A group lends only what outlives its own join. An owner declared inside the
+group's own block drops before the group joins, and a group reached through a
+`TaskGroup` parameter joins in another frame; both stay **E1102**. Detached
+tasks, channels, and `tasks.spawn` are unchanged — they still require ownership.
 
 Combinators are methods on the group handle only (no detached work):
 

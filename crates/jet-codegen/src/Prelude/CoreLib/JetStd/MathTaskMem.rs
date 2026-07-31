@@ -282,6 +282,27 @@
             task
         }
 
+        /// D-TASKBORROW1=A: spawn a child that borrows places its owner still
+        /// holds. Sema proves every borrowed place disjoint before this is
+        /// emitted; the loan is closed by `Drop for JetTaskGroup`, which
+        /// cancels and joins every child before the group's scope ends. That
+        /// join is what makes the lifetime erasure below sound — the same
+        /// contract `std::thread::scope` relies on.
+        pub fn spawn_scoped<'env, F, T>(&self, f: F) -> JetTask<T>
+        where
+            F: FnOnce() -> T + Send + 'env,
+            T: Send + 'static,
+        {
+            let boxed: Box<dyn FnOnce() -> T + Send + 'env> = Box::new(f);
+            // JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_scoped
+            let erased: Box<dyn FnOnce() -> T + Send + 'static> =
+                unsafe { std::mem::transmute(boxed) };
+            // JET_VETTED_UNSAFE_END: jet_taskgroup_scoped
+            let task = JetTask::spawn(move || erased());
+            self.children.register(task.state.clone());
+            task
+        }
+
         pub fn close(&self) {
             self.children
                 .close_with(|child| child.cancel(), |child| child.join());

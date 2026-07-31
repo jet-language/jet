@@ -54,6 +54,11 @@ pub(crate) struct LowerEnv {
     /// index writes so AOT can use the vetted `jet_mem` storage wrapper.
     pub(super) uninit_fixed_locals: HashSet<String>,
     pub(super) gc_return: bool,
+    /// D-TASKBORROW1=A: split-view locals and the handle type engines other
+    /// than AOT hold them as. AOT keeps a real Rust reference; the JIT keeps a
+    /// `ViewMut`/`View` window record, and a spawned task capturing one must be
+    /// typed as that window or the child reads the wrong shape.
+    pub(super) split_view_handles: HashMap<String, Type>,
     /// Operand types that lowering materializes with Rust `.clone()`. Generic
     /// function emission uses this to add `Clone` only where the body needs it.
     pub(super) cloned_types: Rc<RefCell<Vec<Type>>>,
@@ -74,8 +79,16 @@ impl LowerEnv {
             gc_locals: HashSet::new(),
             uninit_fixed_locals: HashSet::new(),
             gc_return: false,
+            split_view_handles: HashMap::new(),
             cloned_types: Rc::new(RefCell::new(Vec::new())),
         }
+    }
+    /// Record the non-AOT handle type for a split-view local (see the field).
+    pub(super) fn mark_split_view(&mut self, name: &str, handle: Type) {
+        self.split_view_handles.insert(name.to_string(), handle);
+    }
+    pub(super) fn split_view_handle(&self, name: &str) -> Option<Type> {
+        self.split_view_handles.get(name).cloned()
     }
     /// D-MEM1 stage S5: mark `name` as a string-view local (see `string_view_locals`).
     pub(super) fn mark_string_view(&mut self, name: &str) {

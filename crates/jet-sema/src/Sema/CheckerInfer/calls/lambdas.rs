@@ -3,7 +3,9 @@ use crate::Diagnostics::Diagnostic;
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerInfer::is_reactive_handle_ty;
 use crate::Sema::Diagnostics::{is_cloneable, type_fix_hint};
-use crate::Sema::{Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem};
+use crate::Sema::{
+    Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem, ViewAccess,
+};
 use crate::Syntax;
 use std::collections::HashSet;
     impl<'a> Checker<'a> {
@@ -113,6 +115,12 @@ use std::collections::HashSet;
                 if param_names.contains(name) || take_set.contains(name) {
                     continue;
                 }
+                // D-TASKBORROW1=A: a write borrow (`&place`) is already a
+                // changeable place. Inside a taskgroup child it stays one; the
+                // disjointness proof below is what keeps the writes safe.
+                if self.in_taskgroup_spawn && self.is_write_borrow(name) {
+                    continue;
+                }
                 if let Some(info) = self.lookup(name) {
                     if !info.mutable {
                         self.diags.push(Diagnostic::error(
@@ -185,6 +193,25 @@ use std::collections::HashSet;
                     }
                     let taken = take_set.contains(name);
                     let cloneable = is_cloneable(&cap_ty, self.registry);
+                    // D-TASKBORROW1=A: a `taskgroup` child is joined by its group,
+                    // so it may borrow places the owner still holds. Reads are free;
+                    // writes need proven-disjoint places. Detached tasks, channels,
+                    // and `tasks.spawn` keep the ownership-only rules below.
+                    if self.in_taskgroup_spawn {
+                        let fallback = match cap_conv {
+                            Some(AccessConvention::Write) => Some(ViewAccess::Write),
+                            Some(AccessConvention::Read) => Some(ViewAccess::Read),
+                            _ => None,
+                        };
+                        match self.admit_scoped_borrow(name, fallback, lam.span) {
+                            Some(true) => {
+                                lam.meta.scoped_task_borrow = true;
+                                continue;
+                            }
+                            Some(false) => continue,
+                            None => {}
+                        }
+                    }
                     if !cap_ty.is_scalar()
                         && !cloneable
                         && matches!(

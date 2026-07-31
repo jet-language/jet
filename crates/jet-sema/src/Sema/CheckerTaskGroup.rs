@@ -11,10 +11,24 @@ pub(crate) struct PendingTaskSpawn {
     pub consumed: bool,
 }
 
+/// D-TASKBORROW1=A: one borrowed place a child of this group holds. Loans open
+/// before the child launches and close when the group joins.
+pub(crate) struct ScopedBorrow {
+    pub name: String,
+    pub place: ViewPlace,
+    pub access: ViewAccess,
+}
+
 pub(crate) struct TaskGroupCtx {
     pub name: String,
     pub origin: TaskGroupOrigin,
     pub pending: Vec<PendingTaskSpawn>,
+    /// Borrowed places already lent to earlier children of this group.
+    pub borrows: Vec<ScopedBorrow>,
+    /// Where this group's handle is declared. A borrowed owner declared after
+    /// this point lives inside the group's own scope and would be dropped
+    /// before the group joins, so it can never be lent to a child.
+    pub handle_span: Span,
     synth_counter: usize,
 }
 
@@ -25,11 +39,13 @@ pub(crate) enum TaskGroupOrigin {
 }
 
 impl TaskGroupCtx {
-    pub(crate) fn new(name: String) -> Self {
+    pub(crate) fn new(name: String, handle_span: Span) -> Self {
         Self {
             name,
             origin: TaskGroupOrigin::Lexical,
             pending: Vec::new(),
+            borrows: Vec::new(),
+            handle_span,
             synth_counter: 0,
         }
     }
@@ -39,6 +55,8 @@ impl TaskGroupCtx {
             name,
             origin: TaskGroupOrigin::Parameter,
             pending: Vec::new(),
+            borrows: Vec::new(),
+            handle_span: Span::new(0, 0),
             synth_counter: 0,
         }
     }
@@ -107,6 +125,99 @@ impl<'a> Checker<'a> {
             ));
         }
         false
+    }
+
+    /// True when `name` is a `&place` write borrow.
+    pub(crate) fn is_write_borrow(&self, name: &str) -> bool {
+        self.view_fact(name)
+            .is_some_and(|fact| matches!(fact.access, ViewAccess::Write))
+    }
+
+    /// D-TASKBORROW1=A: admit a borrowed capture in a `taskgroup` child.
+    ///
+    /// Reads are admitted freely; a write is admitted only when its place is
+    /// provably disjoint from every place a sibling already holds. A group can
+    /// only lend what outlives its own join, so two shapes are never lent:
+    /// a group reached through a `TaskGroup` parameter (its join runs in
+    /// another frame) and an owner declared inside the group's own block (it
+    /// drops before the group joins).
+    ///
+    /// `None` means this capture is not a borrowed place the group can lend, so
+    /// the caller keeps its ordinary ownership rules. `Some(false)` means the
+    /// borrow was rejected and a diagnostic was reported.
+    pub(crate) fn admit_scoped_borrow(
+        &mut self,
+        name: &str,
+        fallback: Option<ViewAccess>,
+        span: Span,
+    ) -> Option<bool> {
+        let Some(active) = self.taskgroup_stack.last() else {
+            return None;
+        };
+        if active.origin == TaskGroupOrigin::Parameter {
+            return None;
+        }
+        let handle_start = active.handle_span.start;
+        let (place, access) = match self.view_fact(name) {
+            Some(fact) => (fact.place.clone(), fact.access),
+            // A borrowed parameter is stack data the caller still owns. It has
+            // no projection fact, so the whole binding is the borrowed place.
+            None => match (fallback, self.lookup(name)) {
+                (Some(access), Some(info)) => (
+                    ViewPlace {
+                        owner: ViewOwnerId {
+                            name: name.to_string(),
+                            def_span: info.def_span,
+                            origin: ViewOwnerOrigin::Local,
+                        },
+                        projections: Vec::new(),
+                    },
+                    access,
+                ),
+                _ => return None,
+            },
+        };
+        // The owner must already exist where the group handle is declared.
+        // Anything created inside the block drops before the group joins.
+        if place.owner.def_span.start > handle_start {
+            return None;
+        }
+        // Every live group lends at the same time, so an inner group's child
+        // races an outer group's child just as two siblings do.
+        let conflict = self
+            .taskgroup_stack
+            .iter()
+            .flat_map(|group| group.borrows.iter())
+            .find(|held| {
+                (matches!(access, ViewAccess::Write) || matches!(held.access, ViewAccess::Write))
+                    && held.place.overlaps(&place)
+            })
+            .map(|held| held.name.clone());
+        if let Some(other) = conflict {
+            let what = if other == name {
+                format!("`{name}` is already lent to another task in this group")
+            } else {
+                format!("`{name}` and `{other}` can reach the same place at the same time")
+            };
+            self.diags.push(Diagnostic::error(
+                "E1101",
+                what,
+                "a taskgroup runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap"
+                    .to_string(),
+                "borrow separate fields or constant indexes, give each task its own owned copy, or send results back through a channel"
+                    .to_string(),
+                Some(span),
+            ));
+            return Some(false);
+        }
+        if let Some(group) = self.taskgroup_stack.last_mut() {
+            group.borrows.push(ScopedBorrow {
+                name: name.to_string(),
+                place,
+                access,
+            });
+        }
+        Some(true)
     }
 
     pub(crate) fn register_taskgroup_spawn(

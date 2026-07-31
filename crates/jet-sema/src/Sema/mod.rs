@@ -1826,6 +1826,12 @@ pub fn stmt_references_name_exact(stmt: &Stmt, name: &str) -> bool {
     Captures::stmt_refs_name(stmt, name)
 }
 
+/// Same question as `stmt_references_name_exact`, but a use inside a lambda
+/// body counts. D-TASKBORROW1=A: a `taskgroup` child borrows through a lambda.
+pub fn stmt_references_name_deep(stmt: &Stmt, name: &str) -> bool {
+    Captures::stmt_uses_name_through_lambdas(stmt, name)
+}
+
 pub(crate) use CheckerCli::*;
 pub use CheckerCoreLib::*;
 pub(crate) use CheckerFieldPolicy::*;

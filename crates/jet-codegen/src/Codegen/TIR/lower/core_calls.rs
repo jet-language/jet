@@ -86,6 +86,8 @@ pub(crate) fn lower_core_closure_call(
                         group: None,
                         site,
                         spawn_closure,
+                        // `tasks.spawn` is detached-capable: ownership only.
+                        scoped: false,
                     },
                 },
             });

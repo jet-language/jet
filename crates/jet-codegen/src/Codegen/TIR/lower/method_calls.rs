@@ -821,6 +821,7 @@ pub(crate) fn lower_method_call(
                         group: Some(Box::new(group)),
                         site,
                         spawn_closure,
+                        scoped: lam.meta.scoped_task_borrow,
                     },
                 },
             };

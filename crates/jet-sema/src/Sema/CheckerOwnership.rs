@@ -469,7 +469,7 @@ impl<'a> Checker<'a> {
         variants.contains(left_variant) && variants.contains(right_variant)
     }
 
-    fn view_fact(&self, name: &str) -> Option<&ViewFact> {
+    pub(crate) fn view_fact(&self, name: &str) -> Option<&ViewFact> {
         let binding = self.lookup(name)?;
         self.view_facts.current_for_binding(name, binding.def_span)
     }

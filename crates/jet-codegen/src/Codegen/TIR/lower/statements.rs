@@ -56,6 +56,27 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 TLocal::user(&candidate.name)
             };
             env.bind(&candidate.name, slot, candidate.ty.clone());
+            // D-TASKBORROW1=A: engines that keep a window record rather than a
+            // Rust reference need the window type when this local crosses into
+            // a taskgroup child. AOT ignores this fact.
+            if let Some(elem) = elem_ty.clone() {
+                let handle = if candidate.write {
+                    Some(Type::Apply {
+                        name: "ViewMut".to_string(),
+                        args: vec![elem],
+                    })
+                } else if !candidate.single {
+                    Some(Type::Apply {
+                        name: "View".to_string(),
+                        args: vec![elem],
+                    })
+                } else {
+                    None
+                };
+                if let Some(handle) = handle {
+                    env.mark_split_view(&candidate.name, handle);
+                }
+            }
             out.push(TStmt::SplitViews {
                 owner: view
                     .initialize
@@ -215,7 +236,7 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
         candidate.last_use = stmts[candidate.stmt_index + 1..]
             .iter()
             .enumerate()
-            .filter(|(_, stmt)| crate::Sema::stmt_references_name_exact(stmt, &candidate.name))
+            .filter(|(_, stmt)| crate::Sema::stmt_references_name_deep(stmt, &candidate.name))
             .map(|(offset, _)| candidate.stmt_index + 1 + offset)
             .next_back()
             .unwrap_or(candidate.stmt_index);
