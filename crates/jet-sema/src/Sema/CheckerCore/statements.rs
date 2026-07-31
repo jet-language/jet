@@ -5,7 +5,7 @@ use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
-    type_fix_hint, undefined_loop_label,
+    type_fix_hint, type_holds_task_handle, undefined_loop_label,
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
@@ -1812,25 +1812,59 @@ impl<'a> Checker<'a> {
                             }
                             let coll_ty = self.infer(collection);
                             let borrowed = collection_root_name(collection);
-                            // A list whose elements cannot be copied is iterated
-                            // by value: each step hands you the element itself,
-                            // which consumes the list. This frame must therefore
-                            // own it. Reject a borrowed collection here — codegen
-                            // would move out of a reference and rustc's E0507
-                            // would reach the user as an ICE (I2).
-                            let consumes_collection = var2.is_none()
-                                && matches!(
-                                    &coll_ty,
-                                    Some(Type::List(inner) | Type::FixedList { elem: inner, .. })
-                                        if matches!(
-                                            inner.as_ref(),
-                                            Type::Apply { name, .. } if name == "Task"
-                                        )
-                                );
-                            let owns_collection =
-                                !consumes_collection || self.frame_owns_place(collection);
+                            // A collection iterated by value is consumed: each
+                            // step hands you the element itself. Match codegen's
+                            // `by_value` predicate exactly — task-handle lists
+                            // (including nested `[[Task<…>]]`), Stream, Iter, and
+                            // HTTPBodyChunks. Two-binding loops consume too.
+                            let task_list_consume = matches!(
+                                &coll_ty,
+                                Some(Type::List(inner) | Type::FixedList { elem: inner, .. })
+                                    if type_holds_task_handle(inner)
+                            );
+                            let streaming_consume = matches!(
+                                &coll_ty,
+                                Some(Type::Apply { name, .. })
+                                    if name == crate::Syntax::TYPE_STREAM
+                                        || name == Syntax::TYPE_ITER
+                            ) || matches!(
+                                &coll_ty,
+                                Some(Type::Named(name)) if name == "HTTPBodyChunks"
+                            );
+                            let consumes_collection = task_list_consume || streaming_consume;
+                            let owns_collection = !consumes_collection
+                                || self.frame_can_consume_collection(collection);
                             if !owns_collection {
-                                self.report_borrowed_loop_consume(collection, &coll_ty);
+                                if task_list_consume {
+                                    self.report_borrowed_loop_consume(collection, &coll_ty);
+                                } else {
+                                    // Stream / Iter / HTTPBodyChunks. Peel
+                                    // Paren/Copy so a wrapped Ident still hits
+                                    // the move helper; field/index must get a
+                                    // diagnostic — consume_builtin_receiver is
+                                    // Ident-only and codegen still iterates by
+                                    // value (I2).
+                                    let place = match &*collection {
+                                        Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
+                                            inner.as_ref()
+                                        }
+                                        other => other,
+                                    };
+                                    if matches!(place, Expr::Ident(..)) {
+                                        self.consume_builtin_receiver(place, "loop");
+                                    } else {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0120",
+                                            "this loop can't take a stream or iterator out of a field or index"
+                                                .to_string(),
+                                            "each step pulls from the source itself, so the loop must take a whole value this scope owns"
+                                                .to_string(),
+                                            "bind it into a local this scope owns first (`src := …`), then write `loop x, src { … }`"
+                                                .to_string(),
+                                            Some(collection.span()),
+                                        ));
+                                    }
+                                }
                             }
                             let lending_var = match (&coll_ty, var2.as_ref()) {
                                 (
@@ -1950,17 +1984,6 @@ impl<'a> Checker<'a> {
                                 {
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
-                                // D-ITERTOOLS1=A: `loop x; lazy_iter` — consume one item per
-                                // step from a lazy `Iter<T>` view (adapters / string split).
-                                Some(Type::Apply { name, args })
-                                    if name == crate::Syntax::TYPE_ITER && args.len() == 1 =>
-                                {
-                                    if let Some(root) = expr_root_ident(collection) {
-                                        self.consume_builtin_receiver(collection, "loop");
-                                        let _ = root;
-                                    }
-                                    self.declare_loop_var(var.clone(), *var_span, &args[0]);
-                                }
                                 // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x; window` — View iterates
                                 // elements; two bindings are index then item.
                                 Some(Type::Apply { name, args })
@@ -2002,15 +2025,15 @@ impl<'a> Checker<'a> {
                                 self.iter_borrowed.remove(&n);
                             }
                             self.loop_depth -= 1;
-                            // A list of non-cloneable elements cannot be iterated by
-                            // copy, so the loop takes the collection. Record the move
-                            // after leaving the loop: the collection is consumed by
-                            // this loop, not inside it, so a later use is ordinary
-                            // use-after-move (E0121) instead of a rustc rejection (I2).
+                            // A by-value collection cannot be iterated by copy, so
+                            // the loop takes it. Record the move after leaving the
+                            // loop: the collection is consumed by this loop, not
+                            // inside it, so a later use is ordinary use-after-move
+                            // (E0121) instead of a rustc rejection (I2).
                             // `consumes_collection` above matches the codegen
-                            // predicate exactly: only a task-handle list is
-                            // consumed. A borrowed collection already reported
-                            // E0120, so do not also record a move it never made.
+                            // `by_value` predicate. A collection this frame could
+                            // not take already reported E0120, so do not also
+                            // record a move it never made.
                             if consumes_collection && owns_collection {
                                 if let Some(name) = borrowed {
                                     self.mark_moved(name, collection.span());

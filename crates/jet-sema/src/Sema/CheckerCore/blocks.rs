@@ -27,6 +27,7 @@ impl<'a> Checker<'a> {
                 self.stmt_tail_ptr = tail.as_ptr();
                 self.stmt_tail_len = tail.len();
                 self.views_used_in_stmt.clear();
+                self.scoped_loan_read_reported = false;
                 self.check_stmt(&mut stmts[i]);
             }
             if pushed_frame {

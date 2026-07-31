@@ -695,6 +695,48 @@ fn run() {{
 }
 
 #[test]
+fn a_write_lent_place_cannot_be_read_by_the_parent_before_the_group_joins() {
+    // A parent read races the child's write. Sequentially a read beside a live
+    // write view is fine, so this rule is specific to the concurrent case.
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        left :: &particles[0]
+        a :: g.task => {{
+            left.position += left.velocity
+            left.position
+        }}
+        print(particles[0].position)
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1101");
+}
+
+#[test]
+fn a_read_lent_place_stays_readable_by_the_parent() {
+    // Shared reads do not race each other, so a read loan constrains nothing.
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        window :: particles[0..1]
+        a :: g.task => window[0].position
+        print(particles[0].position)
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_accepted(&source);
+}
+
+#[test]
 fn a_place_the_group_never_lent_stays_writable() {
     // The loan covers `particles[0]`. `particles[1]` is proven disjoint, so the
     // parent may still write it while the child runs.

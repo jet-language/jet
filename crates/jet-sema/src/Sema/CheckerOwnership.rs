@@ -1945,6 +1945,25 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// True when a by-value loop may take `place` as the collection itself.
+    ///
+    /// Only a bare owned local or an rvalue is consumable. A field, index, or
+    /// slice still names storage inside another value — moving elements out of
+    /// that storage is `E0507`/`E0508` in the generated Rust (I2), even when the
+    /// root local is owned. Infer may wrap an owning field read in `Copy` so
+    /// rustc never sees a partial move; peel that wrap so the loop still sees
+    /// the projection and rejects it instead of cloning a task handle.
+    pub(crate) fn frame_can_consume_collection(&self, place: &Expr) -> bool {
+        match place {
+            Expr::Ident(..) => self.frame_owns_place(place),
+            Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
+                self.frame_can_consume_collection(inner)
+            }
+            _ if expr_root_ident(place).is_none() => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn is_write_view(&self, name: &str) -> bool {
         self.view_fact(name)
             .is_some_and(|fact| fact.access == ViewAccess::Write)
@@ -3847,6 +3866,15 @@ impl<'a> Checker<'a> {
                 "acquire a new `{}` resource; closed resources cannot be copied or reused",
                 moved_ty.as_ref().map(Type::show).unwrap_or_default()
             )
+        } else if moved_ty.as_ref().is_some_and(is_one_pass_source) {
+            match moved_ty.as_ref().and_then(one_pass_materializer) {
+                Some(method) => format!(
+                    "`{moved_place}` is one-pass — materialize it first with `{moved_place}{method}`, or create a fresh source for the second drive"
+                ),
+                None => format!(
+                    "`{moved_place}` is one-pass and cannot be copied — create a fresh source for the second drive"
+                ),
+            }
         } else {
             format!(
                 "give away a copy instead (`{}{}`) where it moved",
@@ -4574,35 +4602,72 @@ impl<'a> Checker<'a> {
     }
 
     /// E0120: `loop h, hs { … }` over a list of handles that cannot be copied
-    /// hands out each handle itself, which takes the list. `hs` is borrowed, so
-    /// this frame cannot give it away.
+    /// hands out each handle itself, which takes the list. The collection must
+    /// be a bare owned local or a temporary — a borrowed name, view, field, or
+    /// index cannot give the list away.
     pub(crate) fn report_borrowed_loop_consume(
         &mut self,
         collection: &Expr,
         coll_ty: &Option<Type>,
     ) {
-        let name = expr_root_ident(collection)
-            .map(str::to_string)
-            .unwrap_or_else(|| "this list".to_string());
         let list_ty = coll_ty
             .as_ref()
             .map(Type::show)
             .unwrap_or_else(|| "[Task<T>]".to_string());
-        let owned = self
-            .lookup(&name)
-            .filter(|info| info.param_conv.is_some())
-            .map(|_| format!("take the list with `{name}: {}{list_ty}`, or ", Syntax::SIGIL_MOVE))
-            .unwrap_or_else(|| "copy the handles into a list this scope owns, or ".to_string());
-        self.diags.push(Diagnostic::error(
-            "E0120",
-            format!("`{name}` was not moved here, so this loop can't take its handles"),
-            "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
-                .to_string(),
-            format!(
-                "{owned}drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`"
-            ),
-            Some(collection.span()),
-        ));
+        let why = "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
+            .to_string();
+        // Infer may wrap an owning field/index read in `Copy`; report against
+        // the underlying place so the fix names the projection, not a clone.
+        let place = match collection {
+            Expr::Paren(inner, _) | Expr::Copy(inner, _) => inner.as_ref(),
+            other => other,
+        };
+        match place {
+            // Bare name: the fix names that list. Suggest `^` only when it is a
+            // parameter, and only then offer the group helpers on the same name.
+            Expr::Ident(name, _) => {
+                let info = self.lookup(name);
+                let is_param = info.as_ref().is_some_and(|info| info.param_conv.is_some());
+                let is_task_list = info.as_ref().is_some_and(|info| {
+                    matches!(
+                        &info.ty,
+                        Type::List(inner) | Type::FixedList { elem: inner, .. }
+                            if type_holds_task_handle(inner)
+                    )
+                });
+                let fix = if is_param && is_task_list {
+                    format!(
+                        "take the list with `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
+                        Syntax::SIGIL_MOVE
+                    )
+                } else if is_task_list {
+                    format!(
+                        "move the list into a local this scope owns, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`"
+                    )
+                } else {
+                    "move the list into a local this scope owns first".to_string()
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0120",
+                    format!("`{name}` was not moved here, so this loop can't take its handles"),
+                    why,
+                    fix,
+                    Some(collection.span()),
+                ));
+            }
+            // Field / index / slice: the root's type is not the list, so do not
+            // rewrite it as `root: ^[Task<…>]` or invent `root.wait_all()`.
+            _ => {
+                self.diags.push(Diagnostic::error(
+                    "E0120",
+                    "this loop can't take handles out of a field or index".to_string(),
+                    why,
+                    "bind the list into a local this scope owns first (`hs := …`), then write `loop h, hs { … }`"
+                        .to_string(),
+                    Some(collection.span()),
+                ));
+            }
+        }
     }
 
     pub(crate) fn consume_builtin_receiver(&mut self, receiver: &Expr, method: &str) {

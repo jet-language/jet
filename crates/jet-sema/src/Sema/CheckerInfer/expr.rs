@@ -163,6 +163,7 @@ impl<'a> Checker<'a> {
         if !self.enter_source_nesting(e.span()) {
             return None;
         }
+        self.check_scoped_loan_read(e);
         let result = self.infer_checked(e);
         self.leave_source_nesting();
         result
@@ -339,12 +340,19 @@ impl<'a> Checker<'a> {
                             return ty;
                         }
                     }
-                    // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
-                    // explicitly — one mechanism for "duplicate this value",
-                    // whether the compiler inserts it or the user spells it.
-                    let span = e.span();
-                    let old = std::mem::replace(e, Expr::Absent(span));
-                    *e = Expr::Copy(Box::new(old), span);
+                    // Only auto-copy when the field type is actually cloneable.
+                    // A task-handle list (and other non-cloneable fields) must
+                    // partial-move; wrapping them in `Copy` skips the E0211
+                    // check and becomes a rustc rejection the user sees as an
+                    // ICE (I2).
+                    if is_cloneable(t, self.registry) {
+                        // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
+                        // explicitly — one mechanism for "duplicate this value",
+                        // whether the compiler inserts it or the user spells it.
+                        let span = e.span();
+                        let old = std::mem::replace(e, Expr::Absent(span));
+                        *e = Expr::Copy(Box::new(old), span);
+                    }
                 }
             }
         }

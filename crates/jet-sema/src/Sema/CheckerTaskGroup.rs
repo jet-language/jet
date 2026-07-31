@@ -264,6 +264,52 @@ impl<'a> Checker<'a> {
         true
     }
 
+    /// A child holding a WRITE loan runs at the same time as the parent, so a
+    /// parent read of that place races the child's write. Sequentially a read
+    /// beside a live write view is fine — nothing runs concurrently — which is
+    /// why this rule belongs to taskgroups and not to the general view model.
+    pub(crate) fn check_scoped_loan_read(&mut self, expr: &Expr) {
+        if self.scoped_loan_read_reported || self.in_taskgroup_spawn {
+            return;
+        }
+        // Cheap early-out: almost no statement runs under a live write loan.
+        if !self
+            .taskgroup_stack
+            .iter()
+            .any(|group| group.borrows.iter().any(|held| held.access == ViewAccess::Write))
+        {
+            return;
+        }
+        if !matches!(expr, Expr::Index { .. } | Expr::Field(..)) {
+            return;
+        }
+        let Some(place) = self.place_from_expr(expr) else {
+            return;
+        };
+        let Some((lent, group)) = self.taskgroup_stack.iter().find_map(|group| {
+            group
+                .borrows
+                .iter()
+                .find(|held| held.access == ViewAccess::Write && held.place.overlaps(&place))
+                .map(|held| (held.name.clone(), group.name.clone()))
+        }) else {
+            return;
+        };
+        self.scoped_loan_read_reported = true;
+        let read_name = Self::place_name(&place);
+        self.diags.push(Diagnostic::error(
+            "E1101",
+            format!("`{read_name}` cannot be read while `{lent}` is lent to a task in `{group}`"),
+            format!(
+                "`{lent}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes"
+            ),
+            format!(
+                "read `{read_name}` after the `{group}` block ends, or have the task send the value back through a channel"
+            ),
+            Some(expr.span()),
+        ));
+    }
+
     pub(crate) fn register_taskgroup_spawn(
         &mut self,
         receiver: &str,

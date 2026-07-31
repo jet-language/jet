@@ -1287,6 +1287,10 @@ pub(crate) struct Checker<'a> {
     /// with the existing statement-tail analysis, this makes local window
     /// conflicts end at last use instead of lexical scope end.
     views_used_in_stmt: HashSet<String>,
+    /// One scoped-loan read report per statement. Nested reads of the same
+    /// place (`ps[0].position` is a Field over an Index) would otherwise each
+    /// report the one mistake.
+    scoped_loan_read_reported: bool,
     /// #1196: argument and receiver loans that remain active until their call
     /// finishes. Nested calls see every outer frame.
     call_access_frames: Vec<CallAccessFrame>,
@@ -1850,6 +1854,9 @@ pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
 pub(crate) use CheckerValidate::*;
 pub(crate) use Diagnostics::*;
+/// Shared by TIR lowering: a loop consumes any collection whose element type
+/// holds a task handle (see `type_holds_task_handle`).
+pub use Diagnostics::type_holds_task_handle;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
 pub use Registration::*;

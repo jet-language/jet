@@ -1202,8 +1202,11 @@ fn emit_tir_stmt(
                             )
                         {
                             // D-RANGE-EXCL1=C: sequence two-binding → index then item.
+                            // A by-value list needs an explicit `into_iter()`
+                            // here: `.enumerate()` is an Iterator method, and a
+                            // bare `Vec` is only IntoIterator.
                             let iter_form = if *by_value {
-                                format!("({})", collection_str)
+                                format!("({}).into_iter()", collection_str)
                             } else if *columnar {
                                 format!("({}).iter_aos()", collection_str)
                             } else if matches!(

@@ -5429,3 +5429,109 @@ fn run() { launch("read") }
 "#;
     jet::compile(src).expect("explicitly copied task capture should compile");
 }
+
+#[test]
+fn two_binding_loop_over_owned_task_list_compiles() {
+    let src = r#"
+use core.tasks as tasks
+fn run() {
+    handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    total := 0
+    loop (i, h), handles { total += h.wait() + i }
+    print(total)
+}
+"#;
+    jet::compile(src).expect("owned two-binding task loop must compile");
+}
+
+#[test]
+fn nested_task_list_loop_compiles() {
+    let src = r#"
+use core.tasks as tasks
+fn run() {
+    groups :: [[tasks.spawn(() => 1)], [tasks.spawn(() => 2)]]
+    n := 0
+    loop g, groups { n += g.len() }
+    print(n)
+}
+"#;
+    jet::compile(src).expect("loop over [[Task]] must compile by value");
+}
+
+#[test]
+fn moved_task_list_parameter_loop_compiles() {
+    let src = r#"
+use core.tasks as tasks
+fn drain(hs: ^[Task<Int>]) => Int {
+    total := 0
+    loop h, hs { total += h.wait() }
+    total
+}
+fn run() {
+    handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    print(drain(^handles))
+}
+"#;
+    jet::compile(src).expect("moved task-list parameter loop must compile");
+}
+
+#[test]
+fn two_binding_borrowed_task_list_reports_e0120() {
+    let src = r#"
+use core.tasks as tasks
+fn drain(hs: [Task<Int>]) => Int {
+    total := 0
+    loop (i, h), hs { total += h.wait() + i }
+    total
+}
+fn run() {
+    handles :: [tasks.spawn(() => 1)]
+    print(drain(handles))
+}
+"#;
+    let diags = jet::compile(src).expect_err("borrowed two-binding task loop needs ^");
+    assert!(diags.iter().any(|d| d.code == "E0120"), "{diags:?}");
+}
+
+#[test]
+fn task_list_index_loop_reports_e0120() {
+    let src = r#"
+use core.tasks as tasks
+fn run() {
+    groups :: [[tasks.spawn(() => 1)]]
+    total := 0
+    loop h, groups[0] { total += h.wait() }
+    print(total)
+}
+"#;
+    let diags = jet::compile(src).expect_err("index projection cannot be consumed by value");
+    let escape = diags.iter().find(|d| d.code == "E0120").expect("E0120");
+    assert!(
+        escape.what.contains("field or index"),
+        "must not rewrite the root as the list: {escape:?}"
+    );
+    assert!(
+        !escape.fix.contains("groups: ^"),
+        "must not suggest taking the outer list as [Task]: {escape:?}"
+    );
+}
+
+#[test]
+fn stream_reuse_after_loop_reports_e0121() {
+    let src = r#"
+fn count(n: Int) => Stream<Int> {
+    i := 0
+    loop i < n {
+        yield i
+        i += 1
+    }
+}
+fn run() {
+    s :: count(3)
+    loop x, s { print("{x}") }
+    loop x, s { print("{x}") }
+}
+"#;
+    let diags = jet::compile(src).expect_err("Stream is consumed by the first loop");
+    assert!(diags.iter().any(|d| d.code == "E0121"), "{diags:?}");
+}
