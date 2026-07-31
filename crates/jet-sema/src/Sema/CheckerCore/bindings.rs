@@ -155,6 +155,67 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
 }
 
 impl<'a> Checker<'a> {
+    /// Can codegen write this folded value back out as Rust?
+    ///
+    /// `CtValue::serialize` renders a struct or enum as `user_<Name> { … }`,
+    /// which only names a real Rust type when `<Name>` is a user-declared type.
+    /// The comptime evaluator also models builtins as structs with an internal
+    /// field encoding, and those have no such Rust type. A container is only
+    /// emittable when everything inside it is.
+    /// As `ct_value_is_emittable`, and additionally that the value's literal
+    /// form has the Rust type this binding declares. `Iter<T>` lowers to
+    /// `JetIter<T>` but folds to a plain list, so writing the list back out
+    /// would assign a `Vec` to a `JetIter` binding.
+    pub(crate) fn ct_value_fits_binding(
+        &self,
+        value: &crate::AST::CtValue,
+        ty: &Type,
+    ) -> bool {
+        use crate::AST::CtValue;
+        if !self.ct_value_is_emittable(value) {
+            return false;
+        }
+        match (value, ty) {
+            (CtValue::List(_) | CtValue::Bytes(_), Type::List(_) | Type::FixedList { .. }) => true,
+            (CtValue::List(_) | CtValue::Bytes(_), _) => false,
+            (CtValue::Map(_), Type::Map { .. }) => true,
+            (CtValue::Map(_), _) => false,
+            (CtValue::Some(_) | CtValue::None(_), Type::Option(_)) => true,
+            (CtValue::Some(_) | CtValue::None(_), _) => false,
+            (CtValue::ResOk(_) | CtValue::ResErr(_), Type::Result { .. }) => true,
+            (CtValue::ResOk(_) | CtValue::ResErr(_), _) => false,
+            _ => true,
+        }
+    }
+
+    pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
+        use crate::AST::CtValue;
+        match value {
+            CtValue::Struct { type_name, fields } => {
+                self.registry.is_user_struct(type_name)
+                    && fields
+                        .iter()
+                        .all(|(_, field)| self.ct_value_is_emittable(field))
+            }
+            CtValue::Enum {
+                type_name, args, ..
+            } => {
+                self.registry.is_user_enum(type_name)
+                    && args.iter().all(|(_, arg)| self.ct_value_is_emittable(arg))
+            }
+            CtValue::List(items) => items.iter().all(|item| self.ct_value_is_emittable(item)),
+            CtValue::Map(entries) => entries
+                .values()
+                .all(|entry| self.ct_value_is_emittable(entry)),
+            CtValue::Some(inner) | CtValue::ResOk(inner) | CtValue::ResErr(inner) => {
+                self.ct_value_is_emittable(inner)
+            }
+            // A closure has no literal form at all.
+            CtValue::Closure(_) => false,
+            _ => true,
+        }
+    }
+
         pub(crate) fn check_meta_attr(&mut self, meta: &mut MetaAttr) {
             if let Some(mut marker) = self.take_rule_fact(Syntax::ATTR_META, meta.span) {
                 let Some(arguments) = self.validate_rule_signature(&mut marker) else {
@@ -636,7 +697,18 @@ impl<'a> Checker<'a> {
                         0,
                     )
                 {
-                    b.ct = Some(v.clone());
+                    // Only record a folded value codegen can write back out.
+                    // The comptime evaluator models many builtins as a struct
+                    // with an internal field encoding (`Set` as `{items}`,
+                    // `Duration` as `{ms}`, …). Serializing one emits
+                    // `user_Set { user_items: … }`, naming a Rust type that was
+                    // never declared, which rustc rejects and I2 counts as an
+                    // internal compiler error. Folding here is an optimization
+                    // (D-VERDICT-1308-1: failure is silent), so decline it and
+                    // let the ordinary runtime path build the value.
+                    if self.ct_value_fits_binding(&v, &final_ty) {
+                        b.ct = Some(v.clone());
+                    }
                     self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
                 }
             }

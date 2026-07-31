@@ -236,6 +236,18 @@ impl TypeRegistry {
         self.types.contains_key(name)
     }
 
+    /// A struct the user declared, so codegen emits a `user_<Name>` Rust type
+    /// for it. False for a builtin the comptime evaluator merely models as a
+    /// struct, which has no such Rust type.
+    pub(crate) fn is_user_struct(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Struct { .. }))
+    }
+
+    /// The enum counterpart of `is_user_struct`.
+    pub(crate) fn is_user_enum(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Enum { .. }))
+    }
+
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
         self.unit_facts.get(name).and_then(|fact| fact.dimension.clone())
     }
