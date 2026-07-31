@@ -1613,6 +1613,7 @@ pub(crate) fn check_module_bodies(
                     return_type: None,
                     return_type_span: None,
                     return_view_provenance: None,
+                    declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
                     is_unsafe: false,
@@ -1687,6 +1688,7 @@ pub(crate) fn check_module_bodies(
                     return_type: None,
                     return_type_span: None,
                     return_view_provenance: None,
+                    declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
                     is_unsafe: false,
@@ -1817,6 +1819,7 @@ pub(crate) fn check_module_bodies(
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),
                     return_view_provenance: None,
+                    declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
                     is_unsafe: false,
@@ -2131,6 +2134,43 @@ pub(crate) fn check_func_body_bundle(
     // D-DATARACE1=C: drain upgrade-report lines onto the function for codegen/`jet report`.
     f.reactive_upgrades = std::mem::take(&mut ck.reactive_upgrades);
     f.return_view_provenance = ck.return_view_provenance.clone();
+    if let Some(declared) = f.declared_return_view_provenance.clone() {
+        // D-MEMPROVENANCE3=A: inferred sources must be ⊆ declaration; callers
+        // see the declared (possibly wider) contract. A bare `from packet`
+        // covers every field/index/range projection of that owner.
+        if let Some(inferred) = f.return_view_provenance.as_ref() {
+            for (slot, inferred_prov) in inferred {
+                let Some(declared_prov) = declared.get(slot) else {
+                    ck.diags.push(Diagnostic::error(
+                        "E2305",
+                        "returned view escapes its declared `from` clause".to_string(),
+                        "every return path's owners must stay inside the sources named after `from`".to_string(),
+                        "widen the `from` clause, or stop returning a view from that owner".to_string(),
+                        f.return_type_span.or(Some(f.name_span)),
+                    ));
+                    continue;
+                };
+                let allowed = inferred_prov.sources.iter().all(|inferred_path| {
+                    declared_prov.sources.iter().any(|declared_path| {
+                        declared_path.source == inferred_path.source
+                            && inferred_path
+                                .projections
+                                .starts_with(declared_path.projections.as_slice())
+                    })
+                });
+                if !allowed {
+                    ck.diags.push(Diagnostic::error(
+                        "E2305",
+                        "returned view escapes its declared `from` clause".to_string(),
+                        "every return path's owners must stay inside the sources named after `from`".to_string(),
+                        "widen the `from` clause, or stop returning a view from that owner".to_string(),
+                        f.return_type_span.or(Some(f.name_span)),
+                    ));
+                }
+            }
+        }
+        f.return_view_provenance = Some(declared);
+    }
     if let Some(owner) = owner_type {
         if let (Some(signature), Some(provenance)) =
             (st.registry.method(owner, &f.name), f.return_view_provenance.clone())

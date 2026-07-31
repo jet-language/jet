@@ -1334,6 +1334,7 @@ impl TraitRegistry {
             is_pure: false,
             declared_effects: None,
             return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
         };
         // restore(&self, snap: ^Snapshot)
         let restore_sig = TraitMethodSig {
@@ -1367,6 +1368,7 @@ impl TraitRegistry {
             is_pure: false,
             declared_effects: None,
             return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
         };
         let mut methods = HashMap::new();
         methods.insert("snapshot".to_string(), snapshot_sig);
@@ -1630,6 +1632,7 @@ impl TraitRegistry {
                 return_type: Some(Type::Result { ok: Box::new(bytes.clone()), err: Box::new(io_error.clone()) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             });
             self.local_traits.insert(Syntax::TRAIT_IO_READER.to_string());
             self.traits.insert(Syntax::TRAIT_IO_READER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
@@ -1647,6 +1650,7 @@ impl TraitRegistry {
                 return_type: Some(Type::Result { ok: Box::new(Type::Int), err: Box::new(io_error.clone()) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             });
             methods.insert("write_all".to_string(), TraitMethodSig {
                 name: "write_all".to_string(), name_span: dummy,
@@ -1654,6 +1658,7 @@ impl TraitRegistry {
                 return_type: Some(Type::Result { ok: Box::new(Type::Named("Unit".to_string())), err: Box::new(io_error) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             });
             self.local_traits.insert(Syntax::TRAIT_IO_WRITER.to_string());
             self.traits.insert(Syntax::TRAIT_IO_WRITER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
@@ -1689,6 +1694,7 @@ impl TraitRegistry {
                 is_pure: false,
                 declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             };
             let mut methods = HashMap::new();
             methods.insert("next".to_string(), next_sig);
@@ -1723,6 +1729,7 @@ impl TraitRegistry {
                 is_pure: false,
                 declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             };
             let mut methods = HashMap::new();
             methods.insert("iter".to_string(), iter_sig);
@@ -1769,6 +1776,7 @@ impl TraitRegistry {
                 is_pure: false,
                 declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             };
             let mut methods = HashMap::new();
             methods.insert("get".to_string(), get_sig);
@@ -1825,6 +1833,7 @@ impl TraitRegistry {
                 is_pure: false,
                 declared_effects: None,
                 return_view_provenance: Default::default(),
+                declared_return_view_provenance: None,
             };
             let mut methods = HashMap::new();
             methods.insert("set".to_string(), set_sig);
@@ -1927,6 +1936,7 @@ impl TraitRegistry {
             is_pure: false,
             declared_effects: None,
             return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
         };
         let mut methods = HashMap::new();
         methods.insert(method.to_string(), sig);
@@ -1954,6 +1964,7 @@ impl TraitRegistry {
             params: vec![param(Syntax::KW_SELF), param("rhs")],
             return_type: Some(ret), span: dummy, default_body: None, is_pure: false,
             declared_effects: None, return_view_provenance: Default::default(),
+        declared_return_view_provenance: None,
         };
         self.local_traits.insert(trait_name.to_string());
         self.traits.insert(trait_name.to_string(), TraitInfo {

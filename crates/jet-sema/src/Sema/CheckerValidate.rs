@@ -297,6 +297,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         }),
         return_type_span: Some(span),
         return_view_provenance: None,
+        declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
         is_unsafe: false,

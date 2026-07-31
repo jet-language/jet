@@ -101,6 +101,8 @@ impl<'a> Parser<'a> {
                     return_type_span = Some(span);
                 }
             }
+            let declared_return_view_provenance =
+                self.parse_opt_declared_view_from(&params);
     
             // Single-expression body: `fn name(...) => T = expr;`
             // Desugars to `return expr;` so the "path must return" check is satisfied.
@@ -129,6 +131,7 @@ impl<'a> Parser<'a> {
                     return_type,
                     return_type_span,
                     return_view_provenance: None,
+                    declared_return_view_provenance,
             gc_return: false,
             gc_scope: false,
                     is_unsafe,
@@ -183,6 +186,7 @@ impl<'a> Parser<'a> {
                 return_type,
                 return_type_span,
                 return_view_provenance: None,
+                declared_return_view_provenance,
             gc_return: false,
             gc_scope: false,
                 is_unsafe,

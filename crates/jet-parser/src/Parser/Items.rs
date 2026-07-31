@@ -21,6 +21,8 @@ mod markers_contracts;
 mod visibility_items;
 #[path = "Items/functions_params.rs"]
 mod functions_params;
+#[path = "Items/view_from.rs"]
+mod view_from;
 #[path = "Items/enums_traits.rs"]
 mod enums_traits;
 #[path = "Items/marker_groups.rs"]

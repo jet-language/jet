@@ -695,6 +695,8 @@ pub struct TraitMethodSig {
     /// D-MEM-VIEWRET1=B: inferred owner contract shared by the declaration,
     /// every implementation, and dynamic dispatch.
     pub return_view_provenance: super::ViewProvenanceCell,
+    /// D-MEMPROVENANCE3=A: declared `from` clause on the trait method return.
+    pub declared_return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.
@@ -816,6 +818,10 @@ pub struct Func {
     /// D-MEM-VIEWRET1=B: sema-inferred stable source of a named view return.
     /// Parser-created functions start at `None`; sema fills this before TIR.
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
+    /// D-MEMPROVENANCE3=A: optional trailing `from` clause on the return type.
+    /// Filled by the parser (param names already resolved to positions). Sema
+    /// checks inferred ⊆ declared, then publishes the declared set to callers.
+    pub declared_return_view_provenance: Option<super::ViewProvenanceMap>,
     /// D-OPTGC1=A: sema proved that this source-level bare return is carried by
     /// the compiler-private automatic-root representation.
     pub gc_return: bool,

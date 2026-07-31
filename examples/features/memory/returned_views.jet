@@ -14,11 +14,12 @@ struct BorrowedRecord {
     body: View<str>
 }
 
-fn first(values: [Int]) => View<Int> = values[0..1]
+fn first(values: [Int]) => View<Int> from values = values[0..1]
 
 // The result safely borrows whichever input wins at runtime. Both possible
-// owners remain live at the call site.
-fn longer(left: String, right: String) => View<str> {
+// owners remain live at the call site. D-MEMPROVENANCE3=A: the `from` clause
+// makes that contract explicit for library APIs.
+fn longer(left: String, right: String) => View<str> from left | right {
     if left.len() >= right.len() {
         winner :: left.trim()
         return winner

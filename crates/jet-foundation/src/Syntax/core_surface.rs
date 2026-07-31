@@ -463,6 +463,12 @@ pub const TYPE_PTR: &str = "Ptr";
 /// from an integer address.
 pub const MEM_FROM_ADDR: &str = "from_addr";
 
+/// D-MEMPROVENANCE3=A: contextual `from` after a return type declaring view owners.
+pub const VIEW_FROM: &str = "from";
+
+/// D-MEMPROVENANCE3=A: `static.<path>` source in a view `from` clause.
+pub const VIEW_FROM_STATIC: &str = "static";
+
 /// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
 pub const MEM_VOLATILE_READ: &str = "volatile_read";
 

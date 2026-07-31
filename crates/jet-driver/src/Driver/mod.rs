@@ -2591,6 +2591,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         return_type: target.return_type.clone(),
         return_type_span: target.return_type_span,
         return_view_provenance: None,
+        declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
         is_unsafe: false,

@@ -1667,6 +1667,18 @@ place access remains D-SHAPE-PLACE1's bare/`&`/`~` rule; the named view types
 appear only where the return or storage boundary needs to state the contract.
 No lifetime syntax is added.
 
+**D-MEMPROVENANCE3=A — expert declared view provenance** *(ratified 2026-07-31,
+card #1340)*: opt-in trailing `from` after a return type names which inputs a
+view may borrow from (`from packet`, `from left | right`, `from self`,
+`from static.MOTD`, or per-slot `from (text: primary | fallback)`).
+`VIEW_FROM` / `VIEW_FROM_STATIC` are contextual identifiers, not lexer
+keywords. Inference (D-MEMPROVENANCE2=A) remains the beginner default;
+undeclared APIs behave as today. Sema requires every return path's inferred
+owners ⊆ the declaration (a bare source covers its field/index/range
+projections) and publishes the declared set to callers. Trait-method and
+function-type clauses are part of the same ruling; this card ships them as
+the remaining vertical slices.
+
 **D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a

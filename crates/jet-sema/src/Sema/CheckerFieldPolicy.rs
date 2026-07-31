@@ -370,6 +370,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         return_type: Some(f.ty.clone()),
         return_type_span: Some(f.ty_span),
         return_view_provenance: None,
+        declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
         is_unsafe: false,

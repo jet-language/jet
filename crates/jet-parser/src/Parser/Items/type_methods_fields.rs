@@ -42,6 +42,8 @@ impl<'a> Parser<'a> {
                     return_type = Some(ty);
                 }
             }
+            let declared_return_view_provenance =
+                self.parse_opt_declared_view_from(&params);
             // D-LIB2: optional default body `{ … }` instead of `;`.
             let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
@@ -64,6 +66,7 @@ impl<'a> Parser<'a> {
                 is_pure,
                 declared_effects,
                 return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+                declared_return_view_provenance,
             })
         }
     
