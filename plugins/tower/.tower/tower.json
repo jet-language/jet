@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1360,
-    "rev": 20779,
+    "nextNum": 1363,
+    "rev": 20855,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e4"
       ]
     },
-    "completionCursor": "2026-07-31T15:57:38.156Z"
+    "completionCursor": "2026-07-31T18:57:59.220Z"
   },
   "epochs": [
     {
@@ -14234,6 +14234,11 @@
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
+          "text": "[handoff] Not this session's lane; continuing sidequest burndown after #1340. Criterion 5 (verify-full) still open on #623."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
           "text": "[handoff] Not this session's lane; continuing sidequest burndown after #1339. Criterion 5 (verify-full) still open on #623."
         },
         {
@@ -14357,7 +14362,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T03:17:36.064Z",
-      "updated": "2026-07-31T17:15:09.241Z",
+      "updated": "2026-07-31T18:25:37.269Z",
       "workOrder": 1400,
       "updatedBy": "cursor-grok",
       "tags": [],
@@ -46796,10 +46801,15 @@
       "priority": "P0",
       "plan": "## Goal\nClose field-audit G4 under D-PIN1=A: `mem.pin(&place) -> Pin<T>` as a tracked write view that blocks move/replace while live.\n\n## Law (ratified)\n- Pin reuses the owner/provenance graph; no second memory model.\n- Structural field projection is declared by the type implementation.\n- Dropping the final pin ends the no-move loan.\n- Unsafe construction stays local; safe callers use `Pin<T>` APIs.\n- Support stack, Fixed, arena, and owned heap places.\n\n## Scope\nIn: `Pin<T>` type, `mem.pin`, move/replace rejection, projection rules, cleanup/cancel/panic paths, self-referential + intrusive examples.\nOut: Pool/Shared as substitutes; Cell (#1201); Shared guards (#1202).\n\n## Owned paths\n- foundation/core `mem` surface + Syntax.rs if `Pin` is user-typeable\n- sema move/replace/projection checks for pinned places\n- tests (`tests/arena.rs`, `tests/resource_close.rs`, new pin tests)\n- examples: zero-allocation queue node / intrusive list\n- docs/spec memory + syntax-decisions\n\n## Steps\n1. Add `Pin<T>` as expert tracked view; `mem.pin(&place)` entry point.\n2. While any pin is live: reject move, replace, and resize of the pinned storage.\n3. Declare structural pin projection on implementing types; reject undeclared projections.\n4. Ensure drop/cancel/panic/owner destruction preserve the contract.\n5. Example: audited unsafe constructor + safe `Pin` use at call sites.\n6. No-allocation / caller-storage parity cases where Rust Pin can; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: focused pin tests + examples; verify skill syntax chores if new names land.\n\n## Owner gates\n`Pin` / `mem.pin` names were chosen by D-PIN1=A. If additional user-typeable keywords beyond that ruling appear, raise a syntax ballot before shipping. Otherwise blockedBy: none.\n",
       "blockedBy": [
-        "D-PIN2"
+        "#1360"
       ],
       "assignee": "claude-burndown",
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Landed the Pin<T> slice (commit 79fb716ea). Shipped: mem.pin(&place) as a tracked write window; E0219 for move/replace/resize while pinned; E0218 for a value argument; Pin<T> as a core generic on fields, parameters, and returns; declared Pin<U> field projection; pin idempotence; sendability rejection; TIR/AOT/Cranelift/interpreter parity; tests/pin.rs (11 tests), two UI snapshots, examples/features/memory/pin.jet with golden output, diagnostics.md rows, jit_gaps + corpus-gate entries. Criteria #1 and #3 are met. Criteria #2, #4, and #5 stay open behind one shared blocker: a live write window cannot flow out of a callee inside an aggregate, because return-view provenance was built for read slices. That is the same limitation ViewMut already has, so it is not pin-specific work. Also fixed en route: the TIR interpreter bound a whole-place write window to a copy, so edits through p :: &node vanished on tier 0 while AOT and Cranelift aliased."
+        },
         {
           "at": "2026-07-31",
           "by": "claude-burndown",
@@ -46824,11 +46834,11 @@
         {
           "n": 1,
           "text": "Safe code cannot move or replace a value after its address-sensitive state starts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.425Z"
+          "evidence": "tests/pin.rs: moving_a_pinned_place_is_e0219, replacing_a_pinned_place_is_e0219, pinning_a_value_instead_of_a_place_is_e0218, the_promise_ends_with_the_pin_scope; snapshots tests/ui/pin_blocks_move.stderr and tests/ui/pin_needs_write_window.stderr",
+          "at": "2026-07-31T19:03:15.199Z"
         },
         {
           "n": 2,
@@ -46842,11 +46852,11 @@
         {
           "n": 3,
           "text": "Pinned field projection preserves declared structural pin rules.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.425Z"
+          "evidence": "tests/pin.rs: a_pin_field_projects_to_a_pin_on_every_tier, pinning_an_already_pinned_place_stays_one_pin; examples/features/memory/pin.jet projects a declared Pin<Node> field on AOT, Cranelift, and the interpreter",
+          "at": "2026-07-31T19:03:15.463Z"
         },
         {
           "n": 4,
@@ -46877,12 +46887,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-31T07:16:30.954Z",
-      "updatedBy": "owner",
+      "updated": "2026-07-31T19:04:19.245Z",
+      "updatedBy": "claude-burndown",
       "workOrder": 520,
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-07-31T03:37:47.495Z"
+      "claimedAt": "2026-07-31T19:04:19.244Z"
     },
     {
       "id": "c0wpp6cz",
@@ -58832,48 +58842,138 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "## Goal\nShip D-MEMPROVENANCE3=A: opt-in trailing `from` provenance clauses. Inference (D-MEMPROVENANCE2=A) stays the beginner default.\n\n## Law\n- Grammar: `from src (| src)*` after return types, view-typed params, trait-method returns, and function-type returns. Aggregate per-slot: `from (field: srcs, …)`.\n- src = param name | `self` | `static.<path>`, with optional projections.\n- Check: each return path's inferred sources ⊆ declaration; wider declaration is legal; escape teaches with fix-it.\n- Trait clauses bind impls and retire E2305 for declared methods. Function-type clauses quantify per call.\n- Type defs never carry owner parameters. API digests flag declared relations.\n\n## Vertical slice order\n1. Parse + Syntax.rs + syntax-decisions + example for result `from` (single/union).\n2. Sema: attach declared set; check ⊆; keep undeclared = infer-only.\n3. Trait method `from self` + retire E2305 on that path; callback function-type clause.\n4. Parameter `from` requirements + aggregate per-slot.\n5. Grammars, snapshots, golden example (returned_views / new expert example).\n6. Independent review; criteria verify; done.\n\n## Out\nPin/self-ref (D-PIN1), variance UI, mandatory notation.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-sol",
+          "text": "Independent verify closed D-MEMPROVENANCE3=A (result/trait/fn-type/param/slots)."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Param from + aggregate slots shipped (011145775). Ballot vertical slices complete; awaiting Sol verify on #9/#10 then done."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Function-type from shipped (56f4f7bd4). Still owed: param from requirements + aggregate per-slot proof."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Restored view_from_escape.jet from-packet (00997059e); Codex spinning function-type from on agent/sq-1340."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Trait declared-from publish wired; dyn+impl View<str> from self still needs ownership/inference follow-up (E2307 on self.label.trim). Result from-clause slice remains green."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Partial slice committed on agent/sq-1340: result from-clause parse+check+UI escape+example. Still owed: trait E2305 retire for declared methods, function-type from, param from, grammars, full criteria."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Worktree agent/sq-1340; implementing D-MEMPROVENANCE3=A trailing from."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:00:33.365Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "VIEW_FROM/VIEW_FROM_STATIC present; Syntax.rs D-MEMPROVENANCE3 comment on af43d7647.",
+          "at": "2026-07-31T17:55:42.245Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:00:33.365Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "syntax-decisions.md D-MEMPROVENANCE3=A entry present.",
+          "at": "2026-07-31T17:55:42.458Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:00:33.365Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Contextual Ident; no lexer/grammar token required.",
+          "at": "2026-07-31T17:55:42.668Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:00:33.365Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "view_from_escape UI snapshot green.",
+          "at": "2026-07-31T17:55:42.879Z"
+        },
+        {
+          "n": 5,
+          "text": "Result from-clause parses and sema checks return paths ⊆ declaration (single + union); undeclared still infers.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Result from-clause ⊆ check + returned_views example.",
+          "at": "2026-07-31T17:55:43.090Z"
+        },
+        {
+          "n": 6,
+          "text": "Trait method from self retires E2305 for that declared method; example + UI snapshot.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "view_from_trait AOT+JIT; dyn JIT ownership test; declared trait publish.",
+          "at": "2026-07-31T17:55:43.296Z"
+        },
+        {
+          "n": 7,
+          "text": "I9: declared provenance honored on AOT and default jet run for the shipped example.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "view_from_trait jet run and --release print 9.",
+          "at": "2026-07-31T17:55:43.536Z"
+        },
+        {
+          "n": 8,
+          "text": "Function-type from: named fn params + trailing from populate callback provenance; undeclared stays conservative; example view_from_callback AOT+JIT.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Independent cursor-sol verification: scripts/agent/jet-env cargo test --test ownership view_callback passed (2 passed: declared named-source provenance and undeclared conservative freezing); fresh cargo build passed; JIT and AOT runs of examples/features/memory/view_from_callback.jet both printed alpha / still ok.",
+          "at": "2026-07-31T18:13:23.196Z"
+        },
+        {
+          "n": 9,
+          "text": "Parameter from: View params declare required sibling sources; escape UI + view_from_param AOT+JIT.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Independent cursor-sol verification at 011145775: JET_UI_FILTER=view_from_param_escape diagnostic snapshot passed (1/1); view_from_param.jet printed 9 under jet run and jet run --release.",
+          "at": "2026-07-31T18:25:06.817Z"
+        },
+        {
+          "n": 10,
+          "text": "Aggregate per-slot from (field: sources): escape UI + view_from_slots AOT+JIT.",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Independent cursor-sol verification at 011145775: JET_UI_FILTER=view_from_slots_escape diagnostic snapshot passed (1/1); view_from_slots.jet printed alpha then beta under jet run and jet run --release.",
+          "at": "2026-07-31T18:25:07.016Z"
         }
       ],
       "refs": [
@@ -58885,8 +58985,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T11:42:11.500Z",
-      "updated": "2026-07-31T13:00:33.365Z",
-      "updatedBy": "owner"
+      "updated": "2026-07-31T18:25:18.548Z",
+      "updatedBy": "cursor-sol",
+      "completedAt": "2026-07-31T18:25:18.548Z"
     },
     {
       "id": "c00707ob",
@@ -58897,12 +58998,42 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": "Blocked on the D-SPREAD1 ballot. After ratification: register the sigil in Syntax.rs with the decision id (I7), parse, desugar in sema (flatten in list position, fixed-size list otherwise), formatter emission plus a fmt STABILITY test, UI snapshot for the member-not-an-ident error, and migrate env.jet plus the jetpack fixtures back onto the sugar. Tier parity is free once the desugar happens in sema, but prove AOT and default jet run anyway.",
+      "plan": "## Goal\nShip D-SPREAD1=A: `prefix.[a, b, c]` means member spread `[prefix.a, prefix.b, prefix.c]`. Call fan-out stays gone.\n\n## Law\n- Sigil `.[` after an expression; entries are bare idents only (E0970 if not).\n- In list position: splice into surrounding ListLit.\n- Elsewhere: fixed-size `[T#N]` list (S76).\n- Desugar in sema before inference. Formatter emits the sugar. Migrate env.jet + jetpack fixtures.\n\n## Steps\n1. Syntax.rs + syntax-decisions D-SPREAD1=A; note E0970 (E0963 already S76).\n2. Parse Expr::MemberSpread { base, names }.\n3. Sema desugar; UI snapshot for non-ident.\n4. Formatter + fmt STABILITY; migrate env.jet and fixtures.\n5. I9: example AOT + jet run; independent verify; done.\n\n## Owned paths\nparser Expressions, AST, sema desugar, Syntax.rs, syntax-decisions, diagnostics, env.jet, jetpack fixtures, formatter, UI snapshot, example.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "closed: D-SPREAD1=A member spread shipped. Proof: jet run + --release member_spread.jet; diagnostic_snapshots UI; golden member_spread; parser member_spread_parses; pkg-model sugar_member_spread. Reviewer: cursor-sol APPROVE."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "integrated agent/sq-1341 onto master (df95f0e6a). Sol re-review APPROVE after highlights+Const/Test/Bench fixes."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Fixed Sol findings: OP_MEMBER_SPREAD in highlights registry + regen; MemberSpread desugar walks Const/Test/Bench; tree-sitter fan_out→member_spread (idents)."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "D-SPREAD1=A shipped in worktree sq-1341: parse (primary+postfix, S84 dashed names), sema splice desugar, fmt, jetpack Merge sugar, env.jet+fixtures migrated, E0961 UI, example I9, grammars. Criteria 1-4 met; awaiting independent Sol verify."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "Implementing D-SPREAD1=A member spread in worktree sq-1341 (Codex)."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "D-SPREAD1=A ratified; writing plan and building member-spread."
+        },
         {
           "at": "2026-07-31",
           "by": "claude-burndown",
@@ -58913,38 +59044,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:03:08.913Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "OP_MEMBER_SPREAD in Syntax.rs comment + core_surface.rs; highlights registry imports OP_MEMBER_SPREAD (fixed after review)",
+          "at": "2026-07-31T18:56:31.130Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:03:08.913Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "syntax-decisions.md S75/D-SPREAD1=A section + 2026-07-31 decision log; diagnostics.md E0961",
+          "at": "2026-07-31T18:56:31.339Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:03:08.913Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "OP_MEMBER_SPREAD in highlights; jet self devtools grammars; .[ in JET_HIGHLIGHT_OPERATOR / zed highlights / tmLanguage; tree-sitter member_spread_expr",
+          "at": "2026-07-31T18:56:31.548Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T13:03:08.913Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "member_spread_not_ident UI snapshot E0961; diagnostic_snapshots + golden member_spread ok after Const/Test/Bench desugar fix",
+          "at": "2026-07-31T18:56:31.756Z"
         }
       ],
       "refs": [
@@ -58959,8 +59090,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T12:36:14.680Z",
-      "updated": "2026-07-31T13:03:08.913Z",
-      "updatedBy": "owner"
+      "updated": "2026-07-31T19:04:51.111Z",
+      "updatedBy": "cursor-grok",
+      "completedAt": "2026-07-31T19:04:51.111Z"
     },
     {
       "id": "c0s2y2en",
@@ -58971,12 +59103,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Find the unbounded recursion under jet::Canvas::project_json_for_entry. Add the missing depth bound or cycle guard, with a regression test that fails by overflowing today. Peer of #1339, which tracks the other repo-red items.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-sol",
+          "text": "Independent verify closed; workspace discovery probe + compiler stack fix stack overflows."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "merged 004fbe2cd; criteria met"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -58997,29 +59139,29 @@
         {
           "n": 1,
           "text": "canvas_project_* family (4 tests named in card) pass without stack overflow.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T17:15:16.873Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Re-ran canvas_project_ after rebase onto 09fa54597; 19/19 ok, no SIGABRT.",
+          "at": "2026-07-31T17:34:17.898Z"
         },
         {
           "n": 2,
           "text": "native_cancellation_closes_group_before_caller_continues in tests/taskgroup_params.rs passes without stack overflow (same class).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T17:15:17.087Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Re-ran taskgroup_params; 12/12 ok including native_cancellation.",
+          "at": "2026-07-31T17:34:18.115Z"
         },
         {
           "n": 3,
           "text": "No regression: rest of tests/canvas.rs canvas_project_ filter and taskgroup_params suite stay green.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T17:15:17.294Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-sol",
+          "evidence": "Scoped canvas_project_ + taskgroup_params green on integrated 004fbe2cd.",
+          "at": "2026-07-31T17:34:18.329Z"
         }
       ],
       "refs": [],
@@ -59027,9 +59169,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T12:44:34.849Z",
-      "updated": "2026-07-31T17:15:17.763Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T17:15:17.762Z"
+      "updated": "2026-07-31T17:34:18.974Z",
+      "updatedBy": "cursor-sol",
+      "completedAt": "2026-07-31T17:34:18.974Z"
     },
     {
       "id": "c054tv3j",
@@ -59731,6 +59873,78 @@
       "created": "2026-07-31T15:19:28.064Z",
       "updated": "2026-07-31T15:19:28.065Z",
       "updatedBy": "cursor-grok"
+    },
+    {
+      "id": "c0buvo7y",
+      "num": 1360,
+      "title": "Write windows cannot flow out of a callee inside an aggregate",
+      "body": "A live exclusive window (ViewMut<T> or Pin<T>) cannot be returned from a function inside a struct, nor accepted as a parameter and stored, without the ownership checker reporting E0204 or E0212. Return-view provenance was built for read slices: a 'from owner' clause marks the returned aggregate a read view of the owner, so writing through the stored window is then rejected.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "## Goal\nLet a library take a caller-owned place and hand back an aggregate that stores an exclusive window into it, with the same provenance proof read views already get.\n\n## Why now\nCard #1200 (Pin<T>) met criteria #1 and #3 but left #2, #4, and #5 open on exactly this. The same limitation blocks any ViewMut-storing library API, so it is one shared fix, not pin-specific work.\n\n## Repro\n    fn attach(label: String, node: &Node) => Queue from node {\n        return Queue.{label: ~label, head: mem.pin(&node)}\n    }\n\nWriting through `queue.head` afterwards is E0212: \"queue is a live read view into node\". Dropping the `from` clause instead loses the hidden Rust lifetime and rustc rejects the generated signature (I2).\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs (return-view provenance, call-site composition)\n- crates/jet-sema/src/Sema/Bundle/Validation.rs (declared `from` contract)\n- crates/jet-codegen/src/Codegen/TIR/emit/functions.rs (hidden view lifetime on write windows)\n- tests/ownership.rs, tests/pin.rs\n\n## Scope\nIn: write-access provenance for returned and stored windows; the `from` clause carrying access, not only the owner set; call-site composition for an aggregate that stores a window.\nOut: new syntax. The `from` clause and the `Pin<T>` / `ViewMut<T>` spellings are already ratified.\n\n## Acceptance\nA library function may accept `&owner` and return an aggregate with a `Pin<T>` or `ViewMut<T>` field; the caller may edit through that field; AOT, Cranelift, and the interpreter agree; provenance escape is still rejected.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-31T19:03:41.244Z",
+      "updated": "2026-07-31T19:03:57.820Z",
+      "updatedBy": "claude-burndown"
+    },
+    {
+      "id": "c0z784jn",
+      "num": 1361,
+      "title": "Reading a place through its owner while a write window is live reaches rustc (I2)",
+      "body": "Sema allows an ordinary read of an owner while an exclusive window into it is still live. rustc then rejects the generated code with E0503, which I2 classifies as an internal compiler error rather than a user diagnostic.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "## Goal\nReject a read of a place while an exclusive window into it is live, in sema, before rustc sees the code.\n\n## Why\n`check_place_change` only fires on changes. A plain read of the owner while a write window is live passes sema and then hits rustc E0503 (\"cannot use `x.f` because it was mutably borrowed\"), which is an internal compiler error by I2, not a user diagnostic.\n\n## Repro\n    node := Node.{payload: 41, hops: 0}\n    pinned :: mem.pin(&node)\n    if node.payload > 0 {\n        pinned.hops += 1\n    }\n    print(\"{(pinned.hops)}\")\n\nSema accepts this; rustc rejects the generated Rust. It reproduces with a plain `p :: &node` window too, so it is not pin-specific.\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs\n- tests/ownership.rs, tests/ui/\n\n## Scope\nIn: a read-while-write-window-live check with a registered diagnostic and a UI snapshot; the fix should name the window to read through.\nOut: relaxing the existing E0212 change rules.\n\n## Acceptance\nThe repro above is a Jet diagnostic, not an ICE; existing read-view overlap rules are unchanged; a read after the window's last use still compiles.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-31T19:04:10.953Z",
+      "updated": "2026-07-31T19:04:18.901Z",
+      "updatedBy": "claude-burndown"
+    },
+    {
+      "id": "c0gei5kr",
+      "num": 1362,
+      "title": "Repo reds: UI snapshots, comptime_diff CBOR, dev stack overflow, golden examples",
+      "body": "Four independent red groups observed on master during the 2026-07-31 burn-down. All four reproduce with the pin work reverted, so none of them belong to card #1200.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "## Goal\nGet the three drifted UI snapshots and the CBOR/comptime differential cases green again, and stop `tests/dev.rs` aborting the whole suite on a stack overflow.\n\n## Findings (2026-07-31, observed on master at 011145775, before any pin work)\n- `tests/diagnostic_snapshots.rs::ui_snapshots` — mismatch on `tests/ui/enum_pattern_needs_dot_payload.jet` (an extra E0404 now fires), `tests/ui/trait_not_impl.jet`, and `tests/ui/view_mut_bounds_interpreter.jet`.\n- `tests/comptime_diff.rs` — five failures, four CBOR cases plus `comptime_bigint_matches_runtime`, all reporting \"generated unsafe outside the vetted prelude\".\n- `tests/dev.rs::cranelift_shield_defers_task_cancel_without_unwinding_native_frame` — stack overflow, SIGABRT, which aborts the rest of the `dev` target.\n- `tests/golden.rs::examples_compile_and_run` — around twenty examples, including `basics/if_universal` (L0507 lint), `concurrency/task_runtime_audit` (codegen ICE), the crypto family and the `net`/`io` families (rustc E0308 on generated code).\n\n## Scope\nIn: triage each group to the commit that introduced it, then fix or split into per-owner cards.\nOut: new features.\n\n## Acceptance\n`cargo test --test diagnostic_snapshots`, `--test comptime_diff`, `--test dev`, and `--test golden` all pass, or each remaining failure has its own card with a named owner.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-31T19:04:33.761Z",
+      "updated": "2026-07-31T19:04:41.845Z",
+      "updatedBy": "claude-burndown"
     }
   ],
   "decisions": [
@@ -79773,6 +79987,538 @@
   ],
   "events": [
     {
+      "at": "2026-07-31T19:04:51.111Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T19:04:50.877Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T19:04:41.845Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-31T19:04:33.762Z",
+      "by": "claude-burndown",
+      "action": "card.add",
+      "ref": "c0gei5kr",
+      "note": "Repo reds: UI snapshots, comptime_diff CBOR, dev stack overflow, golden examples"
+    },
+    {
+      "at": "2026-07-31T19:04:19.245Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-31T19:04:18.901Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-31T19:04:10.954Z",
+      "by": "claude-burndown",
+      "action": "card.add",
+      "ref": "c0z784jn",
+      "note": "Reading a place through its owner while a write window is live reaches rustc (I2)"
+    },
+    {
+      "at": "2026-07-31T19:03:57.820Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-31T19:03:41.244Z",
+      "by": "claude-burndown",
+      "action": "card.add",
+      "ref": "c0buvo7y",
+      "note": "Write windows cannot flow out of a callee inside an aggregate"
+    },
+    {
+      "at": "2026-07-31T19:03:25.877Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T19:03:15.464Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0tfvwqu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T19:03:15.199Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0tfvwqu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T19:03:07.268Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c00707ob",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T18:57:59.220Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-31T18:57:59.220Z"
+    },
+    {
+      "at": "2026-07-31T18:56:31.756Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c00707ob",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T18:56:31.548Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c00707ob",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T18:56:31.340Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c00707ob",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T18:56:31.130Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c00707ob",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T18:56:06.958Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T18:50:02.183Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T18:49:44.976Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00707ob",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T18:49:44.777Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00707ob",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T18:49:44.569Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00707ob",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T18:49:44.348Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00707ob",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T18:26:39.828Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T18:26:13.091Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c00707ob",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-31T18:25:37.491Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c00707ob",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T18:25:37.269Z",
+      "by": "cursor-grok",
+      "action": "card.release",
+      "ref": "c0mwjrp1",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-31T18:25:32.000Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0mwjrp1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T18:25:31.746Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0mwjrp1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T18:25:18.548Z",
+      "by": "cursor-sol",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T18:25:07.016Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-31T18:25:06.817Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-31T18:22:56.677Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T18:22:56.449Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-31T18:22:56.243Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-31T18:22:56.029Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#10 Aggregate per-slot from (field: sources): escape UI + view_f"
+    },
+    {
+      "at": "2026-07-31T18:22:55.833Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#9 Parameter from: View params declare required sibling sources"
+    },
+    {
+      "at": "2026-07-31T18:13:23.196Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-31T18:11:36.293Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T18:11:35.970Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-31T18:11:25.935Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#8 Function-type from: named fn params + trailing from populate"
+    },
+    {
+      "at": "2026-07-31T18:00:11.744Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T17:57:43.622Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c03xl9l8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T17:55:43.537Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-31T17:55:43.297Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-31T17:55:43.091Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T17:55:42.880Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T17:55:42.668Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T17:55:42.459Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T17:55:42.246Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c03xl9l8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T17:54:35.349Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-31T17:54:35.037Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T17:54:34.826Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-31T17:54:34.618Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T17:54:34.417Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T17:50:35.129Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T17:49:04.267Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T17:49:04.046Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c03xl9l8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T17:49:03.821Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T17:43:38.209Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-31T17:43:38.209Z"
+    },
+    {
+      "at": "2026-07-31T17:35:12.475Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#7 I9: declared provenance honored on AOT and default jet run f"
+    },
+    {
+      "at": "2026-07-31T17:35:12.270Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#6 Trait method from self retires E2305 for that declared metho"
+    },
+    {
+      "at": "2026-07-31T17:35:12.060Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c03xl9l8",
+      "note": "#5 Result from-clause parses and sema checks return paths ⊆ dec"
+    },
+    {
+      "at": "2026-07-31T17:35:11.834Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T17:34:56.150Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c03xl9l8",
+      "note": "phase,plan"
+    },
+    {
+      "at": "2026-07-31T17:34:34.580Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c03xl9l8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T17:34:18.974Z",
+      "by": "cursor-sol",
+      "action": "card.update",
+      "ref": "c0s2y2en",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T17:34:18.682Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0s2y2en",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T17:34:18.329Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c0s2y2en",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T17:34:18.115Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c0s2y2en",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T17:34:17.898Z",
+      "by": "cursor-sol",
+      "action": "card.criteria-verify",
+      "ref": "c0s2y2en",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T17:34:17.671Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0s2y2en",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T17:34:17.443Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0s2y2en",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T17:34:17.230Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0s2y2en",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T17:29:09.367Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-31T17:29:09.367Z"
+    },
+    {
       "at": "2026-07-31T17:15:17.763Z",
       "by": "cursor-grok",
       "action": "card.update",
@@ -82739,538 +83485,6 @@
       "action": "card.update",
       "ref": "c03gs87j",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:36.689Z",
-      "by": "codex-batch-verify",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:33.736Z",
-      "by": "codex-batch-verify",
-      "action": "card.update",
-      "ref": "c0wpp6cz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:19.039Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-30T18:34:16.422Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-30T18:34:12.236Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-30T18:34:09.398Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:34:07.163Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:34:04.386Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:34:01.469Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wy20z4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T18:33:58.361Z",
-      "by": "codex-close-impl",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-30T18:33:55.209Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0mfdhwp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:33:52.392Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0mfdhwp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:33:45.450Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0mfdhwp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:33:38.807Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0mfdhwp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T18:33:33.793Z",
-      "by": "codex-close-impl",
-      "action": "card.criteria-meet",
-      "ref": "c0mfdhwp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:33:30.875Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#10"
-    },
-    {
-      "at": "2026-07-30T18:33:27.836Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-30T18:33:24.694Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-30T18:33:21.680Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-30T18:33:17.773Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-30T18:33:14.886Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-30T18:33:11.822Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:33:08.754Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:33:05.975Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:33:02.844Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0b0tifp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T18:32:58.220Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c03gs87j",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:32:54.614Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c03gs87j",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:32:51.825Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c03gs87j",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:32:49.098Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c03gs87j",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T18:32:46.008Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0pbnytf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:32:42.829Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0pbnytf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:32:40.168Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0pbnytf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:32:36.707Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0pbnytf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T18:32:33.964Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wpp6cz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T18:32:30.517Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wpp6cz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T18:32:26.610Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wpp6cz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T18:32:22.736Z",
-      "by": "codex-batch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wpp6cz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T16:39:00.050Z",
-      "by": "codex-bd-close",
-      "action": "card.release",
-      "ref": "c05t5bb1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-30T16:38:47.933Z",
-      "by": "codex-bd-close",
-      "action": "card.release",
-      "ref": "c0wy20z4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-30T16:38:43.043Z",
-      "by": "codex-bd-close",
-      "action": "card.update",
-      "ref": "c0wy20z4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:38:38.135Z",
-      "by": "codex-bd-close",
-      "action": "card.release",
-      "ref": "c0mfdhwp",
-      "note": ""
-    },
-    {
-      "at": "2026-07-30T16:38:33.613Z",
-      "by": "codex-bd-close",
-      "action": "card.update",
-      "ref": "c0mfdhwp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:38:25.161Z",
-      "by": "codex-bd-close",
-      "action": "card.update",
-      "ref": "c05t5bb1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:36:31.577Z",
-      "by": "codex-bd-1208",
-      "action": "card.update",
-      "ref": "c05t5bb1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:27:52.742Z",
-      "by": "codex-bd-1208",
-      "action": "card.update",
-      "ref": "c05t5bb1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T16:26:48.901Z",
-      "by": "codex-bd-1319",
-      "action": "card.update",
-      "ref": "c0wy20z4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:15:26.534Z",
-      "by": "codex-bd-1317",
-      "action": "card.update",
-      "ref": "c0mfdhwp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T16:15:26.291Z",
-      "by": "codex-bd-1317",
-      "action": "card.criteria-meet",
-      "ref": "c0mfdhwp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T16:08:48.001Z",
-      "by": "codex-bd-1317",
-      "action": "card.criteria-add",
-      "ref": "c0mfdhwp",
-      "note": "#4 Default jet run executes every hidden C-bridge signature adm"
-    },
-    {
-      "at": "2026-07-30T16:08:47.810Z",
-      "by": "codex-bd-1317",
-      "action": "card.update",
-      "ref": "c0mfdhwp",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-30T16:04:32.959Z",
-      "by": "codex-bd-review",
-      "action": "card.update",
-      "ref": "c0wy20z4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:04:32.691Z",
-      "by": "codex-bd-review",
-      "action": "card.update",
-      "ref": "c0mfdhwp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T16:04:32.417Z",
-      "by": "codex-bd-review",
-      "action": "card.update",
-      "ref": "c05t5bb1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T15:55:29.037Z",
-      "by": "codex-bd-1319",
-      "action": "card.update",
-      "ref": "c0wy20z4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T15:55:22.788Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-30T15:55:18.925Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-30T15:55:15.462Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T15:55:05.679Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T15:55:02.391Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T15:54:58.690Z",
-      "by": "codex-bd-1319",
-      "action": "card.criteria-meet",
-      "ref": "c0wy20z4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T15:46:51.171Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LOOP-HEADER3",
-      "note": "D"
-    },
-    {
-      "at": "2026-07-30T15:46:44.824Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LOOP-COMMA1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-30T15:46:44.824Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bypiaz",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-30T15:46:44.824Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bypiaz",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-30T15:46:44.824Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bypiaz",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-30T15:46:44.824Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bypiaz",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-30T15:44:29.072Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08mu840",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T15:44:21.318Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08mu840",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T15:44:12.903Z",
-      "by": "fable",
-      "action": "decision.ratify",
-      "ref": "D-BRACE1",
-      "note": "A (by fable, quoting owner: \"Ok for now let's forgo the semicolon, just use braces and collapse if fits formatter\")"
-    },
-    {
-      "at": "2026-07-30T15:44:12.903Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08mu840",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-30T15:44:12.903Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08mu840",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-30T15:44:12.903Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08mu840",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-30T15:44:12.903Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08mu840",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-30T15:35:56.221Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-LOOP-COMMA1",
-      "note": "Loop header clause separator: comma or semicolon"
-    },
-    {
-      "at": "2026-07-30T15:35:07.764Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-BRACE1",
-      "note": "Mandatory braces for control-flow bodies"
-    },
-    {
-      "at": "2026-07-30T15:33:30.306Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0bypiaz",
-      "note": "Loop headers: comma clause separators, respell two-name binding"
     }
   ],
   "nextNum": 368,
