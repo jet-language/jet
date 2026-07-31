@@ -325,6 +325,25 @@ fn run() {{
 }
 
 #[test]
+fn pinning_an_index_place_records_the_element() {
+    let src = format!(
+        r#"{NODE}
+fn run() {{
+    nodes := [Node.{{payload: 1, hops: 0}}, Node.{{payload: 2, hops: 0}}]
+    first :: mem.pin(&nodes[0])
+    first.hops += 1
+    print("{{(first.hops)}} {{(first.payload)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), Vec::<String>::new());
+    assert_eq!(interpret(&src), "1 1\n");
+    if let Some(out) = build_and_run("index_pin", &src) {
+        assert_eq!(out, "1 1\n");
+    }
+}
+
+#[test]
 fn two_pins_on_sibling_fields_do_not_conflict() {
     // Sibling places never overlap, so pinning both is one contract per field,
     // not a double borrow. Only nesting is exempt from the overlap rule.

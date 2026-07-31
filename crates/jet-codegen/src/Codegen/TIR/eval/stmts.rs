@@ -237,7 +237,9 @@ impl<'a> EvalCtx<'a> {
                 // edits through the window vanish on this tier alone (I9).
                 if let TExprKind::Borrow { place, mutable: true } = &init.kind {
                     if let Some((base, path)) = owner_list_place(place) {
-                        if scope.contains_key(&base) {
+                        // `x :: &x` would shadow its own owner and make the
+                        // handle point at itself, so fall back to the value.
+                        if &base != name && scope.contains_key(&base) {
                             scope.insert(
                                 name.clone(),
                                 super::place_mut_handle(&base, &path),
