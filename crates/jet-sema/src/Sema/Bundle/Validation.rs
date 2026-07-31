@@ -1954,7 +1954,30 @@ pub(crate) fn check_module_bodies(
             .get(&trait_name)
             .and_then(|info| info.methods.get(&method_name))
         {
-            let _ = signature.return_view_provenance.set(provenance);
+            // Prefer a declared `from` on the trait method when present.
+            if signature.declared_return_view_provenance.is_none() {
+                let _ = signature.return_view_provenance.set(provenance);
+            }
+        }
+    }
+    // D-MEMPROVENANCE3=A: trait methods with a declared `from` publish that
+    // contract for every implementation and for open dispatch.
+    for item in &module.items {
+        let Item::Trait(trait_def) = item else {
+            continue;
+        };
+        for method in &trait_def.methods {
+            let Some(declared) = method.declared_return_view_provenance.clone() else {
+                continue;
+            };
+            if let Some(signature) = st
+                .trait_reg
+                .traits
+                .get(&trait_def.name)
+                .and_then(|info| info.methods.get(&method.name))
+            {
+                let _ = signature.return_view_provenance.set(declared.clone());
+            }
         }
     }
     let _ = st;
