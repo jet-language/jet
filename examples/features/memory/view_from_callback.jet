@@ -1,5 +1,7 @@
 // D-MEMPROVENANCE3=A: function-type `from` names which callback args a returned
 // view may borrow. Inference stays the default; this spelling is opt-in.
+// Function types do not keep surface parameter names through fmt, so the
+// owner spelling is the parser's synthetic `_N` index (same as an unnamed param).
 
 fn first_field(line: String, _noise: String) => View<str> {
     text :: line.before(":")
@@ -9,7 +11,7 @@ fn first_field(line: String, _noise: String) => View<str> {
 fn scan(
     input: String,
     noise: String,
-    pick: fn(line: String, noise: String) => View<str> from line
+    pick: fn(String, String) => View<str> from _0
 ) => View<str> from input {
     return pick(input, noise)
 }
@@ -18,7 +20,7 @@ fn run() {
     packet := "alpha:beta"
     filler := "ignored"
     chosen :: scan(packet, filler, first_field)
-    // `from line` keeps filler free while chosen is live.
+    // `from _0` keeps filler free while chosen is live.
     filler = "still ok"
     print(chosen)
     print(filler)

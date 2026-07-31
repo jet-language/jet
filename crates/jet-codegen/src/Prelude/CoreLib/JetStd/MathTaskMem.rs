@@ -377,7 +377,12 @@
         }
         // D-COROUTINE1=A: control-plane hooks on the M:N scheduler substrate.
         pub fn pause(&self) {
-            self.state.control.pause();
+            self.pause_with_mode(0);
+        }
+        /// D-TASK-PAUSE-TIER1=E: `mode` 0 = WaitPoints, 1 = CheckLoops.
+        pub fn pause_with_mode(&self, mode: i64) {
+            let mode = if mode == 1 { 1 } else { 0 };
+            self.state.control.pause_with_mode(mode);
         }
         pub fn resume(&self) {
             self.state.control.resume();
@@ -485,8 +490,13 @@
 
     /// Mark every task paused (borrows).
     pub fn jet_task_pause_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
+        jet_task_pause_all_mode(tasks, 0);
+    }
+
+    /// D-TASK-PAUSE-TIER1=E: list twin of `pause_with_mode`.
+    pub fn jet_task_pause_all_mode<T: Send + 'static>(tasks: &[JetTask<T>], mode: i64) {
         for task in tasks {
-            task.pause();
+            task.pause_with_mode(mode);
         }
     }
 

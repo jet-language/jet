@@ -2970,7 +2970,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
-                THandleOp::TaskPause => format!("({}).pause()", recv),
+                THandleOp::TaskPause => {
+                    if args.is_empty() {
+                        format!("({}).pause()", recv)
+                    } else {
+                        format!("({}).pause_with_mode({})", recv, a(0))
+                    }
+                }
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
                 THandleOp::TaskTrace => format!("({}).trace()", recv),
@@ -2981,7 +2987,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_std::jet_task_cancel_all(&({}))", cx.root_prefix, recv)
                 }
                 THandleOp::TaskPauseAll => {
-                    format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
+                    if args.is_empty() {
+                        format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
+                    } else {
+                        format!(
+                            "{}jet_std::jet_task_pause_all_mode(&({}), {})",
+                            cx.root_prefix,
+                            recv,
+                            a(0)
+                        )
+                    }
                 }
                 THandleOp::TaskResumeAll => {
                     format!("{}jet_std::jet_task_resume_all(&({}))", cx.root_prefix, recv)

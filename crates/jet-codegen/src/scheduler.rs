@@ -350,6 +350,8 @@ impl ParkSlot {
 pub struct JetTaskControl {
     pub paused: AtomicBool,
     pub cancelled: AtomicBool,
+    /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
+    pub pause_mode: std::sync::atomic::AtomicU8,
     park: Arc<ParkSlot>,
     cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
 }
@@ -359,12 +361,18 @@ impl JetTaskControl {
         Arc::new(JetTaskControl {
             paused: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
+            pause_mode: std::sync::atomic::AtomicU8::new(0),
             park: ParkSlot::new(),
             cancel_waiters: Mutex::new(Vec::new()),
         })
     }
 
     pub fn pause(&self) {
+        self.pause_with_mode(0);
+    }
+
+    pub fn pause_with_mode(&self, mode: u8) {
+        self.pause_mode.store(mode, Ordering::Relaxed);
         self.paused.store(true, Ordering::Relaxed);
     }
 

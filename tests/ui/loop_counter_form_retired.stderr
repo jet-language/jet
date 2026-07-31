@@ -1,0 +1,7 @@
+Error [E0376]: C-style counter loop headers are retired
+  --> tests/ui/loop_counter_form_retired.jet:2:25
+    |
+  2 |     loop i := 0, i < 5, i += 1 {
+    |                         ^
+ Why: a three-slot loop header is binding, source, and step rule — not init, condition, and assignment
+ Fix: write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state

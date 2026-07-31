@@ -284,7 +284,7 @@ loop n > 0 { tick() }              // conditional effect loop (no `while`)
 loop i, 1..5 { print(i) }          // source effect loop (no `for`)
 loop (key, value), map { audit(key) } // map-pair effect loop
 loop i, 0..10, 2 { audit(i) }      // positive source stride
-loop i := 0, i < n, i++ { draw(i) } // explicit state
+loop i := 0, i < n { draw(i); i += 1 } // mutable state (two-slot)
 values :: loop item, items -> item.value
 ```
 
@@ -292,8 +292,10 @@ values :: loop item, items -> item.value
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 Commas separate loop header clauses. Semicolons remain statement boundaries only.
+**D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
+is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range step rule.
 
-A finite source or C-style loop may use `-> expression` or `-> { ... }`.
+A finite source loop may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-Void item. The result is an eager
 `List<T>` in iteration order. A header guard filters items. Multiple source
 clauses nest left to right and yield one flat List. An inner yielding loop

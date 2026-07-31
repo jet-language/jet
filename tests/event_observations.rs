@@ -390,7 +390,7 @@ fn run() {
     scope :: event.scope()
     many :: event.new<Int>()
     many.on(scope, (n: Int) => {})
-    loop i := 0, i < 300, i++ { many.emit(i) }
+    loop i, 0..<300 { many.emit(i) }
     print("READY")
     time.sleep(30000)
 }
@@ -419,7 +419,7 @@ fn run() {
     scope :: event.scope()
     concurrent :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
     concurrent.on(scope, (n: Int) => { time.sleep(1) })
-    loop i := 0, i < 400, i++ { concurrent.emit_async(i) }
+    loop i, 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500)
     print("READY")
     time.sleep(30000)

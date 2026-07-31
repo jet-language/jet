@@ -24,17 +24,19 @@ const MAX_WIDTH: usize = 100;
 /// non-block statements qualify; every block-bearing variant (`if`, loops,
 /// `switch`, `#unsafe`, etc.) must expand so fmt never nests a block inline.
 fn is_simple_stmt(stmt: &Stmt) -> bool {
-    matches!(
-        stmt,
+    match stmt {
+        // Bare `return` must stay multiline: `{ return }` is not a recoverable parse.
+        Stmt::Return(None, _) => false,
         Stmt::Expr(_)
-            | Stmt::Val(_)
-            | Stmt::Assign { .. }
-            | Stmt::Return(..)
-            | Stmt::Break(_)
-            | Stmt::Continue(_)
-            | Stmt::BreakLabel(..)
-            | Stmt::ContinueLabel(..)
-    )
+        | Stmt::Val(_)
+        | Stmt::Assign { .. }
+        | Stmt::Return(Some(_), _)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..) => true,
+        _ => false,
+    }
 }
 
 /// Format a parsed program back to canonical Jet source.

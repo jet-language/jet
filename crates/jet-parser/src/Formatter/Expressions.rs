@@ -350,7 +350,7 @@ impl<'a> Fmt<'a> {
                 params,
                 ret,
                 effect_bound,
-                ..
+                return_view_provenance,
             } => {
                 self.write("fn(");
                 for (i, p) in params.iter().enumerate() {
@@ -376,6 +376,60 @@ impl<'a> Fmt<'a> {
                     }
                     self.write(" ");
                     self.fmt_type(r);
+                }
+                if let Some(map) = return_view_provenance {
+                    // Function types do not retain surface parameter names; emit
+                    // the parser's synthetic `_N` owners so `from` round-trips.
+                    let synthetic: Vec<crate::AST::Param> = params
+                        .iter()
+                        .enumerate()
+                        .map(|(index, ty)| crate::AST::Param {
+                            convention: crate::AST::AccessConvention::Read,
+                            name: format!("_{index}"),
+                            name_span: crate::Diagnostics::Span::new(0, 0),
+                            ty: ty.clone(),
+                            ty_span: crate::Diagnostics::Span::new(0, 0),
+                            default: None,
+                            variadic: false,
+                            variadic_bound_list: None,
+                            declared_view_from_names: None,
+                        })
+                        .collect();
+                    // Reuse Items helper via a local reprint of the empty-path form.
+                    if map.len() == 1 {
+                        if let Some((path, provenance)) = map.iter().next() {
+                            if path.is_empty() {
+                                self.write(" ");
+                                self.write(crate::Syntax::VIEW_FROM);
+                                self.write(" ");
+                                for (i, source_path) in provenance.sources.iter().enumerate() {
+                                    if i > 0 {
+                                        self.write(" | ");
+                                    }
+                                    match &source_path.source {
+                                        crate::AST::ViewSource::Receiver => {
+                                            self.write(crate::Syntax::KW_SELF)
+                                        }
+                                        crate::AST::ViewSource::Parameter(index) => {
+                                            if let Some(param) = synthetic.get(*index) {
+                                                self.write(&param.name);
+                                            }
+                                        }
+                                        crate::AST::ViewSource::Static { module_path, name } => {
+                                            self.write(crate::Syntax::VIEW_FROM_STATIC);
+                                            self.write(".");
+                                            if !module_path.is_empty() {
+                                                self.write(module_path);
+                                                self.write(".");
+                                            }
+                                            self.write(name);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let _ = synthetic;
                 }
             }
             Type::Named(n) => self.write(n),
@@ -1680,48 +1734,68 @@ impl<'a> Fmt<'a> {
 
     fn fmt_str(&mut self, parts: &[StrPart]) {
         self.write("\"");
-        for part in parts {
-            match part {
+        let mut i = 0;
+        while i < parts.len() {
+            // D-FMT-INTERP2: parser expands `{expr=}` to Lit(label)+Lit(" = ")+Interp.
+            // Reprint the surface form so fmt stays lossless.
+            if let (
+                Some(StrPart::Lit(_label)),
+                Some(StrPart::Lit(sep)),
+                Some(StrPart::Interp(e, fmt)),
+            ) = (parts.get(i), parts.get(i + 1), parts.get(i + 2))
+            {
+                if sep.as_str() == " = " {
+                    self.write("{");
+                    self.fmt_expr(e, Prec::OrFallback);
+                    self.write("=");
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                    i += 3;
+                    continue;
+                }
+            }
+            match &parts[i] {
                 StrPart::Lit(s) => self.write(&escape_str_lit(s)),
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    match fmt {
-                        crate::AST::StrFormat::Display => {}
-                        crate::AST::StrFormat::Debug => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
-                        }
-                        crate::AST::StrFormat::Fixed(precision) => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
-                            self.write("(");
-                            self.write(&precision.to_string());
-                            self.write(")");
-                        }
-                        crate::AST::StrFormat::Unit(style) => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
-                            self.write("(");
-                            self.write(match style {
-                                crate::AST::UnitFormat::Symbol => {
-                                    unreachable!("symbol is bare interpolation")
-                                }
-                                crate::AST::UnitFormat::Name => {
-                                    crate::Syntax::INTERP_UNIT_STYLE_NAME
-                                }
-                                crate::AST::UnitFormat::Bare => {
-                                    crate::Syntax::INTERP_UNIT_STYLE_BARE
-                                }
-                            });
-                            self.write(")");
-                        }
-                    }
+                    self.fmt_str_format(*fmt);
                     self.write("}");
                 }
             }
+            i += 1;
         }
         self.write("\"");
+    }
+
+    fn fmt_str_format(&mut self, fmt: crate::AST::StrFormat) {
+        match fmt {
+            crate::AST::StrFormat::Display => {}
+            crate::AST::StrFormat::Debug => {
+                self.write("#");
+                self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+            }
+            crate::AST::StrFormat::Fixed(precision) => {
+                self.write("#");
+                self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
+                self.write("(");
+                self.write(&precision.to_string());
+                self.write(")");
+            }
+            crate::AST::StrFormat::Unit(style) => {
+                self.write("#");
+                self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
+                self.write("(");
+                self.write(match style {
+                    crate::AST::UnitFormat::Symbol => {
+                        unreachable!("symbol is bare interpolation")
+                    }
+                    crate::AST::UnitFormat::Name => crate::Syntax::INTERP_UNIT_STYLE_NAME,
+                    crate::AST::UnitFormat::Bare => crate::Syntax::INTERP_UNIT_STYLE_BARE,
+                });
+                self.write(")");
+            }
+        }
     }
 
     /// S70 (D-SG5): re-emit a triple-quoted string. Content sits at the current
@@ -1730,11 +1804,28 @@ impl<'a> Fmt<'a> {
     fn fmt_str_multiline(&mut self, parts: &[StrPart]) {
         self.write("\"\"\"");
         self.newline();
-        for part in parts {
-            match part {
+        let mut i = 0;
+        while i < parts.len() {
+            if let (
+                Some(StrPart::Lit(_label)),
+                Some(StrPart::Lit(sep)),
+                Some(StrPart::Interp(e, fmt)),
+            ) = (parts.get(i), parts.get(i + 1), parts.get(i + 2))
+            {
+                if sep.as_str() == " = " {
+                    self.write("{");
+                    self.fmt_expr(e, Prec::OrFallback);
+                    self.write("=");
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                    i += 3;
+                    continue;
+                }
+            }
+            match &parts[i] {
                 StrPart::Lit(s) => {
-                    for (i, line) in s.split('\n').enumerate() {
-                        if i > 0 {
+                    for (line_i, line) in s.split('\n').enumerate() {
+                        if line_i > 0 {
                             self.newline();
                         }
                         if !line.is_empty() {
@@ -1745,40 +1836,11 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    match fmt {
-                        crate::AST::StrFormat::Display => {}
-                        crate::AST::StrFormat::Debug => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
-                        }
-                        crate::AST::StrFormat::Fixed(precision) => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
-                            self.write("(");
-                            self.write(&precision.to_string());
-                            self.write(")");
-                        }
-                        crate::AST::StrFormat::Unit(style) => {
-                            self.write("#");
-                            self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
-                            self.write("(");
-                            self.write(match style {
-                                crate::AST::UnitFormat::Symbol => {
-                                    unreachable!("symbol is bare interpolation")
-                                }
-                                crate::AST::UnitFormat::Name => {
-                                    crate::Syntax::INTERP_UNIT_STYLE_NAME
-                                }
-                                crate::AST::UnitFormat::Bare => {
-                                    crate::Syntax::INTERP_UNIT_STYLE_BARE
-                                }
-                            });
-                            self.write(")");
-                        }
-                    }
+                    self.fmt_str_format(*fmt);
                     self.write("}");
                 }
             }
+            i += 1;
         }
         self.newline();
         self.write("\"\"\"");

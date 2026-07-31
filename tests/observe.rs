@@ -284,7 +284,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "counted_loop",
-            "loop i := 0, i < 1, i++ { counted_only :: 7; print(counted_only) }",
+            "loop i, 0..<1 { counted_only :: 7; print(counted_only) }",
             &["i", "counted_only"],
         ),
         (

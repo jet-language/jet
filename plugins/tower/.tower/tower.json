@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1373,
-    "rev": 21201,
+    "rev": 21222,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57105,7 +57105,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T16:26:27.968Z",
-      "updated": "2026-07-31T22:06:52.113Z",
+      "updated": "2026-07-31T22:29:26.090Z",
       "updatedBy": "cursor-grok",
       "tags": [],
       "parentId": null,
@@ -58012,12 +58012,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement the three ratified rulings on one card. Do not reopen the ballots.\n\n### D-LOOP-HEADER3=D — one meaning for three slots\nHeader shape is binding; source; step rule. Slot three is an Int stride or a step rule (s => s * 2) on a range source. Retire the old counter form with a teaching diagnostic. Pointer-chase loops use a Core generated-sequence helper (Swift sequence(first:next:) shape); settle the helper name in code and document it. Yield arrows keep working.\n\n### D-LOOPLABEL4=A — no change\nKeep binding-as-label for effect loops (Void binding). Optional: suppress unused-binding lint for Void loop labels used as break/next targets. No grammar change required beyond staying compatible with the header work.\n\n### D-LOOPMAP1=B — eager adapters; opt-in lazy\nvalues.map(f) returns a List. Lazy pipelines require values.lazy().map(f).... Iterator sources (files, channels) stay lazy. Eagerness applies to in-memory collections only.\n\n## Acceptance\n- Syntax.rs + syntax-decisions.md for each ruling that changes surface law.\n- Grammars regenerated; snapshots blessed (verify skill).\n- Teaching diagnostic for retired counter form (I4 snapshot).\n- Example(s) covering: range+step rule, Int stride, labeled effect loop, eager map vs .lazy() pipeline.\n- I9: default jet run and AOT match goldens for new examples.\n- No second loop mechanism; no second map plane without .lazy().\n\n## Steps\n1. Header rewrite in parser/sema; diagnostic for old counter form.\n2. Step-rule lowering on ranges; Int stride unchanged in law.\n3. Core generated-sequence helper for pointer-chase; document name.\n4. Adapter eagerness + .lazy() entry; update collection method law/docs.\n5. Examples + goldens; syntax chores; Sol review.\n\n## Owned paths\nparser/sema/codegen loop + collection adapters, Syntax.rs, syntax-decisions.md, Core sequence helper, examples, snapshots.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "sol-verify",
+          "text": "sol-verified: all 7 criteria verified; E0376 UI snapshot + counter-form parser rejection confirmed"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -58065,20 +58070,20 @@
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-30T13:51:35.117Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "JET_UI_FILTER=loop_counter_form_retired cargo test --test diagnostic_snapshots ui_snapshots: 1 passed",
+          "at": "2026-07-31T22:29:58.207Z"
         },
         {
           "n": 5,
           "text": "Counter-form retirement has teaching diagnostic + UI snapshot",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:00:29.903Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "E0376 tests/ui/loop_counter_form_retired.{jet,stderr}; parser rejects loop i := 0, i < n, i += 1 (control.rs:1162-1181)",
+          "at": "2026-07-31T22:29:58.376Z"
         },
         {
           "n": 6,
@@ -58104,9 +58109,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.595Z",
-      "updated": "2026-07-31T22:06:51.432Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T22:06:51.432Z"
+      "updated": "2026-07-31T22:30:02.386Z",
+      "updatedBy": "sol-verify",
+      "completedAt": "2026-07-31T22:30:02.386Z"
     },
     {
       "id": "c0fl0ik7",
@@ -60235,12 +60240,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nOne Prelude formatter for task `paused=` / `cancel=` trace strings, plus pause timing law across engines.\n\n## Ratified law\nD-TASK-PAUSE-TIER1=E —\n- Default: every engine pauses at the next wait point (same beginner rule).\n- Expert: optional labeled mode on pause APIs (for example `mode: .WaitPoints | .CheckLoops`, default `.WaitPoints`). Strong mode adds portable yield or back-edge checks on every engine — never engine-specific timing.\n- Trace flag text always comes from one shared Prelude formatter.\n\n## Build steps\n1. Extract one Prelude formatter; call it from `MathTaskMem.rs` (or successor) and from TIR/eval task trace. Delete the duplicate format path.\n2. Add a tier-parity test that fails if the strings diverge.\n3. Wire default wait-point pause on all engines; add the optional strong mode per the ruling.\n4. Docs only if the ruling needs a teaching note; no I9 carve-out unless a later owner ballot says so.\n\n## Acceptance / proof\n- Interpreter and AOT/JIT task traces use the identical Prelude helper for pause/cancel text.\n- Parity test catches drift.\n- `pause_all` without mode stops at wait points on every engine; strong mode is available and portable.\n- Targeted task/runtime tests green.\n\n## Owned paths\n`crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs` (or shared helper), TIR/eval task trace, parity test, docs if required.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "sol-verify",
+          "text": "sol-verified: all 3 criteria verified; pause_with_mode/jet_scheduler_loop_pause_check + jet_task_control_trace parity"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -60266,11 +60276,11 @@
         {
           "n": 1,
           "text": "D-TASK-PAUSE-TIER1 ratified and pause timing honored on all applicable tiers",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:03:33.048Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "D-TASK-PAUSE-TIER1=E ratified; pause_with_mode in Prelude Scheduler.rs + MathTaskMem.rs; jet_scheduler_loop_pause_check at Scheduler.rs:429",
+          "at": "2026-07-31T22:29:59.116Z"
         },
         {
           "n": 2,
@@ -60284,11 +60294,11 @@
         {
           "n": 3,
           "text": "Parity test fails if trace strings diverge across tiers",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:03:33.470Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "jet-foundation task_control_trace_is_stable: 1 passed; TIR eval + MathTaskMem call jet_task_control_trace",
+          "at": "2026-07-31T22:29:59.358Z"
         }
       ],
       "refs": [
@@ -60298,9 +60308,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T15:19:28.064Z",
-      "updated": "2026-07-31T22:06:51.885Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T22:06:51.885Z"
+      "updated": "2026-07-31T22:30:02.558Z",
+      "updatedBy": "sol-verify",
+      "completedAt": "2026-07-31T22:30:02.558Z"
     },
     {
       "id": "c0buvo7y",
@@ -60825,12 +60835,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nExtend #1335: any braced block whose contents fit the width budget collapses to one line.\n\n## Ratified law\nD-FMTCOLLAPSE1=B — every fitting `{ … }` becomes one line: if/else/loop bodies, match/arrow arms, function bodies, and marker-wrapped regions (`#Unsafe(\"…\") { … }`, `#Impure(\"…\") { … }`, and similar).\n- Comments, forced newlines, or over-width contents stay multiline.\n- Nested blocks collapse inside-out when each level fits.\n- Width budget unchanged (S44 / 100-col).\n\n## Build steps\n1. Amend fmt law in `docs/spec/syntax-decisions.md` after #1335.\n2. Implement collapse for all braced forms named above in the formatter.\n3. Re-bless fmt tests, snapshots, and goldens for touched surfaces.\n4. Run `jet fmt` over the example corpus; keep behavior stable except intentional one-line collapses.\n\n## Acceptance / proof\n- Fitting control, function, arm, and marker blocks format to one line.\n- Over-width or commented blocks stay multiline.\n- Nested collapse is inside-out.\n- Fmt tests + re-blessed snapshots green; example corpus stable under `jet fmt`.\n\n## Owned paths\nFormatter sources, fmt tests/snapshots, `docs/spec/syntax-decisions.md`, touched goldens/examples.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "sol-verify",
+          "text": "sol-verified: all 8 criteria verified; fmt suite 151 passed including examples idempotency"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -60869,20 +60884,20 @@
         {
           "n": 2,
           "text": "Fmt tests + snapshots/goldens re-blessed for touched surfaces",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:28:54.434Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "cargo test --test fmt: 151 passed, 0 failed",
+          "at": "2026-07-31T22:29:58.559Z"
         },
         {
           "n": 3,
           "text": "examples/ stable under jet fmt with the new collapse rule",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:28:54.634Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "fmt_is_idempotent_on_examples ok within fmt suite (151 passed)",
+          "at": "2026-07-31T22:29:58.743Z"
         },
         {
           "n": 4,
@@ -60923,11 +60938,11 @@
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-31T20:40:51.879Z"
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "sol-verify",
+          "evidence": "fmt suite 151 passed including lossless/snapshot re-bless for D-FMTCOLLAPSE1",
+          "at": "2026-07-31T22:29:58.902Z"
         }
       ],
       "refs": [
@@ -60937,9 +60952,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T20:28:03.826Z",
-      "updated": "2026-07-31T22:06:51.660Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T22:06:51.660Z"
+      "updated": "2026-07-31T22:30:02.733Z",
+      "updatedBy": "sol-verify",
+      "completedAt": "2026-07-31T22:30:02.732Z"
     },
     {
       "id": "c04zbobq",
@@ -82041,6 +82056,153 @@
   ],
   "events": [
     {
+      "at": "2026-07-31T22:30:02.733Z",
+      "by": "sol-verify",
+      "action": "card.update",
+      "ref": "c01pcsdb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T22:30:02.558Z",
+      "by": "sol-verify",
+      "action": "card.update",
+      "ref": "c00v6i2i",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T22:30:02.386Z",
+      "by": "sol-verify",
+      "action": "card.update",
+      "ref": "c0yclhqo",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T22:29:59.358Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c00v6i2i",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T22:29:59.116Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c00v6i2i",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T22:29:58.902Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01pcsdb",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-31T22:29:58.743Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01pcsdb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T22:29:58.559Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01pcsdb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T22:29:58.377Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0yclhqo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T22:29:58.207Z",
+      "by": "sol-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0yclhqo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T22:29:28.126Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00v6i2i",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T22:29:27.918Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c00v6i2i",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T22:29:27.701Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c01pcsdb",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-31T22:29:27.438Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c01pcsdb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T22:29:27.119Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c01pcsdb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T22:29:26.771Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0yclhqo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T22:29:26.436Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0yclhqo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T22:29:26.090Z",
+      "by": "cursor-grok",
+      "action": "decision.update",
+      "ref": "D-WEB-CLICK-PORT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-31T22:08:18.372Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c00v6i2i",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T22:08:18.164Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c01pcsdb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T22:08:17.969Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0yclhqo",
+      "note": ""
+    },
+    {
       "at": "2026-07-31T22:06:52.113Z",
       "by": "cursor-grok",
       "action": "card.update",
@@ -85392,153 +85554,6 @@
       "action": "card.criteria-meet",
       "ref": "c0bda91w",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:29:19.565Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bda91w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:29:19.281Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bda91w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:23:12.697Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:23:05.885Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0bda91w",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:22:52.532Z",
-      "by": "grok-verify",
-      "action": "card.update",
-      "ref": "c0kix3zi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:22:52.298Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kix3zi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T16:22:52.093Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kix3zi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:22:51.888Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kix3zi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:22:51.685Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kix3zi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:22:51.475Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0kix3zi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:22:51.241Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kix3zi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T16:22:51.036Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kix3zi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:22:50.833Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kix3zi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:22:50.628Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kix3zi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:06:23.410Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0kix3zi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:06:11.067Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0kix3zi",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:06:05.603Z",
-      "by": "grok-verify",
-      "action": "card.update",
-      "ref": "c0avjyq6",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:06:05.357Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0avjyq6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:06:05.083Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0avjyq6",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:06:04.795Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0avjyq6",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:05:26.744Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0avjyq6",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

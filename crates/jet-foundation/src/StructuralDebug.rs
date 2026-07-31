@@ -34,6 +34,23 @@ pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
     format!("paused={paused},cancel={cancel}")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::jet_task_control_trace;
+
+    #[test]
+    fn task_control_trace_is_stable() {
+        assert_eq!(
+            jet_task_control_trace(true, false),
+            "paused=true,cancel=false"
+        );
+        assert_eq!(
+            jet_task_control_trace(false, true),
+            "paused=false,cancel=true"
+        );
+    }
+}
+
 /// D-RANGE-VALUE1=A: the standard structural record form for `Range`.
 pub fn jet_debug_range(start: i64, end: i64, exclusive: bool) -> String {
     jet_debug_record(

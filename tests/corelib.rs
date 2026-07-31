@@ -8009,7 +8009,7 @@ use core.encoding.xml as xml
 
 fn same_bytes(left: [U8], right: [U8]) => Bool {
     if left.len() != right.len() { return false }
-    loop index := 0, index < left.len(), index++ {
+    loop index, 0..<left.len() {
         if left[index] != right[index] { return false }
     }
     return true

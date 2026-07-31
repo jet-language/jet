@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -325,6 +325,8 @@ impl ParkSlot {
 pub struct JetTaskControl {
     pub paused: AtomicBool,
     pub cancelled: AtomicBool,
+    /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
+    pub pause_mode: AtomicU8,
     observe_id: AtomicUsize,
     park: Arc<ParkSlot>,
     cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
@@ -335,6 +337,7 @@ impl JetTaskControl {
         Arc::new(JetTaskControl {
             paused: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
+            pause_mode: AtomicU8::new(0),
             observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
             cancel_waiters: Mutex::new(Vec::new()),
@@ -342,6 +345,12 @@ impl JetTaskControl {
     }
 
     pub fn pause(&self) {
+        self.pause_with_mode(0);
+    }
+
+    /// D-TASK-PAUSE-TIER1=E: `mode` 0 = WaitPoints, 1 = CheckLoops.
+    pub fn pause_with_mode(&self, mode: u8) {
+        self.pause_mode.store(mode, Ordering::Relaxed);
         self.paused.store(true, Ordering::Relaxed);
         if let Some(registry) = jet_observe_registry() {
             let id = self.observe_id.load(Ordering::Relaxed);
@@ -413,6 +422,24 @@ pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
 
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
+}
+
+/// D-TASK-PAUSE-TIER1=E: strong pause (`CheckLoops`) honors pause at loop
+/// back-edges on every engine. WaitPoints mode is a no-op here.
+pub fn jet_scheduler_loop_pause_check() {
+    let Some(ctrl) = current_task_control() else {
+        return;
+    };
+    if ctrl.pause_mode.load(Ordering::Relaxed) != 1 {
+        return;
+    }
+    if !ctrl.paused.load(Ordering::Relaxed) {
+        return;
+    }
+    ctrl.wait_while_paused();
+    if ctrl.cancelled.load(Ordering::Relaxed) && !jet_scheduler_shielded() {
+        jet_task_deliver_cancel();
+    }
 }
 
 /// Park at a yield point; honors pause/cancel on the running task.

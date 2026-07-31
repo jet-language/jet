@@ -1073,7 +1073,7 @@ fn sum_while(n: Int) => Int {
 #Target(JS)
 fn sum_counted(n: Int) => Int {
     total := 0
-    loop i := 0, i < n, i += 1 { total += i }
+    loop i, 0..<n { total += i }
     return total
 }
 #Target(JS)
@@ -1107,7 +1107,7 @@ fn wasm_sum_while(n: Int) => Int {
 #WasmExport
 fn wasm_sum_counted(n: Int) => Int {
     total := 0
-    loop i := 0, i < n, i += 1 { total += i }
+    loop i, 0..<n { total += i }
     return total
 }
 #WasmExport
@@ -1407,7 +1407,7 @@ enum Choice { Stop Keep }
 #Target(JS)
 fn count(choice: Choice) => Int {
     hits := 0
-    loop i := 0, i < 3, i += 1 {
+    loop i, 0..<3 {
         if choice == {
             .Stop -> { break }
             .Keep -> {}

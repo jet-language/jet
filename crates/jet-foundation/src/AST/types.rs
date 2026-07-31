@@ -941,6 +941,7 @@ mod tests {
                 err: Box::new(Type::String),
             })),
             effect_bound: None,
+            return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
         let time = nested.map_named_types(&|name| (name == "Unit").then(|| "time.Unit".into()));

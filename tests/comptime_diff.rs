@@ -843,7 +843,7 @@ fn build() => [Int] {
         if i == 3 { next }
         xs.push(i * 10)
     }
-    loop cursor := 0, cursor < 3, cursor += 1 {
+    loop cursor, 0..<3 {
         if cursor == 1 { next }
         xs.push(cursor)
     }

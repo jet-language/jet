@@ -655,10 +655,12 @@ fn counted_init_exit() => Int {
 
 fn counted_step_exit() => Int {
     result :: loop {
-        loop i := 0, i < 2, i = (loop {
-            break(result, 15)
-            break 0
-        }) {}
+        loop i := 0, i < 2 {
+            i = (loop {
+                break(result, 15)
+                break 0
+            })
+        }
         break 0
     }
     result

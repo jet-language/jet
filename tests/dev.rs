@@ -1666,10 +1666,12 @@ fn counted_init_exit() => Int {
 
 fn counted_step_exit() => Int {
     result :: loop {
-        loop i := 0, i < 2, i = (loop {
-            break(result, 15)
-            break 0
-        }) {}
+        loop i := 0, i < 2 {
+            i = (loop {
+                break(result, 15)
+                break 0
+            })
+        }
         break 0
     }
     result
@@ -3031,7 +3033,7 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
 
 #[test]
 fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
-    let counted = "fn run() {\n    loop i := 0, i < 4, i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
+    let counted = "fn run() {\n    loop i, 0..<4 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {
         let native = run_cranelift_without_fallback(counted, "counted_next");
         assert_eq!(native.stdout, "0\n2\n3\n");
@@ -6852,7 +6854,7 @@ fn resident_jit_safe_labeled_loop_control() {
     }
     let src = r#"
 fn run() {
-    outer :: loop i := 0, i < 2, i += 1 {
+    outer :: loop i, 0..<2 {
         loop {
             if i == 0 {
                 next(outer)
@@ -6877,7 +6879,7 @@ fn resident_jit_named_or_fallback_loop_control() {
     let src = r#"
 fn run() {
     values := [7]
-    outer :: loop i := 0, i < 2, i += 1 {
+    outer :: loop i, 0..<2 {
         loop {
             value :: values.get(1 - i) ?? next(outer)
             print(value)
@@ -8008,7 +8010,7 @@ fn cranelift_matches_variadic_fixed_writeback() {
 #[test]
 fn cranelift_covers_counted_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    sum := 0\n    loop i := 0, i < 5, i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
+        "fn run() {\n    sum := 0\n    loop i, 0..<5 {\n        sum += i\n    }\n    print(sum)\n}\n",
         "counted_loop",
     );
 }

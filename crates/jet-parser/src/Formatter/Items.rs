@@ -286,6 +286,9 @@ impl<'a> Fmt<'a> {
                     f.write(" ");
                     f.fmt_return_type(ret);
                 }
+                if let Some(map) = &m.declared_return_view_provenance {
+                    f.fmt_declared_return_view_from(map, &m.params);
+                }
                 // D-LIB2: a trait method may carry a default body.
                 if let Some(body) = &m.default_body {
                     f.write(" {");
@@ -790,6 +793,9 @@ impl<'a> Fmt<'a> {
             self.write(" ");
             self.fmt_return_type(ret);
         }
+        if let Some(map) = &f.declared_return_view_provenance {
+            self.fmt_declared_return_view_from(map, &f.params);
+        }
         // D-ARROW-CONTROL1: preserve the canonical concise callable body.
         // The parser desugars `= expr` to `return expr`; its synthetic return
         // span starts on the author-written `=`.
@@ -888,11 +894,95 @@ impl<'a> Fmt<'a> {
                 }
                 None => self.fmt_type(&p.ty),
             }
+            if let Some(names) = &p.declared_view_from_names {
+                if !names.is_empty() {
+                    self.write(" ");
+                    self.write(Syntax::VIEW_FROM);
+                    self.write(" ");
+                    self.write(&names.join(" | "));
+                }
+            }
         }
         // S61: a trailing parameter may carry a `= default` value.
         if let Some(default) = &p.default {
             self.write(" = ");
             self.fmt_expr(default, Prec::OrFallback);
+        }
+    }
+
+    /// D-MEMPROVENANCE3=A: reprint a function return `from` clause.
+    fn fmt_declared_return_view_from(
+        &mut self,
+        map: &crate::AST::ViewProvenanceMap,
+        params: &[crate::AST::Param],
+    ) {
+        if map.is_empty() {
+            return;
+        }
+        self.write(" ");
+        self.write(Syntax::VIEW_FROM);
+        self.write(" ");
+        if map.len() == 1 {
+            if let Some((path, provenance)) = map.iter().next() {
+                if path.is_empty() {
+                    self.fmt_view_source_union(provenance, params);
+                    return;
+                }
+            }
+        }
+        self.write("(");
+        for (i, (path, provenance)) in map.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.write(&path.join("."));
+            self.write(": ");
+            self.fmt_view_source_union(provenance, params);
+        }
+        self.write(")");
+    }
+
+    fn fmt_view_source_union(
+        &mut self,
+        provenance: &crate::AST::ViewProvenance,
+        params: &[crate::AST::Param],
+    ) {
+        for (i, path) in provenance.sources.iter().enumerate() {
+            if i > 0 {
+                self.write(" | ");
+            }
+            match &path.source {
+                crate::AST::ViewSource::Receiver => self.write(Syntax::KW_SELF),
+                crate::AST::ViewSource::Parameter(index) => {
+                    let ordinary: Vec<&crate::AST::Param> = params
+                        .iter()
+                        .filter(|param| param.name != Syntax::KW_SELF)
+                        .collect();
+                    if let Some(param) = ordinary.get(*index) {
+                        self.write(&param.name);
+                    } else {
+                        self.write(&format!("param{index}"));
+                    }
+                }
+                crate::AST::ViewSource::Static { module_path, name } => {
+                    self.write(Syntax::VIEW_FROM_STATIC);
+                    self.write(".");
+                    if !module_path.is_empty() {
+                        self.write(module_path);
+                        self.write(".");
+                    }
+                    self.write(name);
+                }
+            }
+            for projection in &path.projections {
+                match projection {
+                    crate::AST::ViewSourceProjection::Field(field) => {
+                        self.write(".");
+                        self.write(field);
+                    }
+                    crate::AST::ViewSourceProjection::Index | crate::AST::ViewSourceProjection::Range => {}
+                }
+            }
         }
     }
 

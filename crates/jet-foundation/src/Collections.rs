@@ -582,6 +582,7 @@ fn task_list_method_return(args: &[Type], method: &str, nargs: usize) -> Option<
         (Syntax::METHOD_TASK_DETACH_ALL, 0)
         | (Syntax::METHOD_TASK_CANCEL_ALL, 0)
         | (Syntax::METHOD_TASK_PAUSE_ALL, 0)
+        | (Syntax::METHOD_TASK_PAUSE_ALL, 1)
         | (Syntax::METHOD_TASK_RESUME_ALL, 0) => Some(None),
         (Syntax::METHOD_TASK_TRACE_ALL, 0) => Some(Some(Type::List(Box::new(Type::String)))),
         _ => None,
@@ -960,6 +961,7 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
         (Syntax::TASK_DETACH, 0) => Some(None),
         // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.
         (Syntax::METHOD_TASK_PAUSE, 0)
+        | (Syntax::METHOD_TASK_PAUSE, 1)
         | (Syntax::METHOD_TASK_RESUME, 0)
         | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
         (Syntax::METHOD_TASK_TRACE, 0) => Some(Some(Type::String)),

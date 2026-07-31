@@ -1159,33 +1159,32 @@ impl<'a> Parser<'a> {
             }
             self.expect_loop_comma("after the state initializer")?;
             let cond = self.expr_no_struct_lit()?;
-            let step = if self.take_loop_comma() {
-                let step_expr = self.expr()?;
-                let step = if matches!(self.peek().kind, TokKind::Eq)
+            // D-LOOP-HEADER3=D: three-slot C-style counter (`init, cond, step`)
+            // retires. Keep two-slot state loops (`name := value, condition`).
+            if self.take_loop_comma() {
+                let step_span = self.peek().span;
+                let _ = self.expr()?;
+                if matches!(self.peek().kind, TokKind::Eq)
                     || self.peek().kind.compound_op().is_some()
                 {
-                    let op_tok = self.bump();
-                    let op = op_tok.kind.compound_op();
-                    let value = self.expr()?;
-                    let target = self.expr_to_lvalue(step_expr)?;
-                    Stmt::Assign {
-                        target,
-                        op,
-                        op_span: op_tok.span,
-                        value,
-                    }
-                } else {
-                    Stmt::Expr(step_expr)
-                };
-                Some(Box::new(step))
-            } else {
-                None
-            };
+                    self.bump();
+                    let _ = self.expr()?;
+                }
+                return Err(Diagnostic::error(
+                    "E0376",
+                    "C-style counter loop headers are retired".to_string(),
+                    "a three-slot loop header is binding, source, and step rule — not init, condition, and assignment"
+                        .to_string(),
+                    "write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state"
+                        .to_string(),
+                    Some(step_span),
+                ));
+            }
             let body = self.effect_loop_body()?;
             Ok(Stmt::CountedLoop {
                 init,
                 cond,
-                step,
+                step: None,
                 body,
                 span,
                 label,
