@@ -298,6 +298,12 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
 
 /// Project package/workspace source truth into the public Canvas project schema.
 pub fn project_json_for_entry(path: &Path) -> String {
+    // Parent-walk discovery can parse `.jet` files; use the compiler stack +
+    // TIR bridge rather than the thin test/UI thread (default ~2MiB).
+    jet_driver::run_compiler_work(|| project_json_for_entry_inner(path))
+}
+
+fn project_json_for_entry_inner(path: &Path) -> String {
     let ctx = project_context_for_entry(path);
     let entry_rel = rel_path(&ctx.project_root, path);
     let workspace_json = workspace_project_json(&ctx.project_root, ctx.workspace_root.as_deref());

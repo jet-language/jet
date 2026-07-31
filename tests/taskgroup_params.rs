@@ -49,23 +49,35 @@ fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
 }
 
 fn assert_jit_compiles(name: &str, source: &str) {
-    let path = std::env::temp_dir().join(format!(
-        "jet_taskgroup_jit_{name}_{}.jet",
-        std::process::id()
-    ));
-    fs::write(&path, source).unwrap();
-    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
+    // Resident JIT lowering of nested task/lambda shapes needs more than the
+    // default ~2MiB test-thread stack; keep the compile off the test thread.
+    let name = name.to_string();
+    let source = source.to_string();
+    let join = std::thread::Builder::new()
+        .name(format!("jet-taskgroup-jit-{name}"))
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let path = std::env::temp_dir().join(format!(
+                "jet_taskgroup_jit_{name}_{}.jet",
+                std::process::id()
+            ));
+            fs::write(&path, &source).unwrap();
+            let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+                .into_iter()
+                .filter(|diagnostic| {
+                    matches!(
+                        diagnostic.severity,
+                        jet::Diagnostics::Severity::Error
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert!(errors.is_empty(), "{errors:?}");
+            jet_jit::try_compile_bundle(&bundle)
+                .expect("TaskGroup source must compile for resident JIT");
         })
-        .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "{errors:?}");
-    jet_jit::try_compile_bundle(&bundle).expect("TaskGroup source must compile for resident JIT");
+        .expect("spawn JIT compile thread");
+    join.join().expect("JIT compile thread");
 }
 
 #[test]

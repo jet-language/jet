@@ -78,16 +78,42 @@ pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
     }
 }
 
-/// Cheap text-level probe: does `src` declare a top-level, enabled
+/// Cheap token probe: does `src` declare a top-level, enabled
 /// `module workspace { … }`? Full parse/eval happens only on the one match.
+///
+/// Must not call `Parser::parse` — discovery walks every ancestor directory
+/// (including `/tmp` in tests) and full-parsing unrelated deep `.jet` files
+/// overflows the default test-thread stack before `MAX_SOURCE_NESTING` fires.
 fn declares_workspace_module(src: &str) -> bool {
     let (toks, _lex_diags) = crate::Lexer::lex(src);
-    let Ok(program) = crate::Parser::parse(&toks) else {
-        return false;
-    };
-    program.items.iter().any(|item| {
-        matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && m.is_auto_discovered())
-    })
+    let toks = crate::Lexer::without_comments(&toks);
+    let mut brace_depth = 0i32;
+    let mut i = 0;
+    while i + 1 < toks.len() {
+        match &toks[i].kind {
+            crate::Lexer::TokKind::LBrace => {
+                brace_depth += 1;
+                i += 1;
+            }
+            crate::Lexer::TokKind::RBrace => {
+                brace_depth -= 1;
+                i += 1;
+            }
+            crate::Lexer::TokKind::KwModule if brace_depth == 0 => {
+                match &toks[i + 1].kind {
+                    crate::Lexer::TokKind::Ident(name)
+                        if name == Syntax::NS_WORKSPACE
+                            && !name.starts_with(Syntax::MODULE_INTERNAL_PREFIX) =>
+                    {
+                        return true;
+                    }
+                    _ => i += 1,
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    false
 }
 
 /// E1239: two or more files declare `module workspace` — the index must be
@@ -116,6 +142,9 @@ fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
 
 /// Evaluate a `workspace.jet` source string to a `WorkspacePlan`.
 pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic> {
+    // `members:` may call comptime helpers; Canvas/tests invoke `load` outside
+    // `jet`/`jetpack` mains that normally install this bridge.
+    jet_codegen::Codegen::TIR::install_comptime_bridge();
     let overlay_policy = Overlay::parse_workspace_policy(src).map_err(|e| {
         Diagnostic::error(
             "E0998",

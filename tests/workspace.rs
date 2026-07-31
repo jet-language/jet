@@ -345,3 +345,31 @@ fn e1239_two_discovered_workspace_declarations() {
     assert!(d.what.contains("a.jet") && d.what.contains("b.jet"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn discovery_probe_skips_deep_non_workspace_jet_without_stack_overflow() {
+    use jetpack::WorkspaceFile;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ws-deep-probe-{nanos}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Nested `=>` deep enough that a full parse blows the default ~2MiB
+    // test stack — the declaration probe must stay token-cheap.
+    let mut deep = String::from("fn run() {\n    x :: ");
+    for _ in 0..400 {
+        deep.push_str("(() => ");
+    }
+    deep.push('1');
+    for _ in 0..400 {
+        deep.push(')');
+    }
+    deep.push_str("\n}\n");
+    std::fs::write(dir.join("noise.jet"), deep).unwrap();
+    assert!(
+        WorkspaceFile::load(&dir).is_none(),
+        "deep non-workspace file must not count as a workspace index"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
