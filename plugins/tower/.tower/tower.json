@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1363,
-    "rev": 20867,
+    "rev": 20868,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46808,6 +46808,11 @@
         {
           "at": "2026-07-31",
           "by": "claude-burndown",
+          "text": "Review rounds 1 and 2 done (fresh-context reviewer). Two findings fixed: (a) the auto-copy pass wrapped a field or index argument to mem.pin in copy, so no view fact was recorded and the pinned field stayed replaceable — mem.pin now infers its argument in borrow context (commit 3af723a5b); (b) the interpreter place handle could shadow its own owner on x :: &x — guarded, plus an index-place test (commit 5a74d3bb9). tests/pin.rs is now 15 tests, all green. Repo reds observed during this work are unrelated and carded as #1362."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
           "text": "Landed the Pin<T> slice (commit 79fb716ea). Shipped: mem.pin(&place) as a tracked write window; E0219 for move/replace/resize while pinned; E0218 for a value argument; Pin<T> as a core generic on fields, parameters, and returns; declared Pin<U> field projection; pin idempotence; sendability rejection; TIR/AOT/Cranelift/interpreter parity; tests/pin.rs (11 tests), two UI snapshots, examples/features/memory/pin.jet with golden output, diagnostics.md rows, jit_gaps + corpus-gate entries. Criteria #1 and #3 are met. Criteria #2, #4, and #5 stay open behind one shared blocker: a live write window cannot flow out of a callee inside an aggregate, because return-view provenance was built for read slices. That is the same limitation ViewMut already has, so it is not pin-specific work. Also fixed en route: the TIR interpreter bound a whole-place write window to a copy, so edits through p :: &node vanished on tier 0 while AOT and Cranelift aliased."
         },
         {
@@ -46887,12 +46892,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-31T19:04:19.245Z",
+      "updated": "2026-07-31T19:31:25.237Z",
       "updatedBy": "claude-burndown",
       "workOrder": 520,
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-07-31T19:04:19.244Z"
+      "claimedAt": "2026-07-31T19:31:25.237Z"
     },
     {
       "id": "c0wpp6cz",
@@ -80004,6 +80009,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-31T19:31:25.237Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-31T19:31:07.164Z",
       "by": "cursor-grok",
       "action": "card.update",
@@ -83495,13 +83507,6 @@
       "action": "card.update",
       "ref": "c0awzf12",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:42:06.970Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c04w9mi3",
-      "note": "Bounded channel example: capacity backpressure and N-worker limiting"
     }
   ],
   "nextNum": 368,
