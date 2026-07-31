@@ -13,7 +13,9 @@ covered:
   basics/counted_loop
   basics/default_refs
   basics/digits
+  basics/fenced_names
   basics/first_hour
+  basics/first_hour_expert
   basics/fizzbuzz
   basics/functions
   basics/hello
@@ -28,7 +30,7 @@ covered:
   basics/named_args
   basics/numbers
   basics/pattern_matching
-  basics/printable
+  basics/print_lines
   basics/range_step
   basics/switch
   basics/tuples
@@ -38,55 +40,56 @@ covered:
   cli/subcommands
   cli/typed_entry_args
   collections/deque
-  collections/dynamic-array-view
   collections/filter_map
   collections/fixed_arrays
+  collections/fn_dispatch_map
   collections/index_hook
-  collections/iter_adapters
-  collections/iter_hook
-  collections/iter_tools_audit
   collections/lazy_iter
   collections/list_bounds
   collections/list_remove_bounds
   collections/lists
-  collections/map_key
   collections/set
   collections/sketch
   collections/struct_list_mutation
   collections/wordcount
+  comptime/comptime_block
   comptime/comptime_core
   comptime/comptime_if
   comptime/comptime_parse
-  comptime/comptime_splice
   comptime/comptime_table
   comptime/comptime_tiers
   comptime/doctests
-  comptime/reflect
+  comptime/embed
+  comptime/embed_bytes
+  comptime/find
+  comptime/find_empty
   concurrency/all_failfast
+  concurrency/bounded_workers
   concurrency/cancel_cleanup
   concurrency/completion_order
   concurrency/deadline_context
   concurrency/detached_task
   concurrency/parallel_iter
   concurrency/parallel_scan
+  concurrency/parallel_scan_expert
   concurrency/pipeline
   concurrency/protocol
   concurrency/race_cancel
   concurrency/scheduler_spawn
+  concurrency/scoped_borrow_bands
   concurrency/select_channel
   concurrency/shield_commit
   concurrency/task_controls
-  concurrency/task_runtime_audit
   concurrency/taskgroup
+  concurrency/taskgroup_parameter
   concurrency/tasks
-  contracts/inline_contracts
+  concurrency/tasks_join_all
   contracts/pre_post
   crypto/auth_tokens
   crypto/crypto_envelope
   crypto/crypto_migration
   crypto/crypto_sign
   crypto/hash
-  crypto/random_api_split
   crypto/typed_crypto
   crypto/vault_key_wrap
   crypto/vault_keys
@@ -99,44 +102,37 @@ covered:
   effects/capability_sigils
   effects/determinism
   effects/effect_caps
+  effects/effect_declarations
   effects/effect_grant
   effects/effect_higher_order
   effects/effect_levers
   effects/effect_prohibition
-  effects/effect_trait_bound
   effects/effect_tree
   effects/effects
   effects/infer_capability
   effects/infer_receiver
   effects/method_receivers
-  effects/mix_write_take
-  effects/move_no_uaf
   effects/pure
   effects/self_mutation
-  effects/share_boundary
   effects/single_use
-  effects/single_use_discard
   effects/smart_context
   effects/taint
   errors/discard_fallible
   errors/error_context
   errors/errors
   errors/fallible_run
-  errors/must_use
   errors/panic
   errors/qq_control
   errors/rollback_trait
   errors/transact
   errors/typed_error_families
-  functions/lambda_bare_params
   functions/lambda_inference
-  io/archive
+  game/core_game_headless
+  game/raylib_window
   io/args_audit
   io/args_spec
   io/cli
   io/cli_args
-  io/compress_gzip
-  io/compress_zstd
   io/db
   io/db_checked_sql
   io/db_read_footprint
@@ -152,22 +148,18 @@ covered:
   io/os_facts
   io/path
   io/process_builder
-  io/scope_guard
   io/stdin_filter
   io/stream
   io/terminal
-  io/terminal_parity
   io/watcher
   lowlevel/cross
   lowlevel/ffi
   lowlevel/freestanding
   lowlevel/inline_asm
   lowlevel/inline_c
-  lowlevel/layout_c
-  lowlevel/layout_columnar
   lowlevel/linalg_simd
   lowlevel/lowlevel
-  lowlevel/os_target_gating
+  lowlevel/mmio_board_write
   lowlevel/pointer_cast_deref
   lowlevel/sized_floats
   lowlevel/sized_integers
@@ -175,11 +167,9 @@ covered:
   lowlevel/target_profile_board
   lowlevel/unsafe_obligations
   math/math_audit
-  math/random_audit
   memory/arena
   memory/arena_parse
   memory/arena_regions
-  memory/copy_verb
   memory/entity_tree
   memory/entity_world
   memory/expiring_secret
@@ -187,9 +177,7 @@ covered:
   memory/no_alloc_policy
   memory/owner_backed_views
   memory/ownership
-  memory/parameter_modes
   memory/pin
-  memory/place_windows
   memory/pool_stale_id
   memory/rawptr
   memory/ref_field
@@ -198,8 +186,11 @@ covered:
   memory/shared_transact
   memory/string_view
   memory/uninit
+  memory/uninit_buffer
+  memory/view_from_callback
+  memory/view_from_param
+  memory/view_from_slots
   modules/inline_module
-  modules/library
   modules/module_inline_sibling
   modules/pub_file
   modules/selective_imports
@@ -214,7 +205,6 @@ covered:
   net/browser_network
   net/browser_privacy
   net/email_dkim
-  net/email_message
   net/http_client
   net/http_get
   net/http_rest_service
@@ -230,13 +220,10 @@ covered:
   net/url_mime
   net/ws_echo
   operators/chained_comparison
-  operators/user_defined
   parsing/binary-reader
   parsing/binary_pattern
   parsing/parse_interpolation
   parsing/text-cursor
-  patterns/struct_destructure
-  reflection/reflect-value
   safety/sh_typed_text
   safety/typed_sql
   serde/codable_default
@@ -246,49 +233,37 @@ covered:
   serde/decode_traced
   serde/encoding
   serde/encoding_base
-  serde/encoding_breadth
   serde/encoding_cbor_stream
   serde/encoding_csv_stream
   serde/encoding_json_stream
   serde/encoding_jsonl_stream
   serde/encoding_stream_types
-  serde/encoding_xml_projection
   serde/encoding_xml_stream
-  serde/hand_codec
   serde/json
   serde/json_coerce
   serde/json_typed
-  serde/serde_derive
-  serde/serde_generic
   serde/toml
-  serde/user_derive
   serde/validate
   serde/yaml
   streams/generators
   syntax/maturity_tags
   syntax/trailing_block
-  text/bigint
   text/dates
   text/datetime
   text/decimal
-  text/hex_base64
   text/human_format
-  text/regex
   text/runtime_duration
+  text/stream_lines
   text/string_parse
   text/strings
   text/time_calendar
-  text/unicode_text
   text/unicode_text_audit
   text/uuid
   tooling/bench
+  tooling/branch_dispatch_bench
   tooling/canvas_blueprint_demo
-  tooling/data_analysis
   tooling/data_bridges
-  tooling/data_core
-  tooling/data_hostile
   tooling/data_json
-  tooling/data_pipeline
   tooling/data_schema
   tooling/data_stream_bounds
   tooling/debug
@@ -307,36 +282,17 @@ covered:
   tooling/testing_helpers
   tooling/tests
   tooling/todo_hole
-  types/affine_unit_types
-  types/anonymous_unions
-  types/associated_types
   types/capability_bundles
-  types/computed_field
   types/dimensional_quantities
-  types/display_debug
   types/distinct_types
-  types/dot_construction
-  types/enum_dot
   types/enum_dot_patterns
-  types/enums
-  types/external_methods
   types/generic_types
   types/inferred_new
   types/measurement
-  types/nested_enum_groups
-  types/no_any_alternatives
   types/option
-  types/option_combinators
   types/optional_result_variants
-  types/patchable
-  types/range_types
   types/recursive_enum
   types/refinements
-  types/renderable-varargs
-  types/renderable-varargs-multi
-  types/structs
-  types/tags_and_traits
-  types/traits
   types/type_alias
   types/typed_literal_head
   types/typestate
@@ -365,9 +321,90 @@ covered:
   web/web_wasm_for_in
   web/web_wasm_list
   web/web_wasm_list_string
-  web/web_wasm_map
   web/web_wasm_range
   web/web_wasm_string
   web/web_wasm_string_param
 
 gaps:
+  basics/printable: run: jit comptime value unsupported: Struct { type_name: "Greeting", fields: [("text", Str("hello, jet"))] }
+  collections/dynamic-array-view: run: jit comptime value unsupported: Struct { type_name: "Incident", fields: [("severity", Int(1))] }
+  collections/iter_adapters: run: jit comptime value unsupported: Some(Int(6))
+  collections/iter_hook: run: jit comptime value unsupported: Struct { type_name: "Crate", fields: [("data", List([Int(10), Int(20), Int(30)]))] }
+  collections/iter_tools_audit: run: jit comptime value unsupported: Map({Str("a"): Int(2), Str("b"): Int(2)})
+  collections/map_key: run: jit comptime value unsupported: Map({})
+  collections/member_spread: run: jit comptime value unsupported: Struct { type_name: "Validators", fields: [("length", Int(1)), ("charset", Int(2)), ("entropy", Int(3))] }
+  comptime/comptime_splice: run: jit comptime value unsupported: Struct { type_name: "Cube", fields: [("side", Int(5))] }
+  comptime/reflect: run: jit comptime value unsupported: Struct { type_name: "Widget", fields: [("label", Str("gear")), ("secret", Int(1))] }
+  concurrency/loop_task_handles: run: jit for-in by-value stream unsupported
+  concurrency/task_group_helpers: run: jit spawn_group unsupported
+  concurrency/task_runtime_audit: lower_jit_program returned None (entry stmt 0 outside tir_covers)
+  contracts/inline_contracts: run: jit comptime value unsupported: Struct { type_name: "Meters", fields: [("value", Int(7))] }
+  crypto/crypto_suite: run: jit core call unsupported: jet.crypto.hkdf_sha256
+  crypto/random_api_split: run: jit comptime value unsupported: Bytes([168, 146, 201, 32, 70, 22, 168, 119])
+  effects/effect_trait_bound: run: jit comptime value unsupported: Struct { type_name: "Square", fields: [("side", Int(5))] }
+  effects/mix_write_take: run: jit comptime value unsupported: Struct { type_name: "Item", fields: [("bonus", Int(20)), ("label", Str("iron sword"))] }
+  effects/move_no_uaf: run: jit comptime value unsupported: Struct { type_name: "Token", fields: [("id", Int(42)), ("kind", Str("access"))] }
+  effects/share_boundary: run: jit comptime value unsupported: Struct { type_name: "Config", fields: [("width", Int(1920)), ("height", Int(1080)), ("label", Str("display"))] }
+  effects/single_use_discard: run: jit comptime value unsupported: Struct { type_name: "Ticket", fields: [("id", Str("A"))] }
+  errors/must_use: run: jit comptime value unsupported: Struct { type_name: "Token", fields: [("id", Int(7))] }
+  functions/lambda_bare_params: run: jit comptime value unsupported: Struct { type_name: "Fighter", fields: [("hp", Int(12))] }
+  io/archive: run: jit comptime value unsupported: Bytes([80, 75, 3, 4, 10, 0, 0, 0, 0, 0, 0, 0, 33, 0, 130, 137, 209, 247, 5, 0, 0, 0, 5, 0, 0, 0, 9, 0, 0, 0, 101, 110, 116, 114, 121, 46, 116, 120, 116, 72, 101, 108, 108, 111, 80, 75, 1, 2, 30, 3, 10, 0, 0, 0, 0, 0, 0, 0, 33, 0, 130, 137, 209, 247, 5, 0, 0, 0, 5, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 101, 110, 116, 114, 121, 46, 116, 120, 116, 80, 75, 5, 6, 0, 0, 0, 0, 1, 0, 1, 0, 55, 0, 0, 0, 44, 0, 0, 0, 0, 0])
+  io/compress_gzip: run: jit comptime value unsupported: Bytes([31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 1, 5, 0, 250, 255, 72, 101, 108, 108, 111, 130, 137, 209, 247, 5, 0, 0, 0])
+  io/compress_zstd: run: jit comptime value unsupported: Bytes([40, 181, 47, 253, 0, 56, 41, 0, 0, 72, 101, 108, 108, 111])
+  io/log_job: run: jit builtin method unsupported
+  io/scope_guard: with_guards: jit comptime value unsupported: Unit
+  io/terminal_parity: run: jit enum `IOError::InvalidInput`
+  lowlevel/layout_c: run: jit comptime value unsupported: Struct { type_name: "Vec3", fields: [("x", Float(1.0)), ("y", Float(0.0)), ("z", Float(0.0))] }
+  lowlevel/layout_columnar: run: jit comptime value unsupported: Struct { type_name: "PlainParticle", fields: [("x", Float(0.0)), ("y", Float(0.0)), ("mass", Float(1.0))] }
+  lowlevel/os_target_gating: run: jit comptime value unsupported: Struct { type_name: "LinuxBackend", fields: [("name", Str("gtk"))] }
+  math/numeric_floor: run: jit core call unsupported
+  math/random_audit: run: jit comptime value unsupported: Float(0.0)
+  memory/copy_verb: run: jit comptime value unsupported: Struct { type_name: "Ticket", fields: [("id", Int(1)), ("label", Str("root"))] }
+  memory/local_cache: line_starts: jit unknown local `_jet_cap_user_tree`
+  memory/parameter_modes: run: jit comptime value unsupported: Struct { type_name: "Parcel", fields: [("label", Str("parcel"))] }
+  memory/place_windows: run: jit comptime value unsupported: Struct { type_name: "Tile", fields: [("force", Int(5))] }
+  memory/returned_views: run: jit comptime value unsupported: Struct { type_name: "Token", fields: [("text", Str("name")), ("rest", Str("value"))] }
+  memory/shared_guard_queue: produce: jit host method unsupported: guard_edit
+  memory/view_from_trait: run: jit comptime value unsupported: Struct { type_name: "Packet", fields: [("data", List([Int(9), Int(8), Int(7)]))] }
+  modules/generic_modules: run: jit comptime value unsupported: Struct { type_name: "M3Int4LawsWrapped", fields: [("value", Int(91))] }
+  modules/library: run: jit comptime value unsupported: Struct { type_name: "Person", fields: [("name", Str("Ada"))] }
+  net/email_message: run: jit comptime value unsupported: Bytes([70, 114, 111, 109, 58, 32, 61, 63, 85, 84, 70, 45, 56, 63, 66, 63, 84, 87, 70, 121, 89, 83, 68, 105, 109, 74, 85, 61, 63, 61, 32, 60, 109, 97, 114, 97, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 62, 13, 10, 84, 111, 58, 32, 65, 100, 97, 32, 60, 97, 100, 97, 64, 101, 120, 97, 109, 112, 108, 101, 46, 110, 101, 116, 62, 13, 10, 83, 117, 98, 106, 101, 99, 116, 58, 32, 61, 63, 85, 84, 70, 45, 56, 63, 66, 63, 86, 50, 86, 115, 89, 50, 57, 116, 90, 83, 68, 105, 109, 74, 85, 61, 63, 61, 13, 10, 77, 73, 77, 69, 45, 86, 101, 114, 115, 105, 111, 110, 58, 32, 49, 46, 48, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32, 109, 117, 108, 116, 105, 112, 97, 114, 116, 47, 109, 105, 120, 101, 100, 59, 32, 98, 111, 117, 110, 100, 97, 114, 121, 61, 34, 106, 101, 116, 45, 109, 105, 120, 101, 100, 45, 100, 51, 54, 102, 50, 53, 55, 101, 49, 100, 102, 97, 57, 97, 51, 55, 51, 97, 99, 97, 52, 53, 48, 54, 99, 97, 48, 102, 49, 53, 48, 55, 50, 99, 100, 57, 101, 48, 101, 100, 53, 98, 54, 98, 102, 48, 100, 54, 34, 13, 10, 13, 10, 45, 45, 106, 101, 116, 45, 109, 105, 120, 101, 100, 45, 100, 51, 54, 102, 50, 53, 55, 101, 49, 100, 102, 97, 57, 97, 51, 55, 51, 97, 99, 97, 52, 53, 48, 54, 99, 97, 48, 102, 49, 53, 48, 55, 50, 99, 100, 57, 101, 48, 101, 100, 53, 98, 54, 98, 102, 48, 100, 54, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32, 109, 117, 108, 116, 105, 112, 97, 114, 116, 47, 97, 108, 116, 101, 114, 110, 97, 116, 105, 118, 101, 59, 32, 98, 111, 117, 110, 100, 97, 114, 121, 61, 34, 106, 101, 116, 45, 97, 108, 116, 101, 114, 110, 97, 116, 105, 118, 101, 45, 57, 52, 53, 55, 55, 57, 56, 101, 99, 49, 99, 57, 101, 101, 100, 97, 51, 49, 99, 55, 101, 49, 48, 97, 51, 56, 99, 99, 56, 55, 98, 102, 52, 54, 56, 49, 48, 99, 48, 102, 49, 97, 100, 99, 102, 49, 49, 51, 34, 13, 10, 13, 10, 45, 45, 106, 101, 116, 45, 97, 108, 116, 101, 114, 110, 97, 116, 105, 118, 101, 45, 57, 52, 53, 55, 55, 57, 56, 101, 99, 49, 99, 57, 101, 101, 100, 97, 51, 49, 99, 55, 101, 49, 48, 97, 51, 56, 99, 99, 56, 55, 98, 102, 52, 54, 56, 49, 48, 99, 48, 102, 49, 97, 100, 99, 102, 49, 49, 51, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32, 116, 101, 120, 116, 47, 112, 108, 97, 105, 110, 59, 32, 99, 104, 97, 114, 115, 101, 116, 61, 117, 116, 102, 45, 56, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 114, 97, 110, 115, 102, 101, 114, 45, 69, 110, 99, 111, 100, 105, 110, 103, 58, 32, 98, 97, 115, 101, 54, 52, 13, 10, 13, 10, 83, 71, 86, 115, 98, 71, 56, 61, 13, 10, 45, 45, 106, 101, 116, 45, 97, 108, 116, 101, 114, 110, 97, 116, 105, 118, 101, 45, 57, 52, 53, 55, 55, 57, 56, 101, 99, 49, 99, 57, 101, 101, 100, 97, 51, 49, 99, 55, 101, 49, 48, 97, 51, 56, 99, 99, 56, 55, 98, 102, 52, 54, 56, 49, 48, 99, 48, 102, 49, 97, 100, 99, 102, 49, 49, 51, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32, 116, 101, 120, 116, 47, 104, 116, 109, 108, 59, 32, 99, 104, 97, 114, 115, 101, 116, 61, 117, 116, 102, 45, 56, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 114, 97, 110, 115, 102, 101, 114, 45, 69, 110, 99, 111, 100, 105, 110, 103, 58, 32, 98, 97, 115, 101, 54, 52, 13, 10, 13, 10, 80, 71, 73, 43, 83, 71, 86, 115, 98, 71, 56, 56, 76, 50, 73, 43, 13, 10, 45, 45, 106, 101, 116, 45, 97, 108, 116, 101, 114, 110, 97, 116, 105, 118, 101, 45, 57, 52, 53, 55, 55, 57, 56, 101, 99, 49, 99, 57, 101, 101, 100, 97, 51, 49, 99, 55, 101, 49, 48, 97, 51, 56, 99, 99, 56, 55, 98, 102, 52, 54, 56, 49, 48, 99, 48, 102, 49, 97, 100, 99, 102, 49, 49, 51, 45, 45, 13, 10, 13, 10, 45, 45, 106, 101, 116, 45, 109, 105, 120, 101, 100, 45, 100, 51, 54, 102, 50, 53, 55, 101, 49, 100, 102, 97, 57, 97, 51, 55, 51, 97, 99, 97, 52, 53, 48, 54, 99, 97, 48, 102, 49, 53, 48, 55, 50, 99, 100, 57, 101, 48, 101, 100, 53, 98, 54, 98, 102, 48, 100, 54, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32, 116, 101, 120, 116, 47, 112, 108, 97, 105, 110, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 84, 114, 97, 110, 115, 102, 101, 114, 45, 69, 110, 99, 111, 100, 105, 110, 103, 58, 32, 98, 97, 115, 101, 54, 52, 13, 10, 67, 111, 110, 116, 101, 110, 116, 45, 68, 105, 115, 112, 111, 115, 105, 116, 105, 111, 110, 58, 32, 97, 116, 116, 97, 99, 104, 109, 101, 110, 116, 59, 32, 102, 105, 108, 101, 110, 97, 109, 101, 42, 61, 85, 84, 70, 45, 56, 39, 39, 104, 101, 108, 108, 111, 46, 116, 120, 116, 13, 10, 13, 10, 97, 71, 107, 61, 13, 10, 45, 45, 106, 101, 116, 45, 109, 105, 120, 101, 100, 45, 100, 51, 54, 102, 50, 53, 55, 101, 49, 100, 102, 97, 57, 97, 51, 55, 51, 97, 99, 97, 52, 53, 48, 54, 99, 97, 48, 102, 49, 53, 48, 55, 50, 99, 100, 57, 101, 48, 101, 100, 53, 98, 54, 98, 102, 48, 100, 54, 45, 45, 13, 10])
+  operators/user_defined: run: jit comptime value unsupported: Struct { type_name: "Vec2", fields: [("x", Int(1)), ("y", Int(2))] }
+  patterns/struct_destructure: run: jit comptime value unsupported: Struct { type_name: "Incident", fields: [("id", Int(1)), ("severity", Int(5)), ("title", Str("database down")), ("kind", Str("page"))] }
+  reflection/reflect-value: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Int(3)), ("y", Int(4))] }
+  serde/encoding_breadth: run: jit comptime value unsupported: Bytes([162, 97, 97, 1, 97, 98, 2])
+  serde/encoding_xml_projection: run: jit comptime value unsupported: Bytes([60, 99, 97, 116, 97, 108, 111, 103, 62, 60, 98, 111, 111, 107, 32, 105, 100, 61, 34, 55, 34, 62, 60, 116, 105, 116, 108, 101, 62, 72, 105, 60, 47, 116, 105, 116, 108, 101, 62, 60, 112, 114, 105, 99, 101, 32, 99, 117, 114, 114, 101, 110, 99, 121, 61, 34, 85, 83, 68, 34, 62, 57, 60, 47, 112, 114, 105, 99, 101, 62, 60, 47, 98, 111, 111, 107, 62, 60, 98, 111, 111, 107, 32, 105, 100, 61, 34, 56, 34, 62, 60, 116, 105, 116, 108, 101, 62, 76, 111, 60, 47, 116, 105, 116, 108, 101, 62, 60, 112, 114, 105, 99, 101, 32, 99, 117, 114, 114, 101, 110, 99, 121, 61, 34, 69, 85, 82, 34, 62, 51, 60, 47, 112, 114, 105, 99, 101, 62, 60, 47, 98, 111, 111, 107, 62, 60, 47, 99, 97, 116, 97, 108, 111, 103, 62])
+  serde/hand_codec: run: jit comptime value unsupported: Struct { type_name: "Signup", fields: [("name", Str("Ada")), ("email", Struct { type_name: "Email", fields: [("address", Str("ada@lovelace.org"))] })] }
+  serde/serde_derive: run: jit comptime value unsupported: Struct { type_name: "Order", fields: [("id", Int(7)), ("who", Str("Ada")), ("items", List([Str("pen"), Str("ink")])), ("note", None(Option(Int)))] }
+  serde/serde_generic: run: jit comptime value unsupported: Struct { type_name: "Wrap", fields: [("value", Int(7))] }
+  serde/user_derive: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Int(3)), ("y", Int(4))] }
+  text/bigint: run: jit comptime value unsupported: BigInt(CtBigInt { negative: false, limbs: [854775807, 223372036, 9] })
+  text/hex_base64: run: jit comptime value unsupported: Bytes([72, 101, 108, 108, 111])
+  text/regex: run: jit comptime value unsupported: Some(Str("42"))
+  text/unicode_text: run: run: verifier: VerifierErrors([VerifierError { location: inst21, context: Some("call fn12(v13, v14)  ; v14 = 97"), message: "arg 1 (v14) has type i32, expected i64" }, VerifierError { location: inst23, context: Some("call fn12(v13, v15)  ; v15 = 233"), message: "arg 1 (v15) has type i32, expected i64" }])
+  tooling/data_analysis: run: jit comptime value unsupported: Float(4.0)
+  tooling/data_core: run: jit comptime value unsupported: Float(2.0)
+  tooling/data_hostile: run: jit comptime value unsupported: ResOk(Float(0.0))
+  tooling/data_pipeline: run: jit comptime value unsupported: Float(4.0)
+  types/affine_unit_types: lower_jit_program returned None (entry stmt 4 init outside tir_covers)
+  types/anonymous_unions: run: jit comptime value unsupported: Struct { type_name: "Box", fields: [("value", Int(9))] }
+  types/associated_types: run: jit comptime value unsupported: Struct { type_name: "Nums", fields: [("vals", List([Int(10), Int(20), Int(30)]))] }
+  types/computed_field: run: jit comptime value unsupported: Struct { type_name: "Stats", fields: [("strength", Int(10)), ("gear_mod", Int(3))] }
+  types/display_debug: run: jit comptime value unsupported: Struct { type_name: "User", fields: [("id", Int(42)), ("email", Str("w@example.com")), ("password_hash", Str("$2b$12$secret"))] }
+  types/dot_construction: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Float(3.0)), ("y", Float(4.0))] }
+  types/enum_dot: run: jit comptime value unsupported: Enum { type_name: "Direction", variant: "North", args: [] }
+  types/enums: run: jit comptime value unsupported: Enum { type_name: "Light", variant: "Red", args: [] }
+  types/external_methods: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Int(3)), ("y", Int(4))] }
+  types/generic_constructor_inference: run: jit string interp type unsupported: Named("T")
+  types/nested_enum_groups: run: jit comptime value unsupported: Enum { type_name: "Damage", variant: "Fire.Burn", args: [] }
+  types/no_any_alternatives: run: jit comptime value unsupported: Some(Str("present"))
+  types/option_combinators: run: jit comptime value unsupported: Some(Float(19.99))
+  types/patchable: run: jit comptime value unsupported: Struct { type_name: "Employee", fields: [("level", Int(3)), ("title", Str("Staff")), ("team", Str("Eng"))] }
+  types/range_types: sum: jit Range expression unsupported
+  types/renderable-varargs-multi: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Int(3)), ("y", Int(4))] }
+  types/renderable-varargs: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Int(3)), ("y", Int(4))] }
+  types/structs: run: jit comptime value unsupported: Struct { type_name: "Point", fields: [("x", Float(3.0)), ("y", Float(4.0))] }
+  types/tags_and_traits: run: jit comptime value unsupported: Struct { type_name: "Doc", fields: [("title", Str("spec"))] }
+  types/traits: run: jit comptime value unsupported: Struct { type_name: "Circle", fields: [("radius", Float(1.0))] }
+  web/ui_web_click: run: jit callable captures unsupported
+  web/web_wasm_map: run: jit comptime value unsupported: Map({})
