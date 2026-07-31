@@ -261,7 +261,7 @@ Current transactions:
 | `add_pattern_arm` | `graph_id`, `node_start`, `node_end`, `pattern` | Appends a checked Jet pattern arm to a branch/dispatch node. `pattern` may be written with or without leading `==`; new arm bodies use a sema-safe default `return …` for value functions or `print("canvas arm")` for `Void` functions. |
 | `edit_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end`, `pattern` | Replaces one arm pattern source, then formats, checks, and reprojects. Bad patterns return normal Jet diagnostics and leave source unchanged. |
 | `remove_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end` | Deletes one pattern arm and its body. Removing the last remaining arm is refused in plain language before source would become invalid. |
-| `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal or fan-out `f.[...]` source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
+| `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
 | `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |

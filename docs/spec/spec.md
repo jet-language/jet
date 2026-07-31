@@ -2167,6 +2167,15 @@ print(workers.wait_all())
 mechanism, two spellings, not two mechanisms. Example:
 `examples/features/concurrency/task_group_helpers.jet`.
 
+`.trace()` and `.trace_all()` render `paused=<bool>,cancel=<bool>` per handle.
+Pause is cooperative on every tier: a paused task stops at its next wait point,
+not mid-statement. Tier parity for the whole control plane — singles and twins,
+AOT, `jet run`, and the interpreter — is held by `tests/task_control_tiers.rs`.
+
+Iterating the handles yourself instead is a different thing: `loop h, hs { … }`
+hands you each handle, which takes the list, so the loop must own it. A borrowed
+list is **E0120** and points back at these methods.
+
 ### Taskgroups and structured combinators (D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-07-29)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
@@ -2616,7 +2625,7 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 ```
 
 ```jet
-result@ [Int#3]=  double.[1, 2, 3];
+result :: [Int#3].{2, 4, 6};
 [a, b, c] :: result;   // OK — 3 names for 3 elements
 ```
 

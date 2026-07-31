@@ -125,7 +125,6 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::TypedLit] status=graph typed literal node.
 - [Expr::CallValue] status=graph call-value node.
 - [Expr::PtrFromAddr] status=readonly unsafe pointer constructor, source edits.
-- [Expr::FanOut] status=graph fan-out node.
 - [Expr::ComptimeSplice] status=readonly comptime splice, source edits.
 - [Expr::Paren] status=graph grouped expression detail.
 - [Expr::IncDec] status=graph increment/decrement node.

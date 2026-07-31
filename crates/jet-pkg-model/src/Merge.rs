@@ -38,15 +38,14 @@ impl Pkg {
 /// expanding the type-directed sugar (U6 / D-JPK19):
 ///
 /// - `default.ripgrep`      → `Pkg{ default, ripgrep }`
-/// - `default.[ripgrep, fd]`→ `Pkg{ default, ripgrep }`, `Pkg{ default, fd }`
 /// - `unstable.neovim`      → `Pkg{ unstable, neovim }`
 /// - `"mine@hello"`         → escape-hatch string; source left empty for the
 ///   resolver to interpret
 /// - bare `ripgrep`         → `Pkg{ "", ripgrep }` (source filled in later from
 ///   the default source)
 ///
-/// std-only and lenient: empty items are skipped. The scoped form's inner commas
-/// are respected (the split is bracket-aware).
+/// std-only and lenient: empty items are skipped. The split is bracket-aware,
+/// so a nested list value never splits mid-item.
 pub fn parse_package_list(body: &str) -> Vec<Pkg> {
     let mut out = Vec::new();
     for item in split_top_level(body) {
@@ -67,18 +66,6 @@ fn parse_package_item(item: &str) -> Vec<Pkg> {
         }
         return vec![Pkg::new("", inner)];
     }
-    // Scoped list: `source.[a, b, c]`.
-    if let Some(dot_bracket) = item.find(".[") {
-        let source = &item[..dot_bracket];
-        let rest = &item[dot_bracket + 2..];
-        let inside = rest.strip_suffix(']').unwrap_or(rest);
-        return inside
-            .split(',')
-            .map(str::trim)
-            .filter(|n| !n.is_empty())
-            .map(|n| Pkg::new(source, n))
-            .collect();
-    }
     // Dotted single: `source.name`.
     if let Some((source, name)) = item.split_once('.') {
         if !name.is_empty() {
@@ -89,7 +76,7 @@ fn parse_package_item(item: &str) -> Vec<Pkg> {
     vec![Pkg::new("", item)]
 }
 
-/// Split on commas not nested inside `()`/`[]`/`{}` (so `source.[a, b]` is one
+/// Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
 /// item). Returns the raw (untrimmed) slices.
 fn split_top_level(body: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -290,22 +277,10 @@ mod tests {
     }
 
     #[test]
-    fn sugar_scoped_list_keeps_inner_commas() {
-        assert_eq!(
-            parse_package_list("default.[ripgrep, fd, jq]"),
-            vec![
-                Pkg::new("default", "ripgrep"),
-                Pkg::new("default", "fd"),
-                Pkg::new("default", "jq"),
-            ]
-        );
-    }
-
-    #[test]
     fn sugar_mixed_sources_in_one_list() {
         // The example from unified-ecosystem §5.
         assert_eq!(
-            parse_package_list("default.[ripgrep, fd], unstable.neovim"),
+            parse_package_list("default.ripgrep, default.fd, unstable.neovim"),
             vec![
                 Pkg::new("default", "ripgrep"),
                 Pkg::new("default", "fd"),

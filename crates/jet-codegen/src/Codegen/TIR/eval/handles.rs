@@ -600,19 +600,22 @@ pub(super) fn eval_handle(
                 .ok_or_else(|| unsupported("task result", span)),
             _ => Err(unsupported("task receiver", span)),
         },
-        THandleOp::TaskDetach => Ok(CtValue::Unit),
-        THandleOp::TaskPause => Err(unsupported("handle `TaskPause`", span)),
-        THandleOp::TaskResume => Err(unsupported("handle `TaskResume`", span)),
-        THandleOp::TaskCancel => Err(unsupported("handle `TaskCancel`", span)),
-        THandleOp::TaskTrace => Err(unsupported("handle `TaskTrace`", span)),
-        // D-VERDICT-1323-1: each twin behaves exactly like its single-handle
-        // counterpart here, including where that counterpart is not yet
-        // evaluable at compile time.
-        THandleOp::TaskDetachAll => Ok(CtValue::Unit),
-        THandleOp::TaskPauseAll => Err(unsupported("handle `TaskPauseAll`", span)),
-        THandleOp::TaskResumeAll => Err(unsupported("handle `TaskResumeAll`", span)),
-        THandleOp::TaskCancelAll => Err(unsupported("handle `TaskCancelAll`", span)),
-        THandleOp::TaskTraceAll => Err(unsupported("handle `TaskTraceAll`", span)),
+        // D-VERDICT-1323-1 / D-COROUTINE1=A: the whole task control plane —
+        // both the single-handle methods and their `*_all` twins — is handled
+        // in `exprs.rs`, which can reach the evaluator's task table. Nothing
+        // routes here.
+        THandleOp::TaskDetach
+        | THandleOp::TaskPause
+        | THandleOp::TaskResume
+        | THandleOp::TaskCancel
+        | THandleOp::TaskTrace
+        | THandleOp::TaskDetachAll
+        | THandleOp::TaskPauseAll
+        | THandleOp::TaskResumeAll
+        | THandleOp::TaskCancelAll
+        | THandleOp::TaskTraceAll => {
+            Err(unsupported("task control outside the evaluator", span))
+        }
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),
         THandleOp::SenderSend => Err(unsupported("handle `SenderSend`", span)),
         THandleOp::HTTPRouterRegister { .. } => {

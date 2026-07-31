@@ -220,6 +220,50 @@ impl<'a> Checker<'a> {
         Some(true)
     }
 
+    /// D-TASKBORROW1=A: a loan to a taskgroup child opens before the child
+    /// launches and closes only when the group joins. Until then the parent may
+    /// not move, drop, or write the lent place.
+    ///
+    /// The ordinary view rules cannot see this. They end a borrow at the view
+    /// binding's last lexical use, which is right, but a child holds its loan
+    /// past that point — it is still running. `spawn_scoped` erases the lifetime
+    /// inside a vetted-unsafe region, so rustc will not catch it either (I1).
+    ///
+    /// Returns true when a conflict was reported.
+    pub(crate) fn report_scoped_loan_conflict(
+        &mut self,
+        changed: &ViewPlace,
+        action: &str,
+        span: Span,
+    ) -> bool {
+        // Inside the child's own body the loan is what makes the access legal.
+        if self.in_taskgroup_spawn {
+            return false;
+        }
+        let Some((lent, group)) = self.taskgroup_stack.iter().find_map(|group| {
+            group
+                .borrows
+                .iter()
+                .find(|held| held.place.overlaps(changed))
+                .map(|held| (held.name.clone(), group.name.clone()))
+        }) else {
+            return false;
+        };
+        let changed_name = Self::place_name(changed);
+        self.diags.push(Diagnostic::error(
+            "E1101",
+            format!("`{changed_name}` cannot {action} while `{lent}` is lent to a task in `{group}`"),
+            format!(
+                "a taskgroup joins its children at the end of the block, so `{lent}` stays borrowed until `{group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads"
+            ),
+            format!(
+                "do this after the `{group}` block ends, or give the task its own owned copy instead of a borrow"
+            ),
+            Some(span),
+        ));
+        true
+    }
+
     pub(crate) fn register_taskgroup_spawn(
         &mut self,
         receiver: &str,

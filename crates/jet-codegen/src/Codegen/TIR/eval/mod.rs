@@ -450,6 +450,7 @@ pub(super) struct EvalCtx<'a> {
     spawn_lambdas: &'a [TJitSpawnLambda],
     task_sender: Option<mpsc::Sender<EvalTaskJob<'a>>>,
     task_cancel: Option<Arc<AtomicBool>>,
+    task_paused: Option<Arc<AtomicBool>>,
     pub(super) context_deadline: Option<i64>,
     pub(super) shield_depth: usize,
     /// Direct yield delivery keeps generator evaluation streaming: no eager
@@ -589,6 +590,9 @@ struct EvalTask {
     completion: mpsc::Receiver<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
+    /// D-COROUTINE1=A, the evaluator twin of `JetTaskControl::paused`. Honored
+    /// at the same cooperative wait points the cancel flag is.
+    paused: Arc<AtomicBool>,
 }
 
 struct EvalTaskCompletion {
@@ -603,6 +607,7 @@ struct EvalTaskJob<'a> {
     completion: mpsc::SyncSender<EvalTaskCompletion>,
     completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 }
 
 fn select_eval_tasks(
@@ -676,6 +681,7 @@ struct YieldConsumer<'a> {
 
 impl<'a> EvalCtx<'a> {
     fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
+        self.task_wait_while_paused();
         let deadline = self
             .context_deadline
             .filter(|deadline| wall_now_ms() >= *deadline)
@@ -703,6 +709,78 @@ impl<'a> EvalCtx<'a> {
                 Some(self.span()),
             )),
         }
+    }
+
+    /// The evaluator twin of `JetTaskControl::wait_while_paused`: a paused task
+    /// stops at its next cooperative wait point and stays there until it is
+    /// resumed or cancelled. The scheduler parks; the evaluator has no park
+    /// slot, so it sleeps in short steps instead.
+    fn task_wait_while_paused(&self) {
+        let (Some(paused), cancel) = (self.task_paused.as_ref(), self.task_cancel.as_ref()) else {
+            return;
+        };
+        while paused.load(Ordering::Acquire)
+            && !cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
+        {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// D-VERDICT-1323-1 / D-COROUTINE1=A: set or clear one task's pause flag
+    /// without consuming the handle — the evaluator twin of `JetTask::pause`
+    /// and `JetTask::resume`.
+    pub(super) fn set_task_paused_value(
+        &mut self,
+        value: &CtValue,
+        paused: bool,
+    ) -> Result<(), Diagnostic> {
+        let index = Self::task_index(value)
+            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        if let Some(Some(task)) = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .tasks
+            .get(index)
+        {
+            task.paused.store(paused, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    /// The evaluator twin of `JetTask::trace`. The rendering must match the
+    /// Prelude symbol byte for byte — it is user-visible output (I9).
+    pub(super) fn trace_task_value(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
+        let index = Self::task_index(value)
+            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let (paused, cancel) = match runtime.tasks.get(index) {
+            Some(Some(task)) => (
+                task.paused.load(Ordering::Acquire),
+                task.cancel.load(Ordering::Acquire),
+            ),
+            // Already joined or detached: the handle is gone, so neither flag
+            // is set, exactly as a dropped `JetTaskControl` would report.
+            _ => (false, false),
+        };
+        Ok(CtValue::Str(format!("paused={paused},cancel={cancel}")))
+    }
+
+    /// The evaluator twin of `JetTask::detach`: drop the join handle so the
+    /// task runs unattached and its result is never observed.
+    pub(super) fn detach_task_value(&mut self, value: &CtValue) -> Result<(), Diagnostic> {
+        let index = Self::task_index(value)
+            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        if let Some(slot) = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .tasks
+            .get_mut(index)
+        {
+            let _ = slot.take();
+        }
+        Ok(())
     }
 
     fn task_config(&self) -> EvalTaskConfig<'a> {
@@ -797,6 +875,7 @@ impl<'a> EvalCtx<'a> {
             spawn_lambdas: config.spawn_lambdas,
             task_sender: Some(job.task_sender),
             task_cancel: Some(job.cancel),
+            task_paused: Some(job.paused),
             context_deadline: job.context_deadline,
             shield_depth: 0,
             yield_consumer: None,
@@ -868,12 +947,14 @@ impl<'a> EvalCtx<'a> {
         let (completion, receiver) = mpsc::sync_channel(1);
         let completion_order = Arc::new(OnceLock::new());
         let cancel = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
             completion: receiver,
             completion_order: completion_order.clone(),
             cancel: cancel.clone(),
+            paused: paused.clone(),
         }));
         if let Some(group) = group {
             runtime.task_groups[group].push(task);
@@ -888,6 +969,7 @@ impl<'a> EvalCtx<'a> {
                 completion,
                 completion_order,
                 cancel,
+                paused,
             })
             .map_err(|_| unsupported("closed taskgroup", self.span()))?;
         Ok(CtValue::Struct {
@@ -1522,6 +1604,7 @@ pub fn run_program_with_structs(
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
         task_cancel: None,
+        task_paused: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -1593,6 +1676,7 @@ pub fn run_named_func(
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
         task_cancel: None,
+        task_paused: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -1773,6 +1857,7 @@ fn eval_expr_hook(
         spawn_lambdas: &[],
         task_sender: None,
         task_cancel: None,
+        task_paused: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -1870,6 +1955,7 @@ fn eval_block_hook(
         spawn_lambdas: &[],
         task_sender: None,
         task_cancel: None,
+        task_paused: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,

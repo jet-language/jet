@@ -246,9 +246,9 @@ fn shell_package_attr(value: &str) -> String {
         .to_string()
 }
 
-/// Package names out of a rendered ref list: `[nixpkgs.[a, b-c], nixpkgs.d]`
-/// -> `["a", "b-c", "d"]`. Group brackets and source qualifiers are noise
-/// here — the backend resolves every name against the pinned nixpkgs.
+/// Package names out of a rendered ref list: `[nixpkgs.a, nixpkgs.b-c,
+/// nixpkgs.d]` -> `["a", "b-c", "d"]`. Source qualifiers are noise here — the
+/// backend resolves every name against the pinned nixpkgs.
 fn parse_package_ref_names(value: &str) -> Vec<String> {
     value
         .split(|c: char| c == '[' || c == ']' || c == ',')
@@ -550,8 +550,8 @@ fn map_system_to_nixos(
                 fish_enabled = true;
             }
         }
-        // `user.<name>.packages` (per-user scope) — bracket-group refs like
-        // `[nixpkgs.[a, b]]` or single `source.name` refs.
+        // `user.<name>.packages` (per-user scope) — a list of `source.name`
+        // refs.
         if let Some(v) = resolved_option_value(system, &format!("user.{name}.packages")) {
             let attrs = parse_package_ref_names(&v);
             if !attrs.is_empty() {

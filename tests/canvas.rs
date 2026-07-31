@@ -1102,8 +1102,7 @@ fn run() {
 
 fn demo() => Int {
     xs :: [1, 2, 3]
-    ys :: [to_int(1), to_int(2)]
-    return xs[0] + ys[0]
+    return xs[0] + to_int(1)
 }
 
 fn run() {

@@ -1,0 +1,12 @@
+use core.tasks as tasks
+
+fn drain(hs: [Task<Int>]) => Int {
+    total := 0
+    loop h, hs { total += h.wait() }
+    total
+}
+
+fn run() {
+    handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    print(drain(handles))
+}

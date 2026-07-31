@@ -30,4 +30,16 @@ fn run() {
     print(particles[0].position)
     print(particles[1].position)
     print(particles[2].position)
+
+    // One borrow on its own is the same law with one child. The write still
+    // lands on the owner, because the group joins before the block ends.
+    taskgroup solo {
+        only :: &particles[1]
+        done :: solo.task => {
+            only.position += only.velocity
+            only.position
+        }
+        print(done.wait())
+    }
+    print(particles[1].position)
 }

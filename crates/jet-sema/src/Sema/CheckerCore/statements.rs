@@ -1812,6 +1812,26 @@ impl<'a> Checker<'a> {
                             }
                             let coll_ty = self.infer(collection);
                             let borrowed = collection_root_name(collection);
+                            // A list whose elements cannot be copied is iterated
+                            // by value: each step hands you the element itself,
+                            // which consumes the list. This frame must therefore
+                            // own it. Reject a borrowed collection here — codegen
+                            // would move out of a reference and rustc's E0507
+                            // would reach the user as an ICE (I2).
+                            let consumes_collection = var2.is_none()
+                                && matches!(
+                                    &coll_ty,
+                                    Some(Type::List(inner) | Type::FixedList { elem: inner, .. })
+                                        if matches!(
+                                            inner.as_ref(),
+                                            Type::Apply { name, .. } if name == "Task"
+                                        )
+                                );
+                            let owns_collection =
+                                !consumes_collection || self.frame_owns_place(collection);
+                            if !owns_collection {
+                                self.report_borrowed_loop_consume(collection, &coll_ty);
+                            }
                             let lending_var = match (&coll_ty, var2.as_ref()) {
                                 (
                                     Some(Type::List(inner) | Type::FixedList { elem: inner, .. }),
@@ -1987,22 +2007,13 @@ impl<'a> Checker<'a> {
                             // after leaving the loop: the collection is consumed by
                             // this loop, not inside it, so a later use is ordinary
                             // use-after-move (E0121) instead of a rustc rejection (I2).
-                            if var2.is_none() {
-                                if let Some(
-                                    Type::List(inner) | Type::FixedList { elem: inner, .. },
-                                ) = &coll_ty
-                                {
-                                    // Must match the codegen predicate exactly:
-                                    // only a task-handle list is consumed.
-                                    let consumed = matches!(
-                                        inner.as_ref(),
-                                        Type::Apply { name, .. } if name == "Task"
-                                    );
-                                    if consumed {
-                                        if let Some(name) = borrowed {
-                                            self.mark_moved(name, collection.span());
-                                        }
-                                    }
+                            // `consumes_collection` above matches the codegen
+                            // predicate exactly: only a task-handle list is
+                            // consumed. A borrowed collection already reported
+                            // E0120, so do not also record a move it never made.
+                            if consumes_collection && owns_collection {
+                                if let Some(name) = borrowed {
+                                    self.mark_moved(name, collection.span());
                                 }
                             }
                         }

@@ -1867,25 +1867,56 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
-                // D-VERDICT-1323-1: the group control-plane twins reach the
-                // evaluator's task table, which the shared handle dispatch has
-                // no access to. Each behaves exactly like its single-handle
-                // counterpart does on this tier.
-                match op {
-                    crate::Codegen::TIR::THandleOp::TaskCancelAll => {
-                        let CtValue::List(tasks) = &r else {
-                            return Err(unsupported("task group receiver", self.span()));
-                        };
-                        let tasks = tasks.clone();
-                        for task in &tasks {
-                            self.cancel_task_value(task)?;
+                // D-VERDICT-1323-1 / D-COROUTINE1=A: the task control plane
+                // reaches the evaluator's task table, which the shared handle
+                // dispatch has no access to. Each `*_all` twin is exactly its
+                // single-handle counterpart applied in order.
+                {
+                    use crate::Codegen::TIR::THandleOp as Op;
+                    let each = |this: &mut Self, value: &CtValue| -> Result<(), Diagnostic> {
+                        match op {
+                            Op::TaskCancel | Op::TaskCancelAll => this.cancel_task_value(value),
+                            Op::TaskPause | Op::TaskPauseAll => {
+                                this.set_task_paused_value(value, true)
+                            }
+                            Op::TaskResume | Op::TaskResumeAll => {
+                                this.set_task_paused_value(value, false)
+                            }
+                            Op::TaskDetach | Op::TaskDetachAll => this.detach_task_value(value),
+                            _ => unreachable!("guarded by the outer match"),
                         }
-                        return Ok(CtValue::Unit);
+                    };
+                    match op {
+                        Op::TaskCancel | Op::TaskPause | Op::TaskResume | Op::TaskDetach => {
+                            let receiver = r.clone();
+                            each(self, &receiver)?;
+                            return Ok(CtValue::Unit);
+                        }
+                        Op::TaskCancelAll
+                        | Op::TaskPauseAll
+                        | Op::TaskResumeAll
+                        | Op::TaskDetachAll => {
+                            let CtValue::List(tasks) = &r else {
+                                return Err(unsupported("task group receiver", self.span()));
+                            };
+                            for task in tasks.clone() {
+                                each(self, &task)?;
+                            }
+                            return Ok(CtValue::Unit);
+                        }
+                        Op::TaskTrace => return self.trace_task_value(&r.clone()),
+                        Op::TaskTraceAll => {
+                            let CtValue::List(tasks) = &r else {
+                                return Err(unsupported("task group receiver", self.span()));
+                            };
+                            let mut traces = Vec::new();
+                            for task in tasks.clone() {
+                                traces.push(self.trace_task_value(&task)?);
+                            }
+                            return Ok(CtValue::List(traces));
+                        }
+                        _ => {}
                     }
-                    crate::Codegen::TIR::THandleOp::TaskDetachAll => {
-                        return Ok(CtValue::Unit);
-                    }
-                    _ => {}
                 }
                 let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
                 let http_json = matches!(

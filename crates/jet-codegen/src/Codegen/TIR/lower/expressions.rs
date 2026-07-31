@@ -2663,8 +2663,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Lambda(Box::new(tl)),
             }
         }
-        // #779 / D-ONECORE1: fan-out `f.[a, b, c]` desugars at lowering to a
-        // `ListLit` of synthetic `Call`s (S75/S76). Engines never see a FanOut node.
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is
         // `Ptr<elem>` (`ptr_type`), total from the node's `elem`. The element's Rust type
         // is resolved here (`cx.rust_type`) so emit makes no decision (I3). The cast is

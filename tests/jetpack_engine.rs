@@ -1981,7 +1981,7 @@ fn typed_module_example_builds_offline_end_to_end() {
     // for the typed `module { … }` env surface (U3/U6/U8) including U4 import-tree
     // discovery. `jetpack build` with no ref evaluates env.jet through `modeval`:
     // the `default` source merges to its pinned nixpkgs upstream,
-    // `default.[ripgrep, fd]` expands to two `Pkg` refs, and `imports:
+    // `[default.ripgrep, default.fd]` gives two `Pkg` refs, and `imports:
     // find("./modules")` walks `modules/tools.jet` and folds its `default.jq`
     // into the same merge. All three realize from the committed fixtures, fully
     // offline. The store lives under a scratch JETPACK_ROOT, so nothing is

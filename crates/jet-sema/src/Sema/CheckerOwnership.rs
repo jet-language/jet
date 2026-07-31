@@ -573,7 +573,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn place_name(place: &ViewPlace) -> String {
+    pub(crate) fn place_name(place: &ViewPlace) -> String {
         let mut out = place.owner.name.clone();
         for projection in &place.projections {
             match projection {
@@ -1922,6 +1922,29 @@ impl<'a> Checker<'a> {
         self.view_fact(name).is_some()
     }
 
+    /// True when this frame owns `place` outright, so a loop that hands out the
+    /// elements themselves may take the whole collection.
+    ///
+    /// A read or write parameter, anything reached through one, and any live
+    /// view all name storage the caller still owns. Moving out of those is
+    /// `E0507` in the generated Rust, which reaches the user as an internal
+    /// compiler error rather than a diagnostic (I2). An expression with no root
+    /// name is a temporary, which the loop is always free to consume.
+    pub(crate) fn frame_owns_place(&self, place: &Expr) -> bool {
+        let Some(root) = expr_root_ident(place) else {
+            return true;
+        };
+        if self.is_view(root) {
+            return false;
+        }
+        !self.lookup(root).is_some_and(|info| {
+            matches!(
+                info.param_conv,
+                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+            )
+        })
+    }
+
     pub(crate) fn is_write_view(&self, name: &str) -> bool {
         self.view_fact(name)
             .is_some_and(|fact| fact.access == ViewAccess::Write)
@@ -2180,6 +2203,12 @@ impl<'a> Checker<'a> {
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
+        // A taskgroup loan outlives the borrow binding's last lexical use: the
+        // child still holds it until the group joins. Check that first — the
+        // view scan below would already have let this place go.
+        if self.report_scoped_loan_conflict(changed, action, span) {
+            return;
+        }
         let Some((view, access, place)) = self
             .view_facts
             .bindings
@@ -4541,6 +4570,38 @@ impl<'a> Checker<'a> {
             why,
             fix.to_string(),
             Some(span),
+        ));
+    }
+
+    /// E0120: `loop h, hs { … }` over a list of handles that cannot be copied
+    /// hands out each handle itself, which takes the list. `hs` is borrowed, so
+    /// this frame cannot give it away.
+    pub(crate) fn report_borrowed_loop_consume(
+        &mut self,
+        collection: &Expr,
+        coll_ty: &Option<Type>,
+    ) {
+        let name = expr_root_ident(collection)
+            .map(str::to_string)
+            .unwrap_or_else(|| "this list".to_string());
+        let list_ty = coll_ty
+            .as_ref()
+            .map(Type::show)
+            .unwrap_or_else(|| "[Task<T>]".to_string());
+        let owned = self
+            .lookup(&name)
+            .filter(|info| info.param_conv.is_some())
+            .map(|_| format!("take the list with `{name}: {}{list_ty}`, or ", Syntax::SIGIL_MOVE))
+            .unwrap_or_else(|| "copy the handles into a list this scope owns, or ".to_string());
+        self.diags.push(Diagnostic::error(
+            "E0120",
+            format!("`{name}` was not moved here, so this loop can't take its handles"),
+            "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
+                .to_string(),
+            format!(
+                "{owned}drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`"
+            ),
+            Some(collection.span()),
         ));
     }
 

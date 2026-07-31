@@ -6,7 +6,7 @@
 //! Two evaluation paths, by field:
 //! - **`packages`** reuses the already-tested text-level Pkg-sugar parser
 //!   (`Merge::parse_package_list`) on the field's source span. The
-//!   `default.[ripgrep, fd]` grammar (U6) is static sugar, not a runtime
+//!   `[default.ripgrep, default.fd]` grammar (U6) is static sugar, not a runtime
 //!   computation, so this stays a text slice rather than re-deriving the
 //!   same rules at the AST level.
 //! - **Every other field** runs through `Comptime::evaluate` — the M9.5
@@ -101,7 +101,7 @@ mod tests {
         let src = r#"
 module dev {
     env.dev: Env.{
-        packages: [default.[ripgrep, fd], unstable.neovim],
+        packages: [default.ripgrep, default.fd, unstable.neovim],
         prompt: "wordstats",
     }
 }
@@ -202,7 +202,7 @@ module _gaming {
 module dev {
     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     env.dev: Env.{
-        packages: [default.[ripgrep, fd]],
+        packages: [default.ripgrep, default.fd],
         prompt: "wordstats",
     }
 }
@@ -504,7 +504,7 @@ module halcyon {
     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     system.halcyon: {
         target: linux.x64,
-        packages: [default.[firefox, btop, ripgrep]],
+        packages: [default.firefox, default.btop, default.ripgrep],
         services: {
             pipewire: { enable: true },
             openssh: { enable: true, ports: [22] },

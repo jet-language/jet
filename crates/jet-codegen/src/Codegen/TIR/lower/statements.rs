@@ -286,7 +286,12 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
     });
     let mut planned = HashMap::new();
     for (plan_index, mut group) in groups.into_iter().enumerate() {
-        if group.len() < 2
+        // A lone read borrow needs no plan: reading a clone reads the same
+        // values. A lone WRITE borrow does need one — without it the emitted
+        // Rust borrows a temporary clone and the write is silently dropped,
+        // while the JIT applies it. Same source, two answers (I9).
+        let lone_write = group.len() == 1 && candidates[group[0]].write;
+        if (group.len() < 2 && !lone_write)
             || group.iter().enumerate().any(|(i, &a)| {
                 group.iter().skip(i + 1).any(|&b| {
                     let a = &candidates[a];

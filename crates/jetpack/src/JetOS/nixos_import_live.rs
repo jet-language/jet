@@ -278,7 +278,7 @@ fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
 
 /// Locked github flake inputs other than `nixpkgs` / `root`, as
 /// `(jet_source_label, owner/repo/rev@github)`. Labels are sanitized to Jet
-/// idents so they can appear in `sources:` and `label.[pkg, …]` groups.
+/// idents so they can appear in `sources:` and `label.pkg` refs.
 fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
     let Ok(text) = fs::read_to_string(source.join("flake.lock")) else {
         return Vec::new();

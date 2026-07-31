@@ -393,7 +393,7 @@ pub(super) fn import_package_list(
 }
 
 /// Package list entries accept interior hyphens (`xdg-utils`, `btrfs-progs`)
-/// — the ratified `source.[a, b]` grammar parses them — but stay conservative
+/// — a `source.name` ref parses them — but stay conservative
 /// elsewhere: no leading/trailing dash, no dots or version suffixes, and no
 /// hyphen segment that lexes as a Jet keyword (`codex-…-use-…` would parse
 /// as the `use` keyword mid-list).
@@ -541,21 +541,16 @@ fn render_import_package_groups(
     nixpkgs: &[String],
     sourced: &[(String, Vec<String>)],
 ) -> String {
-    let mut groups = Vec::new();
-    if !nixpkgs.is_empty() {
-        groups.push(format!("nixpkgs.[{}]", nixpkgs.join(", ")));
+    let mut refs = Vec::new();
+    for package in nixpkgs {
+        refs.push(format!("nixpkgs.{package}"));
     }
     for (source, packages) in sourced {
-        if packages.is_empty() {
-            continue;
+        for package in packages {
+            refs.push(format!("{source}.{package}"));
         }
-        groups.push(format!("{source}.[{}]", packages.join(", ")));
     }
-    if groups.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[{}]", groups.join(", "))
-    }
+    format!("[{}]", refs.join(", "))
 }
 
 fn render_nixos_import_audit(plan: &NixosImportPlan) -> String {

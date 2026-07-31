@@ -1978,13 +1978,18 @@ fn find_multi_input_element_in_stmt(
 fn find_multi_input_element_in_expr(
     expr: &Expr,
     node_span: SourceSpan,
-    _element_span: SourceSpan,
+    element_span: SourceSpan,
     found: &mut bool,
 ) {
     if *found {
         return;
     }
     match expr {
+        Expr::ListLit(items, span) if same_span((*span).into(), node_span) => {
+            *found = items
+                .iter()
+                .any(|item| same_span(item.span().into(), element_span));
+        }
         _ => {
             let mut nested = None;
             walk_expr_children_for_multi_input(expr, node_span, &mut nested);

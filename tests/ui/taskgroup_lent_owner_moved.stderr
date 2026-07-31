@@ -1,0 +1,7 @@
+Error [E1101]: `particles` cannot be moved while `left` is lent to a task in `g`
+  --> tests/ui/taskgroup_lent_owner_moved.jet:13:19
+    |
+ 13 |         n :: eat(^particles)
+    |                   ^^^^^^^^^
+ Why: a taskgroup joins its children at the end of the block, so `left` stays borrowed until `g` joins — changing `particles` now would race a running task or free memory it still reads
+ Fix: do this after the `g` block ends, or give the task its own owned copy instead of a borrow

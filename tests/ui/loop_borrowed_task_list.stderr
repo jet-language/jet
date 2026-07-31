@@ -1,0 +1,7 @@
+Error [E0120]: `hs` was not moved here, so this loop can't take its handles
+  --> tests/ui/loop_borrowed_task_list.jet:5:13
+    |
+  5 |     loop h, hs { total += h.wait() }
+    |             ^^
+ Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
+ Fix: take the list with `hs: ^[Task<Int>]`, or drive the group without a loop: `hs.wait_all()`, `hs.cancel_all()`, `hs.pause_all()`

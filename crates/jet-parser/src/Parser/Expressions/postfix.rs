@@ -378,8 +378,7 @@ impl<'a> Parser<'a> {
             Ok(expr)
         }
     
-        /// `dot_span` is the span of the consumed `.`. Called from both `expr_primary`
-        /// (for `ident.[…]`) and `expr_postfix` (for chained `expr.[…]`).
+        /// Reinterpret an already-parsed expression as an assignment target.
         pub(in crate::Parser) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
             match expr {
                 Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),

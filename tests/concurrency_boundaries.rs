@@ -647,6 +647,77 @@ fn run() {{
 }
 
 #[test]
+fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
+    // The child still holds the loan, so moving the owner out from under it
+    // would free heap the running task reads. `left`'s last lexical use is the
+    // spawn, so the ordinary view rules end its borrow too early.
+    let source = format!(
+        r#"{PARTICLES}
+fn eat(ps: ^[Particle]) => Int = ps.len()
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        left :: &particles[0]
+        a :: g.task => {{
+            left.position += left.velocity
+            left.position
+        }}
+        n :: eat(^particles)
+        print(n)
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1101");
+}
+
+#[test]
+fn a_lent_place_cannot_be_written_by_the_parent_before_the_group_joins() {
+    // A parent write races the child's write through the same place.
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        left :: &particles[0]
+        a :: g.task => {{
+            left.position += left.velocity
+            left.position
+        }}
+        particles[0].position = 99
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_rejected(&source, "E1101");
+}
+
+#[test]
+fn a_place_the_group_never_lent_stays_writable() {
+    // The loan covers `particles[0]`. `particles[1]` is proven disjoint, so the
+    // parent may still write it while the child runs.
+    let source = format!(
+        r#"{PARTICLES}
+fn run() {{
+    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    taskgroup g {{
+        left :: &particles[0]
+        a :: g.task => {{
+            left.position += left.velocity
+            left.position
+        }}
+        particles[1].position = 99
+        print(g.all([a]))
+    }}
+}}
+"#
+    );
+    assert_accepted(&source);
+}
+
+#[test]
 fn a_taskgroup_parameter_cannot_lend_a_borrow() {
     // The join runs in the caller's frame, so this frame cannot prove the
     // borrowed owner outlives it.

@@ -7,9 +7,20 @@ use core.tasks as tasks
 
 fn run() {
     workers :: tasks.spawn_group(3, () => 7)
+    // pause_all, resume_all and trace_all borrow the group: the handles are
+    // still yours afterwards. `trace_all` reports each child's flags in order.
+    workers.pause_all()
+    print(workers.trace_all())
+    workers.resume_all()
+    print(workers.trace_all())
+    // cancel_all borrows too; wait_all consumes.
     workers.cancel_all()
     print(workers.wait_all())
 
     pair :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
     print(pair.join_all())
+
+    // detach_all consumes without waiting: nobody observes these results.
+    background :: tasks.spawn_group(2, () => 0)
+    background.detach_all()
 }

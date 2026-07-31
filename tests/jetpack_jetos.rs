@@ -150,9 +150,9 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
     let config = fs::read_to_string(out_dir.join("config.jet")).unwrap();
     assert!(config.contains("system.halcyon"), "{config}");
     assert!(config.contains("nixpkgs: NixOS/nixpkgs/nixos-24.05@github"), "{config}");
-    assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
+    assert!(config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"), "{config}");
     assert!(config.contains("openssh: { enable: true"), "{config}");
-    assert!(config.contains("user.nate.packages: [nixpkgs.[neovim, ghostty]]"), "{config}");
+    assert!(config.contains("user.nate.packages: [nixpkgs.neovim, nixpkgs.ghostty]"), "{config}");
     assert!(config.contains("user.nate.homeManager: true"), "{config}");
     let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
     assert!(audit.contains("\"mode\":\"semantic-facts\""), "{audit}");
@@ -228,8 +228,8 @@ exit 0
         "extra source must be pinned from flake.lock:\n{config}"
     );
     assert!(
-        config.contains("zen_beta.[zen-browser]")
-            || config.contains("packages: [nixpkgs.[git], zen_beta.[zen-browser]]"),
+        config.contains("zen_beta.zen-browser")
+            || config.contains("packages: [nixpkgs.git, zen_beta.zen-browser]"),
         "recovered package must be sourced from zen_beta:\n{config}"
     );
     assert!(
@@ -284,7 +284,7 @@ fn os_import_live_semantic_eval_maps_real_options() {
         config.contains("services.virtualization.docker.enable: true"),
         "{config}"
     );
-    assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
+    assert!(config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"), "{config}");
     assert!(config.contains("openssh: { enable: true"), "{config}");
     assert!(config.contains("tailscale: { enable: true"), "{config}");
 }
