@@ -2168,6 +2168,101 @@ impl<'a> Checker<'a> {
                         args: vec![t],
                     });
                 }
+                // D-VERDICT-1323-1: spawn n tasks from one callable. Same
+                // capture rules as `spawn`; the result is the group list the
+                // *_all twins drive.
+                ("core.tasks", Syntax::CORE_TASKS_SPAWN_GROUP) => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity(
+                            Syntax::CORE_TASKS_SPAWN_GROUP,
+                            2,
+                            args.len(),
+                            span,
+                        ));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    let count_ty = self.infer(&mut args[0].expr);
+                    if !matches!(count_ty, Some(Type::Int) | None) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{}` needs a whole number of tasks, not {}",
+                                Syntax::CORE_TASKS_SPAWN_GROUP,
+                                count_ty.as_ref().map(|t| t.show()).unwrap_or_default()
+                            ),
+                            "the first argument says how many tasks to start".to_string(),
+                            format!(
+                                "write `tasks.{}(4, () => work())`",
+                                Syntax::CORE_TASKS_SPAWN_GROUP
+                            ),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    let saved_esc = self.lambda_escapes;
+                    let saved_task = self.is_task_spawn;
+                    self.lambda_escapes = true;
+                    self.is_task_spawn = true;
+                    let lam_ty = self.infer(&mut args[1].expr);
+                    self.lambda_escapes = saved_esc;
+                    self.is_task_spawn = saved_task;
+                    let t = match lam_ty {
+                        Some(Type::Fn { params, ret, .. }) => {
+                            if !params.is_empty() {
+                                self.diags.push(Diagnostic::error(
+                                    "E0104",
+                                    format!(
+                                        "`{}` needs a zero-parameter lambda, got {} parameter{}",
+                                        Syntax::CORE_TASKS_SPAWN_GROUP,
+                                        params.len(),
+                                        if params.len() == 1 { "" } else { "s" }
+                                    ),
+                                    "every task in the group starts by calling the lambda with no arguments"
+                                        .to_string(),
+                                    "move data into the task instead of taking lambda parameters"
+                                        .to_string(),
+                                    Some(args[1].expr.span()),
+                                ));
+                            }
+                            ret.map(|r| *r)
+                                .unwrap_or_else(|| Type::Named("Unit".to_string()))
+                        }
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`{}` needs a lambda, not {}",
+                                    Syntax::CORE_TASKS_SPAWN_GROUP,
+                                    other.show()
+                                ),
+                                "each task in the group runs the same zero-parameter lambda"
+                                    .to_string(),
+                                format!(
+                                    "write `tasks.{}(4, () => work())`",
+                                    Syntax::CORE_TASKS_SPAWN_GROUP
+                                ),
+                                Some(args[1].expr.span()),
+                            ));
+                            Type::Named("Unit".to_string())
+                        }
+                        None => Type::Named("Unit".to_string()),
+                    };
+                    if let Some(problem) = self.sendability_problem(&t, false) {
+                        self.report_unsendable(
+                            "task result",
+                            &t,
+                            problem,
+                            SendCrossing::TaskResult,
+                            args[1].expr.span(),
+                        );
+                    }
+                    return Some(Type::List(Box::new(Type::Apply {
+                        name: "Task".to_string(),
+                        args: vec![t],
+                    })));
+                }
                 // D-FANOUT3=C: consume a list of task handles and join them in
                 // list order. Runtime meaning reuses TaskGroupAll/jet_task_all.
                 ("core.tasks", "join_all") => {

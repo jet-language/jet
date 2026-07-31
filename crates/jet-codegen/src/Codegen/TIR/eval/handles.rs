@@ -605,6 +605,28 @@ pub(super) fn eval_handle(
         THandleOp::TaskResume => Err(unsupported("handle `TaskResume`", span)),
         THandleOp::TaskCancel => Err(unsupported("handle `TaskCancel`", span)),
         THandleOp::TaskTrace => Err(unsupported("handle `TaskTrace`", span)),
+        // D-VERDICT-1323-1: each twin behaves exactly like its single-handle
+        // counterpart here, including where that counterpart is not yet
+        // evaluable at compile time.
+        THandleOp::TaskWaitAll => match recv {
+            CtValue::List(tasks) => tasks
+                .iter()
+                .map(|task| match task {
+                    CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
+                        .iter()
+                        .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                        .ok_or_else(|| unsupported("task result", span)),
+                    _ => Err(unsupported("task receiver", span)),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(CtValue::List),
+            _ => Err(unsupported("task group receiver", span)),
+        },
+        THandleOp::TaskDetachAll => Ok(CtValue::Unit),
+        THandleOp::TaskPauseAll => Err(unsupported("handle `TaskPauseAll`", span)),
+        THandleOp::TaskResumeAll => Err(unsupported("handle `TaskResumeAll`", span)),
+        THandleOp::TaskCancelAll => Err(unsupported("handle `TaskCancelAll`", span)),
+        THandleOp::TaskTraceAll => Err(unsupported("handle `TaskTraceAll`", span)),
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),
         THandleOp::SenderSend => Err(unsupported("handle `SenderSend`", span)),
         THandleOp::HTTPRouterRegister { .. } => {

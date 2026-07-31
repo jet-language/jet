@@ -2623,6 +2623,12 @@ pub(crate) fn lower_method_call(
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
             "trace" => (THandleOp::TaskTrace, Type::String),
+            "wait_all" | "join_all" => (THandleOp::TaskWaitAll, Type::List(Box::new(elem))),
+            "detach_all" => (THandleOp::TaskDetachAll, unit_type()),
+            "cancel_all" => (THandleOp::TaskCancelAll, unit_type()),
+            "pause_all" => (THandleOp::TaskPauseAll, unit_type()),
+            "resume_all" => (THandleOp::TaskResumeAll, unit_type()),
+            "trace_all" => (THandleOp::TaskTraceAll, Type::List(Box::new(Type::String))),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {

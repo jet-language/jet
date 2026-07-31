@@ -568,11 +568,37 @@ pub fn partition_ret_ty(inner: &Type) -> Type {
     ])
 }
 
+/// D-VERDICT-1323-1: the list twin of each single-task method. Each name means
+/// exactly what its single-handle counterpart means, applied in list order.
+fn task_list_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let result = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        (Syntax::METHOD_TASK_WAIT_ALL, 0) | (Syntax::METHOD_TASK_JOIN_ALL, 0) => {
+            Some(Some(Type::List(Box::new(result))))
+        }
+        (Syntax::METHOD_TASK_DETACH_ALL, 0)
+        | (Syntax::METHOD_TASK_CANCEL_ALL, 0)
+        | (Syntax::METHOD_TASK_PAUSE_ALL, 0)
+        | (Syntax::METHOD_TASK_RESUME_ALL, 0) => Some(None),
+        (Syntax::METHOD_TASK_TRACE_ALL, 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        _ => None,
+    }
+}
+
 fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     let mutable_view = || Type::Apply {
         name: "ViewMut".to_string(),
         args: vec![inner.clone()],
     };
+    // The task-group twins exist only on a list of task handles, so an
+    // ordinary list keeps its own surface untouched.
+    if let Type::Apply { name, args } = inner {
+        if name == "Task" {
+            if let Some(ret) = task_list_method_return(args, method, nargs) {
+                return Some(ret);
+            }
+        }
+    }
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),

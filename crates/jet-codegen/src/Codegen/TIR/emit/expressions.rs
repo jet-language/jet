@@ -2908,6 +2908,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
                 THandleOp::TaskTrace => format!("({}).trace()", recv),
+                THandleOp::TaskWaitAll => {
+                    format!("{}jet_std::jet_task_wait_all({})", cx.root_prefix, recv)
+                }
+                THandleOp::TaskDetachAll => {
+                    format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
+                }
+                THandleOp::TaskCancelAll => {
+                    format!("{}jet_std::jet_task_cancel_all(&({}))", cx.root_prefix, recv)
+                }
+                THandleOp::TaskPauseAll => {
+                    format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
+                }
+                THandleOp::TaskResumeAll => {
+                    format!("{}jet_std::jet_task_resume_all(&({}))", cx.root_prefix, recv)
+                }
+                THandleOp::TaskTraceAll => {
+                    format!("{}jet_std::jet_task_trace_all(&({}))", cx.root_prefix, recv)
+                }
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
                 // D-REACT1=B: reactive Signal/Derived reads and writes.

@@ -170,6 +170,26 @@ pub const METHOD_TASK_CANCEL: &str = "cancel";
 /// D-COROUTINE1=A: inspect task control-plane state.
 pub const METHOD_TASK_TRACE: &str = "trace";
 
+// D-VERDICT-1323-1 (ratified 2026-07-30): the list twin of each single-task
+// method, so a group of handles is driven without writing a loop. Each name
+// means exactly what its single-handle counterpart means, applied in order.
+/// Spawn `n` tasks from one callable — `tasks.spawn_group(n, fn) => [Task<T>]`.
+pub const CORE_TASKS_SPAWN_GROUP: &str = "spawn_group";
+/// Wait for every task and return the results in list order (consumes).
+pub const METHOD_TASK_WAIT_ALL: &str = "wait_all";
+/// `join_all`'s method spelling — the same mechanism as `wait_all` (consumes).
+pub const METHOD_TASK_JOIN_ALL: &str = "join_all";
+/// Detach every task (consumes).
+pub const METHOD_TASK_DETACH_ALL: &str = "detach_all";
+/// Request cancellation for every task (borrows).
+pub const METHOD_TASK_CANCEL_ALL: &str = "cancel_all";
+/// Mark every task paused (borrows).
+pub const METHOD_TASK_PAUSE_ALL: &str = "pause_all";
+/// Clear the paused marker on every task (borrows).
+pub const METHOD_TASK_RESUME_ALL: &str = "resume_all";
+/// One control-plane trace line per task, in list order (borrows).
+pub const METHOD_TASK_TRACE_ALL: &str = "trace_all";
+
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an

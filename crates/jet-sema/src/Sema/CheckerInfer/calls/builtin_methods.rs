@@ -311,6 +311,25 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // D-VERDICT-1323-1: the consuming task-group twins take the list the
+            // same way their single-handle counterparts take one handle.
+            if let Type::List(inner) = recv_ty {
+                if matches!(inner.as_ref(), Type::Apply { name, .. } if name == "Task")
+                    && matches!(
+                        method,
+                        m if m == Syntax::METHOD_TASK_WAIT_ALL
+                            || m == Syntax::METHOD_TASK_JOIN_ALL
+                            || m == Syntax::METHOD_TASK_DETACH_ALL
+                    )
+                {
+                    if let Expr::Ident(name, _) = receiver {
+                        self.mark_taskgroup_spawn_consumed(name);
+                    }
+                    self.consume_builtin_receiver(receiver, method);
+                    let _ = span;
+                    return ret;
+                }
+            }
             if let Type::Apply { name, .. } = recv_ty {
                 match (name.as_str(), method) {
                     ("Task", "join") | ("Task", "wait") => {

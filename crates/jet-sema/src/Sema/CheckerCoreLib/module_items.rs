@@ -276,7 +276,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "bar_text",
             "bar_svg",
         ],
-        "core.tasks" => &["spawn", "join_all", "channel", "after", "interval"],
+        "core.tasks" => &["spawn", "spawn_group", "join_all", "channel", "after", "interval"],
         "core.testing" => &[
             "snap",
             "golden",

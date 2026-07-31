@@ -552,6 +552,23 @@ extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_task_trace_all(task_list: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        let lines: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                let ctrl = &rt.task_controls[*id as usize];
+                let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
+                let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
+                format!("paused={paused},cancel={cancel}")
+            })
+            .collect();
+        let handles: Vec<i64> = lines.into_iter().map(|t| rt.heap.alloc_string(t)).collect();
+        store_i64_list(rt, handles)
+    })
+}
+
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     // `emit_async(…).join()` is typed as TaskJoin in TIR, but the thin async
     // event host returns a completed DispatchReport handle (1-based index into
@@ -583,6 +600,44 @@ extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
         let values = jet_scheduler_all(entries);
         with_runtime_mut(|rt| store_i64_list(rt, values))
     })
+}
+
+// D-VERDICT-1323-1: the task-group twins. Each marshals the JIT's list of task
+// ids into the same per-task operation its single-handle counterpart uses.
+extern "C" fn jet_jit_task_wait_all(task_list: i64) -> i64 {
+    jet_jit_task_all(task_list)
+}
+
+extern "C" fn jet_jit_task_detach_all(task_list: i64) {
+    with_runtime_mut(|rt| {
+        for id in task_ids_from_list(rt, task_list) {
+            let _ = rt.tasks[id as usize].take();
+        }
+    });
+}
+
+extern "C" fn jet_jit_task_cancel_all(task_list: i64) {
+    with_runtime_mut(|rt| {
+        for id in task_ids_from_list(rt, task_list) {
+            rt.task_controls[id as usize].cancel();
+        }
+    });
+}
+
+extern "C" fn jet_jit_task_pause_all(task_list: i64) {
+    with_runtime_mut(|rt| {
+        for id in task_ids_from_list(rt, task_list) {
+            rt.task_controls[id as usize].pause();
+        }
+    });
+}
+
+extern "C" fn jet_jit_task_resume_all(task_list: i64) {
+    with_runtime_mut(|rt| {
+        for id in task_ids_from_list(rt, task_list) {
+            rt.task_controls[id as usize].resume();
+        }
+    });
 }
 
 /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first successful result.
@@ -744,6 +799,12 @@ pub(crate) struct ConcurrencyHostFns {
     pub task_resume: cranelift_module::FuncId,
     pub task_trace: cranelift_module::FuncId,
     pub task_all: cranelift_module::FuncId,
+    pub task_wait_all: cranelift_module::FuncId,
+    pub task_trace_all: cranelift_module::FuncId,
+    pub task_detach_all: cranelift_module::FuncId,
+    pub task_cancel_all: cranelift_module::FuncId,
+    pub task_pause_all: cranelift_module::FuncId,
+    pub task_resume_all: cranelift_module::FuncId,
     pub task_race: cranelift_module::FuncId,
     pub task_any: cranelift_module::FuncId,
     pub select_wait: cranelift_module::FuncId,
@@ -813,6 +874,12 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_task_resume", jet_jit_task_resume as *const u8);
     builder.symbol("jet_jit_task_trace", jet_jit_task_trace as *const u8);
     builder.symbol("jet_jit_task_all", jet_jit_task_all as *const u8);
+    builder.symbol("jet_jit_task_wait_all", jet_jit_task_wait_all as *const u8);
+    builder.symbol("jet_jit_task_trace_all", jet_jit_task_trace_all as *const u8);
+    builder.symbol("jet_jit_task_detach_all", jet_jit_task_detach_all as *const u8);
+    builder.symbol("jet_jit_task_cancel_all", jet_jit_task_cancel_all as *const u8);
+    builder.symbol("jet_jit_task_pause_all", jet_jit_task_pause_all as *const u8);
+    builder.symbol("jet_jit_task_resume_all", jet_jit_task_resume_all as *const u8);
     builder.symbol("jet_jit_task_race", jet_jit_task_race as *const u8);
     builder.symbol("jet_jit_task_any", jet_jit_task_any as *const u8);
     builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
@@ -910,6 +977,12 @@ pub(crate) fn declare_concurrency_host_fns(
         task_resume: import("jet_jit_task_resume", &sig_void_i64)?,
         task_trace: import("jet_jit_task_trace", &sig_i64)?,
         task_all: import("jet_jit_task_all", &sig_i64)?,
+        task_wait_all: import("jet_jit_task_wait_all", &sig_i64)?,
+        task_trace_all: import("jet_jit_task_trace_all", &sig_i64)?,
+        task_detach_all: import("jet_jit_task_detach_all", &sig_void_i64)?,
+        task_cancel_all: import("jet_jit_task_cancel_all", &sig_void_i64)?,
+        task_pause_all: import("jet_jit_task_pause_all", &sig_void_i64)?,
+        task_resume_all: import("jet_jit_task_resume_all", &sig_void_i64)?,
         task_race: import("jet_jit_task_race", &sig_i64)?,
         task_any: import("jet_jit_task_any", &sig_i64)?,
         select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,

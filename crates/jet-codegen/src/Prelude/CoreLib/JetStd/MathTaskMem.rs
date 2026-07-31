@@ -445,6 +445,62 @@
         super::jet_scheduler_all(jet_task_entries(tasks, "all"))
     }
 
+    // D-VERDICT-1323-1: task-group helpers. Each is the list twin of the
+    // single-handle method and means exactly the same thing applied in list
+    // order. Semantics live here; every engine only marshals into these.
+
+    /// Spawn `count` tasks from one callable — `tasks.spawn_group(n, f)`.
+    pub fn jet_task_spawn_group<F, T>(count: i64, make: F) -> Vec<JetTask<T>>
+    where
+        F: Fn() -> T + Send + Sync + Clone + 'static,
+        T: Send + 'static,
+    {
+        (0..count.max(0))
+            .map(|_| {
+                let make = make.clone();
+                JetTask::spawn(move || make())
+            })
+            .collect()
+    }
+
+    /// Wait for every task and return the results in list order (consumes).
+    pub fn jet_task_wait_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
+        jet_task_all(tasks)
+    }
+
+    /// Detach every task (consumes).
+    pub fn jet_task_detach_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) {
+        for task in tasks {
+            task.detach();
+        }
+    }
+
+    /// Request cancellation for every task (borrows).
+    pub fn jet_task_cancel_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
+        for task in tasks {
+            task.cancel();
+        }
+    }
+
+    /// Mark every task paused (borrows).
+    pub fn jet_task_pause_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
+        for task in tasks {
+            task.pause();
+        }
+    }
+
+    /// Clear the paused marker on every task (borrows).
+    pub fn jet_task_resume_all<T: Send + 'static>(tasks: &[JetTask<T>]) {
+        for task in tasks {
+            task.resume();
+        }
+    }
+
+    /// One control-plane trace line per task, in list order (borrows).
+    pub fn jet_task_trace_all<T: Send + 'static>(tasks: &[JetTask<T>]) -> Vec<String> {
+        tasks.iter().map(|task| task.trace()).collect()
+    }
+
     /// D-CONCCOMB1=A + D-RACEWIN1: first successful result; cancel siblings via scheduler.
     pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
         super::jet_scheduler_race(jet_task_entries(tasks, "race"))

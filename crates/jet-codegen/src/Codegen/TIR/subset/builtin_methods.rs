@@ -95,6 +95,14 @@ pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
             | ("trace", 0)
             | ("receive", 0)
             | ("send", 1)
+            // D-VERDICT-1323-1: the task-group twins.
+            | ("wait_all", 0)
+            | ("join_all", 0)
+            | ("detach_all", 0)
+            | ("cancel_all", 0)
+            | ("pause_all", 0)
+            | ("resume_all", 0)
+            | ("trace_all", 0)
     )
 }
 

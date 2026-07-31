@@ -15606,6 +15606,34 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
             }
+            THandleOp::TaskTraceAll => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_trace_all, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TaskWaitAll => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_wait_all, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+            }
+            THandleOp::TaskDetachAll
+            | THandleOp::TaskCancelAll
+            | THandleOp::TaskPauseAll
+            | THandleOp::TaskResumeAll => {
+                let host = match op {
+                    THandleOp::TaskDetachAll => self.host.conc.task_detach_all,
+                    THandleOp::TaskCancelAll => self.host.conc.task_cancel_all,
+                    THandleOp::TaskPauseAll => self.host.conc.task_pause_all,
+                    _ => self.host.conc.task_resume_all,
+                };
+                let host_ref = self.module.declare_func_in_func(host, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             THandleOp::TaskCancel => {
                 let host_ref = self
                     .module

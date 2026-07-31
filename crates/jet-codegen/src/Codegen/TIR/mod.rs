@@ -4176,6 +4176,14 @@ pub enum THandleOp {
     TaskCancel,
     /// D-COROUTINE1=A: Task control-plane trace string.
     TaskTrace,
+    // D-VERDICT-1323-1: the list twins. Each calls the same Prelude symbol its
+    // single-handle counterpart does, applied over the whole group in order.
+    TaskWaitAll,
+    TaskDetachAll,
+    TaskCancelAll,
+    TaskPauseAll,
+    TaskResumeAll,
+    TaskTraceAll,
     /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
     /// `Result<T, Closed>`.
     ChannelReceive,
