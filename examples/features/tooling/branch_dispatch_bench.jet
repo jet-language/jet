@@ -1,0 +1,64 @@
+// D-BRANCH-CODEGEN1: representative classifier workloads use the existing
+// benchmark mechanism. Run with `jet bench`.
+enum Mode {
+    Read
+    Write
+    Admin
+}
+
+fn dense(n: Int) => Int {
+    if n == {
+        0 -> { return 10 }
+        1 -> { return 11 }
+        2 -> { return 12 }
+        else -> { return 0 }
+    }
+}
+
+fn sparse(n: Int) => Int {
+    if n == {
+        1 -> { return 10 }
+        1000 -> { return 20 }
+        100000 -> { return 30 }
+        else -> { return 0 }
+    }
+}
+
+fn enum_dispatch(mode: Mode) => Int {
+    if mode == {
+        .Read -> { return 1 }
+        .Write -> { return 2 }
+        .Admin -> { return 3 }
+    }
+}
+
+fn ordered(n: Int) => Int {
+    if n == {
+        0..9 -> { return 1 }
+        10..99 -> { return 2 }
+        else -> { return 3 }
+    }
+}
+
+fn biased(n: Int) => Int {
+    if n == {
+        0 -> { return 1 }
+        1..100 -> { return 2 }
+        else -> { return 3 }
+    }
+}
+
+#Bench("branch dense") { require_eq(dense(2), 12) }
+#Bench("branch sparse") { require_eq(sparse(1000), 20) }
+#Bench("branch enum") { require_eq(enum_dispatch(Mode.Write), 2) }
+#Bench("branch ordered") { require_eq(ordered(40), 2) }
+#Bench("branch biased") { require_eq(biased(0), 1) }
+
+fn run() {
+    require_eq(dense(2), 12)
+    require_eq(sparse(1000), 20)
+    require_eq(enum_dispatch(Mode.Write), 2)
+    require_eq(ordered(40), 2)
+    require_eq(biased(0), 1)
+    print("branch dispatch benchmarks")
+}

@@ -185,6 +185,19 @@ pub(super) fn core_call_args_in_subset(
     cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> bool {
+    // D-TASKRUNTIME1=A: the bounded channel form has one required
+    // documentation label. Sema has already checked its name and integer
+    // type; lowering erases the label and carries the resolved tuple type.
+    if module == "core.tasks" && method == "channel" {
+        return match args {
+            [] => true,
+            [arg] => {
+                arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("capacity")
+                    && expr_in_subset(&arg.expr, cx, locals)
+            }
+            _ => false,
+        };
+    }
     // D-REGEX-LIT1=D: regex one-shot calls support the ordinary documentation-only
     // labels (`pattern:`, `text:`). Sema has already checked each label against its
     // positional parameter; lowering erases labels.

@@ -3,10 +3,9 @@ use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    CodeModule, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
-    GenericModuleParam, IfStmt, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
-    OrFallback, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart, StructPatField, Type,
-    VariantPayload,
+    CodeModule, ConstAttr, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
+    GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg, OrFallback,
+    Pattern, ProgramBundle, RustConstKind, Stmt, StrPart, StructPatField, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -27,9 +26,9 @@ use Outputs::{
 };
 #[allow(unused_imports)]
 pub(crate) use Validation::{
-    check_func_body_bundle, check_module_bodies, collect_core_expr, collect_core_if,
-    collect_core_lvalue, collect_core_stmts, collect_used_core, fn_types_compatible,
-    func_sig_to_fn_type, register_func_item,
+    check_func_body_bundle, check_module_bodies, collect_core_expr, collect_core_lvalue,
+    collect_core_stmts, collect_used_core, fn_types_compatible, func_sig_to_fn_type,
+    register_func_item,
 };
 use Validation::{
     apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
@@ -628,9 +627,6 @@ fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
             expr_has_comptime_evaluation(value)
         }
         Stmt::Return(None, _) => false,
-        Stmt::If(value) => {
-            expr_has_comptime_evaluation(&value.cond) || if_has_comptime_evaluation(value)
-        }
         Stmt::While { cond, body, .. } => {
             expr_has_comptime_evaluation(cond) || stmts_have_comptime_evaluation(body)
         }
@@ -853,15 +849,6 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
     }
 }
 
-fn if_has_comptime_evaluation(value: &IfStmt) -> bool {
-    stmts_have_comptime_evaluation(&value.then_body)
-        || match value.else_branch.as_ref() {
-            Some(ElseBranch::ElseIf(next)) => if_has_comptime_evaluation(next),
-            Some(ElseBranch::Else(body)) => stmts_have_comptime_evaluation(body),
-            None => false,
-        }
-}
-
 fn builtin_type_registry() -> TypeRegistry {
     let zero = Span::new(0, 0);
     let variants = ["Less", "Equal", "Greater"].into_iter().map(|name| {
@@ -1045,10 +1032,10 @@ fn check_bundle_opts_for_output_inner(
     diags.extend(inject_units_prelude(bundle));
     diags.extend(super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
-    // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `#Known if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
-    // meet the taken arm. Rewrites into a `comptime if` chain (reuses D-WHEN1).
+    // meet the taken arm. Rewrites into a `#Known if` chain (reuses D-WHEN1).
     diags.extend(super::desugar_os_switches(bundle));
     // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
     // decodable `#PublishedSchema` type into a synthetic top-level converter

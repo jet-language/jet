@@ -493,8 +493,8 @@ fn comptime_const_inline() {
         return;
     }
     let src = "\
-comptime version = \"1.0\"
-comptime banner = \"logbook {version}\"
+#Known version :: \"1.0\"
+#Known banner :: \"logbook {version}\"
 fn wrap(s: String) => String {
     return \"{banner}: {s}\"
 }

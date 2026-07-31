@@ -1,11 +1,5 @@
-// 196 — a real, clickable webpage rendered by Jet-compiled JS (Phase 7
-// extension: DOM backend now mounts real elements when a `document` exists,
-// and every top-level `#Target(JS) fn` is exported so a hand-written host page
-// (ui_web_click.html) can call `render` directly from a button's onclick.
-// The box's fill color is wired all the way through `ui.node_color` ->
-// `JetPaintCmd::FillRect` -> the real DOM background (Phase 3/7 wiring) —
-// no hardcoded "#000000" anywhere in this path. Every other click switches
-// color, proving the color is live per-render, not a static style.
+// D-WEB-CLICK-OWN1=D: Jet owns the click listener, counter signal, and render.
+// The companion HTML is only a shell. No hand-written JavaScript keeps state.
 // D-WEBDEFAULT1/D-HTMLPAIR1 (ratified 2026-07-01, c134): explicit instead of implicit —
 // `jet dev`/`jet build`/`jet run` infer the web backend from #Target(Web)
 // (no --target=web needed), and #HTML names the companion host page instead
@@ -25,18 +19,14 @@
 // `devserver.for_app("path")` only to watch a DIFFERENT entry file; it
 // accepts relative (resolved against the invocation cwd) or absolute paths.
 use core.ui as ui
-use core.web.devserver as devserver
+use core.reactive as reactive
+use core.web as web
 #[Target(Web), HTML("ui_web_click.html")]
-
-fn dev() {
-    server :: devserver.app()
-    server.serve()
-}
 
 fn render(n: Int) {
     backend :: ui.null_backend()
     color := "#e8790c"
-    if ((n % 2) == 0) { color = "#3366ff" }
+    if n % 2 == 0 { color = "#3366ff" }
     node :: ui.node_color("Clicks: {n}", 160.0, 40.0, color)
     constraint :: ui.constraint(0.0, 0.0, 300.0, 100.0)
     size :: backend.measure(node, constraint)
@@ -45,4 +35,8 @@ fn render(n: Int) {
     backend.paint(node)
 }
 
-fn run() { render(0) }
+fn run() {
+    count :: reactive.signal(0)
+    ui.reactive_render(() => { render(count.get()) })
+    web.on("#btn", "click", ev => { count.set(count.get() + 1) })
+}

@@ -522,10 +522,17 @@ pub(crate) fn let_ty_tuple(types: Vec<Type>) -> crate::Codegen::TIR::TLetTy {
 /// same bytes `CtValue::serialize` would have produced.
 pub(crate) fn lower_comptime_scalar(
     value: Option<&crate::AST::CtValue>,
+    ty: Option<&Type>,
 ) -> Option<crate::Codegen::TIR::TExprKind> {
     use crate::Codegen::TIR::{TExprKind, TStrPart};
     match value? {
-        crate::AST::CtValue::Int(int) => Some(TExprKind::IntLit(*int, None)),
+        crate::AST::CtValue::Int(int) => Some(TExprKind::IntLit(
+            *int,
+            match ty {
+                Some(Type::IntN { signed, bits }) => Some((*signed, *bits)),
+                _ => None,
+            },
+        )),
         crate::AST::CtValue::Float(float) => Some(TExprKind::FloatLit(float.as_f64())),
         crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),

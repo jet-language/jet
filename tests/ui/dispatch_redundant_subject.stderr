@@ -1,1 +1,7 @@
-(no errors)
+Error [E0994]: drop the `subject OP` — the comparison on the `if` already applies it to every arm
+  --> tests/ui/dispatch_redundant_subject.jet:11:9
+    |
+ 11 |         c == .Active(id) -> { return "live:{id}" }
+    |         ^^^^^^^^^^^^^^^^
+ Why: `if subject OP { … }` matches each arm head against the subject, so repeating `subject OP` on an arm is redundant
+ Fix: delete the `subject OP` prefix; write just the value or pattern

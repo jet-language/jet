@@ -101,8 +101,8 @@ impl<'a> Parser<'a> {
                 Some(eq_span),
             ));
         }
-        // D-ARROW-CONTROL1: effect-only one-line bodies are adjacent and
-        // arrow-free. Accept the retired result arrow only to teach its removal.
+        // D-ARROW-CONTROL1: accept the retired result arrow and adjacent body
+        // only to teach both removals while preserving a formatter-recoverable AST.
         if matches!(self.peek().kind, TokKind::Arrow) {
             let arrow = self.bump();
             self.diags.push(Diagnostic::error(
@@ -110,23 +110,35 @@ impl<'a> Parser<'a> {
                 "this effect-only `if` uses a result arrow".to_string(),
                 "an arrow says that control selects a value; this body only performs work"
                     .to_string(),
-                "remove `->`; keep the one-line body adjacent or use braces".to_string(),
+                "remove `->` and wrap the body in `{ ... }`".to_string(),
                 Some(arrow.span),
             ));
+            self.teach_control_braces("if", self.peek().span);
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
                 self.prefer_arm_table_lint(span);
             }
-            return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
+            return Ok(Self::classic_if_switch(IfStmt {
+                cond,
+                then_body,
+                else_branch,
+                span,
+            }));
         }
         if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
+            self.teach_control_braces("if", self.peek().span);
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
                 self.prefer_arm_table_lint(span);
             }
-            return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
+            return Ok(Self::classic_if_switch(IfStmt {
+                cond,
+                then_body,
+                else_branch,
+                span,
+            }));
         }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
@@ -170,12 +182,38 @@ impl<'a> Parser<'a> {
         {
             self.prefer_arm_table_lint(span);
         }
-        Ok(Stmt::If(IfStmt {
+        Ok(Self::classic_if_switch(IfStmt {
             cond,
             then_body,
             else_branch,
             span,
         }))
+    }
+
+    /// D-BRANCH-AST1=C: classic effect `if` syntax enters the same arm-table
+    /// node as every other branch directly from the parser.
+    fn classic_if_switch(branch: IfStmt) -> Stmt {
+        let IfStmt {
+            cond,
+            then_body,
+            else_branch,
+            span,
+        } = branch;
+        let else_body = match else_branch {
+            None => None,
+            Some(ElseBranch::Else(body)) => Some(body),
+            Some(ElseBranch::ElseIf(next)) => Some(vec![Self::classic_if_switch(*next)]),
+        };
+        Stmt::Switch {
+            subject: Expr::Bool(true, span),
+            arms: vec![SwitchArm {
+                span: cond.span(),
+                cond,
+                body: then_body,
+            }],
+            else_body,
+            span,
+        }
     }
 
     fn adjacent_effect_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
@@ -207,7 +245,19 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok(Some(ElseBranch::Else(self.block_stmts())));
         }
+        self.teach_control_braces("else", self.peek().span);
         Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)))
+    }
+
+    pub(super) fn teach_control_braces(&mut self, body: &str, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0372",
+            format!("this `{body}` body needs braces"),
+            "braces make the body's boundary visible to readers, editors, and the compiler"
+                .to_string(),
+            format!("wrap the body in `{{ ... }}`; `jet fmt` applies this fix"),
+            Some(span),
+        ));
     }
 
     /// D-IFGUARD1=A: `if { Bool -> body ... [else -> body] }` statement guards.
@@ -430,7 +480,7 @@ impl<'a> Parser<'a> {
                                         Some(pat_span),
                                     ));
                                     Expr::PatternTest {
-                                        subject: Box::new(pat_subject.clone()),
+                                        subject: Box::new(subject.clone()),
                                         pattern: Pattern::Range {
                                             lo,
                                             hi,
@@ -468,7 +518,7 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                                 Expr::PatternTest {
-                                    subject: Box::new(pat_subject.clone()),
+                                    subject: Box::new(subject.clone()),
                                     pattern: Pattern::Range {
                                         lo,
                                         hi,
@@ -577,7 +627,7 @@ impl<'a> Parser<'a> {
                     return Ok(raw);
                 }
                 Expr::Binary(binop, lhs, _, span)
-                    if binop.is_comparison() && Self::same_subject(lhs, subject) =>
+                    if *binop == op && Self::same_subject(lhs, subject) =>
                 {
                     self.diags.push(Self::redundant_subject_diag(*span));
                     return Ok(raw);

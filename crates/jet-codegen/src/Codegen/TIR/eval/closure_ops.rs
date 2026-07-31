@@ -16,6 +16,59 @@ impl<'a> EvalCtx<'a> {
         args: &'a [TExpr],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        if matches!(op, TClosureOp::EditDisjoint) {
+            let base_name = match &recv.kind {
+                TExprKind::Local(local) => local.name.clone(),
+                TExprKind::Borrow { place, .. } => match &place.kind {
+                    TExprKind::Local(local) => local.name.clone(),
+                    _ => return Err(unsupported("edit_disjoint base", self.span())),
+                },
+                _ => return Err(unsupported("edit_disjoint base", self.span())),
+            };
+            let CtValue::List(items) = scope
+                .get(&base_name)
+                .cloned()
+                .ok_or_else(|| unsupported("edit_disjoint unbound base", self.span()))?
+            else {
+                return Err(unsupported("edit_disjoint list base", self.span()));
+            };
+            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+                return Err(unsupported("edit_disjoint indexes", self.span()));
+            };
+            let mut indexes = Vec::with_capacity(targets.len());
+            for target in targets {
+                indexes.push(crate::Comptime::Builtins::as_int(&target, self.span())?);
+            }
+            if indexes.len() != 2 {
+                return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                    "edit_disjoint needs exactly two indexes".to_string(),
+                ))));
+            }
+            let ordered = match super::disjoint_semantics::indexes(items.len(), &indexes) {
+                Ok(ordered) => ordered,
+                Err(error) => return Ok(CtValue::ResErr(Box::new(CtValue::Str(error)))),
+            };
+            let mut views = ordered
+                .into_iter()
+                .map(|(start, end, position)| {
+                    (
+                        position,
+                        CtValue::Struct {
+                            type_name: "__JetViewMut".into(),
+                            fields: vec![
+                                ("base".into(), CtValue::Str(base_name.clone())),
+                                ("start".into(), CtValue::Int(start as i64)),
+                                ("end".into(), CtValue::Int(end as i64 - 1)),
+                            ],
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            views.sort_by_key(|(position, _)| *position);
+            let argv = views.into_iter().map(|(_, view)| view).collect();
+            let _ = self.apply_callable(&args[1], argv, scope)?;
+            return Ok(CtValue::ResOk(Box::new(CtValue::Unit)));
+        }
         let mut recv_v = self.eval_expr(recv, scope)?;
         // ViewMut place-window → inclusive List for read-only map/fold.
         if let CtValue::Struct {
@@ -36,6 +89,7 @@ impl<'a> EvalCtx<'a> {
             this.apply_callable(f, vec![item], scope)
         };
         match op {
+            TClosureOp::EditDisjoint => unreachable!(),
             TClosureOp::Map | TClosureOp::MapMut | TClosureOp::ViewMap => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("map receiver", self.span()));

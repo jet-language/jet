@@ -275,12 +275,12 @@ fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
 
 #[test]
 fn fmt_comptime_os_dispatch_round_trips() {
-    // D-OSTARGET2=B (ratified 2026-07-03): `comptime if build.os == { … }` — the
-    // OS-target dispatch. New token shape: the `comptime if <subject> == { }`
+    // D-OSTARGET2=B (ratified 2026-07-03): `#Known if build.os == { … }` — the
+    // OS-target dispatch. New token shape: the `#Known if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    comptime if build.os == {
+    #Known if build.os == {
         .Linux -> {
             b :: LinuxBackend.{ name: "gtk" }
             print(b.label())
@@ -292,8 +292,8 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("comptime if build.os == {"),
-        "expected the `comptime if build.os == {{` dispatch head, got:\n{out}"
+        out.contains("#Known if build.os == {"),
+        "expected the `#Known if build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. Braceless simple arms stay concise; the
     // author-written scoped arm stays braced.
@@ -330,6 +330,25 @@ fn fmt_preserves_concise_dispatch_arms() {
 }
 "#;
     assert_fmt_stable(src, "concise dispatch arms");
+}
+
+#[test]
+fn fmt_keeps_empty_dispatch_arms_compact_and_stable() {
+    let src = r#"fn run() {
+    if "ready" == {
+        "ready" -> print("ready")
+        else -> {}
+    }
+    print("done")
+}
+"#;
+    let out = jet::format_source(src).expect("empty dispatch arm should format");
+    assert!(
+        out.contains("else -> {}"),
+        "empty dispatch arm should stay compact, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("empty dispatch arm should reformat");
+    assert_eq!(out, twice, "empty dispatch arm must be stable");
 }
 
 #[test]
@@ -998,10 +1017,8 @@ fn fmt_preserves_bin_take_pattern_literal() {
 
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
 //
-// A brace body the author wrote on one line stays one line when it holds one
-// simple statement, has no inner comment, and fits width 100; a body broken
-// across lines stays multiline. fmt only normalizes spacing within the shape
-// the author chose. Idempotent (second pass == first), not canonical.
+// A braced control body with one simple statement and no inner comment
+// collapses when it fits width 100. Wider, nested, or commented bodies expand.
 
 /// Assert `src` formats to itself byte-for-byte and is idempotent.
 fn assert_fmt_stable(src: &str, label: &str) {
@@ -1034,24 +1051,35 @@ fn fmt_preserves_single_line_if() {
 
 #[test]
 fn fmt_preserves_multiline_if() {
-    // The 3-line form the author chose stays 3 lines.
     let src = "fn run() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
-    assert_fmt_stable(src, "multiline if");
+    let expected = "fn run() {\n    ready :: true\n    if ready { launch() }\n}\n";
+    let out = jet::format_source(src).expect("multiline if should format");
+    assert_eq!(out, expected);
+    assert_eq!(out, jet::format_source(&out).expect("collapsed if should reformat"));
 }
 
 #[test]
-fn fmt_if_else_chain_one_multiline_expands_all() {
-    // D-FMT1 chain rule: if any branch is multiline, the whole chain expands.
-    // Author wrote `then` inline but `else` multiline → whole chain goes
-    // multiline; the expanded form is then stable.
+fn fmt_classic_if_ignores_braces_inside_leading_trivia() {
+    let src =
+        "fn run() {\n    ready :: true\n    if /* { trivia */ ready { launch() }\n}\n";
+    let out = jet::format_source(src).expect("commented classic if should format");
+    assert_eq!(out, src);
+    assert_eq!(
+        out,
+        jet::format_source(&out).expect("commented classic if should reformat")
+    );
+}
+
+#[test]
+fn fmt_if_else_chain_collapses_when_every_branch_fits() {
     let src = "fn run() {\n    if a { x() } else {\n        y()\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
     assert_eq!(
-        out, "fn run() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
-        "mixed if/else chain should expand wholesale, got:\n{out}"
+        out, "fn run() {\n    if a { x() } else { y() }\n}\n",
+        "fitting if/else branches should collapse, got:\n{out}"
     );
-    let twice = jet::format_source(&out).expect("expanded chain should re-fmt");
-    assert_eq!(out, twice, "expanded chain must be idempotent");
+    let twice = jet::format_source(&out).expect("collapsed chain should re-fmt");
+    assert_eq!(out, twice, "collapsed chain must be idempotent");
 }
 
 #[test]
@@ -1106,11 +1134,11 @@ fn fmt_preserves_single_line_loops_and_fn() {
     let while_src = "fn run() {\n    n :: 0\n    loop n < 3 { n += 1 }\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
 
-    let for_src = "fn run() {\n    loop i; 0..3 { print(\"{i}\") }\n}\n";
+    let for_src = "fn run() {\n    loop i, 0..3 { print(\"{i}\") }\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
-    let excl_src = "fn run() {\n    loop i; 0..<3 { print(\"{i}\") }\n}\n";
+    let excl_src = "fn run() {\n    loop i, 0..<3 { print(\"{i}\") }\n}\n";
     assert_fmt_stable(excl_src, "exclusive range loop");
-    let two_bind = "fn run() {\n    loop i, x; xs { print(\"{i}\") }\n}\n";
+    let two_bind = "fn run() {\n    loop (i, x), xs { print(\"{i}\") }\n}\n";
     assert_fmt_stable(two_bind, "list two-binding loop");
 
 
@@ -1524,13 +1552,13 @@ fn fmt_keeps_parens_around_binary_receiver() {
 
 #[test]
 fn fmt_comptime_block_is_idempotent() {
-    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` formatting
+    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` formatting
     // round-trips — the block keyword, brace, and body all survive a second fmt.
-    let src = r#"comptime limit = 1000
+    let src = r#"#Known limit :: 1000
 
 fn run() {
-    comptime {
-        comptime ratio = limit / 10
+    #Known {
+        #Known ratio :: limit / 10
         if ratio < 1 { panic("bad") }
     }
     print("ok")
@@ -1538,7 +1566,7 @@ fn run() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept comptime block");
     assert!(
-        out.contains("comptime {"),
+        out.contains("#Known {"),
         "comptime block keyword + open brace must survive fmt, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
@@ -1899,8 +1927,8 @@ fn fmt_loop_label_d_looplabel3_stability() {
     // D-LOOPLABEL3=A: named loops and target-argument exits survive unchanged.
     let src = "\
 fn run() {
-    outer :: loop i; [1, 2] {
-        loop j; [1, 2] {
+    outer :: loop i, [1, 2] {
+        loop j, [1, 2] {
             if i == j {
                 value() ?? next(outer)
                 break(outer)
@@ -1924,8 +1952,8 @@ fn run() {
 fn fmt_loop_values_and_yielding_loops_are_idempotent() {
     let src = r#"fn find(xs: [Int]) => Int {
     found :: loop {
-        loop x; xs {
-            if x > 2 break(found, x)
+        loop x, xs {
+            if x > 2 { break(found, x) }
         }
         break -1
     }
@@ -1934,8 +1962,8 @@ fn fmt_loop_values_and_yielding_loops_are_idempotent() {
 
 fn run() {
     xs :: [Int].{ 1, 2, 3, 4 }
-    values :: loop x; xs -> {
-        if x > 3 break
+    values :: loop x, xs -> {
+        if x > 3 { break }
         x * 2
     }
     print(values)
@@ -1943,7 +1971,7 @@ fn run() {
 "#;
     assert_fmt_keeps(
         src,
-        &["found :: loop", "break(found, x)", "values :: loop x; xs ->"],
+        &["found :: loop", "break(found, x)", "values :: loop x, xs ->"],
         "loop values",
     );
     let once = jet::format_source(src).expect("fmt should accept loop values");
@@ -1953,17 +1981,17 @@ fn run() {
 
 #[test]
 fn fmt_counted_loop_d_loop_semicolon1_stability() {
-    // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` must survive fmt unchanged.
+    // D-LOOP-SEMICOLON1=A: `loop init, cond, step { body }` must survive fmt unchanged.
     let src = "\
 fn run() {
     sum := 0
-    loop i := 0; i < 5; i += 1 {
+    loop i := 0, i < 5, i += 1 {
         sum += i
     }
     print(sum)
 }
 ";
-    assert_fmt_keeps(src, &["loop i := 0; i < 5; i += 1"], "counted loop header");
+    assert_fmt_keeps(src, &["loop i := 0, i < 5, i += 1"], "counted loop header");
     let once = jet::format_source(src).expect("fmt should accept counted loop");
     let twice = jet::format_source(&once).expect("second fmt of counted loop must succeed");
     assert_eq!(once, twice, "counted loop fmt must be idempotent");
@@ -1971,7 +1999,7 @@ fn run() {
 
 #[test]
 fn fmt_unified_loop_headers_and_next_stability() {
-    let src = "fn next() => Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item; [1, 2, 3]; 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
+    let src = "fn next() => Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item, [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
     assert_fmt_keeps(
         src,
         &[
@@ -1979,7 +2007,7 @@ fn fmt_unified_loop_headers_and_next_stability() {
             "next()",
             ".next()",
             "?? (next)",
-            "loop item; [1, 2, 3]; 2",
+            "loop item, [1, 2, 3], 2",
             "?? next",
             "{ next }",
         ],
@@ -1991,12 +2019,12 @@ fn fmt_unified_loop_headers_and_next_stability() {
 
     for retired in [
         "fn run() { loop x in [1] {} }\n",
-        "fn run() { loop i; 0..2 step 1 {} }\n",
+        "fn run() { loop i, 0..2 step 1 {} }\n",
         "fn run() { loop { continue } }\n",
-        "fn run() { loop i :: 0; true {} }\n",
-        "fn run() { loop [i] := [0]; true {} }\n",
+        "fn run() { loop i :: 0, true {} }\n",
+        "fn run() { loop [i] := [0], true {} }\n",
         "fn run() { loop i := 0 true {} }\n",
-        "fn run() { loop i := 0; true; i += 1; i += 2 {} }\n",
+        "fn run() { loop i := 0, true, i += 1, i += 2 {} }\n",
     ] {
         assert!(
             jet::format_source(retired).is_err(),
@@ -2006,36 +2034,61 @@ fn fmt_unified_loop_headers_and_next_stability() {
 }
 
 #[test]
+fn control_bodies_gain_braces_and_collapse_when_they_fit() {
+    let src = "fn run() {\n    if true {\n        print(\"yes\")\n    }\n    loop false print(\"no\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should recover the retired adjacent loop");
+    assert!(once.contains("if true { print(\"yes\") }"), "{once}");
+    assert!(once.contains("loop false { print(\"no\") }"), "{once}");
+    let twice = jet::format_source(&once).expect("formatted controls must parse");
+    assert_eq!(once, twice);
+}
+
+#[test]
+fn loop_headers_use_comma_clauses_and_group_two_names() {
+    let src = "fn run() {\n    loop item, [1, 2, 3], 2 { print(item) }\n    loop (key, value), counts { print(key) }\n    loop i := 0, i < 3, i += 1 { print(i) }\n}\n";
+    let once = jet::format_source(src).expect("fmt should recover retired loop semicolons");
+    for expected in [
+        "loop item, [1, 2, 3], 2 { print(item) }",
+        "loop (key, value), counts { print(key) }",
+        "loop i := 0, i < 3, i += 1 { print(i) }",
+    ] {
+        assert!(once.contains(expected), "missing `{expected}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("formatted loop headers must parse");
+    assert_eq!(once, twice);
+}
+
+#[test]
 fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
     let src = r#"fn run() {
-    loop item; // source clause
-        [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000]; // stride clause
+    loop item, // source clause
+        [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000], // stride clause
         2 {
         next
     }
-    loop cursor := 1000000000000000000; cursor < 9000000000000000000; cursor += 1000000000000000000 {
+    loop cursor := 1000000000000000000, cursor < 9000000000000000000, cursor += 1000000000000000000 {
         print(cursor)
     }
-    loop ready := true; ready {
+    loop ready := true, ready {
         break
     }
 }
 "#;
     let once = jet::format_source(src).expect("long unified loop headers should format");
     for token in [
-        "loop item;",
+        "loop item,",
         "// source clause",
-        "];",
+        "],",
         "// stride clause",
-        "loop cursor := 1000000000000000000;",
-        "cursor < 9000000000000000000;",
+        "loop cursor := 1000000000000000000,",
+        "cursor < 9000000000000000000,",
         "cursor += 1000000000000000000",
-        "loop ready := true; ready {",
+        "loop ready := true, ready {",
     ] {
         assert!(once.contains(token), "fmt dropped loop token `{token}`:\n{once}");
     }
     assert!(
-        once.contains("loop cursor := 1000000000000000000;\n"),
+        once.contains("loop cursor := 1000000000000000000,\n"),
         "long state header must wrap after a semicolon:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted long loop headers must reparse");
@@ -2345,9 +2398,7 @@ fn count(n: Int) => Stream<Int> {
 }
 
 fn run() {
-    loop x; count(3) {
-        print(\"{x}\")
-    }
+    loop x, count(3) { print(\"{x}\") }
 }
 ";
     assert_fmt_stable(src, "yield");
@@ -2361,9 +2412,7 @@ fn fmt_preserves_chained_comparison() {
     let src = "\
 fn run() {
     sev :: 5
-    if 0 <= sev < 10 {
-        print(\"in range\")
-    }
+    if 0 <= sev < 10 { print(\"in range\") }
 }
 ";
     assert_fmt_stable(src, "chained comparison");
@@ -2436,9 +2485,7 @@ fn fmt_preserves_variadic_trait_bound_bare() {
     // bound sugar — must survive byte-for-byte.
     let src = "\
 fn log_all(parts: ...Renderable) {
-    loop p; parts {
-        print(\"{p}\")
-    }
+    loop p, parts { print(\"{p}\") }
 }
 
 fn run() {
@@ -2456,9 +2503,7 @@ fn fmt_preserves_variadic_trait_bound_list() {
     let src = "\
 fn log_all(prefix: String, parts: ...[Renderable]) {
     print(prefix)
-    loop p; parts {
-        print(\"{p}\")
-    }
+    loop p, parts { print(\"{p}\") }
 }
 
 fn run() {
@@ -2930,7 +2975,7 @@ fn fmt_preserves_casing_errors_for_sema() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T, capacity: Int, label: String> {
 #Meta(category: label)
-comptime size = capacity
+#Known size :: capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) => U { return ~value } }
 module inner = nested<T>
@@ -2959,11 +3004,11 @@ fn run() {}
 
 #[test]
 fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
-    // D-IFGUARD1=A + D-ARROW-CONTROL1=A: effect-only one-line `if` has no
-    // arrow. Guard-table and value arms keep their selection arrows.
+    // D-IFGUARD1=A + D-ARROW-CONTROL1=A: effect-only `if` has no arrow and
+    // keeps its mandatory body braces. Guard-table and value arms keep arrows.
     let src = r#"fn run() {
     ready :: true
-    if ready print("inline")
+    if ready { print("inline") }
     if {
         ready -> print("ready")
         false -> print("never")
@@ -2978,7 +3023,7 @@ fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
     let once = jet::format_source(src).expect("subjectless guards should format");
     assert_eq!(once, src, "concise subjectless guards should stay byte-stable");
     for preserved in [
-        "if ready print(\"inline\")",
+        "if ready { print(\"inline\") }",
         "if {",
         "ready ->",
         "false ->",

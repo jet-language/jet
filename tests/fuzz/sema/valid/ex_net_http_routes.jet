@@ -24,7 +24,7 @@ fn run() {
     mux.get("/users/:id", (req: HTTPRequest) => handle_user(req))
     mux.post("/users", (req: HTTPRequest) => handle_create(req))
     t :: tasks.spawn(() => {
-        loop i; [0, 1, 2, 3] { server.serve_once_listener(listener, mux) ?? panic("serve failed") }
+        loop i, [0, 1, 2, 3] { server.serve_once_listener(listener, mux) ?? panic("serve failed") }
     })
     r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body().text(8388608) ?? panic("body failed"))

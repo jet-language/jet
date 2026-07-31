@@ -777,7 +777,7 @@ fn public_transcript_covers_sorted_set_field_writeback_exactly() {
 
 fn parity_source(expression: &str, imports: &str) -> String {
     format!(
-        "{imports}\ncomptime expected = {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{expected}}\")\n    print(\"{{actual}}\")\n}}\n"
+        "{imports}\n#Known expected :: {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{expected}}\")\n    print(\"{{actual}}\")\n}}\n"
     )
 }
 
@@ -1001,7 +1001,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "measurement/interpolation-display",
-            "use core.science.measurement as measurement\ncomptime value = measurement.from(12.5, 0.25)\ncomptime expected = \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
+            "use core.science.measurement as measurement\n#Known value :: measurement.from(12.5, 0.25)\n#Known expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
         ),
         "12.5 ± 0.25"
     );
@@ -1433,7 +1433,7 @@ fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
 
 #[test]
 fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
-    // New #722 ports: AOT path (no comptime expected= — TIR still Todo for
+    // New #722 ports: AOT path (no #Known expected :: — TIR still Todo for
     // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
     let source = r#"use core.crypto.expert as expert
 fn run() {

@@ -303,7 +303,7 @@ pub struct ConstDef {
     pub meta: Option<MetaAttr>,
     pub attrs: Vec<ConstAttr>,
     pub rust_kind: RustConstKind,
-    /// S57 (M9.5): `comptime name = expr;` — evaluated at compile time.
+    /// S57 (M9.5): `#Known name :: expr;` — evaluated at compile time.
     pub is_comptime: bool,
     /// Filled by sema for comptime bindings: the evaluated constant value,
     /// serialized to a Rust literal at use sites by codegen.

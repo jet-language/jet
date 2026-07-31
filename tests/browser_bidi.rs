@@ -751,14 +751,14 @@ fn run() {
     retry_context :: session.context() ?? panic("retry context")
     retry_page :: retry_context.page() ?? panic("retry page")
     retry_locator :: retry_page.get_by_role("button", "Save")
-    loop attempt; [1, 2] {
+    loop attempt, [1, 2] {
         retry_page.close() ?? next
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         retry_locator.click() ?? next
         print("unexpected click")
     }
-    loop attempt; [1, 2] {
+    loop attempt, [1, 2] {
         retry_context.close() ?? next
     }
 
@@ -884,7 +884,7 @@ fn run() {
     context :: session.context() ?? panic("context")
     page :: context.tab() ?? panic("tab")
     page.close() ?? panic("close")
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.frames() ?? next
         print("unexpected")
     }
@@ -1017,7 +1017,7 @@ fn closed_protocol_outcome(endpoint: String) => String {
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.close() ?? return "close-error"
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.protocol("bidi") ?? next
         return "unexpected-open"
     }
@@ -1500,7 +1500,7 @@ fn run() {
     context :: session.context() ?? panic("context")
     page :: context.page() ?? panic("page")
     missing :: page.get_by_role("button", "Missing")
-    loop attempt; [1] {
+    loop attempt, [1] {
         missing.click() ?? next
         print("unexpected")
     }
@@ -1717,15 +1717,15 @@ fn run() {
     timeout :: browser.timeout(200) ?? panic("timeout")
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
 
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.add_intercept("not-a-phase") ?? next
         print("unexpected phase")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.continue_request("") ?? next
         print("unexpected empty")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.fulfill_request("req", 99, "nope") ?? next
         print("unexpected status")
     }
@@ -2084,27 +2084,27 @@ fn run() {
     context :: session.context() ?? panic("context")
     page :: context.page() ?? panic("page")
 
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.allow_downloads("") ?? next
         print("unexpected empty folder")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.set_cookie("", "v", "example.test") ?? next
         print("unexpected empty cookie")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         value :: page.cookie("") ?? next
         print("unexpected empty cookie name {value}")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         value :: page.storage_get("memory", "k") ?? next
         print("unexpected storage kind {value}")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.storage_set("local", "", "v") ?? next
         print("unexpected empty key")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.get_by_css("input").set_files("") ?? next
         print("unexpected empty path")
     }
@@ -2185,15 +2185,15 @@ fn run() {
     context :: session.context() ?? panic("context")
     page :: context.page() ?? panic("page")
     page.close() ?? panic("page close")
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.screenshot() ?? next
         print("unexpected screenshot")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.pdf() ?? next
         print("unexpected pdf")
     }
-    loop attempt; [1] {
+    loop attempt, [1] {
         page.clear_cookies() ?? next
         print("unexpected cookies")
     }
@@ -2762,7 +2762,7 @@ fn closed_receipt(endpoint: String) => String {
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.close() ?? return "unexpected-close"
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.context() ?? next
         return "unexpected-open"
     }
@@ -3159,7 +3159,7 @@ fn closed_ops(endpoint: String) => String {
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.close() ?? return "unexpected-close"
-    loop attempt; [1] {
+    loop attempt, [1] {
         session.context() ?? next
         return "unexpected-open"
     }

@@ -1073,7 +1073,7 @@ fn sum_while(n: Int) => Int {
 #Target(JS)
 fn sum_counted(n: Int) => Int {
     total := 0
-    loop i := 0; i < n; i += 1 { total += i }
+    loop i := 0, i < n, i += 1 { total += i }
     return total
 }
 #Target(JS)
@@ -1107,7 +1107,7 @@ fn wasm_sum_while(n: Int) => Int {
 #WasmExport
 fn wasm_sum_counted(n: Int) => Int {
     total := 0
-    loop i := 0; i < n; i += 1 { total += i }
+    loop i := 0, i < n, i += 1 { total += i }
     return total
 }
 #WasmExport
@@ -1407,7 +1407,7 @@ enum Choice { Stop Keep }
 #Target(JS)
 fn count(choice: Choice) => Int {
     hits := 0
-    loop i := 0; i < 3; i += 1 {
+    loop i := 0, i < 3, i += 1 {
         if choice == {
             .Stop -> { break }
             .Keep -> {}
@@ -1443,7 +1443,7 @@ fn web_for_in_preflight_rejects_unimplemented_iteration_fields() {
 #Target(JS)
 fn sum() => Int {
     total := 0
-    loop value; [1, 2, 3]; 2 { total += value }
+    loop value, [1, 2, 3], 2 { total += value }
     return total
 }
 fn run() {}
@@ -1455,7 +1455,7 @@ fn run() {}
 #Target(JS)
 fn count_chars() => Int {
     total := 0
-    loop ch; "abc".chars() { total += 1 }
+    loop ch, "abc".chars() { total += 1 }
     return total
 }
 fn run() {}
@@ -2276,7 +2276,7 @@ fn web_showcase_dashboard_roundtrip() {
 #[test]
 fn web_wasm_range_loop_bridge_roundtrip() {
     // D-WEBBACKEND1 / criterion #1: Wasm compute must lower inclusive
-    // `loop i; start..end` from checked TIR (JS already could). Live
+    // `loop i, start..end` from checked TIR (JS already could). Live
     // rustc+node proof — not emit-shape only.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build wasm range (need rustc + node)");
@@ -2302,7 +2302,7 @@ fn web_wasm_range_loop_bridge_roundtrip() {
 #[test]
 fn web_wasm_for_in_bridge_roundtrip() {
     // D-WEBBACKEND1 / criterion #1: Wasm compute must lower plain
-    // `loop x; xs` ForIn from checked TIR (JS already could). Live
+    // `loop x, xs` ForIn from checked TIR (JS already could). Live
     // rustc+node proof — not emit-shape only. Reuses [Int] ABI; does not
     // reopen String/[Int] packing.
     if !have_tool("rustc") || !have_tool("node") {

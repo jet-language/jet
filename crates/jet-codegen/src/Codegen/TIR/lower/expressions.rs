@@ -453,13 +453,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // inlined F32 keeps its width in every TIR consumer.
             if cx.consts.contains_key(name) {
                 let value = cx.const_values.get(name);
+                let ty = env
+                    .ty_of(name)
+                    .or_else(|| value.map(crate::AST::CtValue::jet_type))
+                    .unwrap_or(Type::Int);
                 return TExpr {
-                    ty: value
-                        .map(crate::AST::CtValue::jet_type)
-                        .or_else(|| env.ty_of(name))
-                        .unwrap_or(Type::Int),
-                    kind: lower_comptime_scalar(value)
+                    kind: lower_comptime_scalar(value, Some(&ty))
                         .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
+                    ty,
                 };
             }
             // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
@@ -2892,6 +2893,17 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
 /// record the clone's type so generic emission adds the required bound, then
 /// materialize the owned value at this semantic boundary.
 pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    fn reads_borrowed_place(e: &Expr, env: &LowerEnv) -> bool {
+        match e {
+            Expr::Ident(name, _) => env.is_borrowed(name),
+            Expr::Field(base, _, _) | Expr::Index { base, .. } => {
+                reads_borrowed_place(base, env)
+            }
+            Expr::Paren(inner, _) => reads_borrowed_place(inner, env),
+            _ => false,
+        }
+    }
+
     let lowered = lower_expr(e, cx, env);
     if matches!(e, Expr::Ident(name, _) if env.is_resource(name)) {
         let Expr::Ident(name, _) = e else { unreachable!() };
@@ -2899,7 +2911,7 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: lowered.ty,
             kind: TExprKind::ResourceTake(env.rust_name_of(name)),
         }
-    } else if matches!(e, Expr::Ident(name, _) if env.is_borrowed(name)) && !lowered.ty.is_scalar() {
+    } else if reads_borrowed_place(e, env) && !lowered.ty.is_scalar() {
         let ty = lowered.ty.clone();
         env.note_clone(&ty);
         TExpr {

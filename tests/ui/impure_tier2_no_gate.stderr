@@ -1,8 +1,8 @@
 Error [E3410]: `core.files.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  --> tests/ui/impure_tier2_no_gate.jet:4:23
+  --> tests/ui/impure_tier2_no_gate.jet:4:22
     |
-  4 |     comptime cfg = fs.read("config.txt")
-    |                       ^^^^
+  4 |     #Known cfg :: fs.read("config.txt")
+    |                      ^^^^
  Why: ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation
  Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build
 

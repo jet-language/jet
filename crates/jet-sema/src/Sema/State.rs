@@ -28,7 +28,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::edit_distance;
-use crate::AST::{Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt};
+use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
 
 /// Program-wide typestate metadata, collected once before any body is walked.
@@ -358,7 +358,6 @@ impl<'a> StateCtx<'a> {
             }
             Stmt::Return(Some(e), _) => self.check_expr(e),
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => self.check_if(ifs),
             Stmt::While { cond, body, .. } => {
                 self.check_expr(cond);
                 self.check_block(body);
@@ -448,28 +447,6 @@ impl<'a> StateCtx<'a> {
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
-        }
-    }
-
-    fn check_if(&mut self, ifs: &IfStmt) {
-        self.check_expr(&ifs.cond);
-        // Branches are checked against the state at the `if`; transitions inside a
-        // branch do not leak out (conservative — a value whose state diverges across
-        // arms becomes untracked at the join, handled by `join_after`).
-        let before = self.states.clone();
-        self.check_block(&ifs.then_body);
-        let after_then = std::mem::replace(&mut self.states, before.clone());
-        if let Some(e) = &ifs.else_branch {
-            self.check_else(e);
-        }
-        let after_else = std::mem::take(&mut self.states);
-        self.states = join_after(before, after_then, after_else);
-    }
-
-    fn check_else(&mut self, e: &ElseBranch) {
-        match e {
-            ElseBranch::Else(stmts) => self.check_block(stmts),
-            ElseBranch::ElseIf(ifs) => self.check_if(ifs),
         }
     }
 
@@ -738,6 +715,7 @@ impl<'a> StateCtx<'a> {
 /// Join two branch state-maps back into one: a local keeps its state only when both
 /// branches agree (and it had one before, or both produced the same). Disagreement →
 /// untracked (no spurious guard error after a state-divergent `if`).
+#[allow(dead_code)]
 fn join_after(
     before: HashMap<String, String>,
     then_s: HashMap<String, String>,

@@ -319,7 +319,6 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     push(out, root);
                 }
             }
-            Stmt::If(ifs) => walk_if(ifs, out),
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
@@ -367,14 +366,6 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             // targets we snapshot at block entry. (A `&self` mutating method call
             // hides inside `Stmt::Expr` — the documented deferred corner.)
             _ => {}
-        }
-    }
-    fn walk_if(ifs: &crate::AST::IfStmt, out: &mut Vec<String>) {
-        collect_txn_mut_roots(&ifs.then_body, out);
-        match &ifs.else_branch {
-            Some(crate::AST::ElseBranch::ElseIf(inner)) => walk_if(inner, out),
-            Some(crate::AST::ElseBranch::Else(body)) => collect_txn_mut_roots(body, out),
-            None => {}
         }
     }
 }

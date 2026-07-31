@@ -201,13 +201,6 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
             Stmt::Val(binding) => collect_scene_expr(&binding.init, scenes),
             Stmt::Expr(expr) | Stmt::Return(Some(expr), _) => collect_scene_expr(expr, scenes),
             Stmt::Assign { value, .. } => collect_scene_expr(value, scenes),
-            Stmt::If(value) => {
-                collect_scene_expr(&value.cond, scenes);
-                collect_scene_attachments(&value.then_body, scenes);
-                if let Some(crate::AST::ElseBranch::Else(body)) = &value.else_branch {
-                    collect_scene_attachments(body, scenes);
-                }
-            }
             Stmt::While { cond, body, .. } => {
                 collect_scene_expr(cond, scenes);
                 collect_scene_attachments(body, scenes);

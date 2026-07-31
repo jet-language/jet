@@ -500,7 +500,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
 }
 #Bench("parse") {
     total := 0
-    loop value; 0..100 { total = total + value }
+    loop value, 0..100 { total = total + value }
     require_eq(total, 4950)
 }
 fn run() {}
@@ -3891,7 +3891,7 @@ fn run() {
     fs.write("/tmp/jet_1271.csv", "alpha,1\n") ?? panic("write failed")
     text :: fs.read("/tmp/jet_1271.csv") ?? ""
     rows := [Row].{}
-    loop line; text.split("\n") {
+    loop line, text.split("\n") {
         parts :: line.split(",")
         rows.push(Row.{ name: parts.get(0), count: missing })
     }
@@ -3979,7 +3979,7 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
 
     fs::write(
         dir.join("compare_chain.jet"),
-        "fn helper() => Int { return 1 }\nfn run() {\n comptime if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n",
+        "fn helper() => Int { return 1 }\nfn run() {\n #Known if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n",
     )
     .unwrap();
     let compare_chain = Command::new(jet())
@@ -4033,7 +4033,7 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
 
     fs::write(
         dir.join("lambda_value.jet"),
-        "fn run() {\n comptime callback = () => print(\"not called\")\n print(\"ok\")\n}\n",
+        "fn run() {\n #Known callback :: () => print(\"not called\")\n print(\"ok\")\n}\n",
     )
     .unwrap();
     let lambda_value = Command::new(jet())

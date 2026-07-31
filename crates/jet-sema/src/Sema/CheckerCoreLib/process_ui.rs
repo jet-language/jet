@@ -438,7 +438,7 @@ pub(crate) fn devserver_method_return(
     match (method, n_args) {
         ("html", 1) => Some(Some(devserver_ty)),
         ("port", 1) => Some(Some(devserver_ty)),
-        ("serve", 0) => Some(Some(unit)),
+        ("serve", 0 | 1) => Some(Some(unit)),
         _ => None,
     }
 }

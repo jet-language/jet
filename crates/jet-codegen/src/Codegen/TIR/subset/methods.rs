@@ -1409,6 +1409,11 @@ pub(crate) fn closure_method_in_subset(
         return false;
     }
     match method {
+        "edit_disjoint" => {
+            args.len() == 2
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+        }
         "reduce" | "scan" | "fold" => {
             // (seed, lambda). The seed is any in-subset value; the lambda must be a
             // literal in-subset closure.

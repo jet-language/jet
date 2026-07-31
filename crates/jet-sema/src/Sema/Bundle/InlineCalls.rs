@@ -46,7 +46,6 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Continue(_)
             | Stmt::BreakLabel(..)
             | Stmt::ContinueLabel(..) => {}
-            Stmt::If(ifs) => rewrite_inline_calls_if(ifs, siblings, modname),
             Stmt::While { cond, body, .. } => {
                 rewrite_inline_calls_expr(cond, siblings, modname);
                 rewrite_inline_calls_stmts(body, siblings, modname);
@@ -149,16 +148,6 @@ pub(crate) fn rewrite_inline_calls_stmts(
                 rewrite_inline_calls_stmts(body, siblings, modname);
             }
         }
-    }
-}
-
-pub(crate) fn rewrite_inline_calls_if(ifs: &mut IfStmt, siblings: &HashSet<String>, modname: &str) {
-    rewrite_inline_calls_expr(&mut ifs.cond, siblings, modname);
-    rewrite_inline_calls_stmts(&mut ifs.then_body, siblings, modname);
-    match &mut ifs.else_branch {
-        Some(ElseBranch::Else(b)) => rewrite_inline_calls_stmts(b, siblings, modname),
-        Some(ElseBranch::ElseIf(next)) => rewrite_inline_calls_if(next, siblings, modname),
-        None => {}
     }
 }
 

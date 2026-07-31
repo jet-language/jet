@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, Item, LambdaBody, OrFallback, Stmt,
+    EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Stmt,
     StrPart, Type, VariantPayload,
 };
 use std::collections::BTreeMap;
@@ -314,7 +314,6 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
             collect_tuple_shapes_from_expr(e, out)
         }
         Stmt::Return(None, _) => {}
-        Stmt::If(i) => collect_tuple_shapes_from_if(i, out),
         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {
             collect_tuple_shapes_from_expr(cond, out);
             for s in body {
@@ -429,22 +428,6 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
                 }
             }
         }
-    }
-}
-
-fn collect_tuple_shapes_from_if(i: &IfStmt, out: &mut CollectedTypeShapes) {
-    collect_tuple_shapes_from_expr(&i.cond, out);
-    for s in &i.then_body {
-        collect_tuple_shapes_from_stmt(s, out);
-    }
-    match &i.else_branch {
-        Some(ElseBranch::ElseIf(nested)) => collect_tuple_shapes_from_if(nested, out),
-        Some(ElseBranch::Else(stmts)) => {
-            for s in stmts {
-                collect_tuple_shapes_from_stmt(s, out);
-            }
-        }
-        None => {}
     }
 }
 

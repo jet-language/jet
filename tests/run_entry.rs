@@ -228,3 +228,21 @@ fn run() {
         "expected E0114, got: {diags:?}"
     );
 }
+
+#[test]
+fn classic_if_without_else_does_not_satisfy_missing_return_check() {
+    let src = r#"
+fn maybe(flag: Bool) => Int {
+    if flag { return 1 }
+}
+
+fn run() {
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("a conditional return still needs an else path");
+    assert!(
+        diags.iter().any(|d| d.code == "E0114"),
+        "expected E0114, got: {diags:?}"
+    );
+}

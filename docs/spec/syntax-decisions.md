@@ -268,28 +268,30 @@ separately ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 
-**S3 — Blocks** *(amended by D-ARROW-CONTROL1)*: curly braces `{ }` group a
-multiline body or provide an explicit parse boundary. One clear statement or
-expression may stay adjacent on one line. Braces do not determine whether a
+**S3 — Blocks** *(amended by D-ARROW-CONTROL1 and D-BRACE1=A, ratified
+2026-07-30, card #1335)*: curly braces `{ }` give every effect `if`, `else`,
+and `loop` body a visible parse boundary. Arrow arm bodies remain expressions
+and retain their existing braceless form. Braces do not determine whether a
 construct returns a value.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
-D-LOOPEVAL1=A, D-COMPREHENSION1=A)*:
+D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, ratified
+2026-07-30, card #1336)*:
 
 ```jet
 loop { … }                        // infinite
-loop n > 0 tick()                  // conditional effect loop (no `while`)
-loop i; 1..5 print(i)              // source effect loop (no `for`)
-loop key, value; map audit(key)    // map-pair effect loop
-loop i; 0..10; 2 audit(i)          // positive source stride
-loop i := 0; i < n; i++ draw(i)    // explicit state
-values :: loop item; items -> item.value
+loop n > 0 { tick() }              // conditional effect loop (no `while`)
+loop i, 1..5 { print(i) }          // source effect loop (no `for`)
+loop (key, value), map { audit(key) } // map-pair effect loop
+loop i, 0..10, 2 { audit(i) }      // positive source stride
+loop i := 0, i < n, i++ { draw(i) } // explicit state
+values :: loop item, items -> item.value
 ```
 
 `while`/`for` are not keywords. A source and optional stride evaluate once,
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
-Only loop headers use visible semicolons, and formatters wrap them only after one.
+Commas separate loop header clauses. Semicolons remain statement boundaries only.
 
 A finite source or C-style loop may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-Void item. The result is an eager
@@ -301,7 +303,7 @@ iterator adapters.
 Bare infinite and condition-only loops cannot use a yield arrow.
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
-optional third clause (`loop i; 0..10; 2`); `step` has no loop role.
+optional third clause (`loop i, 0..10, 2`); `step` has no loop role.
 **D-RANGE-EXCL1=C**: `0..<n` is half-open (stops before `n`, empty when
 `a >= b`). Prefer `loop i, item; xs` or `loop i; xs.indexes` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
@@ -1884,11 +1886,14 @@ results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
 
-**S57 — Comptime bindings**: `comptime x = f()` — `comptime` is the binding
-keyword, always immutable. **D-CTBLOCKEXPOSE1**: `comptime { … }` execution
-block (Jai `#run` analog); bindings inside leak to the enclosing scope as
-`$name` (E2713). **D-CTMARKER1**: `$name` is reserved **only** for comptime
-splices into generated code.
+**S57 — Compile-time demand** (amended by D-VERDICT-1308-1/2):
+ordinary foldable expressions fold implicitly. `#Known x :: f()` demands an
+immutable value now and fails the build if evaluation cannot complete.
+`#Known { … }` is the execution-block form (Jai `#run` analog); bindings
+inside leak to the enclosing scope as `$name` (E2713). `#Known if` is the
+conditional form. The `comptime` keyword is retired (E0374).
+**D-CTMARKER1**: `$name` is reserved **only** for compile-time splices into
+generated code.
 
 **D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
 pure Core functions evaluates at comptime; the sole I/O escapes are
@@ -2135,17 +2140,17 @@ assertion snapshot path.
 **S49 — Doc comments**: `///` summary lines above items, plain text v1;
 doctest-runnable (D-TEST4); no `/** … */`.
 
-**S6 — No visible semicolons** *(S6-R)*: statements end at line end; the
+**S6 — No visible semicolons** *(S6-R, amended by D-LOOP-COMMA1=A)*: statements end at line end; the
 lexer inserts Go-style terminators after any line whose last token can end a
 statement. Layout rules: `-> Type` and `{` stay on the closing-`)` line; a
 terminator is suppressed when the next non-blank line starts with `.` (chain)
-or a binary/logical operator. Counted-loop headers keep their internal `;`
-(D-LOOP-SEMICOLON1). New terminal tokens must be added to `ends_statement`.
+or a binary/logical operator. Loop header clauses use commas; the retired
+semicolon spelling is E0373. New terminal tokens must be added to `ends_statement`.
 
-**S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2)*: one style, zero
+**S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2, D-BRACE1=A)*: one style, zero
 config — 4-space indent, same-line `{`, width 100, spaced binary operators.
-Author intent preserved: a single-simple-statement one-line body stays
-one-line (fits, no inner comment); author grouping parens preserved even when
+Every fitting, comment-free single-simple-statement control body collapses to
+one line regardless of authored layout; author grouping parens are preserved even when
 redundant; call-site labels never added/stripped; dot-chain breaks preserved
 (**S69** — break before `.`, optional trailing comment per step). Idempotent,
 not AST-canonical. **Every new syntax needs formatter emission + a fmt
@@ -2227,7 +2232,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `comptime if build.os ==` /
+Target variants select via the existing `#Known if build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -3225,12 +3230,12 @@ arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
-`if subject == { }` if-table) with the existing `comptime if` lead (D-WHEN1) —
+`if subject == { }` if-table) with the existing `#Known if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    comptime if build.os == {
+    #Known if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
@@ -3240,7 +3245,7 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `comptime if` chain
+`OSTarget::active`). Sema desugars the dispatch into a `#Known if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -3264,7 +3269,7 @@ handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
 handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `comptime if
+in place (the shipped reactive core, I8). Selected by the shipped `#Known if
 build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use

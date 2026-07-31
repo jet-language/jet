@@ -67,14 +67,13 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client comptime derive distinct effect enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
+; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
 [
   "Bench"
   "Test"
   "add"
   "as"
   "change"
-  "comptime"
   "derive"
   "distinct"
   "enum"
@@ -106,7 +105,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Char Computed DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Lru Measurement PriorityQueue Ptr SelectBuilder Set Shared Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet YAML
+; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Char Computed Condition DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Lru Measurement PriorityQueue Ptr SelectBuilder Set Shared SharedGuard Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -128,8 +127,8 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
-; sigil: # & ... :: := :> <: ^ ~
+; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Known Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
+; sigil: # $[ & ... :: := ]$ ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 

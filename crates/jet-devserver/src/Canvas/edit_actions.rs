@@ -9,7 +9,7 @@ use jet_semindex::SourceSpan;
 use super::debug_source_git::canonical_path;
 use super::graph_helpers::{
     diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id_name_span,
-    indentation_at, line_after, line_start, snippet,
+    indentation_at, line_after, line_start, snippet, span_through_closing_parens,
 };
 use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::trait_method_signature;
@@ -1094,7 +1094,7 @@ pub(super) fn apply_add_pattern_arm(
         return Err(edit_error("bad_request", "pattern arm text is empty"));
     }
     let mut target = None;
-    find_pattern_target(&func.body, node_span, &mut target);
+    find_pattern_target(src, &func.body, node_span, &mut target);
     let Some(target) = target else {
         return Err(edit_error(
             "not_found",
@@ -1103,7 +1103,11 @@ pub(super) fn apply_add_pattern_arm(
     };
     let body = fresh_arm_body(func);
     let changed = match target {
-        PatternTarget::Branch(ifs) => add_arm_to_branch(src, ifs, &head, &body)?,
+        PatternTarget::Classic {
+            arm,
+            else_body,
+            span,
+        } => add_arm_to_classic_switch(src, arm, else_body, span, &head, &body)?,
         PatternTarget::Switch { arms, else_body, span, .. } => {
             // Insert right after the last existing arm so the new arm never
             // lands inside the else body's block (its first-statement
@@ -1146,7 +1150,7 @@ pub(super) fn apply_edit_pattern_arm(
     if head.is_empty() {
         return Err(edit_error("bad_request", "pattern arm text is empty"));
     }
-    if !pattern_span_belongs_to_graph(&func.body, pattern_span) {
+    if !pattern_span_belongs_to_graph(src, &func.body, pattern_span) {
         return Err(edit_error(
             "not_found",
             "Canvas pattern arm no longer exists",
@@ -1307,7 +1311,11 @@ fn checked_bundle(path: &Path, src: &str) -> Result<&'static AST::ProgramBundle,
 }
 
 enum PatternTarget<'a> {
-    Branch(&'a AST::IfStmt),
+    Classic {
+        arm: &'a AST::SwitchArm,
+        else_body: Option<&'a Vec<Stmt>>,
+        span: SourceSpan,
+    },
     Switch {
         arms: &'a [AST::SwitchArm],
         else_body: Option<&'a Vec<Stmt>>,
@@ -1316,6 +1324,7 @@ enum PatternTarget<'a> {
 }
 
 fn find_pattern_target<'a>(
+    src: &str,
     stmts: &'a [Stmt],
     node_span: SourceSpan,
     out: &mut Option<PatternTarget<'a>>,
@@ -1325,30 +1334,46 @@ fn find_pattern_target<'a>(
     }
     for stmt in stmts {
         match stmt {
-            Stmt::If(ifs) => {
-                if same_span(ifs.cond.span().into(), node_span)
-                    && matches!(ifs.cond, Expr::PatternTest { .. })
-                {
-                    *out = Some(PatternTarget::Branch(ifs));
-                    return;
-                }
-                find_pattern_target(&ifs.then_body, node_span, out);
-                if let Some(branch) = &ifs.else_branch {
-                    match branch {
-                        AST::ElseBranch::Else(body) => find_pattern_target(body, node_span, out),
-                        AST::ElseBranch::ElseIf(next) => {
-                            find_pattern_target_in_if(next, node_span, out)
-                        }
-                    }
-                }
-            }
             Stmt::Switch {
+                subject,
                 arms,
                 else_body,
                 span,
                 ..
+            } => {
+                let classic = AST::is_subjectless_guard(subject, *span)
+                    && arms.first().is_some_and(|arm| {
+                        AST::uses_classic_if_spelling(src, *span, arm.cond.span())
+                    });
+                if classic {
+                    if let Some(arm) = arms.first() {
+                        if same_span(arm.cond.span().into(), node_span)
+                            && matches!(arm.cond, Expr::PatternTest { .. })
+                        {
+                            *out = Some(PatternTarget::Classic {
+                                arm,
+                                else_body: else_body.as_ref(),
+                                span: stmt_text_span(src, stmt),
+                            });
+                            return;
+                        }
+                    }
+                } else if same_span((*span).into(), node_span) {
+                    *out = Some(PatternTarget::Switch {
+                        arms,
+                        else_body: else_body.as_ref(),
+                        span: (*span).into(),
+                    });
+                    return;
+                }
+                for arm in arms {
+                    find_pattern_target(src, &arm.body, node_span, out);
+                }
+                if let Some(body) = else_body {
+                    find_pattern_target(src, body, node_span, out);
+                }
             }
-            | Stmt::ComptimeSwitch {
+            Stmt::ComptimeSwitch {
                 arms,
                 else_body,
                 span,
@@ -1363,37 +1388,19 @@ fn find_pattern_target<'a>(
                     return;
                 }
                 for arm in arms {
-                    find_pattern_target(&arm.body, node_span, out);
+                    find_pattern_target(src, &arm.body, node_span, out);
                 }
                 if let Some(body) = else_body {
-                    find_pattern_target(body, node_span, out);
+                    find_pattern_target(src, body, node_span, out);
                 }
             }
-            _ => find_pattern_target_in_children(stmt, node_span, out),
-        }
-    }
-}
-
-fn find_pattern_target_in_if<'a>(
-    ifs: &'a AST::IfStmt,
-    node_span: SourceSpan,
-    out: &mut Option<PatternTarget<'a>>,
-) {
-    if same_span(ifs.cond.span().into(), node_span) && matches!(ifs.cond, Expr::PatternTest { .. })
-    {
-        *out = Some(PatternTarget::Branch(ifs));
-        return;
-    }
-    find_pattern_target(&ifs.then_body, node_span, out);
-    if let Some(branch) = &ifs.else_branch {
-        match branch {
-            AST::ElseBranch::Else(body) => find_pattern_target(body, node_span, out),
-            AST::ElseBranch::ElseIf(next) => find_pattern_target_in_if(next, node_span, out),
+            _ => find_pattern_target_in_children(src, stmt, node_span, out),
         }
     }
 }
 
 fn find_pattern_target_in_children<'a>(
+    src: &str,
     stmt: &'a Stmt,
     node_span: SourceSpan,
     out: &mut Option<PatternTarget<'a>>,
@@ -1420,15 +1427,15 @@ fn find_pattern_target_in_children<'a>(
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => find_pattern_target(body, node_span, out),
+        | Stmt::ScopeMember { body, .. } => find_pattern_target(src, body, node_span, out),
         Stmt::ComptimeIf {
             then_body,
             else_body,
             ..
         } => {
-            find_pattern_target(then_body, node_span, out);
+            find_pattern_target(src, then_body, node_span, out);
             if let Some(body) = else_body {
-                find_pattern_target(body, node_span, out);
+                find_pattern_target(src, body, node_span, out);
             }
         }
         _ => {}
@@ -1451,32 +1458,37 @@ fn find_pattern_arm_remove_span(
     }
     for stmt in stmts {
         match stmt {
-            Stmt::If(ifs) => {
-                if let Expr::PatternTest { pattern, .. } = &ifs.cond {
-                    if same_span(pattern.span().into(), pattern_span) {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                span,
+            } => {
+                for arm in arms {
+                    let classic = AST::is_subjectless_guard(subject, *span)
+                        && AST::uses_classic_if_spelling(src, *span, arm.cond.span());
+                    if same_span(
+                        switch_arm_edit_span(src, subject, *span, arm),
+                        pattern_span,
+                    ) {
                         *out = Some(RemoveArmInfo {
-                            remove_span: stmt_text_span(src, stmt),
-                            only_arm_without_else: true,
+                            remove_span: if classic {
+                                stmt_text_span(src, stmt)
+                            } else {
+                                stmt_arm_text_span(src, arm)
+                            },
+                            only_arm_without_else: classic
+                                || (arms.len() == 1 && else_body.is_none()),
                         });
                         return;
                     }
+                    find_pattern_arm_remove_span(src, &arm.body, pattern_span, out);
                 }
-                find_pattern_arm_remove_span(src, &ifs.then_body, pattern_span, out);
-                if let Some(branch) = &ifs.else_branch {
-                    match branch {
-                        AST::ElseBranch::Else(body) => {
-                            find_pattern_arm_remove_span(src, body, pattern_span, out)
-                        }
-                        AST::ElseBranch::ElseIf(next) => {
-                            find_pattern_arm_remove_span_in_if(src, next, pattern_span, out)
-                        }
-                    }
+                if let Some(body) = else_body {
+                    find_pattern_arm_remove_span(src, body, pattern_span, out);
                 }
             }
-            Stmt::Switch {
-                arms, else_body, ..
-            }
-            | Stmt::ComptimeSwitch {
+            Stmt::ComptimeSwitch {
                 arms, else_body, ..
             } => {
                 for arm in arms {
@@ -1494,37 +1506,6 @@ fn find_pattern_arm_remove_span(
                 }
             }
             _ => find_pattern_arm_remove_span_in_children(src, stmt, pattern_span, out),
-        }
-    }
-}
-
-fn find_pattern_arm_remove_span_in_if(
-    src: &str,
-    ifs: &AST::IfStmt,
-    pattern_span: SourceSpan,
-    out: &mut Option<RemoveArmInfo>,
-) {
-    if let Expr::PatternTest { pattern, .. } = &ifs.cond {
-        if same_span(pattern.span().into(), pattern_span) {
-            *out = Some(RemoveArmInfo {
-                remove_span: SourceSpan {
-                    start: line_start(src, ifs.span.start),
-                    end: line_after(src, ifs.span.end),
-                },
-                only_arm_without_else: true,
-            });
-            return;
-        }
-    }
-    find_pattern_arm_remove_span(src, &ifs.then_body, pattern_span, out);
-    if let Some(branch) = &ifs.else_branch {
-        match branch {
-            AST::ElseBranch::Else(body) => {
-                find_pattern_arm_remove_span(src, body, pattern_span, out)
-            }
-            AST::ElseBranch::ElseIf(next) => {
-                find_pattern_arm_remove_span_in_if(src, next, pattern_span, out)
-            }
         }
     }
 }
@@ -1574,39 +1555,48 @@ fn find_pattern_arm_remove_span_in_children(
     }
 }
 
-fn pattern_span_belongs_to_graph(stmts: &[Stmt], pattern_span: SourceSpan) -> bool {
+fn pattern_span_belongs_to_graph(
+    src: &str,
+    stmts: &[Stmt],
+    pattern_span: SourceSpan,
+) -> bool {
     let mut found = false;
-    find_pattern_span(stmts, pattern_span, &mut found);
+    find_pattern_span(src, stmts, pattern_span, &mut found);
     found
 }
 
-fn find_pattern_span(stmts: &[Stmt], pattern_span: SourceSpan, found: &mut bool) {
+fn find_pattern_span(
+    src: &str,
+    stmts: &[Stmt],
+    pattern_span: SourceSpan,
+    found: &mut bool,
+) {
     if *found {
         return;
     }
     for stmt in stmts {
         match stmt {
-            Stmt::If(ifs) => {
-                if let Expr::PatternTest { pattern, .. } = &ifs.cond {
-                    if same_span(pattern.span().into(), pattern_span) {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                span,
+            } => {
+                for arm in arms {
+                    if same_span(
+                        switch_arm_edit_span(src, subject, *span, arm),
+                        pattern_span,
+                    ) {
                         *found = true;
                         return;
                     }
+                    find_pattern_span(src, &arm.body, pattern_span, found);
                 }
-                find_pattern_span(&ifs.then_body, pattern_span, found);
-                if let Some(branch) = &ifs.else_branch {
-                    match branch {
-                        AST::ElseBranch::Else(body) => find_pattern_span(body, pattern_span, found),
-                        AST::ElseBranch::ElseIf(next) => {
-                            find_pattern_span_in_if(next, pattern_span, found)
-                        }
-                    }
+                if let Some(body) = else_body {
+                    find_pattern_span(src, body, pattern_span, found);
                 }
             }
-            Stmt::Switch {
-                arms, else_body, ..
-            }
-            | Stmt::ComptimeSwitch {
+            Stmt::ComptimeSwitch {
                 arms, else_body, ..
             } => {
                 for arm in arms {
@@ -1614,34 +1604,23 @@ fn find_pattern_span(stmts: &[Stmt], pattern_span: SourceSpan, found: &mut bool)
                         *found = true;
                         return;
                     }
-                    find_pattern_span(&arm.body, pattern_span, found);
+                    find_pattern_span(src, &arm.body, pattern_span, found);
                 }
                 if let Some(body) = else_body {
-                    find_pattern_span(body, pattern_span, found);
+                    find_pattern_span(src, body, pattern_span, found);
                 }
             }
-            _ => find_pattern_span_in_children(stmt, pattern_span, found),
+            _ => find_pattern_span_in_children(src, stmt, pattern_span, found),
         }
     }
 }
 
-fn find_pattern_span_in_if(ifs: &AST::IfStmt, pattern_span: SourceSpan, found: &mut bool) {
-    if let Expr::PatternTest { pattern, .. } = &ifs.cond {
-        if same_span(pattern.span().into(), pattern_span) {
-            *found = true;
-            return;
-        }
-    }
-    find_pattern_span(&ifs.then_body, pattern_span, found);
-    if let Some(branch) = &ifs.else_branch {
-        match branch {
-            AST::ElseBranch::Else(body) => find_pattern_span(body, pattern_span, found),
-            AST::ElseBranch::ElseIf(next) => find_pattern_span_in_if(next, pattern_span, found),
-        }
-    }
-}
-
-fn find_pattern_span_in_children(stmt: &Stmt, pattern_span: SourceSpan, found: &mut bool) {
+fn find_pattern_span_in_children(
+    src: &str,
+    stmt: &Stmt,
+    pattern_span: SourceSpan,
+    found: &mut bool,
+) {
     match stmt {
         Stmt::While { body, .. }
         | Stmt::For { body, .. }
@@ -1664,15 +1643,17 @@ fn find_pattern_span_in_children(stmt: &Stmt, pattern_span: SourceSpan, found: &
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => find_pattern_span(body, pattern_span, found),
+        | Stmt::ScopeMember { body, .. } => {
+            find_pattern_span(src, body, pattern_span, found)
+        }
         Stmt::ComptimeIf {
             then_body,
             else_body,
             ..
         } => {
-            find_pattern_span(then_body, pattern_span, found);
+            find_pattern_span(src, then_body, pattern_span, found);
             if let Some(body) = else_body {
-                find_pattern_span(body, pattern_span, found);
+                find_pattern_span(src, body, pattern_span, found);
             }
         }
         _ => {}
@@ -1712,18 +1693,6 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         }
         Stmt::Return(Some(e), _) => find_multi_input_in_expr(e, node_span, out),
         Stmt::Yield(e, _) => find_multi_input_in_expr(e, node_span, out),
-        Stmt::If(ifs) => {
-            find_multi_input_in_expr(&ifs.cond, node_span, out);
-            find_multi_input_target(&ifs.then_body, node_span, out);
-            if let Some(branch) = &ifs.else_branch {
-                match branch {
-                    AST::ElseBranch::Else(body) => find_multi_input_target(body, node_span, out),
-                    AST::ElseBranch::ElseIf(next) => {
-                        find_multi_input_in_stmt(&Stmt::If((**next).clone()), node_span, out)
-                    }
-                }
-            }
-        }
         Stmt::Switch {
             subject,
             arms,
@@ -1995,13 +1964,6 @@ fn find_multi_input_element_in_stmt(
         Stmt::Assign { value, .. } => {
             find_multi_input_element_in_expr(value, node_span, element_span, found)
         }
-        Stmt::If(ifs) => {
-            find_multi_input_element_in_expr(&ifs.cond, node_span, element_span, found);
-            find_multi_input_element(&ifs.then_body, node_span, element_span, found);
-            if let Some(AST::ElseBranch::Else(body)) = &ifs.else_branch {
-                find_multi_input_element(body, node_span, element_span, found);
-            }
-        }
         Stmt::For { kind, body, .. } => {
             match kind {
                 AST::ForKind::Range { start, end, step, exclusive: _ } => {
@@ -2071,15 +2033,33 @@ fn fresh_arm_body(func: &AST::Func) -> String {
     }
 }
 
-fn add_arm_to_branch(
+fn switch_arm_edit_span(
     src: &str,
-    ifs: &AST::IfStmt,
+    subject: &Expr,
+    switch_span: Span,
+    arm: &AST::SwitchArm,
+) -> SourceSpan {
+    if AST::is_subjectless_guard(subject, switch_span)
+        && AST::uses_classic_if_spelling(src, switch_span, arm.cond.span())
+    {
+        if let Expr::PatternTest { pattern, .. } = &arm.cond {
+            return span_through_closing_parens(src, pattern.span());
+        }
+    }
+    arm.cond.span().into()
+}
+
+fn add_arm_to_classic_switch(
+    src: &str,
+    arm: &AST::SwitchArm,
+    else_body: Option<&Vec<Stmt>>,
+    span: SourceSpan,
     new_head: &str,
     fresh_body: &str,
 ) -> Result<String, String> {
     let Expr::PatternTest {
         subject, pattern, ..
-    } = &ifs.cond
+    } = &arm.cond
     else {
         return Err(edit_error(
             "bad_request",
@@ -2087,18 +2067,22 @@ fn add_arm_to_branch(
         ));
     };
     let subject_src = snippet(src, subject.span());
-    let head = snippet(src, pattern.span());
-    let then_body = block_body_source(src, &ifs.then_body, 2);
-    let else_body = if let Some(AST::ElseBranch::Else(body)) = &ifs.else_branch {
+    let pattern_span = span_through_closing_parens(src, pattern.span());
+    let head = src
+        .get(pattern_span.start..pattern_span.end)
+        .map(str::to_owned)
+        .unwrap_or_else(|| snippet(src, pattern.span()));
+    let then_body = block_body_source(src, &arm.body, 2);
+    let else_body = if let Some(body) = else_body {
         let body = block_body_source(src, body, 2);
         format!("    else -> {{\n{body}    }}\n")
     } else {
         String::new()
     };
     let replacement = format!(
-        "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_body}}}"
+        "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_body}}}\n"
     );
-    FixEngine::apply_edits(src, &[edit(ifs.span.into(), &replacement)])
+    FixEngine::apply_edits(src, &[edit(span, &replacement)])
         .map_err(|_| edit_error("overlap", "Canvas pattern branch conversion overlapped"))
 }
 
@@ -2289,24 +2273,6 @@ fn collect_child_statement_locs(
     out: &mut Vec<StatementLoc>,
 ) {
     match stmt {
-        Stmt::If(ifs) => {
-            block.push(0);
-            collect_statement_locs(src, &ifs.then_body, block, out);
-            block.pop();
-            match &ifs.else_branch {
-                Some(AST::ElseBranch::Else(body)) => {
-                    block.push(1);
-                    collect_statement_locs(src, body, block, out);
-                    block.pop();
-                }
-                Some(AST::ElseBranch::ElseIf(next)) => {
-                    block.push(1);
-                    collect_child_statement_locs(src, &Stmt::If((**next).clone()), block, out);
-                    block.pop();
-                }
-                None => {}
-            }
-        }
         Stmt::While { body, .. }
         | Stmt::For { body, .. }
         | Stmt::Loop { body, .. }
@@ -2370,7 +2336,6 @@ fn collect_child_statement_locs(
 
 fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
     match stmt {
-        Stmt::If(ifs) => ifs.cond.span(),
         Stmt::Val(b) => b.name_span,
         Stmt::Assign { target, .. } => target.span(),
         Stmt::Expr(e) => e.span(),
@@ -2411,7 +2376,6 @@ fn stmt_source_span(stmt: &Stmt) -> SourceSpan {
             start: span.start,
             end: e.span().end,
         },
-        Stmt::If(ifs) => ifs.span.into(),
         _ => stmt.span().into(),
     }
 }

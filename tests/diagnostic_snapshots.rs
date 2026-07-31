@@ -269,6 +269,7 @@ fn ui_snapshots() {
             let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
                 .args(["repl", "--deny-fs"])
                 .env("NO_COLOR", "1")
+                .env("JET_REPL_HISTORY", "off")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())

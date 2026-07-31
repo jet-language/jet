@@ -1,0 +1,52 @@
+use core.tasks as tasks
+use core.time as time
+
+fn use_slot(token: Int, token_sender: Sender<Int>) => Int {
+    time.sleep(20)
+    token_sender.send(token)
+    return token
+}
+
+fn run() {
+    // A capacity-one buffer accepts the first value. The second sender waits
+    // until the receiver drains that slot.
+    (sender, values) :: tasks.channel<Int>(capacity: 1)
+    second_sender :: ~sender
+    (done_sender, done) :: tasks.channel<Int>()
+    sender.send(10)
+    second :: tasks.spawn(() => {
+        second_sender.send(20)
+        done_sender.send(1)
+    })
+
+    print("buffered first item")
+    print(values.receive() ?? panic("value channel closed"))
+    done.receive() ?? panic("done channel closed")
+    print("second send completed")
+    print(values.receive() ?? panic("value channel closed"))
+    second.join()
+
+    // A capacity-two channel starts with two tokens. A worker receives one
+    // before work and sends it back after work, so at most two workers can be
+    // active. Returned slot IDs prove that every worker held one of two leases.
+    (token_sender, tokens) :: tasks.channel<Int>(capacity: 2)
+    token_sender.send(1)
+    token_sender.send(2)
+    token_sender_two :: ~token_sender
+    token_sender_three :: ~token_sender
+    token_sender_four :: ~token_sender
+    token_one :: tokens.receive() ?? panic("token channel closed")
+    first :: tasks.spawn(() => use_slot(token_one, token_sender))
+    token_two :: tokens.receive() ?? panic("token channel closed")
+    second_worker :: tasks.spawn(() => use_slot(token_two, token_sender_two))
+    token_three :: tokens.receive() ?? panic("token channel closed")
+    third :: tasks.spawn(() => use_slot(token_three, token_sender_three))
+    token_four :: tokens.receive() ?? panic("token channel closed")
+    fourth :: tasks.spawn(() => use_slot(token_four, token_sender_four))
+
+    leases := [first.join(), second_worker.join(), third.join(), fourth.join()]
+    leases.sort()
+    if leases != [1, 1, 2, 2] { panic("workers escaped the two-slot token pool") }
+    print("worker limit: 2")
+    print("bounded workers complete")
+}

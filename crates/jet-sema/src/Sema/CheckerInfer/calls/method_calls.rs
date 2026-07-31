@@ -1419,15 +1419,16 @@ impl<'a> Checker<'a> {
                             Type::Apply { name, .. } if name == "ExpiringSecret"
                         )
             );
-            // Most fact tags are type-transparent. SharedGuard's compiler-only
-            // tag is different: it carries the read/edit capability needed by
-            // method lookup and must survive until ownership and TIR lowering.
+            // Most fact tags are type-transparent. These compiler-owned tags
+            // carry method policy and must survive through method lookup.
             let recv_ty = match recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(
                         marker.as_str(),
                         crate::AST::SHARED_GUARD_READ_MARKER
                             | crate::AST::SHARED_GUARD_EDIT_MARKER
+                            | crate::AST::TERMINAL_FACT_SET_MARKER
+                            | crate::AST::CORE_CRYPTO_NOMINAL_MARKER
                     ) =>
                 {
                     Type::Tagged { marker, inner }

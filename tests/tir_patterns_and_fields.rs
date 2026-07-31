@@ -362,7 +362,7 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// c109 (S57/M9.5): a comptime LOCAL `comptime name = expr` in a function body. Sema
+/// c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
 /// (`let user_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
@@ -375,13 +375,13 @@ fn comptime_local_is_literal_data() {
     let src = "\
 fn build() => [Int] {
     xs := [Int].{}
-    loop i; 1..3 {
+    loop i, 1..3 {
         xs.push(i * 10)
     }
     return xs
 }
 fn run() {
-    comptime xs = build()
+    #Known xs :: build()
     print(\"{xs}\")
     print(\"{xs[1]}\")
 }
@@ -568,8 +568,8 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`comptime pair_value = Pair{…}`;
-/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`comptime light_value =
+/// c109: a field read off a comptime-const STRUCT value (`#Known pair_value :: Pair{…}`;
+/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`#Known light_value ::
 /// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
 /// Rust value; the field read / comparison matches the old emitter baseline.
 /// `main` routes through the TIR; runs to the round-trip output.
@@ -589,8 +589,8 @@ enum Light {
     Green
 }
 
-comptime pair_value = Pair.{left: 7, right: \"seven\"}
-comptime light_value = Light.Green
+#Known pair_value :: Pair.{left: 7, right: \"seven\"}
+#Known light_value :: Light.Green
 
 fn run() {
     p :: Pair.{left: 7, right: \"seven\"}
@@ -675,11 +675,11 @@ fn run() {
     print(bad)
     lines :: \"a\\nb\\nc\".lines()
     print(lines.len())
-    loop line; lines {
+    loop line, lines {
         print(line)
     }
     total := 0
-    loop row; \"10\\n20\\n30\".lines() {
+    loop row, \"10\\n20\\n30\".lines() {
         total += (Int.parse(row) ?? 0)
     }
     print(total)

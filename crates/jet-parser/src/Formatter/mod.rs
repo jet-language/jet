@@ -12,7 +12,7 @@ mod Statements;
 use crate::Diagnostics::Span;
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
-use crate::AST::{BinOp, ElseBranch, Func, IfStmt, Item, LValue, Program, Stmt};
+use crate::AST::{BinOp, Func, Item, LValue, Program, Stmt};
 
 const INDENT: usize = 4;
 
@@ -344,11 +344,13 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                     .rfind(&format!("#{}", Syntax::CONTRACT_PERSIST))
                     .unwrap_or(c.name_span.start)
             } else if c.is_comptime {
-                // Prefer `#Static`/`#Inline` when present; else `comptime`.
+                // Prefer force markers, then the live `#Known` marker. Retired
+                // keywords remain last-resort recovery starts.
                 let before = &src[..c.name_span.start];
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
+                    .or_else(|| before.rfind(&format!("#{}", Syntax::ATTR_KNOWN)))
                     .or_else(|| before.rfind(Syntax::KW_COMPTIME))
                     .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)
@@ -481,7 +483,6 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Assign { value, .. } => value.span().end,
         Stmt::Return(e, s) => e.as_ref().map(|x| x.span().end).unwrap_or(s.end),
         Stmt::Yield(e, _) => e.span().end,
-        Stmt::If(i) => if_end(i),
         Stmt::While { body, .. } => body.last().map(stmt_end).unwrap_or(0),
         Stmt::For { body, .. } => body.last().map(stmt_end).unwrap_or(0),
         Stmt::Switch {
@@ -542,14 +543,6 @@ fn stmt_end(stmt: &Stmt) -> usize {
     }
 }
 
-fn if_end(i: &IfStmt) -> usize {
-    match &i.else_branch {
-        Some(ElseBranch::ElseIf(e)) => if_end(e),
-        Some(ElseBranch::Else(body)) => body.last().map(stmt_end).unwrap_or(i.span.end),
-        None => i.then_body.last().map(stmt_end).unwrap_or(i.span.end),
-    }
-}
-
 impl<'a> Fmt<'a> {
     fn write_loop_continuation_indent(&mut self) {
         self.indent += 1;
@@ -558,7 +551,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn loop_clause_separator(&mut self, next_start: usize, wrap: bool) {
-        self.write(";");
+        self.write(",");
         let mut broke = false;
         while self.comment_i < self.comments.len()
             && self.comments[self.comment_i].span.start < next_start
@@ -836,8 +829,8 @@ impl<'a> Fmt<'a> {
     /// (`chain_break_between`): the author's line-count choice is preserved, fmt
     /// only normalizes spacing within it. Gates: exactly one statement, that
     /// statement is simple (no nested block), no comment inside the braces, and
-    /// the author wrote the whole body on a single source line. The width-100
-    /// floor is enforced after rendering (see `fmt_body`).
+    /// the author wrote the whole body on one source line. The width-100 floor
+    /// is enforced after rendering (see `fmt_body`).
     fn body_inline_eligible(&self, body: &[Stmt], open: usize, close: usize) -> bool {
         open <= close
             && body.len() == 1
@@ -944,6 +937,33 @@ impl<'a> Fmt<'a> {
         self.at_line_start = saved_line_start;
         false
     }
+
+    fn fmt_control_body(&mut self, body: &[Stmt]) {
+        if let [statement] = body {
+            let comment_free = self
+                .single_stmt_braces(statement)
+                .map_or(true, |(open, close)| !self.span_has_comment(open, close));
+            if is_simple_stmt(statement) && comment_free {
+                let saved_out = self.out.len();
+                let saved_col = self.col;
+                let saved_line_start = self.at_line_start;
+                let saved_pending_blank = self.pending_blank;
+                let saved_comment_i = self.comment_i;
+                self.write(" ");
+                self.fmt_stmt_inline(statement);
+                self.write(" }");
+                if self.col <= MAX_WIDTH {
+                    return;
+                }
+                self.out.truncate(saved_out);
+                self.col = saved_col;
+                self.at_line_start = saved_line_start;
+                self.pending_blank = saved_pending_blank;
+                self.comment_i = saved_comment_i;
+            }
+        }
+        self.fmt_body_expanded(body);
+    }
 }
 
 impl Prec {
@@ -978,7 +998,6 @@ fn stmt_start(stmt: &Stmt) -> usize {
         },
         Stmt::Return(_, s) => s.start,
         Stmt::Yield(_, s) => s.start,
-        Stmt::If(i) => i.span.start,
         Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::Switch { span, .. } => span.start,
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
             s.start

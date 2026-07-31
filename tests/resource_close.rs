@@ -235,7 +235,7 @@ fn questioned() => Int ? String {
 }
 
 fn looped() {
-    loop n; [0, 1] {
+    loop n, [0, 1] {
         resource := Resource.{ name: if n == 0 -> "continue" else -> "break" }
         defer close(^resource)
         if n == 0 { next }

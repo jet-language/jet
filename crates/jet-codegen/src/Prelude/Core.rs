@@ -1712,6 +1712,20 @@ fn jet_get_disjoint_write<'a, T>(
     Ok(views.into_iter().map(|(_, view)| view).collect())
 }
 
+fn jet_edit_disjoint<T, F>(xs: &mut [T], indices: &[i64], edit: F) -> Result<(), String>
+where
+    F: FnOnce(&mut [T], &mut [T]),
+{
+    if indices.len() != 2 {
+        return Err("edit_disjoint needs exactly two indexes".to_string());
+    }
+    let mut views = jet_get_disjoint_write(xs, indices)?;
+    let right = views.pop().expect("two disjoint views");
+    let left = views.pop().expect("two disjoint views");
+    edit(left, right);
+    Ok(())
+}
+
 fn jet_view_range_new<'a, T>(
     xs: &'a [T],
     range: &JetRange,

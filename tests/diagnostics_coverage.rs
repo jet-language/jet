@@ -870,8 +870,12 @@ fn registered_unimplemented_codes_are_expected() {
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
         "E0328", // retired (D-IFDIST1=A): `|` binds tighter than `&&`/`||`; mixing needs no parens
+        "E0334", // retired by D-TRAILBLOCK2=A: trailing blocks no longer have a separate mismatch
         "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
+        "E0920", // retired: `#InlineAlways` was condensed into `#Inline(Always)`
+        "E1109", // deferred by D-SOA2B: v1 supports only whole-struct columnar layout
         "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
+        "L3101", // retired by D-UNSAFE-REASON1=A: bare `#Unsafe` is hard error E3112
         "E0410", // retired by D-MARK-DISCARD1=A (was `#Suppress` unknown argument); registry row
                  // already says "retired" — no live Diagnostic::error call to find.
         "E0859", // D-GENMOD-IDENTITY1=A: raised via `jet_foundation::ice!` (ICE 101), not

@@ -476,7 +476,7 @@ fn web_wasm_stmts_supported(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> bool {
     stmts.iter().all(|stmt| match stmt {
-        TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
+        TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, file_prefix, reconstructions),
         TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, file_prefix, reconstructions),
         TIR::TStmt::If { cond, then_body, else_body, .. } => {
@@ -533,6 +533,7 @@ fn web_wasm_stmts_supported(
             subject,
             arms,
             else_body,
+            ..
         } => {
             web_wasm_expr_supported(subject, bundle, file_prefix, reconstructions)
                 && arms.iter().all(|(cond, body)| {
@@ -748,7 +749,7 @@ fn wasm_callee_bucket(bundle: &ProgramBundle, name: &str) -> Option<WebBucket> {
 
 fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
     stmts.iter().all(|stmt| match stmt {
-        TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
+        TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
         TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
         TIR::TStmt::If { cond, then_body, else_body, .. } => {
@@ -786,6 +787,7 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
             subject,
             arms,
             else_body,
+            ..
         } => {
             web_expr_supported(subject)
                 && arms.iter().all(|(cond, body)| {
@@ -2866,6 +2868,7 @@ fn emit_wasm_body(
                 subject,
                 arms,
                 else_body,
+                ..
             } => {
                 let subject_str =
                     wasm_emit_expr(subject, funcs, file_prefix, reconstructions)?;
@@ -2966,6 +2969,7 @@ fn emit_wasm_body(
             TIR::TStmt::LineMarker(line) => {
                 out.push_str(&format!("{pad}// jet:line {line}\n"));
             }
+            TIR::TStmt::SourceSpan(_) => {}
             _ => return Err(()),
         }
     }
@@ -4009,6 +4013,7 @@ fn emit_tir_js_body(
     let pad = "  ".repeat(indent);
     for stmt in body {
         match stmt {
+            TIR::TStmt::SourceSpan(_) => {}
             TIR::TStmt::LineMarker(line) => {
                 let source_marker = &funcs
                     .first()
@@ -4214,6 +4219,7 @@ fn emit_tir_js_body(
                 subject,
                 arms,
                 else_body,
+                ..
             } => {
                 out.push_str(&format!("{pad}{{\n"));
                 let inner = "  ".repeat(indent + 1);

@@ -231,9 +231,10 @@ pub(crate) fn is_webapp_method_name(method: &str, nargs: usize) -> bool {
             | ("routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter", 1)
             | (
                 "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
-                    | "hydration_release" | "facts_json" | "serve",
+                    | "hydration_release" | "facts_json",
                 0
             )
+            | ("serve", 0 | 1)
     )
 }
 

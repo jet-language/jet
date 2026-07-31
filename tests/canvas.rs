@@ -84,11 +84,7 @@ const CANVAS_FIXTURE: &str = r#"fn square(n: Int) => Int {
 
 fn summarize(limit: Int) => Int {
     total := square(limit)
-    if total > 10 {
-        return total
-    } else {
-        return total + 1
-    }
+    if total > 10 { return total } else { return total + 1 }
 }
 
 fn run() {
@@ -98,7 +94,7 @@ fn run() {
 
 const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) => Int {
     total := 0
-    loop i := 0; i < limit; i++ {
+    loop i := 0, i < limit, i++ {
         if i == 2 {
             next
         }
@@ -1177,6 +1173,71 @@ fn canvas_projects_and_edits_subjectless_guard_arms() {
     jet::Canvas::apply_transaction_json(&path, &add).expect("add guard arm");
     let edited = fs::read_to_string(&path).unwrap();
     assert!(edited.contains("false ->"), "{edited}");
+}
+
+#[test]
+fn canvas_classic_pattern_branch_transactions_use_canonical_switch() {
+    let path = write_fixture(
+        "classic_pattern_transactions",
+        r#"fn choose(x: Int?) => Int {
+    if x == Val(_) { return 1 } else { return 0 }
+}
+
+fn run() {
+    print(choose(Val(1)))
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("classic pattern graph");
+    assert!(graph.contains("\"title\":\"if ==\""), "{graph}");
+    assert!(!graph.contains("\"title\":\"if guards\""), "{graph}");
+    let graph_id = graph_id_for_title(&graph, "choose");
+    let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"== Val(_)\"");
+    let before = fs::read_to_string(&path).unwrap();
+    let remove_last = format!(
+        "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
+        jet::Canvas::source_revision(&before), graph_id, pat_start, pat_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &remove_last).unwrap_err();
+    assert!(err.contains("can't remove the last pattern arm"), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"None\"}}",
+        jet::Canvas::source_revision(&before), graph_id, pat_start, pat_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit).expect("edit classic pattern");
+    let edited = fs::read_to_string(&path).unwrap();
+    assert!(edited.contains("if x == .None"), "{edited}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("edited classic pattern graph");
+    let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
+    let add = format!(
+        "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"Val(_)\"}}",
+        jet::Canvas::source_revision(&edited), graph_id, node_start, node_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &add).expect("add classic pattern arm");
+    let converted = fs::read_to_string(&path).unwrap();
+    assert!(converted.contains("if x == {"), "{converted}");
+    assert!(converted.contains(".None ->"), "{converted}");
+    assert!(converted.contains(".Val(_) ->"), "{converted}");
+    assert!(converted.contains("else ->"), "{converted}");
+}
+
+#[test]
+fn canvas_classic_if_ignores_braces_inside_leading_trivia() {
+    let path = write_fixture(
+        "classic_if_trivia",
+        r#"fn run() {
+    ready :: true
+    if /* { trivia */ ready { print("ready") }
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("commented classic graph");
+    assert!(graph.contains("\"title\":\"if\""), "{graph}");
+    assert!(!graph.contains("\"title\":\"if guards\""), "{graph}");
+    assert!(graph.contains("/* { trivia */"), "{graph}");
 }
 
 #[test]
@@ -3305,20 +3366,20 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         "unified_loop_canvas",
         r#"fn run() {
     total := 0
-    loop item; [1, 2, 3]; 2 {
+    loop item, [1, 2, 3], 2 {
         total += item
     }
-    loop i; 0..3; 2 {
+    loop i, 0..3, 2 {
         total += i
     }
     counts := [String: Int].{ "one": 1 }
-    loop entry; counts {
+    loop entry, counts {
         total += entry.value
     }
-    loop key, value; counts {
+    loop (key, value), counts {
         total += value
     }
-    loop cursor := 0; cursor < 1; cursor += 1 {
+    loop cursor := 0, cursor < 1, cursor += 1 {
         total += cursor
     }
 }
@@ -3355,7 +3416,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     jet::Canvas::apply_transaction_json(&path, &append)
         .expect("edit list source nested in loop header");
     let after = fs::read_to_string(&path).unwrap();
-    assert!(after.contains("loop item; [1, 2, 3, 4]; 2"), "{after}");
+    assert!(after.contains("loop item, [1, 2, 3, 4], 2"), "{after}");
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before header edits");
     let initializer_id = field_before(
@@ -3385,7 +3446,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         .expect("edit complete state afterthought clause");
     let after_headers = fs::read_to_string(&path).unwrap();
     assert!(
-        after_headers.contains("loop cursor := 1; cursor < 1; cursor += 2"),
+        after_headers.contains("loop cursor := 1, cursor < 1, cursor += 2"),
         "{after_headers}"
     );
 }

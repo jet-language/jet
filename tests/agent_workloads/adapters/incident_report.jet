@@ -17,7 +17,7 @@ fn run() {
     services := [String].{}
     rejects := [String].{}
     line_number := 0
-    loop line; text.split("\n") {
+    loop line, text.split("\n") {
         line_number += 1
         if line_number != 1 && line != "" {
             fields :: line.split("\t").to_list()
@@ -45,13 +45,13 @@ fn run() {
     services.sort()
     print("accepted|{incidents.len()}")
     print("rejected|{rejects.len()}")
-    loop reject; rejects {
+    loop reject, rejects {
         print(reject)
     }
-    loop service; services {
+    loop service, services {
         ok := 0
         errors := 0
-        loop incident; incidents {
+        loop incident, incidents {
             if incident.service == service {
                 if incident.status == "ok" {
                     ok += 1

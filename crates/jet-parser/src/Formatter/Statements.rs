@@ -1,7 +1,6 @@
 use super::*;
 use crate::AST::{
-    BinOp, BindPattern, Binding, ElseBranch, Expr, ForKind, IfStmt, LValue, Stmt, StrPart,
-    SwitchArm,
+    BinOp, BindPattern, Binding, Expr, ForKind, LValue, Stmt, StrPart, SwitchArm,
 };
 
 impl<'a> Fmt<'a> {
@@ -283,13 +282,6 @@ impl<'a> Fmt<'a> {
                 self.write("yield ");
                 self.fmt_expr(e, Prec::OrFallback);
             }
-            Stmt::If(i) => {
-                if self.is_adjacent_effect_if(i) {
-                    self.fmt_adjacent_effect_if(i);
-                } else {
-                    self.fmt_if(i);
-                }
-            }
             Stmt::While {
                 cond, body, label, ..
             } => {
@@ -313,10 +305,14 @@ impl<'a> Fmt<'a> {
                     self.write(&format!("{} :: ", _n));
                 }
                 self.write("loop ");
+                if var2.is_some() {
+                    self.write("(");
+                }
                 self.write(var);
                 if let Some((v2, _)) = var2 {
                     self.write(", ");
                     self.write(v2);
+                    self.write(")");
                 }
                 let clause_width = match kind {
                     ForKind::Range { start, end, step, exclusive } => {
@@ -378,7 +374,11 @@ impl<'a> Fmt<'a> {
                 self.write(Syntax::KW_IF);
                 self.write(" ");
                 if crate::AST::is_subjectless_guard(subject, *span) {
-                    self.fmt_guard_dispatch(arms, else_body.as_deref());
+                    if self.switch_was_classic_if(arms, *span) {
+                        self.fmt_classic_switch(arms, else_body.as_deref());
+                    } else {
+                        self.fmt_guard_dispatch(arms, else_body.as_deref());
+                    }
                 } else {
                     self.fmt_dispatch(subject, arms, else_body.as_deref());
                 }
@@ -405,7 +405,7 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Stmt::ContinueLabel(name, _) => self.write(&format!("next({})", name)),
-            // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — emit verbatim.
+            // D-LOOP-COMMA1=A: `loop init, cond, step { body }`.
             Stmt::CountedLoop {
                 init,
                 cond,
@@ -588,21 +588,21 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` block.
+            // D-VERDICT-1308-1: `#Known { … }` demand block.
             Stmt::ComptimeBlock { body, .. } => {
-                self.write(&format!("{} {{", Syntax::KW_COMPTIME));
+                self.write(&format!("#{} {{", Syntax::ATTR_KNOWN));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
+            // D-VERDICT-1308-2: format like `if` with a `#Known` lead.
             Stmt::ComptimeIf {
                 cond,
                 then_body,
                 else_body,
                 ..
             } => {
-                self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
+                self.write(&format!("#{} {} ", Syntax::ATTR_KNOWN, Syntax::KW_IF));
                 self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
@@ -615,7 +615,7 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
-            // D-OSTARGET2=B (ratified 2026-07-03): `comptime if build.os == { … }`
+            // D-OSTARGET2=B (ratified 2026-07-03): `#Known if build.os == { … }`
             // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
             // (D-IF3 arm grammar) with a `comptime` lead.
             Stmt::ComptimeSwitch {
@@ -624,7 +624,7 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
+                self.write(&format!("#{} {} ", Syntax::ATTR_KNOWN, Syntax::KW_IF));
                 self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
@@ -741,138 +741,10 @@ impl<'a> Fmt<'a> {
         })
     }
 
-    fn fmt_if(&mut self, i: &IfStmt) {
-        // D-FMT1: the whole if/else chain shares one line shape. If any branch
-        // is multiline (author broke it, or a gate forces expansion), expand the
-        // entire chain for readability; only a chain whose every branch is
-        // inline-eligible stays inline.
-        let inline = self.chain_inlineable(i);
-        self.fmt_if_chain(i, inline);
-    }
-
     fn fmt_effect_loop_body(&mut self, body: &[Stmt], header_end: usize) {
-        if let [statement] = body {
-            if self
-                .src
-                .get(header_end..statement.span().start)
-                .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
-            {
-                self.write(" ");
-                self.fmt_stmt(statement);
-                return;
-            }
-        }
+        let _ = header_end;
         self.write(" {");
-        self.fmt_body(body);
-    }
-
-    fn is_adjacent_effect_if(&self, i: &IfStmt) -> bool {
-        if i.then_body.len() != 1
-            || !self
-                .src
-                .get(i.cond.span().end..i.then_body[0].span().start)
-                .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
-        {
-            return false;
-        }
-        match &i.else_branch {
-            None => true,
-            Some(ElseBranch::ElseIf(inner)) => {
-                !self
-                    .src
-                    .get(i.then_body[0].span().end..inner.cond.span().start)
-                    .is_some_and(|gap| gap.contains('\n') || gap.contains('{'))
-                    && self.is_adjacent_effect_if(inner)
-            }
-            Some(ElseBranch::Else(body)) => {
-                body.len() == 1
-                    && self
-                        .src
-                        .get(i.then_body[0].span().end..body[0].span().start)
-                        .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
-            }
-        }
-    }
-
-    fn fmt_adjacent_effect_if(&mut self, i: &IfStmt) {
-        let saved_out = self.out.len();
-        let saved_col = self.col;
-        let saved_line_start = self.at_line_start;
-        let saved_pending_blank = self.pending_blank;
-        let saved_comment_i = self.comment_i;
-        self.write(Syntax::KW_IF);
-        self.write(" ");
-        self.fmt_cond(&i.cond);
-        self.write(" ");
-        self.fmt_stmt(&i.then_body[0]);
-        if let Some(branch) = &i.else_branch {
-            self.write(" else ");
-            match branch {
-                ElseBranch::ElseIf(inner) => self.fmt_adjacent_effect_if(inner),
-                ElseBranch::Else(body) => self.fmt_stmt(&body[0]),
-            }
-        }
-        if self.col <= MAX_WIDTH {
-            return;
-        }
-        self.out.truncate(saved_out);
-        self.col = saved_col;
-        self.at_line_start = saved_line_start;
-        self.pending_blank = saved_pending_blank;
-        self.comment_i = saved_comment_i;
-        self.fmt_if(i);
-    }
-
-    /// True when every branch of the if/else chain is eligible to render inline
-    /// (D-FMT1 gates a–d) AND the author wrote each on a single source line.
-    fn chain_inlineable(&self, i: &IfStmt) -> bool {
-        let then_ok = i.then_body.len() == 1
-            && self
-                .single_stmt_braces(&i.then_body[0])
-                .is_some_and(|(o, c)| self.body_inline_eligible(&i.then_body, o, c));
-        if !then_ok {
-            return false;
-        }
-        match &i.else_branch {
-            None => true,
-            Some(ElseBranch::ElseIf(inner)) => self.chain_inlineable(inner),
-            Some(ElseBranch::Else(body)) => {
-                body.len() == 1
-                    && self
-                        .single_stmt_braces(&body[0])
-                        .is_some_and(|(o, c)| self.body_inline_eligible(body, o, c))
-            }
-        }
-    }
-
-    /// Render the chain. `inline` is the shared decision from `chain_inlineable`;
-    /// each branch still passes its rendered width through `fmt_body`'s gate (d),
-    /// so an over-wide branch falls back to the expanded form for that branch.
-    fn fmt_if_chain(&mut self, i: &IfStmt, inline: bool) {
-        self.write("if ");
-        // S68 (D-SG2): conditions use the no-paren house style — the outer
-        // redundant parens of `if (cond)` are stripped.
-        self.fmt_cond(&i.cond);
-        self.write(" {");
-        if inline {
-            self.fmt_body(&i.then_body);
-        } else {
-            self.fmt_body_expanded(&i.then_body);
-        }
-        if let Some(else_b) = &i.else_branch {
-            self.write(" else ");
-            match else_b {
-                ElseBranch::ElseIf(inner) => self.fmt_if_chain(inner, inline),
-                ElseBranch::Else(body) => {
-                    self.write("{");
-                    if inline {
-                        self.fmt_body(body);
-                    } else {
-                        self.fmt_body_expanded(body);
-                    }
-                }
-            }
-        }
+        self.fmt_control_body(body);
     }
 
     /// D-IF1/D-FMT1: render one dispatch arm. A bare-value arm
@@ -880,7 +752,7 @@ impl<'a> Fmt<'a> {
     /// written. Preserve an author-written braceless simple body when it fits.
     /// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
     /// `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-    /// `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+    /// `#Known if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
     fn fmt_dispatch(&mut self, subject: &Expr, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
         let table_op = self
             .dispatch_op_from_source(subject)
@@ -939,6 +811,58 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
+    fn switch_was_classic_if(&self, arms: &[SwitchArm], span: Span) -> bool {
+        let Some(first) = arms.first() else {
+            return false;
+        };
+        crate::AST::uses_classic_if_spelling(self.src, span, first.cond.span())
+    }
+
+    fn fmt_classic_switch(&mut self, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
+        let Some(arm) = arms.first() else {
+            return;
+        };
+        self.emit_classic_if_condition_trivia(arm.cond.span().start);
+        self.fmt_cond(&arm.cond);
+        self.write(" {");
+        self.fmt_control_body(&arm.body);
+        match else_body {
+            Some([
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    span,
+                },
+            ]) if crate::AST::is_subjectless_guard(subject, *span)
+                && self.switch_was_classic_if(arms, *span) =>
+            {
+                self.write(" else if ");
+                self.fmt_classic_switch(arms, else_body.as_deref());
+            }
+            Some(body) => {
+                self.write(" else {");
+                self.fmt_control_body(body);
+            }
+            None => {}
+        }
+    }
+
+    fn emit_classic_if_condition_trivia(&mut self, condition_start: usize) {
+        while self.comment_i < self.comments.len()
+            && self.comments[self.comment_i].span.start < condition_start
+        {
+            let text = self.comments[self.comment_i].text.clone();
+            self.write(&text);
+            self.comment_i += 1;
+            if text.starts_with("//") {
+                self.newline();
+            } else {
+                self.write(" ");
+            }
+        }
+    }
+
     fn fmt_switch_arm(
         &mut self,
         subject: &Expr,
@@ -957,6 +881,10 @@ impl<'a> Fmt<'a> {
     /// keep their explicit scope. Add concise braces when the next leading-dot
     /// arm would otherwise parse as a chain on this body's final expression.
     fn fmt_arm_body(&mut self, body: &[Stmt], force_braces: bool) {
+        if body.is_empty() {
+            self.write(" {}");
+            return;
+        }
         let was_braceless = self.arm_body_was_braceless(body);
         if was_braceless && force_braces {
             let saved_out = self.out.len();
@@ -1211,13 +1139,11 @@ impl<'a> Fmt<'a> {
         if b.reactive_shared {
             self.write(&format!("#{} ", Syntax::ATTR_SHARED));
         }
-        // S57: comptime stays keyword-led (`comptime name = …`). D-BIND4: ordinary
-        // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
+        // D-VERDICT-1308-1: explicit compile-time demand is marker-led.
         if b.is_comptime {
-            self.write(Syntax::KW_COMPTIME);
-            self.write(" ");
+            self.write(&format!("#{} ", Syntax::ATTR_KNOWN));
             self.write(&b.name);
-            self.write(" = ");
+            self.write(" :: ");
             self.fmt_expr(&b.init, Prec::OrFallback);
             return;
         }

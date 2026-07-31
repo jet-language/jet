@@ -41,6 +41,7 @@ impl UninitState {
         }
     }
 
+    #[allow(dead_code)]
     fn merge_paths(&mut self, other: &Self) {
         if self.fixed_len == other.fixed_len {
             self.initialized_indexes = self
@@ -1261,6 +1262,9 @@ pub(crate) struct Checker<'a> {
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
+    /// Loop bindings that lend one `ViewMut<T>` element from a collection.
+    /// These values may edit during the iteration but may not be retained.
+    lending_view_loop_vars: HashSet<String>,
     /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
     /// buffer, matrix, and future named mutable views.
     view_facts: ViewFactGraph,
@@ -1305,6 +1309,9 @@ pub(crate) struct Checker<'a> {
     /// lambda body. The builtin table supplies the mutation fact; inline
     /// callbacks fold these roots into `LambdaMeta::mut_captures`.
     inferred_lambda_mut_captures: HashSet<String>,
+    /// `edit_disjoint` lends each callback parameter for that invocation only.
+    /// Any store, return, or retaining call from the callback is E0212.
+    lambda_params_are_lending_views: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
@@ -1357,7 +1364,7 @@ pub(crate) struct Checker<'a> {
     /// by Bundle.rs after the full bundle is checked.
     pub(super) ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
-    /// `comptime if` arm — name-resolution runs normally (so unknown-name
+    /// `#Known if` arm — name-resolution runs normally (so unknown-name
     /// typos are caught) but all other diagnostics are suppressed and the arm
     /// is never lowered to codegen.
     in_dropped_comptime_arm: bool,

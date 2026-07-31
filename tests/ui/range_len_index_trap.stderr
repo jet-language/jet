@@ -1,7 +1,7 @@
 Error [E0364]: this range includes `xs.len()`, one past the last index
   --> tests/ui/range_len_index_trap.jet:3:19
     |
-  3 |     loop i; 0..xs.len() {
+  3 |     loop i, 0..xs.len() {
     |                   ^^^
  Why: `xs.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `xs`
- Fix: write `loop i, item; xs` — or `loop i; xs.indexes` — or `0..<xs.len()`
+ Fix: write `loop (i, item), xs` — or `loop i, xs.indexes` — or `0..<xs.len()`

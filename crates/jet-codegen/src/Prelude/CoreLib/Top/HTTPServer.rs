@@ -17,7 +17,7 @@ struct JetHTTPMuxRoute {
 }
 
 #[derive(Clone)]
-struct JetHTTPMux(
+pub(crate) struct JetHTTPMux(
     std::sync::Arc<std::sync::Mutex<Vec<JetHTTPMuxRoute>>>,
     std::sync::Arc<std::sync::Mutex<Vec<JetHTTPMiddleware>>>,
 );
@@ -4781,6 +4781,106 @@ fn jet_http_srv_static_files_mount_defaulted(
             follow_links: follow_links.unwrap_or(false),
         },
     );
+}
+
+pub(crate) fn jet_webapp_http_mux_new() -> JetHTTPMux {
+    jet_http_mux_new()
+}
+
+pub(crate) fn jet_webapp_http_page<F>(mux: &JetHTTPMux, path: &str, handler: F)
+where
+    F: Fn() -> String + Send + Sync + 'static,
+{
+    jet_http_mux_add(mux, "GET", path, move |_| {
+        let mut response = jet_http_srv_response(200, &handler());
+        response
+            .headers
+            .append("content-type", "text/html; charset=utf-8")
+            .expect("static content type is valid");
+        response
+    });
+}
+
+pub(crate) fn jet_webapp_http_action<F>(mux: &JetHTTPMux, path: &str, handler: F)
+where
+    F: Fn() + Send + Sync + 'static,
+{
+    jet_http_mux_add(mux, "POST", path, move |_| {
+        handler();
+        jet_http_srv_response(200, &"ok".to_string())
+    });
+}
+
+pub(crate) fn jet_webapp_http_mount<F>(mux: &JetHTTPMux, path: &str, handler: F)
+where
+    F: Fn(&String) + Send + Sync + 'static,
+{
+    jet_http_mux_add(mux, "POST", path, move |request| {
+        handler(&request.path);
+        jet_http_srv_response(200, &"ok".to_string())
+    });
+}
+
+pub(crate) fn jet_webapp_http_assets(mux: &JetHTTPMux, root: &String) {
+    jet_http_srv_static_files_mount(
+        mux,
+        &"/assets".to_string(),
+        root,
+        JetHTTPStaticOptions::safe(),
+    );
+}
+
+pub(crate) fn jet_webapp_http_reload(mux: &JetHTTPMux) {
+    jet_http_mux_add(mux, "GET", "/__jet/reload", move |_| {
+        let watched = std::env::var("JET_DEV_FILE").ok();
+        let fingerprint = |path: &str| {
+            std::fs::metadata(path)
+                .ok()
+                .and_then(|metadata| {
+                    metadata
+                        .modified()
+                        .ok()
+                        .map(|modified| (metadata.len(), modified))
+                })
+        };
+        let initial = watched.as_deref().and_then(fingerprint);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let changed = loop {
+            if watched
+                .as_deref()
+                .is_some_and(|path| fingerprint(path) != initial)
+            {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let status = if changed { 200 } else { 204 };
+        let body = if changed { "data: reload\n\n" } else { "" };
+        let mut response = jet_http_srv_response(status, &body.to_string());
+        response
+            .headers
+            .append("content-type", "text/event-stream")
+            .expect("static content type is valid");
+        response
+    });
+}
+
+pub(crate) fn jet_webapp_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
+    use std::io::Write;
+    let server = jet_http_server_bind(&format!("127.0.0.1:{port}"), mux)
+        .unwrap_or_else(|error| panic!("web app server failed: {error}"));
+    println!(
+        "serving http://{}{}",
+        jet_http_server_local_addr(&server)
+            .unwrap_or_else(|error| panic!("web app address failed: {error}")),
+        if dev { " (live reload)" } else { "" }
+    );
+    let _ = std::io::stdout().flush();
+    jet_http_server_serve(&server)
+        .unwrap_or_else(|error| panic!("web app server failed: {error}"));
 }
 
 fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {

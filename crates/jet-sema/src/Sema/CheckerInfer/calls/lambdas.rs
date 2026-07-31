@@ -362,6 +362,26 @@ use std::collections::HashSet;
                     },
                 );
             }
+            let lending_params = if self.lambda_params_are_lending_views {
+                lam.params
+                    .iter()
+                    .zip(param_types.iter())
+                    .filter(|(_, ty)| {
+                        matches!(
+                            ty,
+                            Type::Apply { name, args }
+                                if name == "ViewMut" && args.len() == 1
+                        )
+                    })
+                    .filter_map(|(param, _)| {
+                        self.lending_view_loop_vars
+                            .insert(param.name.clone())
+                            .then(|| param.name.clone())
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
     
             // D-TXN2: a lambda body is a deferred execution context (it runs later —
             // e.g. an `on_commit` hook fires only post-commit). Effects inside it are
@@ -526,6 +546,9 @@ use std::collections::HashSet;
             self.ret = saved_ret;
             self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;
+            for name in lending_params {
+                self.lending_view_loop_vars.remove(&name);
+            }
     
             self.pop_scope();
     
@@ -646,18 +669,6 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
             {
                 *name = new.to_string();
             }
-            Stmt::If(branch) => {
-                rewrite_inline_loop_target(&mut branch.then_body, old, new);
-                match &mut branch.else_branch {
-                    Some(crate::AST::ElseBranch::ElseIf(next)) => {
-                        rewrite_inline_if_target(next, old, new)
-                    }
-                    Some(crate::AST::ElseBranch::Else(body)) => {
-                        rewrite_inline_loop_target(body, old, new)
-                    }
-                    None => {}
-                }
-            }
             Stmt::Switch {
                 arms, else_body, ..
             }
@@ -705,15 +716,6 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
             }
             _ => {}
         }
-    }
-}
-
-fn rewrite_inline_if_target(branch: &mut crate::AST::IfStmt, old: &str, new: &str) {
-    rewrite_inline_loop_target(&mut branch.then_body, old, new);
-    match &mut branch.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(next)) => rewrite_inline_if_target(next, old, new),
-        Some(crate::AST::ElseBranch::Else(body)) => rewrite_inline_loop_target(body, old, new),
-        None => {}
     }
 }
 
@@ -775,7 +777,6 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     resolved_ret: Some(Type::Named(Syntax::TYPE_VOID.to_string())),
                 });
             }
-            Stmt::If(branch) => rewrite_collect_if(branch, target),
             Stmt::Loop { body, .. }
             | Stmt::While { body, .. }
             | Stmt::For { body, .. }
@@ -807,14 +808,5 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
             }
             _ => {}
         }
-    }
-}
-
-fn rewrite_collect_if(branch: &mut crate::AST::IfStmt, target: &str) {
-    rewrite_collect_yields(&mut branch.then_body, target);
-    match &mut branch.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(next)) => rewrite_collect_if(next, target),
-        Some(crate::AST::ElseBranch::Else(body)) => rewrite_collect_yields(body, target),
-        None => {}
     }
 }

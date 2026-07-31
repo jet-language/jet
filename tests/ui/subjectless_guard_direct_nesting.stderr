@@ -4,7 +4,15 @@ Error [E0071]: this effect-only `if` uses a result arrow
   2 |     if true -> if false -> print("never")
     |             ^^
  Why: an arrow says that control selects a value; this body only performs work
- Fix: remove `->`; keep the one-line body adjacent or use braces
+ Fix: remove `->` and wrap the body in `{ ... }`
+
+Error [E0372]: this `if` body needs braces
+  --> tests/ui/subjectless_guard_direct_nesting.jet:2:16
+    |
+  2 |     if true -> if false -> print("never")
+    |                ^^
+ Why: braces make the body's boundary visible to readers, editors, and the compiler
+ Fix: wrap the body in `{ ... }`; `jet fmt` applies this fix
 
 Error [E0329]: a nested one-line `if` needs braces
   --> tests/ui/subjectless_guard_direct_nesting.jet:2:16

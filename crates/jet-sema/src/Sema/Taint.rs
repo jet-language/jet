@@ -3,8 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Effects::core_effect;
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, Item, LValue, Lambda, LambdaBody, OrFallback,
-    Stmt, StrPart, Type,
+    EnumLitArg, Expr, ForKind, Item, LValue, Lambda, LambdaBody, OrFallback, Stmt, StrPart, Type,
 };
 use std::collections::{BTreeSet, HashMap};
 
@@ -181,6 +180,14 @@ impl<'a> TaintCtx<'a> {
                 }
                 if let Some(tag) = key.as_ref().and_then(|key| self.scrubbers.get(key)) {
                     tags.remove(tag);
+                }
+                // A verified token yields typed public claims, not the original
+                // credential text. Core owns this declassification boundary.
+                let verifies_credential = matches!(receiver.as_ref(), Expr::Ident(alias, _)
+                    if self.core_imports.get(alias).map(String::as_str) == Some("core.auth"))
+                    && matches!(method.as_str(), "verify_jwt" | "verify_paseto");
+                if verifies_credential {
+                    tags.remove(crate::Syntax::KW_CREDENTIAL);
                 }
                 tags
             }
@@ -552,7 +559,6 @@ impl<'a> TaintCtx<'a> {
             }
             Stmt::Return(Some(e), _) => self.check_expr(e),
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => self.check_if(ifs),
             Stmt::While { cond, body, .. } => {
                 self.check_expr(cond);
                 self.check_block(body);
@@ -657,21 +663,6 @@ impl<'a> TaintCtx<'a> {
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
-        }
-    }
-
-    fn check_if(&mut self, ifs: &IfStmt) {
-        self.check_expr(&ifs.cond);
-        self.check_block(&ifs.then_body);
-        if let Some(e) = &ifs.else_branch {
-            self.check_else(e);
-        }
-    }
-
-    fn check_else(&mut self, e: &ElseBranch) {
-        match e {
-            ElseBranch::Else(stmts) => self.check_block(stmts),
-            ElseBranch::ElseIf(ifs) => self.check_if(ifs),
         }
     }
 

@@ -65,7 +65,7 @@ fn build_and_run_stdin(name: &str, src: &str, stdin: &str) -> (i32, String) {
 /// this is a `MethodCall` on a `core.io` alias, lowered to a `CoreCall`
 /// (`jet_std_io_input(Some(&(prompt)))` → `Result<String, IOError>`). It composes with a
 /// `?? return <value>` fallback (the early-return form, already covered since Phase 8).
-/// The loop accumulates piped lines; a blank line breaks; EOF yields `Ok("")` (read_line on
+/// The loop accumulates piped lines, a blank line breaks, EOF yields `Ok("")` (read_line on
 /// EOF) so the loop also breaks — the `?? return` fires only on a genuine Err. Both stdin
 /// shapes run deterministically.
 #[test]
@@ -89,7 +89,7 @@ fn collect() => [String] {
 fn run() {
     got :: collect()
     print(\"count={got.len()}\")
-    loop g; got {
+    loop g, got {
         print(g)
     }
     print(\"done\")
@@ -184,6 +184,38 @@ shapes :: [Shape].{ Circle.{radius: 1.0}, Square.{side: 2.0} }
     assert_eq!(code, 0);
     // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
+}
+
+/// A typed trait-object list must coerce both inline literals and local
+/// implementing values. The local path used to emit the concrete value
+/// directly into `Vec<Box<dyn Trait>>`, which leaked rustc E0308.
+#[test]
+fn trait_object_list_boxes_local_implementing_values() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Sink {
+    fn absorb(self, value: Float) => Float
+}
+struct Holder {
+    offset: Float
+
+    impl Sink {
+        fn absorb(self, value: Float) => Float {
+            return value + self.offset
+        }
+    }
+}
+fn run() {
+    holder :: Holder.{ offset: 1.0 }
+    sinks :: [Sink].{ holder }
+    print(sinks.len())
+}
+";
+    let (code, stdout) = build_and_run("tir_trait_object_local_list", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
 }
 
 /// D-MEM-PARAM1=A: assigning a read parameter into an owned field must never

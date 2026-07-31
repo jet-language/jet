@@ -1086,6 +1086,16 @@ impl<'a> Checker<'a> {
                 kind,
             } => {
                 let result = self.infer_index(base, index, span, kind);
+                if matches!(kind, IndexKind::Range) && self.loop_depth > 0 {
+                    self.diags.push(Diagnostic::lint(
+                        "L0501",
+                        "slicing inside a loop copies every time".to_string(),
+                        "each slice makes a fresh copy of the range — that adds up in a loop"
+                            .to_string(),
+                        "build indices outside the loop, or collect into one list".to_string(),
+                        Some(*span),
+                    ));
+                }
                 if matches!(kind, IndexKind::Range) {
                     let span = *span;
                     let base = std::mem::replace(base, Box::new(Expr::Absent(span)));
@@ -1255,7 +1265,8 @@ impl<'a> Checker<'a> {
                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw
                 // memory access, gated to `#Unsafe`. The result type is the
                 // pointer's element type.
-                if !self.in_unsafe {
+                let forbidden = !self.in_unsafe;
+                if forbidden {
                     self.diags.push(Diagnostic::error(
                         "E0208",
                         "reading through a raw pointer requires `#Unsafe`".to_string(),
@@ -1266,6 +1277,9 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 let inner_t = self.infer(inner)?;
+                if forbidden {
+                    return None;
+                }
                 match crate::Sema::ptr_elem(&inner_t) {
                     Some(elem) => Some(elem),
                     None => Some(inner_t),
@@ -1274,7 +1288,8 @@ impl<'a> Checker<'a> {
             Expr::RawOf(inner, span) => {
                 // D-CAP9: prefix `*x` takes a raw pointer to `x` (raw-pointer-of),
                 // legal only inside `#Unsafe`. Result type is `*T` (`Ptr<T>`).
-                if !self.in_unsafe {
+                let forbidden = !self.in_unsafe;
+                if forbidden {
                     self.diags.push(Diagnostic::error(
                         "E0208",
                         "taking a raw pointer requires `#Unsafe`".to_string(),
@@ -1286,6 +1301,9 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 let inner_t = self.infer(inner)?;
+                if forbidden {
+                    return None;
+                }
                 Some(crate::Sema::ptr_type(inner_t))
             }
             Expr::Copy(inner, span) => {
@@ -1927,8 +1945,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E2713",
                         format!("there is no comptime value named `{}`", name),
-                        "`$name` splices a value that was computed by a `comptime` binding or `comptime {}` block".to_string(),
-                        format!("define `comptime {name} = ...` before using `${name}`"),
+                        "`$name` splices a value that was computed by a `comptime` binding or `#Known {}` block".to_string(),
+                        format!("define `#Known {name} :: ...` before using `${name}`"),
                         Some(*span),
                     ));
                 }
@@ -2838,7 +2856,7 @@ impl<'a> Checker<'a> {
                     "E0503",
                     "strings aren't indexed with `[ ]`".to_string(),
                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                    "e.g. `loop c; s.chars() { }` or `s.slice(0..2)`".to_string(),
+                    "e.g. `loop c, s.chars() { }` or `s.slice(0..2)`".to_string(),
                     Some(*span),
                 ));
                 None
@@ -3064,8 +3082,12 @@ impl<'a> Checker<'a> {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
-            if let Some(_owner_mod) = self.struct_owner_module(type_name, None) {
-                let is_declared_state = false;
+            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
+                let is_declared_state = self
+                    .modules
+                    .and_then(|modules| modules.get(owner_mod))
+                    .and_then(|module| module.declared_states.get(type_name))
+                    .is_some_and(|states| states.iter().any(|state| state == member));
                 let (what, why, fix) = if is_declared_state {
                     (
                         format!("`{type_name}.{member}` is not a value"),
@@ -3095,6 +3117,11 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
+        }
+        // Numeric field spelling already emitted E0049 in the parser. The
+        // recovery member cannot name a Jet field, so do not add E0302.
+        if member == "0" {
+            return None;
         }
         self.borrow_ctx = true;
         let suppress = self.suppress_partial_move_root_read;

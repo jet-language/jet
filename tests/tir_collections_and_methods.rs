@@ -6,7 +6,7 @@ mod tir_support;
 use tir_support::{build_and_run, have_rustc};
 
 // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
-// and `loop x; coll` / `loop k, v; map` iteration. The `IndexKind` (List/Map)
+// and `loop x, coll` / `loop (k, v), map` iteration. The `IndexKind` (List/Map)
 // is carried as a total fact from sema and dispatched at lowering (never
 // re-inferred). All asserts prove rustc accepts the output (I2) and runs correctly.
 
@@ -20,7 +20,7 @@ fn list_literal_index_slice_and_iteration() {
     let src = "\
 fn total(xs: [Int]) => Int {
     sum := 0
-    loop x; xs {
+    loop x, xs {
         sum = (sum + x)
     }
     return sum
@@ -46,19 +46,19 @@ fn list_two_binding_and_indexes() {
     let src = "\
 fn run() {
     xs := [10, 20, 30]
-    loop i, v; xs {
+    loop (i, v), xs {
         print(\"{i}:{v}\")
     }
-    loop i; xs.indexes() {
+    loop i, xs.indexes() {
         print(i)
     }
     empty := [Int].{}
     count := 0
-    loop i; empty.indexes() {
+    loop i, empty.indexes() {
         count = (count + 1)
     }
     print(count)
-    loop pair; xs.indexed() {
+    loop pair, xs.indexed() {
         print(\"{pair.idx}:{pair.item}\")
     }
 }
@@ -92,7 +92,7 @@ fn run() {
 }
 
 /// A map literal (`[]`), map indexing, map insert (`m[k] = v`), and two-binding
-/// `loop k, v; map` iteration — the map-specific helpers and the `.iter()` clone
+/// `loop (k, v), map` iteration — the map-specific helpers and the `.iter()` clone
 /// form. BTreeMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_literal_index_insert_and_iteration() {
@@ -105,10 +105,10 @@ fn run() {
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
-    loop k, v; counts {
+    loop (k, v), counts {
         print(\"{k}={v}\")
     }
-    loop entry; counts {
+    loop entry, counts {
         print(\"{entry.key}:{entry.value}\")
     }
 }
@@ -498,7 +498,7 @@ fn optional_val_none_and_fallback() {
     }
     let src = "\
 fn first_even(limit: Int) => (Int?) {
-    loop i; 1..limit {
+    loop i, 1..limit {
         if (i % 2) == 0 {
             return Val(i)
         }

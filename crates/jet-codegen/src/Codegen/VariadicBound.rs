@@ -270,19 +270,6 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
             };
             target_hit || expr_references_ident(value, name)
         }
-        Stmt::If(ifs) => {
-            expr_references_ident(&ifs.cond, name)
-                || ifs.then_body.iter().any(|s| stmt_references_ident(s, name))
-                || match &ifs.else_branch {
-                    Some(crate::AST::ElseBranch::ElseIf(inner)) => {
-                        stmt_references_ident(&Stmt::If((**inner).clone()), name)
-                    }
-                    Some(crate::AST::ElseBranch::Else(body)) => {
-                        body.iter().any(|s| stmt_references_ident(s, name))
-                    }
-                    None => false,
-                }
-        }
         Stmt::While { cond, body, .. } => {
             expr_references_ident(cond, name) || body.iter().any(|s| stmt_references_ident(s, name))
         }
@@ -331,7 +318,7 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => false,
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `#Transact`, `comptime { }`, …) — conservatively assume a
+        // `region`, `#Transact`, `#Known { }`, …) — conservatively assume a
         // reference so an unsupported-but-undetected body shape becomes a loud
         // internal-compiler-error, never silently-wrong Rust (I2).
         _ => true,

@@ -40,7 +40,8 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_task_entry, run_tasks, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
+    run_fuzz, run_new, run_task_entry, run_tasks, run_test, run_test_opts,
+    run_web_app_dev_entry, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -1746,6 +1747,22 @@ fn main() {
                 run_dev_entry(file, mode);
                 return;
             }
+            if has_web_app_entry_fn(file) {
+                if use_interpreter {
+                    std::env::set_var("JET_WEBAPP_DEV", "1");
+                    let dev_file = std::fs::canonicalize(file)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|_| file.to_string());
+                    std::env::set_var("JET_DEV_FILE", dev_file);
+                    if let Some(port) = dev_port {
+                        std::env::set_var("JET_WEBAPP_PORT", port.to_string());
+                    }
+                    run_dev(file, try_anyway, policy, mode, true);
+                    return;
+                }
+                run_web_app_dev_entry(file, mode, dev_port);
+                return;
+            }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
             // and serves `build/` with browser live-reload — a completely
             // different execution model from the native interpret/hot-swap
@@ -2313,6 +2330,32 @@ fn has_dev_entry_fn(file: &str) -> bool {
     prog.items
         .iter()
         .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
+}
+
+fn has_web_app_entry_fn(file: &str) -> bool {
+    let src = match fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(_) => return false,
+    };
+    let (tokens, diagnostics) = jet::Lexer::lex(&src);
+    if !diagnostics.is_empty() {
+        return false;
+    }
+    let program = match jet::Parser::parse(&tokens) {
+        Ok(program) => program,
+        Err(_) => return false,
+    };
+    program.items.iter().any(|item| {
+        matches!(
+            item,
+            jet::AST::Item::Func(function)
+                if function.name == "app"
+                    && matches!(
+                        function.return_type.as_ref(),
+                        Some(jet::AST::Type::Named(name)) if name == "WebApp"
+                    )
+        )
+    })
 }
 
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `pkg.jet`'s `target: "web"`, if `file` sits

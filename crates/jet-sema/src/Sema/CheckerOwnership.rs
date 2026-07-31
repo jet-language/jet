@@ -5,8 +5,8 @@ use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Collections;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, ElseBranch, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt,
-    Type, UnOp, VariantPayload,
+    AccessConvention, BinOp, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt, Type, UnOp,
+    VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -20,6 +20,37 @@ struct EvaluatedAccess {
     span: Span,
     through_call: bool,
     moves_owner: bool,
+}
+
+fn carries_lending_view(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident(found, _) => found == name,
+        Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Paren(inner, _)
+        | Expr::Spread(inner, _) => carries_lending_view(inner, name),
+        Expr::ListLit(items, _) => items.iter().any(|item| carries_lending_view(item, name)),
+        Expr::TupleLit(fields, _, _) => fields
+            .iter()
+            .any(|(_, value)| carries_lending_view(value, name)),
+        Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
+            carries_lending_view(key, name) || carries_lending_view(value, name)
+        }),
+        Expr::StructLit { fields, .. } => fields
+            .iter()
+            .any(|(_, _, value)| carries_lending_view(value, name)),
+        Expr::TypedLit { .. }
+        | Expr::If { .. }
+        | Expr::OrFallback { .. } => crate::Sema::Captures::expr_refs_name(expr, name),
+        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
+            crate::AST::EnumLitArg::Positional(value) => carries_lending_view(value, name),
+            crate::AST::EnumLitArg::Named { expr, .. } => carries_lending_view(expr, name),
+        }),
+        Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Present(inner, _) => {
+            carries_lending_view(inner, name)
+        }
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1286,36 +1317,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn collect_if_stmt_accesses(
-        &self,
-        branch: &crate::AST::IfStmt,
-        mode: AccessWalkMode,
-        bound: &HashSet<String>,
-        out: &mut Vec<EvaluatedAccess>,
-    ) {
-        self.collect_evaluated_expr_accesses(&branch.cond, mode, bound, out);
-        let mut then_bound = bound.clone();
-        if let Expr::PatternTest { pattern, .. } = &branch.cond {
-            Self::bind_pattern_names(pattern, &mut then_bound);
-        }
-        self.collect_evaluated_stmt_accesses(
-            &branch.then_body,
-            mode,
-            &mut then_bound,
-            out,
-        );
-        match &branch.else_branch {
-            Some(ElseBranch::ElseIf(branch)) => {
-                self.collect_if_stmt_accesses(branch, mode, bound, out);
-            }
-            Some(ElseBranch::Else(body)) => {
-                let mut else_bound = bound.clone();
-                self.collect_evaluated_stmt_accesses(body, mode, &mut else_bound, out);
-            }
-            None => {}
-        }
-    }
-
     fn collect_evaluated_stmt_accesses(
         &self,
         body: &[Stmt],
@@ -1347,9 +1348,6 @@ impl<'a> Checker<'a> {
                 }
                 Stmt::BreakValue(expr, _) | Stmt::BreakLabelValue(_, _, expr, _) => {
                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
-                }
-                Stmt::If(branch) => {
-                    self.collect_if_stmt_accesses(branch, mode, bound, out);
                 }
                 Stmt::While { cond, body, .. } => {
                     self.collect_evaluated_expr_accesses(cond, mode, bound, out);
@@ -1726,6 +1724,7 @@ impl<'a> Checker<'a> {
     /// Lambda bodies run later, but constructing a lambda evaluates its free
     /// captures now. Only nonescaping FnMut closures retain capture borrows.
     pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
+        self.report_lending_view_escape(expr, "be passed to a call");
         let mut accesses = Vec::new();
         self.collect_evaluated_expr_accesses(
             expr,
@@ -1742,6 +1741,25 @@ impl<'a> Checker<'a> {
             }
         }
         self.record_call_result_views(expr);
+    }
+
+    pub(crate) fn report_lending_view_escape(&mut self, expr: &Expr, action: &str) {
+        let lent = self
+            .lending_view_loop_vars
+            .iter()
+            .find(|name| carries_lending_view(expr, name))
+            .cloned();
+        let Some(name) = lent else {
+            return;
+        };
+        self.diags.push(Diagnostic::error(
+            "E0212",
+            format!("the lent mutable view `{name}` cannot {action}"),
+            "the view is valid only while the current iteration or callback invocation is active"
+                .to_string(),
+            "use the view inside that scope, and keep only owned values outside it".to_string(),
+            Some(expr.span()),
+        ));
     }
 
     /// Receiver evaluation is a read even before method resolution. This catches
@@ -5526,6 +5544,7 @@ pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
 
 /// D-LIN1 (ratified 2026-06-21): E0141 — a `#SingleUse` value is consumed on one
 /// branch of an `if` but not the other, so some paths leave it unused.
+#[allow(dead_code)]
 pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0141",

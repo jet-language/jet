@@ -1598,7 +1598,7 @@ fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
         &file,
         r#"fn find(xs: [Int]) => Int {
     found :: loop {
-        loop x; xs {
+        loop x, xs {
             if x > 2 break(found, x)
         }
         break -1
@@ -1666,7 +1666,7 @@ fn counted_init_exit() => Int {
 
 fn counted_step_exit() => Int {
     result :: loop {
-        loop i := 0; i < 2; i = (loop {
+        loop i := 0, i < 2, i = (loop {
             break(result, 15)
             break 0
         }) {}
@@ -1688,8 +1688,8 @@ fn value_if_exit() => Int {
 
 fn run() {
     xs :: [Int].{ 1, 2, 3, 4 }
-    doubled :: loop x; xs -> x * 2
-    outer :: loop x; xs {
+    doubled :: loop x, xs -> x * 2
+    outer :: loop x, xs {
         ignored :: loop {
             if x == 1 next(outer)
             if x == 2 break(outer)
@@ -3031,18 +3031,18 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
 
 #[test]
 fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
-    let counted = "fn run() {\n    loop i := 0; i < 4; i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
+    let counted = "fn run() {\n    loop i := 0, i < 4, i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {
         let native = run_cranelift_without_fallback(counted, "counted_next");
         assert_eq!(native.stdout, "0\n2\n3\n");
     }
 
-    let stride = "fn run() {\n    xs := [0, 1, 2, 3, 4]\n    loop x; xs; 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n";
+    let stride = "fn run() {\n    xs := [0, 1, 2, 3, 4]\n    loop x, xs, 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {
         let native = run_cranelift_without_fallback(stride, "source_stride_next");
         assert_eq!(native.stdout, "0\n2\n4\n");
 
-        let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x; xs; stride {\n        print(x)\n    }\n}\n";
+        let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x, xs, stride {\n        print(x)\n    }\n}\n";
         let RunOutcome::Problems(diags) =
             run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull")
         else {
@@ -3074,7 +3074,7 @@ fn run() {
     print(bands[0].start)
     print(bands[0].contains(3))
     total := 0
-    loop n; copied {
+    loop n, copied {
         total += n
     }
     print(total)
@@ -3118,7 +3118,7 @@ fn run() {
     print(band.contains(4))
     print((5..2).contains(3))
     total := 0
-    loop n; band {
+    loop n, band {
         total += n
     }
     print(total)
@@ -5684,11 +5684,11 @@ fn closes() => Stream<Int> {
     return
 }
 fn run() {
-    loop value; stopped() {
+    loop value, stopped() {
         print(value)
         break
     }
-    loop value; closes() { print(value) }
+    loop value, closes() { print(value) }
     print("done")
 }
 "#,
@@ -6005,12 +6005,12 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     }
 
     let source = r#"
-comptime f32_nan = F32.NAN
-comptime f32_inf = F32.INFINITY
-comptime f32_neg_inf = F32.NEG_INFINITY
-comptime f64_nan = Float.NAN
-comptime f64_inf = Float.INFINITY
-comptime f64_neg_inf = Float.NEG_INFINITY
+#Known f32_nan :: F32.NAN
+#Known f32_inf :: F32.INFINITY
+#Known f32_neg_inf :: F32.NEG_INFINITY
+#Known f64_nan :: Float.NAN
+#Known f64_inf :: Float.INFINITY
+#Known f64_neg_inf :: Float.NEG_INFINITY
 
 fn run() {
     print(f32_nan)
@@ -6852,7 +6852,7 @@ fn resident_jit_safe_labeled_loop_control() {
     }
     let src = r#"
 fn run() {
-    outer :: loop i := 0; i < 2; i += 1 {
+    outer :: loop i := 0, i < 2, i += 1 {
         loop {
             if i == 0 {
                 next(outer)
@@ -6877,7 +6877,7 @@ fn resident_jit_named_or_fallback_loop_control() {
     let src = r#"
 fn run() {
     values := [7]
-    outer :: loop i := 0; i < 2; i += 1 {
+    outer :: loop i := 0, i < 2, i += 1 {
         loop {
             value :: values.get(1 - i) ?? next(outer)
             print(value)
@@ -8004,11 +8004,11 @@ fn cranelift_matches_variadic_fixed_writeback() {
     );
 }
 
-/// c139 M3+: counted `loop init; cond; step` with compound assign.
+/// c139 M3+: counted `loop init, cond, step` with compound assign.
 #[test]
 fn cranelift_covers_counted_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    sum := 0\n    loop i := 0; i < 5; i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
+        "fn run() {\n    sum := 0\n    loop i := 0, i < 5, i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
         "counted_loop",
     );
 }
@@ -8026,7 +8026,7 @@ fn cranelift_covers_while_loop() {
 #[test]
 fn cranelift_covers_range_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    loop n; 1..3 {\n        print(n)\n    }\n}\n",
+        "fn run() {\n    loop n, 1..3 {\n        print(n)\n    }\n}\n",
         "range_loop",
     );
 }

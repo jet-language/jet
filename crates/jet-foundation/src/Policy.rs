@@ -423,6 +423,28 @@ impl RuleSignature {
         self,
         marker: &crate::AST::Marker,
     ) -> Option<Vec<RuleArgumentBinding>> {
+        // `#Meta` has dedicated duplicate-field diagnostics (E0346). Preserve
+        // repeated known labels here so the semantic checker can teach the
+        // actual mistake instead of collapsing it into the generic E0930.
+        if marker.name == crate::Syntax::ATTR_META
+            && marker.arg_labels.iter().all(Option::is_some)
+        {
+            return marker
+                .arg_labels
+                .iter()
+                .enumerate()
+                .map(|(source_index, label)| {
+                    let name = &label.as_ref()?.0;
+                    let parameter_index =
+                        self.params.iter().position(|parameter| parameter.name == name)?;
+                    Some(RuleArgumentBinding {
+                        source_index,
+                        parameter_index: Some(parameter_index),
+                        ty: self.params[parameter_index].ty,
+                    })
+                })
+                .collect();
+        }
         let labels = marker
             .args
             .iter()
@@ -673,6 +695,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Env", sig!(param!("name", String)), FIELD_SITE, Call),
     rule!("Persist", sig!(), DECLARATION_SITE, Bare),
     rule!("Track", sig!(), DECLARATION_SITE, Bare),
+    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement], Prefix),
     rule!("Local", sig!(), DECLARATION_SITE, Bare),
     rule!("Shared", sig!(), DECLARATION_SITE, Bare),
     rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant], Call),

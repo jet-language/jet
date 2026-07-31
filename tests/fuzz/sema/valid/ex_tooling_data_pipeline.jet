@@ -17,7 +17,7 @@ fn must_stay_deferred(ticket: Ticket) => Bool {
     return false
 }
 
-fn no_minutes() => (Float?) = None
+fn no_minutes() => Float? = None
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
@@ -47,23 +47,17 @@ fn run() {
     print(data.count(planned))
     print(data.count(planned_rows))
     print(data.plan(planned)[2])
-    loop ticket; planned_rows {
-        print("planned: {ticket.team} {ticket.minutes}")
-    }
+    loop ticket, planned_rows { print("planned: {ticket.team} {ticket.minutes}") }
     print(data.missing_count(series))
     print(data.bar_text(groups) ?? panic("bar"))
-    loop pair; joined {
-        print("join: {pair.left.team} -> {pair.right.owner}")
-    }
-    loop pair; left {
+    loop pair, joined { print("join: {pair.left.team} -> {pair.right.owner}") }
+    loop pair, left {
         if pair.right == {
             .Val(budget) -> { print("left: {pair.left.team} -> {budget.owner}") }
             .None -> { print("left: {pair.left.team} -> none") }
         }
     }
-    loop cell; pivot {
-        print("{cell.row_key}|{cell.column_key} count={cell.count} sum={cell.sum}")
-    }
+    loop cell, pivot { print("{cell.row_key}|{cell.column_key} count={cell.count} sum={cell.sum}") }
     print(summary.count)
     print(summary.median)
     print(rolling[2])

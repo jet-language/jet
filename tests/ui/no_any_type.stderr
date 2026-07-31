@@ -1,7 +1,15 @@
-Error [E0112]: `print` doesn't know how to show `Any`
-  --> tests/ui/no_any_type.jet:3:11
+Error [E0350]: Jet does not have an `Any` type
+  --> tests/ui/no_any_type.jet:1:16
     |
-  3 |     print(value)
-    |           ^^^^^
- Why: print shows values that have a display
- Fix: print one of its parts instead
+  1 | fn show(value: Any) {
+    |                ^^^
+ Why: a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data
+ Fix: replace `Any` with the specific mechanism for this value
+
+Error [E0112]: `show` wants `Any` for argument 1, but this is Int (a whole number)
+  --> tests/ui/no_any_type.jet:6:10
+    |
+  6 |     show(1)
+    |          ^
+ Why: every argument must match its parameter's type
+ Fix: use `Any` here

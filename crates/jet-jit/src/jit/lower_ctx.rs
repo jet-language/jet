@@ -3,7 +3,7 @@ use cranelift_codegen::ir::{
     types, Block, Endianness, InstBuilder, MemFlags, StackSlot, StackSlotData, StackSlotKind,
     TrapCode, Value,
 };
-use cranelift_frontend::{FunctionBuilder, Variable};
+use cranelift_frontend::{FunctionBuilder, Switch, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
@@ -107,6 +107,26 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) in_lexical_exit: bool,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
+}
+
+fn mixed_switch_int_literal(cond: &TExpr) -> Option<i64> {
+    match &cond.kind {
+        TExprKind::Binary { rhs, .. } => match rhs.kind {
+            TExprKind::IntLit(value, _) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn mixed_switch_bool_literal(cond: &TExpr) -> Option<bool> {
+    match &cond.kind {
+        TExprKind::Binary { rhs, .. } => match rhs.kind {
+            TExprKind::BoolLit(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 #[derive(Clone)]
@@ -2649,6 +2669,124 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(exit)[0])
     }
 
+    fn lower_mixed_switch(
+        &mut self,
+        subject: &TExpr,
+        class: TIR::BranchClass,
+        arms: &[(TExpr, Vec<TStmt>)],
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String> {
+        let subject_value = self.lower_expr(subject)?;
+        let saved_subject = self
+            .switch_subject
+            .replace((subject_value, subject.ty.clone()));
+        let merge = self.b.create_block();
+        let mut any_reaches_merge = false;
+
+        match class {
+            TIR::BranchClass::Bool2 => {
+                let true_body = arms
+                    .iter()
+                    .find(|(cond, _)| mixed_switch_bool_literal(cond) == Some(true))
+                    .map(|(_, body)| body.as_slice())
+                    .ok_or("jit bool branch is missing true arm")?;
+                let false_body = arms
+                    .iter()
+                    .find(|(cond, _)| mixed_switch_bool_literal(cond) == Some(false))
+                    .map(|(_, body)| body.as_slice())
+                    .ok_or("jit bool branch is missing false arm")?;
+                let true_block = self.b.create_block();
+                let false_block = self.b.create_block();
+                self.b
+                    .ins()
+                    .brif(subject_value, true_block, &[], false_block, &[]);
+                for (block, body) in [(true_block, true_body), (false_block, false_body)] {
+                    self.b.switch_to_block(block);
+                    self.b.seal_block(block);
+                    self.lower_stmts_scoped(body)?;
+                    if !self.dead {
+                        self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
+                    }
+                }
+            }
+            TIR::BranchClass::DenseInt | TIR::BranchClass::SparseInt => {
+                let fallback = self.b.create_block();
+                let mut switch = Switch::new();
+                let mut blocks = Vec::with_capacity(arms.len());
+                for (cond, body) in arms {
+                    let value = mixed_switch_int_literal(cond)
+                        .ok_or("jit integer branch contains a non-integer arm")?;
+                    let block = self.b.create_block();
+                    switch.set_entry(value as u64 as u128, block);
+                    blocks.push((block, body.as_slice()));
+                }
+                switch.emit(self.b, subject_value, fallback);
+                for (block, body) in blocks {
+                    self.b.switch_to_block(block);
+                    self.b.seal_block(block);
+                    self.lower_stmts_scoped(body)?;
+                    if !self.dead {
+                        self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
+                    }
+                }
+                self.b.switch_to_block(fallback);
+                self.b.seal_block(fallback);
+                self.dead = false;
+                if let Some(body) = else_body {
+                    self.lower_stmts_scoped(body)?;
+                }
+                if !self.dead {
+                    self.b.ins().jump(merge, &[]);
+                    any_reaches_merge = true;
+                }
+            }
+            TIR::BranchClass::Enum
+            | TIR::BranchClass::Ordered
+            | TIR::BranchClass::Mixed => {
+                let mut tail = self.b.create_block();
+                self.b.ins().jump(tail, &[]);
+                for (cond, body) in arms {
+                    self.b.switch_to_block(tail);
+                    self.b.seal_block(tail);
+                    let cond_val = self.lower_expr(cond)?;
+                    let then_block = self.b.create_block();
+                    let next = self.b.create_block();
+                    self.b.ins().brif(cond_val, then_block, &[], next, &[]);
+                    self.b.switch_to_block(then_block);
+                    self.b.seal_block(then_block);
+                    self.lower_stmts_scoped(body)?;
+                    if !self.dead {
+                        self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
+                    }
+                    tail = next;
+                }
+                self.b.switch_to_block(tail);
+                self.b.seal_block(tail);
+                self.dead = false;
+                if let Some(body) = else_body {
+                    self.lower_stmts_scoped(body)?;
+                }
+                if !self.dead {
+                    self.b.ins().jump(merge, &[]);
+                    any_reaches_merge = true;
+                }
+            }
+        }
+
+        if any_reaches_merge {
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            self.dead = false;
+        } else {
+            self.dead = true;
+        }
+        self.switch_subject = saved_subject;
+        Ok(())
+    }
+
     /// Exhaustive match on every `TStmt` variant (`TIR/mod.rs`) — the JIT half
     /// of the R12 two-consumer contract; `TIR/emit/statements.rs::emit_tir_stmt`
     /// is the AOT half. Control-flow variants (`If`/`Loop`/`While`/`CountedLoop`/
@@ -4290,54 +4428,11 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::MixedSwitch {
                 subject,
+                class,
                 arms,
                 else_body,
             } => {
-                let subject_value = self.lower_expr(subject)?;
-                let saved_subject = self
-                    .switch_subject
-                    .replace((subject_value, subject.ty.clone()));
-                let merge = self.b.create_block();
-                let mut tail = self.b.create_block();
-                self.b.ins().jump(tail, &[]);
-                // Unlike `EnumMatch`, a missing `else_body` here is a genuine live
-                // fall-through (no exhaustiveness proof backs this shape) — see the
-                // `TStmt::If` absent-else handling this mirrors.
-                let mut any_reaches_merge = false;
-                for (cond, body) in arms {
-                    self.b.switch_to_block(tail);
-                    self.b.seal_block(tail);
-                    let cond_val = self.lower_expr(cond)?;
-                    let then_block = self.b.create_block();
-                    let next = self.b.create_block();
-                    self.b.ins().brif(cond_val, then_block, &[], next, &[]);
-                    self.b.switch_to_block(then_block);
-                    self.b.seal_block(then_block);
-                    self.lower_stmts_scoped(body)?;
-                    if !self.dead {
-                        self.b.ins().jump(merge, &[]);
-                        any_reaches_merge = true;
-                    }
-                    tail = next;
-                }
-                self.b.switch_to_block(tail);
-                self.b.seal_block(tail);
-                self.dead = false;
-                if let Some(body) = else_body {
-                    self.lower_stmts_scoped(body)?;
-                }
-                if !self.dead {
-                    self.b.ins().jump(merge, &[]);
-                    any_reaches_merge = true;
-                }
-                if any_reaches_merge {
-                    self.b.switch_to_block(merge);
-                    self.b.seal_block(merge);
-                    self.dead = false;
-                } else {
-                    self.dead = true;
-                }
-                self.switch_subject = saved_subject;
+                self.lower_mixed_switch(subject, *class, arms, else_body.as_deref())?;
             }
             TStmt::TaskGroup { group, body } => {
                 let host = self
@@ -4723,7 +4818,7 @@ impl LowerCtx<'_, '_> {
                     let _ = self.txn_stack.pop();
                 }
             }
-            TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),
+            TStmt::LineMarker(_) | TStmt::SourceSpan(_) => {}
         }
         Ok(())
     }
@@ -6492,6 +6587,11 @@ impl LowerCtx<'_, '_> {
                     record_type_key(&subject_ty).ok_or("jit switch subject field type")?;
                 self.lower_record_field(handle, &type_name, field, ty)
             }
+            THostCall::SwitchSubjectValue => self
+                .switch_subject
+                .as_ref()
+                .map(|(value, _)| *value)
+                .ok_or_else(|| "jit switch subject value outside switch".to_string()),
             THostCall::Helper { helper, args } if helper.ends_with("jet_context") => {
                 let recv = match args.first() {
                     Some(THostArg::Expr(e)) => self.lower_expr(e)?,
@@ -18857,6 +18957,7 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         match op {
+            TClosureOp::EditDisjoint => self.lower_edit_disjoint(recv, args),
             TClosureOp::Map | TClosureOp::MapMut | TClosureOp::OptionMap | TClosureOp::ViewMap => {
                 if let Type::Option(inner) = &recv.ty {
                     return self.lower_option_map(recv, args, inner);
@@ -18887,6 +18988,96 @@ impl LowerCtx<'_, '_> {
             TClosureOp::CountBy => self.lower_iter_count_by(recv, args),
             _ => Err("jit closure method unsupported".to_string()),
         }
+    }
+
+    fn lower_edit_disjoint(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        let Type::List(elem_ty) = &recv.ty else {
+            return Err("jit edit_disjoint receiver unsupported".to_string());
+        };
+        let targets = args
+            .first()
+            .ok_or_else(|| "jit edit_disjoint indexes missing".to_string())?;
+        let lambda = args
+            .get(1)
+            .ok_or_else(|| "jit edit_disjoint callback missing".to_string())?;
+        let TExprKind::Lambda(lambda) = &lambda.kind else {
+            return Err("jit edit_disjoint callback unsupported".to_string());
+        };
+        if !lambda.prep.is_empty() || lambda.source_params.len() != 2 {
+            return Err("jit edit_disjoint callback unsupported".to_string());
+        }
+
+        let recv_val = self.lower_expr(recv)?;
+        let targets = self.lower_expr(targets)?;
+        let disjoint = self
+            .module
+            .declare_func_in_func(self.host.coll.get_disjoint_write, self.b.func);
+        let call = self.b.ins().call(disjoint, &[recv_val, targets]);
+        let result = self.b.inst_results(call)[0];
+
+        let success = self.b.create_block();
+        let failure = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let is_ok_host = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let is_ok_call = self.b.ins().call(is_ok_host, &[result]);
+        let is_ok = self.b.inst_results(is_ok_call)[0];
+        let zero = self.b.ins().iconst(types::I8, 0);
+        let ok = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero);
+        self.b.ins().brif(ok, success, &[], failure, &[]);
+
+        self.b.switch_to_block(failure);
+        self.b.seal_block(failure);
+        self.b.ins().jump(merge, &[result]);
+
+        self.b.switch_to_block(success);
+        self.b.seal_block(success);
+        let view_ty = Type::Apply {
+            name: "ViewMut".to_string(),
+            args: vec![(**elem_ty).clone()],
+        };
+        let views_ty = Type::List(Box::new(view_ty.clone()));
+        let views = self.result_payload(result, &views_ty)?;
+        let get = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let zero_index = self.b.ins().iconst(types::I64, 0);
+        let left_call = self.b.ins().call(get, &[views, zero_index, line]);
+        let left = self.b.inst_results(left_call)[0];
+        self.emit_trap_check()?;
+        let one_index = self.b.ins().iconst(types::I64, 1);
+        let right_call = self.b.ins().call(get, &[views, one_index, line]);
+        let right = self.b.inst_results(right_call)[0];
+        self.emit_trap_check()?;
+        let left_place = TIR::local_place(&lambda.source_params[0]);
+        let right_place = TIR::local_place(&lambda.source_params[1]);
+        self.with_bound_local(&left_place, view_ty.clone(), left, |this| {
+            this.with_bound_local(&right_place, view_ty, right, |this| {
+                match &lambda.executable {
+                    TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
+                    TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
+                }
+            })
+        })?;
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let unit = self.b.ins().iconst(types::I64, 0);
+        let make_result = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let ok_call = self.b.ins().call(make_result, &[tag, unit]);
+        let ok_result = self.b.inst_results(ok_call)[0];
+        self.b.ins().jump(merge, &[ok_result]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
     }
 
     fn lower_iter_count_by(

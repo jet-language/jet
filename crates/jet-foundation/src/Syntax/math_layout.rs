@@ -521,10 +521,8 @@ pub const KW_TAG: &str = "tag";
 /// S55 (ratified M9): opt-in built-in derive line in a type body.
 pub const KW_DERIVE: &str = "derive";
 
-/// S57 (ratified M9.5): compile-time constant binding keyword.
-/// Also used in `comptime if` (D-WHEN1, ratified 2026-06-19) — the two-word
-/// sequence `comptime if` is parsed as a compile-time conditional; no new
-/// keyword is required. The unselected arm gets name-resolution only (D-WHEN2).
+/// D-VERDICT-1308-1: retired compile-time spelling. The lexer retains a token
+/// only so the parser can emit E0374 and offer `#Known`; this is not live Jet.
 pub const KW_COMPTIME: &str = "comptime";
 
 /// S28: foreign trait spellings for teaching error E0022.

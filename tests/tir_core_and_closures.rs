@@ -210,22 +210,22 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
     for (method, callback, call) in [
         (
             "map",
-            "fn callback(n: Int) => Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"map-low\") }\n    if n == 65 { require(false, \"map-high\") }\n    return n\n}\n",
+            "fn callback(n: Int) => Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } require(false, \"map-low\") }\n    if n == 65 { require(false, \"map-high\") }\n    return n\n}\n",
             "ignored :: values.para_map(callback)",
         ),
         (
             "filter",
-            "fn callback(n: Int) => Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"filter-low\") }\n    if n == 65 { require(false, \"filter-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) => Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } require(false, \"filter-low\") }\n    if n == 65 { require(false, \"filter-high\") }\n    return true\n}\n",
             "ignored :: values.para_filter(callback)",
         ),
         (
             "partition",
-            "fn callback(n: Int) => Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"partition-low\") }\n    if n == 65 { require(false, \"partition-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) => Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } require(false, \"partition-low\") }\n    if n == 65 { require(false, \"partition-high\") }\n    return true\n}\n",
             "ignored :: values.para_partition(callback)",
         ),
         (
             "fold",
-            "fn step(acc: Int, n: Int) => Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"fold-low\") }\n    if n == 65 { require(false, \"fold-high\") }\n    return acc + n\n}\n",
+            "fn step(acc: Int, n: Int) => Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } require(false, \"fold-low\") }\n    if n == 65 { require(false, \"fold-high\") }\n    return acc + n\n}\n",
             "ignored :: values.para_fold(() => 0, step, (left: Int, right: Int) => left + right)",
         ),
     ] {

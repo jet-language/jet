@@ -679,10 +679,10 @@ fn run() {}
 #[test]
 fn semindex_unified_loop_slots_and_state_scope_are_structural() {
     let src = r#"fn run() {
-    loop item; [1, 2, 3]; 2 {
+    loop item, [1, 2, 3], 2 {
         print(item)
     }
-    loop cursor := 0; cursor < 1; cursor += 1 {
+    loop cursor := 0, cursor < 1, cursor += 1 {
         print(cursor)
     }
 }
@@ -710,7 +710,7 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
 
     let out_of_scope = jet::check_document(
         "state_scope.jet",
-        "fn run() {\n    loop cursor := 0; cursor < 1; cursor += 1 {}\n    print(cursor)\n}\n",
+        "fn run() {\n    loop cursor := 0, cursor < 1, cursor += 1 {}\n    print(cursor)\n}\n",
     );
     assert!(
         out_of_scope.iter().any(|diagnostic| {
@@ -909,7 +909,7 @@ struct Widget {
     title: String
 
     fn label(self) => String {
-        return self.title
+        return ~self.title
     }
 }
 
@@ -941,13 +941,13 @@ fn run() {
     assert!(signatures.iter().any(|s| s == "title:title: String"));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("label:fn label() => String")));
+        .any(|s| s.contains("label:fn label() =[]=> String")), "{signatures:?}");
     assert!(signatures
         .iter()
-        .any(|s| s.contains("size:fn size() => Int")));
+        .any(|s| s.contains("size:fn size() =[]=> Int")));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("render:fn render() => String")));
+        .any(|s| s.contains("render:fn render() =[]=> String")));
     let json = dossier.to_json();
     assert!(json.contains("\"target\":\"Widget\""));
     assert!(json.contains("\"trait_impl\""));
@@ -961,7 +961,7 @@ fn semindex_dossier_bypass_facts() {
     // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
     let src = r#"
 struct Invoice {
-    #[allow(float_money)]
+    #allow(float_money)
     price: Float,
 }
 

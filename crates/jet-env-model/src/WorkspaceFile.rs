@@ -160,7 +160,7 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
     // every top-level `fn` (callable) and every top-level `const`/`comptime`
     // binding (referenceable), evaluated in source order so a later binding can
     // build on an earlier one. This is what lets `members:` compose a sibling
-    // `comptime packages = […]` or call a local helper `fn`, rather than being
+    // `#Known packages :: […]` or call a local helper `fn`, rather than being
     // limited to inline literals + the `find("./dir")` fast path.
     let funcs: HashMap<String, &Func> = program
         .items
@@ -495,7 +495,7 @@ module workspace {
     fn members_references_sibling_comptime_const() {
         // Slice A: a `members:` expression can name a top-level `comptime`
         // binding declared in the same file — not just inline literals.
-        let src = "comptime pkgs = [\"./packages/hello\", \"./packages/ranker\"]\n\
+        let src = "#Known pkgs :: [\"./packages/hello\", \"./packages/ranker\"]\n\
                    module workspace {\n    members: pkgs\n}\n";
         let plan = eval(src);
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
@@ -505,7 +505,7 @@ module workspace {
     #[test]
     fn members_composes_comptime_const_with_string_ops() {
         // A binding can be composed inside the list expression.
-        let src = "comptime base = \"./workspace-packages\"\n\
+        let src = "#Known base :: \"./workspace-packages\"\n\
                    module workspace {\n    members: [\"{base}/a\", \"{base}/b\"]\n}\n";
         let plan = eval(src);
         let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();

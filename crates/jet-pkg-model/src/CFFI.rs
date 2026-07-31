@@ -206,7 +206,10 @@ pub fn rustc_link_args_for_target(
 /// `Item::CModule`s from user files, merges them, appends synthetic modules,
 /// and resolves C `use` forms. Returns the artifacts, or diagnostics.
 pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
-    let mut diags = Vec::new();
+    let mut diags = duplicate_use_form_diagnostics(bundle);
+    if !diags.is_empty() {
+        return Err(diags);
+    }
 
     // 0. Load any generated bindgen cache files for libraries this program
     //    brings in. Cache files (`.jet/bindings/c/<lib>.jet`) are not `use`d
@@ -401,32 +404,22 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         return Err(diags);
     }
 
-    // 3. Resolve each file's C `use` forms (E3204 on duplicate forms per lib).
+    // 3. Resolve each file's C `use` forms. Duplicate forms were rejected
+    //    before cache discovery so a missing header cannot mask E3204.
     //    A `use` of a lib with no declared surface is allowed — the bind backend
     //    (Phase 3) would generate it; for now an empty synthetic module is made
     //    on demand so the alias still resolves and link discovery still runs.
     let n_user_modules = bundle.modules.len();
     for idx in 0..n_user_modules {
-        // Track which form (module vs header) first bound each lib in this file.
-        let mut seen_form: HashMap<String, (bool, String)> = HashMap::new(); // lib -> (is_header, header)
         let imports = bundle.modules[idx].imports.clone();
         for imp in &imports {
-            let (lib, is_header, header) = if let Some(lib) = c_module_lib(imp) {
-                (lib, false, String::new())
-            } else if let Some((header, lib)) = c_header_lib(imp) {
-                (lib, true, header)
+            let lib = if let Some(lib) = c_module_lib(imp) {
+                lib
+            } else if let Some((_, lib)) = c_header_lib(imp) {
+                lib
             } else {
                 continue;
             };
-            if let Some((prev_header, _)) = seen_form.get(&lib) {
-                if *prev_header != is_header {
-                    let h = if is_header { &header } else { "" };
-                    diags.push(e3204(&lib, h, imp.span));
-                    continue;
-                }
-            } else {
-                seen_form.insert(lib.clone(), (is_header, header.clone()));
-            }
 
             let target_idx = match lib_to_idx.get(&lib) {
                 Some(&i) => i,
@@ -477,6 +470,31 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         return Err(diags);
     }
     Ok(cffi)
+}
+
+fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for module in &bundle.modules {
+        let mut seen: HashMap<String, (bool, String)> = HashMap::new();
+        for import in &module.imports {
+            let (lib, is_header, header) = if let Some(lib) = c_module_lib(import) {
+                (lib, false, String::new())
+            } else if let Some((header, lib)) = c_header_lib(import) {
+                (lib, true, header)
+            } else {
+                continue;
+            };
+            if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
+                if *previous_is_header != is_header {
+                    let header = if is_header { &header } else { previous_header };
+                    diagnostics.push(e3204(&lib, header, import.span));
+                }
+            } else {
+                seen.insert(lib, (is_header, header));
+            }
+        }
+    }
+    diagnostics
 }
 
 /// Discover and parse generated bindgen cache files for every C library this

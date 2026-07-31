@@ -122,7 +122,7 @@ pub fn os_target_unmatched_call(
     )
 }
 
-/// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `comptime if … == { }` OS
+/// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `#Known if … == { }` OS
 /// dispatch whose subject is not `build.os`. The comptime dispatch that reaches
 /// OS-gated `impl`s only branches on the compiler-known `build.os` value.
 pub fn os_target_build_context(
@@ -132,19 +132,19 @@ pub fn os_target_build_context(
         "E-OSTARGET-BUILD-CONTEXT",
         format!(
             "a `{} {} … == {{ … }}` dispatch branches on `{}.{}`",
-            Syntax::KW_COMPTIME,
+            format!("{}{}", Syntax::ATTR_PREFIX, Syntax::ATTR_KNOWN),
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
         ),
         format!(
-            "`{}.{}` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
+            "`{}.{}` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
         ),
         format!(
             "write `{} {} {}.{} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
-            Syntax::KW_COMPTIME,
+            format!("{}{}", Syntax::ATTR_PREFIX, Syntax::ATTR_KNOWN),
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
@@ -157,7 +157,7 @@ pub fn os_target_build_context(
     )
 }
 
-/// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `comptime if
+/// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `#Known if
 /// build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.MacOS`/
 /// `.Windows`), or repeats one.
 pub fn os_target_dispatch_arm(
@@ -188,7 +188,7 @@ pub fn os_target_dispatch_arm(
     )
 }
 
-/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `comptime if build.os ==
+/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `#Known if build.os ==
 /// { }` dispatch's arms leave some target OS uncovered and there is no `else`.
 /// Build-independent: enforced regardless of the current `--target` so the same
 /// source compiles (or fails) identically on every platform.

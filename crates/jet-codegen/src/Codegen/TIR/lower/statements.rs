@@ -13,7 +13,6 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_forin_collection;
-use crate::Codegen::TIR::lower_if;
 use crate::Codegen::TIR::lower::lower_string_view_init;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
@@ -37,11 +36,12 @@ use crate::Syntax;
 use std::collections::HashMap;
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 2 } else { 1 });
+    let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
     let mut split_views = split_view_plan(stmts, cx);
     let mut index = 0;
     while index < stmts.len() {
         if let Some(view) = split_views.remove(&index) {
+            out.push(TStmt::SourceSpan(stmts[index].span()));
             if cx.debug_linemap {
                 out.push(TStmt::LineMarker(view.candidate.line));
             }
@@ -80,6 +80,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             continue;
         }
         let s = &stmts[index];
+        out.push(TStmt::SourceSpan(s.span()));
         if cx.debug_linemap {
             let line = crate::Diagnostics::span_line_col(&cx.src, s.span().start).0;
             out.push(TStmt::LineMarker(line));
@@ -679,22 +680,22 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
                 };
             }
-            // c109 (S57/M9.5): a comptime LOCAL `comptime name = expr`. The AST `emit_let`
+            // c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr`. The AST `emit_let`
             // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
             // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
             // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
             // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
-            // A comptime local inside a `comptime { … }` block is evaluated by
+            // A comptime local inside a `#Known { … }` block is evaluated by
             // the interpreter itself, so sema never pre-resolves `b.ct`. There
             // the binding is an ordinary one whose init runs now; only a
             // pre-resolved value becomes literal data.
-            if b.is_comptime && b.ct.is_some() {
+            if b.ct.is_some() {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),
-                    kind: lower_comptime_scalar(b.ct.as_ref()).unwrap_or_else(|| {
+                    kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()).unwrap_or_else(|| {
                         b.ct
                             .as_ref()
                             .map(|v| TExprKind::CtLit(v.clone()))
@@ -1168,7 +1169,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             receiver, method, ..
         }) if method == Syntax::METHOD_DROP => TStmt::ExprStmt(lower_expr(receiver, cx, env)),
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
-        Stmt::If(ifs) => lower_if(ifs, cx, env),
         // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
         // lower on a cloned env so bindings inside don't leak out.
         Stmt::Loop { body, label, .. } => {
@@ -1395,7 +1395,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             else_body,
             span,
         } => lower_switch(subject, arms, else_body, *span, cx, env),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
+        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.

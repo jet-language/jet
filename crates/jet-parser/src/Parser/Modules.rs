@@ -857,6 +857,7 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
+            TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
             TokKind::KwUse => {
                 let span = self.peek().span;
                 self.sync_stmt();

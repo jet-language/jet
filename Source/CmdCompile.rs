@@ -673,6 +673,38 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
     exit(status.code().unwrap_or(ExitCodes::OK));
 }
 
+/// D-WEBAPP-SERVE1=D: `jet dev` serves a conventional `fn app() => WebApp`
+/// through the same native app entry as `jet run`, adding only the reload
+/// response flag. A user-authored `fn dev()` is selected before this helper.
+pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<u16>) {
+    let _src = match fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(_) => {
+            eprintln!("error: can't find the file `{file}`");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let dev_file = fs::canonicalize(file)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| file.to_string());
+    let jet_bin = std::env::current_exe().unwrap_or_else(|_| {
+        eprintln!("error: couldn't locate the running Jet executable");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let mut command = Command::new(jet_bin);
+    command.arg("run").arg(file);
+    command.env("JET_WEBAPP_DEV", "1");
+    command.env("JET_DEV_FILE", dev_file);
+    if let Some(port) = port {
+        command.env("JET_WEBAPP_PORT", port.to_string());
+    }
+    let status = command.status().unwrap_or_else(|error| {
+        eprintln!("error: couldn't run the web app: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    exit(status.code().unwrap_or(ExitCodes::OK));
+}
+
 /// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
 /// the named `#Job fn` as the entry via a synthetic `fn run { task(…) }`
 /// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps

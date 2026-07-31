@@ -1,7 +1,7 @@
-Error [E0953]: your comptime code stopped the build
-  --> tests/ui/view_mut_bounds_interpreter.jet:1:1
+Error [E3001]: can't view 1 items from 2 to 2 (inclusive)
+  --> tests/ui/view_mut_bounds_interpreter.jet:4:5
     |
-  1 | // @dev_interpreter
-    | ^
- Why: while computing this value at compile time, the program panicked: can't view 1 items from 2 to 2 (inclusive)
- Fix: this is the sanctioned way to validate at compile time — fix the input the check rejects
+  4 |     outside :: [&values[0..0], &values[2..2]]
+    |     ^^^^^^^
+ Why: the requested view is outside the list at runtime
+ Fix: use bounds between 0 and 1, with the end after the start

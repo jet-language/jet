@@ -1380,13 +1380,6 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
             expr_handle_escape(e, handle)
         }
-        Stmt::If(i) => expr_handle_escape(&i.cond, handle)
-            .or_else(|| block(&i.then_body))
-            .or_else(|| {
-                i.else_branch
-                    .as_ref()
-                    .and_then(|e| else_handle_escape(e, handle))
-            }),
         Stmt::While { cond, body, .. } => expr_handle_escape(cond, handle).or_else(|| block(body)),
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
@@ -1461,24 +1454,6 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::BreakLabel(..)
         | Stmt::ContinueLabel(..)
         | Stmt::Return(None, _) => None,
-    }
-}
-
-fn else_handle_escape(e: &crate::AST::ElseBranch, handle: &str) -> Option<Span> {
-    use crate::AST::ElseBranch;
-    match e {
-        ElseBranch::Else(stmts) => stmts.iter().find_map(|s| stmt_handle_escape(s, handle)),
-        ElseBranch::ElseIf(i) => expr_handle_escape(&i.cond, handle)
-            .or_else(|| {
-                i.then_body
-                    .iter()
-                    .find_map(|s| stmt_handle_escape(s, handle))
-            })
-            .or_else(|| {
-                i.else_branch
-                    .as_ref()
-                    .and_then(|e| else_handle_escape(e, handle))
-            }),
     }
 }
 

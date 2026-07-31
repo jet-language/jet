@@ -2676,7 +2676,7 @@ fn run() {{
     output :: files.create("{success}") ?? panic("create")
     writer := cbor.writer(^output, roomy) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
-    loop _; 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
+    loop _, 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
     close_array(&writer)
     writer.finish() ?? panic("finish")
 
@@ -2685,7 +2685,7 @@ fn run() {{
     rejected_output :: files.create("{rejected}") ?? panic("create rejected")
     rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
     rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
-    loop _; 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
+    loop _, 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
@@ -2991,7 +2991,7 @@ use core.encoding.cbor as cbor
 
 fn wire(values: [Int]) => [U8] {
     bytes := [U8].{}
-    loop value; values {
+    loop value, values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes
@@ -3267,7 +3267,7 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
     let src = r#"
-comptime paths = find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+#Known paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
     print(paths.join("|"))
@@ -4174,7 +4174,7 @@ fn core_net_dns_transaction_ids_are_not_a_fixed_sequence() {
 use core.net as net
 
 fn run() {{
-    loop _i; 0..8 {{
+    loop _i, 0..8 {{
         _ :: net.dns_txt_at("{}", "service.example.test", 1000) ?? panic("dns")
     }}
 }}
@@ -5876,7 +5876,7 @@ fn run() {{
     print(piped.output)
 
     child :: process.cmd(["{lines}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
-    loop line; child.stdout.lines() {{
+    loop line, child.stdout.lines() {{
         print(line)
     }}
     waited :: child.wait() ?? panic("wait failed")
@@ -7296,7 +7296,7 @@ fn run() {
     print(data.count(planned))
     print(data.count(data.rows(collected)))
     print(data.plan(planned)[2])
-    loop ticket; data.rows(collected) {
+    loop ticket, data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
     none :: Float? = None
@@ -7305,25 +7305,25 @@ fn run() {
     print(data.count(series))
     print(data.missing_count(series))
     groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes) ?? panic("group")
-    loop g; groups {
+    loop g, groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values) ?? panic("sum"))
     print(data.mean(values) ?? panic("mean"))
     joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team) ?? panic("join")
-    loop pair; joined {
+    loop pair, joined {
         print("{pair.left.team}:{pair.right.owner}")
     }
     left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team) ?? panic("left")
-    loop pair; left {
+    loop pair, left {
         if pair.right == {
             Val(budget) -> print("{pair.left.team}:{budget.owner}")
             None -> print("{pair.left.team}:none")
         }
     }
     pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes) ?? panic("pivot")
-    loop cell; pivot {
+    loop cell, pivot {
         print("{cell.row_key}|{cell.column_key}:{cell.count}")
     }
     rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
@@ -7439,12 +7439,12 @@ fn run() {
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c; cols {
+    loop c, cols {
         print("{c.name}:{c.type_name}")
     }
     selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t; selected {
+    loop t, selected {
         print("{t.team}:{t.minutes}")
     }
     print("{data.status()[5].step}:{data.status()[5].path}")
@@ -7488,12 +7488,12 @@ fn run() {
     rows :: data.json<Ticket>(raw) ?? panic("bad json")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c; cols {
+    loop c, cols {
         print("{c.name}:{c.type_name}")
     }
     selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t; selected {
+    loop t, selected {
         print("{t.team}:{t.minutes}")
     }
     print("{data.status()[6].step}:{data.status()[6].path}")
@@ -7544,23 +7544,23 @@ struct Box<T> {
 fn run() {
     empty_rows := [Ticket].{}
     empty_table :: data.table(empty_rows)
-    loop c; data.schema(empty_table) {
+    loop c, data.schema(empty_table) {
         print("empty:{c.name}:{c.type_name}")
     }
 
     nums :: data.series([1.0, 2.0])
-    loop c; data.schema(nums) {
+    loop c, data.schema(nums) {
         print("float:{c.name}:{c.type_name}")
     }
 
     tickets :: data.series([Ticket.{team: "Core", minutes: 4.0}])
-    loop c; data.schema(tickets) {
+    loop c, data.schema(tickets) {
         print("struct:{c.name}:{c.type_name}")
     }
 
     empty_tickets := [Ticket].{}
     empty_series :: data.series(empty_tickets)
-    loop c; data.schema(empty_series) {
+    loop c, data.schema(empty_series) {
         print("empty_series:{c.name}:{c.type_name}")
     }
 
@@ -7568,7 +7568,7 @@ fn run() {
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
 
     boxed := [Box<Int>].{}
-    loop c; data.schema(data.table(boxed)) {
+    loop c, data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }
 }
@@ -8009,7 +8009,7 @@ use core.encoding.xml as xml
 
 fn same_bytes(left: [U8], right: [U8]) => Bool {
     if left.len() != right.len() { return false }
-    loop index := 0; index < left.len(); index++ {
+    loop index := 0, index < left.len(), index++ {
         if left[index] != right[index] { return false }
     }
     return true
@@ -8039,7 +8039,7 @@ fn summarize() => String {
     return "unreachable"
 }
 
-comptime expected = summarize()
+#Known expected :: summarize()
 
 fn run() {
     print(expected)
@@ -8089,9 +8089,9 @@ fn show(result: DataTree ? XMLError) => String {
     return "unreachable"
 }
 
-comptime numeric = show(xml.parse("<r>&#0;</r>"))
-comptime attribute = show(xml.parse("<r a='&#0;'/>"))
-comptime namespace = show(xml.parse("<r xmlns='&#0;'/>"))
+#Known numeric :: show(xml.parse("<r>&#0;</r>"))
+#Known attribute :: show(xml.parse("<r a='&#0;'/>"))
+#Known namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
@@ -8152,10 +8152,10 @@ fn summarize(source: String) => String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-comptime cr = String.from_bytes([13]) ?? panic("CR")
-comptime close = "/>"
-comptime source = "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
-comptime normalized = summarize(source)
+#Known cr :: String.from_bytes([13]) ?? panic("CR")
+#Known close :: "/>"
+#Known source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
+#Known normalized :: summarize(source)
 
 fn run() {
     runtime := summarize(source)
@@ -8227,24 +8227,24 @@ fn show32(text: String) => String {
     return "unreachable"
 }
 
-comptime standard_ws = show64("Z g = =\n")
-comptime standard_unpadded = show64("Zg")
-comptime standard_interior = show64("Zg=A")
-comptime standard_excess = show64("Zg====")
-comptime standard_bits = show64("Zh==")
-comptime standard_padding = show64("=AAA")
-comptime standard_alphabet = show64("Zg-=")
-comptime standard_size = show64("A")
-comptime url_outer_ws = show64url(" \tZg==\n")
-comptime url_interior = show64url("Zg=A")
-comptime url_standard_alphabet = show64url("+w")
-comptime url_bits = show64url("Zh")
-comptime url_padding = show64url("=AAA")
-comptime url_size = show64url("A")
-comptime base32_loose = show32("m=y======\n")
-comptime base32_bits = show32("MZ======")
-comptime base32_short = show32("A")
-comptime base32_alphabet = show32("M0======")
+#Known standard_ws :: show64("Z g = =\n")
+#Known standard_unpadded :: show64("Zg")
+#Known standard_interior :: show64("Zg=A")
+#Known standard_excess :: show64("Zg====")
+#Known standard_bits :: show64("Zh==")
+#Known standard_padding :: show64("=AAA")
+#Known standard_alphabet :: show64("Zg-=")
+#Known standard_size :: show64("A")
+#Known url_outer_ws :: show64url(" \tZg==\n")
+#Known url_interior :: show64url("Zg=A")
+#Known url_standard_alphabet :: show64url("+w")
+#Known url_bits :: show64url("Zh")
+#Known url_padding :: show64url("=AAA")
+#Known url_size :: show64url("A")
+#Known base32_loose :: show32("m=y======\n")
+#Known base32_bits :: show32("MZ======")
+#Known base32_short :: show32("A")
+#Known base32_alphabet :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -8375,7 +8375,7 @@ use core.files as files
 fn run() {{
     paths :: [String].{{ {boundary_paths} }}
     passed := 0
-    loop path; paths {{
+    loop path, paths {{
         input :: files.open(path) ?? panic("open boundary")
         reader :: xml.reader(^input) ?? panic("reader defaults")
         document_start := false
@@ -9247,13 +9247,13 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) : tasks.channel<Int>()
     producer :: tasks.spawn(() => {
-        loop i; 1..1000 {
+        loop i, 1..1000 {
             sender.send(i)
         }
     })
     producer.join()
     total: Int = 0
-    loop i; 1..1000 {
+    loop i, 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"))
     }
     print(total)
@@ -9285,14 +9285,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i; 1..1000 {
+    loop i, 1..1000 {
         dup :: ~sender
         tasks.spawn(() => {
             dup.send(1)
         })
     }
     total := 0
-    loop i; 1..1000 {
+    loop i, 1..1000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -9324,14 +9324,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i; 1..10000 {
+    loop i, 1..10000 {
         dup :: ~sender
         tasks.spawn(() => {
             dup.send(1)
         })
     }
     total := 0
-    loop i; 1..10000 {
+    loop i, 1..10000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -9364,14 +9364,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i; 1..100000 {
+    loop i, 1..100000 {
         dup :: ~sender
         tasks.spawn(() => {
             dup.send(1)
         })
     }
     total := 0
-    loop i; 1..100000 {
+    loop i, 1..100000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)

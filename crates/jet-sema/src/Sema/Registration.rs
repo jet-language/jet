@@ -4,8 +4,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item, Stmt, StructDef,
-    Type,
+    AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -567,7 +566,6 @@ fn scan_stmt_for_variadic_uses(
             }
             expr_uses(value, name, other);
         }
-        Stmt::If(ifs) => scan_if(ifs, name, for_hits, other),
         Stmt::While { cond, body, .. } => {
             expr_uses(cond, name, other);
             for st in body {
@@ -641,27 +639,11 @@ fn scan_stmt_for_variadic_uses(
             }
         }
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `taskgroup`, `#Transact`, `comptime { }`, …) is out of scope
+        // `region`, `taskgroup`, `#Transact`, `#Known { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.
         _ => {}
-    }
-}
-
-fn scan_if(ifs: &IfStmt, name: &str, for_hits: &mut usize, other: &mut Vec<Span>) {
-    expr_uses(&ifs.cond, name, other);
-    for st in &ifs.then_body {
-        scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
-    }
-    match &ifs.else_branch {
-        Some(ElseBranch::ElseIf(inner)) => scan_if(inner, name, for_hits, other),
-        Some(ElseBranch::Else(body)) => {
-            for st in body {
-                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
-            }
-        }
-        None => {}
     }
 }
 

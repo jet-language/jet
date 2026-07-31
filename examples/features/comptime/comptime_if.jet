@@ -1,26 +1,26 @@
-// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if` selects a branch at
+// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `#Known if` selects a branch at
 // compile time. Only the selected arm is type-checked and emitted; the
 // dropped arm gets name-resolution only (typos still caught).
-comptime debug = false
+#Known debug :: false
 
-comptime platform = "unix"
+#Known platform :: "unix"
 
 fn run() {
-    comptime if debug {
+    #Known if debug {
         print("debug mode")
     } else {
         print("release mode")
     }
-    comptime if platform == "windows" {
+    #Known if platform == "windows" {
         print("windows path")
     } else {
         print("unix path")
     }
-    // Nested comptime if (comptime else-if chain)
-    comptime if debug {
+    // Nested #Known if (comptime else-if chain)
+    #Known if debug {
         print("debug")
     } else {
-        comptime if platform == "unix" {
+        #Known if platform == "unix" {
             print("unix, non-debug")
         } else {
             print("other")

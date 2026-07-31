@@ -20,18 +20,18 @@ fn run() {
     rows :: data.json<Ticket>(raw) ?? panic("bad json")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c; cols {
+    loop c, cols {
         print("{c.name}:{c.type_name}")
     }
     selected :: data.filter(data.rows(table), t => t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t; selected {
+    loop t, selected {
         print("{t.team}:{t.minutes}")
     }
     empty_units :: [Empty].{}
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
     boxed :: [Box<Int>].{}
-    loop c; data.schema(data.table(boxed)) {
+    loop c, data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }
     print("{data.status()[6].step}:{data.status()[6].path}")

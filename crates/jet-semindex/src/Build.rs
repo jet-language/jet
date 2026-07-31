@@ -1607,10 +1607,7 @@ fn collect_loop_label_ref(name: &str, span: Span, mp: &str, ctx: &mut WalkCtx<'_
 }
 
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    let span = match stmt {
-        AST::Stmt::If(if_stmt) => if_stmt.span,
-        _ => stmt.span(),
-    };
+    let span = stmt.span();
     let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, span);
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match stmt {
@@ -1639,9 +1636,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
                 collect_expr(value, mp, ctx)
             });
-        }
-        AST::Stmt::If(if_stmt) => {
-            collect_if(if_stmt, mp, module, ctx);
         }
         AST::Stmt::While {
             cond, body, label, ..
@@ -1705,7 +1699,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             else_body,
             ..
         }
-        // D-OSTARGET2=B: `comptime if build.os == { … }` — index arm bodies
+        // D-OSTARGET2=B: `#Known if build.os == { … }` — index arm bodies
         // the same as a runtime dispatch (sema desugars it away later).
         | AST::Stmt::ComptimeSwitch {
             subject,
@@ -1828,17 +1822,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         }
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }
-}
-
-fn collect_if(if_stmt: &AST::IfStmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(&if_stmt.cond, mp, ctx));
-    structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| collect_stmts(&if_stmt.then_body, mp, module, ctx));
-    if let Some(eb) = &if_stmt.else_branch {
-        match eb {
-            AST::ElseBranch::ElseIf(inner) => structural_slot(ctx, "else_if", StructuralSlotKind::Scalar, |ctx| collect_if(inner, mp, module, ctx)),
-            AST::ElseBranch::Else(body) => structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
-        }
-    }
 }
 
 fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {

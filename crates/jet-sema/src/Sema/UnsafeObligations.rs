@@ -271,7 +271,6 @@ fn collect_shallow_operations(statement: &Stmt, out: &mut Vec<(&'static str, Spa
         Stmt::Expr(expression) | Stmt::Return(Some(expression), _) => collect_expr_operations(expression, out),
         Stmt::Val(binding) => collect_expr_operations(&binding.init, out),
         Stmt::Assign { target, value, .. } => { collect_lvalue_operations(target, out); collect_expr_operations(value, out); }
-        Stmt::If(condition) => collect_expr_operations(&condition.cond, out),
         Stmt::While { cond, .. } => collect_expr_operations(cond, out),
         Stmt::CountedLoop { init, cond, step, .. } => { collect_expr_operations(&init.init, out); collect_expr_operations(cond, out); if let Some(step) = step { collect_shallow_operations(step, out); } }
         Stmt::For { kind, .. } => match kind {
@@ -360,17 +359,6 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
 
 pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
     match statement {
-        Stmt::If(condition) => {
-            let mut bodies = vec![condition.then_body.as_slice()];
-            let mut branch = condition.else_branch.as_ref();
-            while let Some(next) = branch {
-                match next {
-                    crate::AST::ElseBranch::Else(body) => { bodies.push(body); break; }
-                    crate::AST::ElseBranch::ElseIf(condition) => { bodies.push(&condition.then_body); branch = condition.else_branch.as_ref(); }
-                }
-            }
-            bodies
-        }
         Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Loop { body, .. } | Stmt::CountedLoop { body, .. }
         | Stmt::Impure { body, .. } | Stmt::Reactive { body, .. } | Stmt::Shield { body, .. } | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. } | Stmt::Region { body, .. } | Stmt::Policy { body, .. } | Stmt::TaskGroup { body, .. }
@@ -413,23 +401,9 @@ fn strip_item(item: &mut Item) {
 fn strip_body(body: &mut Vec<Stmt>) {
     body.retain(|statement| assertion(statement).is_none());
     for statement in body {
-        if let Stmt::If(condition) = statement {
-            strip_body(&mut condition.then_body);
-            strip_else(&mut condition.else_branch);
-        } else {
-            for nested in nested_bodies_mut(statement) { strip_body(nested); }
+        for nested in nested_bodies_mut(statement) {
+            strip_body(nested);
         }
-    }
-}
-
-fn strip_else(branch: &mut Option<crate::AST::ElseBranch>) {
-    match branch {
-        Some(crate::AST::ElseBranch::Else(body)) => strip_body(body),
-        Some(crate::AST::ElseBranch::ElseIf(condition)) => {
-            strip_body(&mut condition.then_body);
-            strip_else(&mut condition.else_branch);
-        }
-        None => {}
     }
 }
 

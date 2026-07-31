@@ -1,4 +1,4 @@
-use crate::AST::{BinOp, BindPattern, ElseBranch, Expr, ForKind, IfStmt, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
+use crate::AST::{BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
 use crate::Codegen::Cx;
 use crate::Diagnostics::Span;
 use crate::Codegen::is_json_variant;
@@ -99,7 +99,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     // (the placeholder `Expr::Int(0, …)` init is never evaluated or
                     // lowered).
                     //
-                    // c109 (S57/M9.5): a comptime LOCAL `comptime name = expr`. Sema
+                    // c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr`. Sema
                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as
                     // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
                     // `init` expr is NEVER emitted, so it need not be in-subset. Covered
@@ -108,7 +108,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     let ok = if b.uninit {
                         true
                     } else if b.is_comptime {
-                        // Unresolved inside a `comptime { … }` block: the
+                        // Unresolved inside a `#Known { … }` block: the
                         // interpreter evaluates the init itself.
                         b.ct.is_some() || expr_in_subset(&b.init, cx, locals)
                     } else {
@@ -157,7 +157,6 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             receiver, method, ..
         }) if method == Syntax::METHOD_DROP => expr_in_subset(receiver, cx, locals),
         Stmt::Expr(e) => expr_in_subset(e, cx, locals),
-        Stmt::If(ifs) => if_in_subset(ifs, cx, locals),
         // c109 Phase 2: control-flow loops. Each loop body is its own scope; check
         // it on a clone so a `let` inside the loop doesn't leak past it.
         Stmt::Loop { body, .. } => {
@@ -279,7 +278,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             else_body,
             span,
         } => switch_in_subset(subject, arms, else_body, *span, cx, locals),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` erases entirely.
+        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` erases entirely.
         // Always "in subset" since it emits nothing in Rust (I3).
         Stmt::ComptimeBlock { .. } => true,
         // Scope classification mirrors lowering: an emitted Rust block gets a cloned
@@ -561,34 +560,6 @@ pub(crate) fn if_cond_in_subset(
     expr_in_subset(cond, cx, locals).then(Vec::new)
 }
 
-pub(crate) fn if_in_subset(ifs: &IfStmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
-    let Some(cond_bindings) = if_cond_in_subset(&ifs.cond, cx, locals) else {
-        return false;
-    };
-    // Each branch scopes its own bindings; check on a clone so a `let` in the
-    // `then` arm doesn't leak into the `else` arm's classification. An optional-binding
-    // condition introduces its binding(s) into the then-branch scope.
-    let mut then_locals = locals.clone();
-    for b in &cond_bindings {
-        then_locals.insert(b.clone());
-    }
-    if !ifs
-        .then_body
-        .iter()
-        .all(|s| stmt_in_subset(s, cx, &mut then_locals))
-    {
-        return false;
-    }
-    match &ifs.else_branch {
-        None => true,
-        Some(ElseBranch::Else(body)) => {
-            let mut else_locals = locals.clone();
-            body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals))
-        }
-        Some(ElseBranch::ElseIf(next)) => if_in_subset(next, cx, locals),
-    }
-}
-
 /// c109 Phase 4: is a `Stmt::Switch` (`when`/match) inside the subset? Covered in
 /// exactly the two shapes the TIR reproduces byte-for-byte:
 ///   (A) **exhaustive enum match** — every arm is a variant pattern over a covered
@@ -683,19 +654,13 @@ pub(crate) fn switch_in_subset(
         return true;
     }
     // Shape B: all arms are arm-head range patterns over a scalar subject, with an
-    // `else`. (Range arms bind nothing.) The subject's type must resolve to an
-    // integer/char local so the conditions type-check.
+    // `else`. Lowering binds any covered subject expression once; range arms bind
+    // nothing and read that shared switch-subject value.
     if else_body.is_some()
         && arms
             .iter()
             .all(|a| arm_head_range(cx, &a.cond, subject).is_some())
     {
-        // The subject must be a plain in-subset scalar place (an Ident local/param)
-        // so `_jet_switch_subject`/the conditions read it directly. Anything more
-        // complex is excluded (the AST path re-emits the subject per arm).
-        if !matches!(subject, Expr::Ident(name, _) if locals.contains(name)) {
-            return false;
-        }
         for a in arms {
             let mut body_locals = locals.clone();
             if !a
@@ -756,25 +721,20 @@ pub(crate) fn switch_in_subset(
     //
     // D-IF3: a range head (`400..499 ->`) is admitted into this chain too, lowered to
     // `subject >= lo && subject <= hi`, so a value+range mix (`200 -> …` next to
-    // `400..499 -> …`) is covered — provided the subject is a scalar ident local so the
-    // emitted range condition type-checks (the same constraint shape B imposes).
+    // `400..499 -> …`) is covered. The shared switch-subject value keeps calls
+    // and field expressions single-evaluation.
     // D-DESTRUCT1: a struct-pattern arm head (`.{ kind: "page", title, .. }`) also
     // lowers through this chain: value fields become boolean equality checks, and bind
     // fields clone from the borrowed `_jet_switch_subject` at the top of the arm body.
     // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
     // switch (stays on the AST path). The `else` is optional.
-    let has_range = arms
-        .iter()
-        .any(|a| arm_head_range(cx, &a.cond, subject).is_some());
-    let subject_is_scalar_ident = matches!(subject, Expr::Ident(name, _) if locals.contains(name));
     if arms.iter().all(|a| {
         arm_is_plain_cond(cx, &a.cond, subject)
             || arm_head_range(cx, &a.cond, subject).is_some()
             || arm_struct_pattern(cx, &a.cond, subject).is_some()
             || arm_str_match_pattern(cx, &a.cond, subject).is_some()
             || arm_bin_match_pattern(cx, &a.cond, subject).is_some()
-    }) && (!has_range || subject_is_scalar_ident)
-    {
+    }) {
         // D-PARSESTR1: sema already proved a str-match arm's subject is
         // `String` (E0305 otherwise) — trusted here, same as shape C trusts
         // sema for `ok`/`err`/`value` subject types (I3).

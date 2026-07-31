@@ -1984,7 +1984,9 @@ pub(crate) fn declare_collections_host_fns(
         sig_range_contains.params.push(AbiParam::new(types::I64));
     }
     sig_range_contains.returns.push(AbiParam::new(types::I8));
-    let sig_disjoint = sig_list_eq.clone();
+    let mut sig_disjoint = sig_list_eq.clone();
+    sig_disjoint.returns.clear();
+    sig_disjoint.returns.push(AbiParam::new(types::I64));
     let mut sig_range_show = Signature::new(cc);
     for _ in 0..3 {
         sig_range_show.params.push(AbiParam::new(types::I64));

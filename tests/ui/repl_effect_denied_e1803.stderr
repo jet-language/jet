@@ -1,10 +1,9 @@
 Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY
-warning: REPL history storage is unavailable (Read-only file system (os error 30)); continuing with session-only history
-Error [E2510]: `#Grant` is only valid inside a lane `.reduce(…)`
-  --> <repl:2>:1:44
+Error [E3410]: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  --> <repl:2>:1:49
     |
   1 | #Grant(caps: FS) { fs.write("denied.txt", "must not run") ?? panic("write failed") }
-    |                                            ^^^^^^
- Why: a reduce-op marker names the fold operation; it isn't a value on its own
- Fix: write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`
+    |                                                 ^^^^^
+ Why: ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation
+ Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build
 1 problem found

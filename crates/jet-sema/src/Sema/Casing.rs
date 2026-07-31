@@ -1,5 +1,5 @@
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item,
+    EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item,
     LambdaBody, LValue, OrFallback, Pattern, ProgramBundle, Stmt, StrPart, StructPatField,
     TraitMethodSig, Type, VariantPayload,
 };
@@ -213,15 +213,6 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                 expr_names(value, out);
             }
             Stmt::Return(value, _) => if let Some(value) = value { expr_names(value, out); },
-            Stmt::If(i) => {
-                expr_names(&i.cond, out);
-                stmt_names(&i.then_body, out);
-                match &i.else_branch {
-                    Some(ElseBranch::ElseIf(i)) => stmt_names(std::slice::from_ref(&Stmt::If((**i).clone())), out),
-                    Some(ElseBranch::Else(b)) => stmt_names(b, out),
-                    None => {}
-                }
-            }
             Stmt::While { cond, body, label, .. } => {
                 expr_names(cond, out);
                 if let Some((name, span)) = label { snake(name, *span, "loop label", out); }

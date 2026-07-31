@@ -538,6 +538,10 @@ impl<'a> EvalCtx<'a> {
             | TStmt::Unsafe(body)
             | TStmt::Region(body) => self.exec_stmts(body, scope),
             TStmt::LineMarker(_) => Ok(Flow::Normal),
+            TStmt::SourceSpan(span) => {
+                self.current_span = *span;
+                Ok(Flow::Normal)
+            }
             TStmt::DeferClose { close, .. } => {
                 self.deferred_closes.push(close);
                 Ok(Flow::Normal)
@@ -729,6 +733,7 @@ impl<'a> EvalCtx<'a> {
                 subject,
                 arms,
                 else_body,
+                ..
             } => {
                 let value = self.eval_expr(subject, scope)?;
                 let saved = self.switch_subject.replace(value);

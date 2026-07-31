@@ -28,8 +28,8 @@ fn run() {
         box = expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal failed")
         plain = expert.aes256gcm_open(key, nonce, box, []) ?? panic("open failed")
         v1 := [U8].{0x4a, 0x45, 0x54, 0x43, 1, 2}
-        loop byte; nonce { v1.push(byte) }
-        loop byte; box { v1.push(byte) }
+        loop byte, nonce { v1.push(byte) }
+        loop byte, box { v1.push(byte) }
         historical = expert.open_v1(key, v1) ?? panic("v1 open failed")
         source.write_atomic(v1) ?? panic("v1 fixture")
         expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? panic("v1 migration failed")

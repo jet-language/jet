@@ -446,23 +446,6 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
         | Stmt::Continue(_)
         | Stmt::BreakLabel(..)
         | Stmt::ContinueLabel(..) => {}
-        Stmt::If(if_stmt) => {
-            walk!(&if_stmt.cond);
-            for stmt in &if_stmt.then_body {
-                walk_stmt_expr_nodes(stmt, include_suppressed, f);
-            }
-            match &if_stmt.else_branch {
-                Some(crate::AST::ElseBranch::ElseIf(inner)) => {
-                    walk_if_stmt_expr_nodes(inner, include_suppressed, f);
-                }
-                Some(crate::AST::ElseBranch::Else(body)) => {
-                    for stmt in body {
-                        walk_stmt_expr_nodes(stmt, include_suppressed, f);
-                    }
-                }
-                None => {}
-            }
-        }
         Stmt::While { cond, body, .. } => {
             walk!(cond);
             walk_stmt_body_nodes(body, include_suppressed, f);

@@ -141,7 +141,6 @@ pub(crate) fn check_pure_stmt(
         }
         Stmt::Return(None, _) => None,
         Stmt::Expr(e) | Stmt::Yield(e, _) => check_pure_expr(e, pure_fn, funcs),
-        Stmt::If(if_stmt) => check_pure_if(if_stmt, pure_fn, funcs),
         Stmt::While { cond, body, .. } => {
             if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
                 return Some(d);
@@ -272,7 +271,7 @@ pub(crate) fn check_pure_stmt(
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
         // D-CTMARKER1: comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
-        // D-WHEN1: check both arms of a comptime if for purity (conservative).
+        // D-WHEN1: check both arms of a #Known if for purity (conservative).
         Stmt::ComptimeIf {
             cond,
             then_body,
@@ -334,33 +333,6 @@ pub(crate) fn check_pure_stmt(
         // The whole body is asserted deterministic, so the purity post-pass does
         // not descend into it (E3401/E3403 suspended). A semantic footgun.
         Stmt::AssumeDet { .. } => None,
-    }
-}
-
-pub(crate) fn check_pure_if(
-    if_stmt: &crate::AST::IfStmt,
-    pure_fn: &str,
-    funcs: &HashMap<String, FuncSig>,
-) -> Option<Diagnostic> {
-    if let Some(d) = check_pure_expr(&if_stmt.cond, pure_fn, funcs) {
-        return Some(d);
-    }
-    for st in &if_stmt.then_body {
-        if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
-            return Some(d);
-        }
-    }
-    match &if_stmt.else_branch {
-        Some(crate::AST::ElseBranch::Else(stmts)) => {
-            for st in stmts {
-                if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
-                    return Some(d);
-                }
-            }
-            None
-        }
-        Some(crate::AST::ElseBranch::ElseIf(nested)) => check_pure_if(nested, pure_fn, funcs),
-        None => None,
     }
 }
 
@@ -599,7 +571,6 @@ fn check_pure_stmt_with_path(
         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => rec!(e),
         Stmt::Return(None, _) => None,
         Stmt::Expr(e) | Stmt::Yield(e, _) => rec!(e),
-        Stmt::If(if_stmt) => check_pure_if_with_path(if_stmt, pure_fn, funcs, path, visited),
         Stmt::While { cond, body, .. } => {
             if let Some(d) = rec!(cond) {
                 return Some(d);
@@ -787,37 +758,6 @@ fn check_pure_stmt_with_path(
         }
         // D-DET1: skip `assume_deterministic { … }` bodies (suspension).
         Stmt::AssumeDet { .. } => None,
-    }
-}
-
-fn check_pure_if_with_path(
-    if_stmt: &crate::AST::IfStmt,
-    pure_fn: &str,
-    funcs: &HashMap<String, FuncSig>,
-    path: &[String],
-    visited: &mut HashSet<String>,
-) -> Option<Diagnostic> {
-    if let Some(d) = check_pure_expr_with_path(&if_stmt.cond, pure_fn, funcs, path, visited) {
-        return Some(d);
-    }
-    for st in &if_stmt.then_body {
-        if let Some(d) = check_pure_stmt_with_path(st, pure_fn, funcs, path, visited) {
-            return Some(d);
-        }
-    }
-    match &if_stmt.else_branch {
-        Some(crate::AST::ElseBranch::Else(stmts)) => {
-            for st in stmts {
-                if let Some(d) = check_pure_stmt_with_path(st, pure_fn, funcs, path, visited) {
-                    return Some(d);
-                }
-            }
-            None
-        }
-        Some(crate::AST::ElseBranch::ElseIf(nested)) => {
-            check_pure_if_with_path(nested, pure_fn, funcs, path, visited)
-        }
-        None => None,
     }
 }
 
@@ -1167,9 +1107,6 @@ fn walk_stmt_for_calls(
         Stmt::Expr(e) | Stmt::Yield(e, _) => {
             walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
         }
-        Stmt::If(if_stmt) => {
-            walk_if_for_calls(if_stmt, root_fn, funcs_sig, ast_funcs, path, visited, diags)
-        }
         Stmt::While { cond, body, .. } => {
             walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
@@ -1381,49 +1318,5 @@ fn walk_stmt_for_calls(
         // D-DET1: skip `assume_deterministic { … }` bodies (suspension). The
         // `jet eval --pure` transitive walk also honors the escape.
         Stmt::AssumeDet { .. } => {}
-    }
-}
-
-fn walk_if_for_calls(
-    if_stmt: &crate::AST::IfStmt,
-    root_fn: &str,
-    funcs_sig: &HashMap<String, FuncSig>,
-    ast_funcs: &HashMap<String, &Func>,
-    path: &mut Vec<String>,
-    visited: &mut HashSet<String>,
-    diags: &mut Vec<Diagnostic>,
-) {
-    walk_expr_for_calls(
-        &if_stmt.cond,
-        root_fn,
-        funcs_sig,
-        ast_funcs,
-        path,
-        visited,
-        diags,
-    );
-    if diags.is_empty() {
-        for st in &if_stmt.then_body {
-            walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            if !diags.is_empty() {
-                return;
-            }
-        }
-    }
-    if diags.is_empty() {
-        match &if_stmt.else_branch {
-            Some(crate::AST::ElseBranch::Else(stmts)) => {
-                for st in stmts {
-                    walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() {
-                        return;
-                    }
-                }
-            }
-            Some(crate::AST::ElseBranch::ElseIf(nested)) => {
-                walk_if_for_calls(nested, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            }
-            None => {}
-        }
     }
 }

@@ -895,13 +895,14 @@ impl TraitRegistry {
         trait_name: &str,
         foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
     ) -> bool {
-        let type_params = match item {
-            Item::Struct(s) => &s.type_params,
-            Item::Enum(e) => &e.type_params,
+        let (owner, type_params) = match item {
+            Item::Struct(s) => (s.name.as_str(), &s.type_params),
+            Item::Enum(e) => (e.name.as_str(), &e.type_params),
             _ => return false,
         };
         let supports = |ty: &Type| {
-            self.auto_derive_type_ready(ty, trait_name, type_params, foreign_supports)
+            matches!(ty, Type::Named(name) if name == owner)
+                || self.auto_derive_type_ready(ty, trait_name, type_params, foreign_supports)
         };
         match item {
             Item::Struct(s) => s
@@ -2007,7 +2008,10 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
             .iter()
             .all(|(_, field)| field_auto_ok(field, owner)),
         Type::Union(members) => members.iter().all(|member| field_auto_ok(member, owner)),
-        Type::Named(n) => n != owner,
+        // Recursive value types use invisible boxing. Their generated trait
+        // implementation may call itself just like a hand-written recursive
+        // implementation.
+        Type::Named(_) => true,
         Type::Apply { name, .. } => name != Syntax::TYPE_SHARED_GUARD,
         Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }

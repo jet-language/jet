@@ -91,7 +91,7 @@ fn reserve() {{
 }}
 
 #Policy(arena_bounded({bound})) fn run() {{
-    loop item; [1, 2, 3, 4, 5]; {stride} {{
+    loop item, [1, 2, 3, 4, 5], {stride} {{
         print(item)
         reserve()
     }}

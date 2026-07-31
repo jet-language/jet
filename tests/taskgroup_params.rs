@@ -13,7 +13,7 @@ fn spawn_later(group: TaskGroup) => Shared<[Int]> {
         loop gate.read((state: [Int]) => state[0]) == 1 {}
         gate.edit((state: [Int]) => state[0] = state[0] + 1)
         total := 0
-        loop n; 0..<2000000 { total += n }
+        loop n, 0..<2000000 { total += n }
         print("task")
     }
     loop gate.read((state: [Int]) => state[0]) == 0 {}
@@ -294,7 +294,7 @@ fn wait_in_group(gate: Shared<[Int]>) {
         child :: group.task => {
             gate.edit((state: [Int]) => state[0] = 1)
             total := 0
-            loop n; 0..<2000000 { total += n }
+            loop n, 0..<2000000 { total += n }
             print("settled")
         }
         time.sleep(10000)
@@ -323,7 +323,7 @@ fn leave_on_deadline() {
     taskgroup group {
         child :: group.task => {
             total := 0
-            loop n; 0..<2000000 { total += n }
+            loop n, 0..<2000000 { total += n }
             print("settled")
         }
         #Context(deadline: time.now() - 1) {
@@ -347,7 +347,7 @@ fn native_panicked_wait_closes_group_before_caller_continues() {
 fn slow_value(gate: Shared<[Int]>) => Int {
     gate.edit((state: [Int]) => state[0] = 1)
     total := 0
-    loop n; 0..<2000000 { total += n }
+    loop n, 0..<2000000 { total += n }
     print("settled")
     return 1
 }
@@ -387,7 +387,7 @@ fn leave() => Int {
     taskgroup group {
         spawn_bad(group)
         total := 0
-        loop n; 0..<2000000 { total += n }
+        loop n, 0..<2000000 { total += n }
         return 1
     }
     return 0

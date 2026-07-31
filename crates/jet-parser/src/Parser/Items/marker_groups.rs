@@ -234,6 +234,43 @@ impl<'a> Parser<'a> {
             {
                 return Ok(());
             }
+            if marker.name == Syntax::CTX_BLOCK {
+                if let Some((field_name, field_span)) =
+                    marker.arg_labels.iter().flatten().find(|(field_name, _)| {
+                        field_name != Syntax::CTX_FIELD_ALLOCATOR
+                            && field_name != Syntax::CTX_FIELD_LOGGER
+                            && field_name != Syntax::CTX_FIELD_DEADLINE
+                    })
+                {
+                    return Err(Diagnostic::error(
+                        "E0761",
+                        format!("`{field_name}` isn't a context field"),
+                        "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
+                        format!(
+                            "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+                            Syntax::CTX_BLOCK,
+                            Syntax::CTX_BLOCK,
+                            Syntax::CTX_BLOCK
+                        ),
+                        Some(*field_span),
+                    ));
+                }
+            }
+            if marker.name == Syntax::ATTR_RENAME
+                && !matches!(
+                    marker.args.as_slice(),
+                    [crate::AST::Expr::Str(parts, _)]
+                        if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)])
+                )
+            {
+                return Err(Diagnostic::error(
+                    "E2407",
+                    "`#Rename(...)` needs a string literal".to_string(),
+                    "the wire key a `#Codable` field maps to is a constant string".to_string(),
+                    "pass one quoted string, such as `#Rename(\"wire_name\")`".to_string(),
+                    Some(marker.span),
+                ));
+            }
             if rule.signature.marker_argument_bindings(marker).is_none() {
                 return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
@@ -1492,14 +1529,11 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if matches!(self.peek().kind, TokKind::KwFn) {
-                    return Err(Diagnostic::error(
-                        "E0732",
-                        format!("the tag `{name}` declares a method"),
-                        "tags declare dataflow facts and policy; traits declare methods"
-                            .to_string(),
-                        "make this a `trait`, or replace the body with `deny: [...]`"
-                            .to_string(),
-                        Some(self.peek().span),
+                    let method = self.trait_method_sig(false)?;
+                    return Err(crate::Generics::e0732(
+                        &name,
+                        &method.name,
+                        method.name_span,
                     ));
                 }
                 let (field, field_span) = self.expect_ident("for a tag policy field")?;

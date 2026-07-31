@@ -1948,6 +1948,8 @@ pub enum THostCall {
     SwitchSubjectField {
         field: String,
     },
+    /// The already-evaluated subject of the enclosing `MixedSwitch`.
+    SwitchSubjectValue,
     /// Generator `yield e` → `__jet_yield_tx.send(e)`.
     YieldSend {
         value: Box<TExpr>,
@@ -2272,12 +2274,9 @@ pub enum TStmt {
     /// `if let <pat> = <subj>` (an `x == value(b)`/`Ok(b)`/`Err(b)`/variant condition),
     /// or an `<subj>.is_none()` test (`x == null`) — reproducing `emit_if`'s three
     /// condition shapes (Source/Codegen/Statement.rs).
-    /// `else_is_elseif` distinguishes the source `ElseBranch`: `true` for a real
-    /// `else if` chain (`ElseBranch::ElseIf` — the else-body is the synthesised nested
-    /// `If`, emitted as `} else if …`), `false` for an explicit `else { … }` block
-    /// (`ElseBranch::Else`, emitted as `} else { … }` even when the block holds a
-    /// single `if`). The AST path keys solely on the `ElseBranch` variant; the TIR
-    /// must NOT flatten an explicit `else { if … }` into `else if` (a parity drift).
+    /// `else_is_elseif` distinguishes a nested residual guard arm from the
+    /// explicit `else` body of the canonical subjectless `Switch`: nested arms
+    /// emit as `} else if …`, while the final body stays `} else { … }`.
     If {
         cond: TIfCond,
         then_body: Vec<TStmt>,
@@ -2455,6 +2454,7 @@ pub enum TStmt {
         /// The matched subject. Emit borrows it for the parity binding; arm
         /// conditions are already structured `TExpr` values.
         subject: TExpr,
+        class: BranchClass,
         arms: Vec<(TExpr, Vec<TStmt>)>,
         else_body: Option<Vec<TStmt>>,
     },
@@ -2568,6 +2568,20 @@ pub enum TStmt {
     /// comment immediately before the statement's generated Rust, giving the native
     /// backend a rust-line -> jet-line table without touching any other TStmt shape.
     LineMarker(usize),
+    /// Source location for the following statement. Evaluators consume it;
+    /// code generators discard it.
+    SourceSpan(crate::Diagnostics::Span),
+}
+
+/// D-BRANCH-CODEGEN1=B: total lowering classification for one arm table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchClass {
+    Bool2,
+    Enum,
+    DenseInt,
+    SparseInt,
+    Ordered,
+    Mixed,
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -3507,6 +3521,8 @@ pub enum TNumericOp {
 /// branch (off the lambda arg's `needs_fn_mut` meta) are decided ONCE at lowering;
 /// the variant encodes the chosen form so emit only formats.
 pub enum TClosureOp {
+    /// Prove two indexes before lending their mutable views to one callback.
+    EditDisjoint,
     /// `map` on a list — `jet_list_map((recv).clone(), f)`.
     Map,
     /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.

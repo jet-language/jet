@@ -22,7 +22,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{ElseBranch, Expr, Item, Stmt, TraitImplBlock};
+use crate::AST::{Expr, Item, Stmt, TraitImplBlock};
 
 /// Validate every scope-member statement in the program. Runs in every mode
 /// (not just `jet test`): a malformed member is a structural error that `jet
@@ -284,22 +284,6 @@ fn walk_members(stmts: &[Stmt], f: &mut impl FnMut(&str, Span)) {
 /// Every `Vec<Stmt>` block body a statement carries. Leaf statements yield none.
 fn child_bodies(s: &Stmt) -> Vec<&[Stmt]> {
     match s {
-        Stmt::If(ifs) => {
-            let mut v: Vec<&[Stmt]> = Vec::new();
-            let mut cur = ifs;
-            loop {
-                v.push(cur.then_body.as_slice());
-                match &cur.else_branch {
-                    Some(ElseBranch::ElseIf(next)) => cur = next,
-                    Some(ElseBranch::Else(body)) => {
-                        v.push(body.as_slice());
-                        break;
-                    }
-                    None => break,
-                }
-            }
-            v
-        }
         Stmt::Switch {
             arms, else_body, ..
         } => {

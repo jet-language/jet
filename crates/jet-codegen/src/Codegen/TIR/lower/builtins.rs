@@ -513,9 +513,11 @@ pub(crate) fn resolve_closure_op(
     cx: &Cx,
 ) -> TClosureOp {
     // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
+    let lambda_index = usize::from(method == "edit_disjoint");
     let fn_mut =
-        matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
+        matches!(args.get(lambda_index).map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
     let op = match method {
+        "edit_disjoint" => TClosureOp::EditDisjoint,
         "map" => {
             // D-HOLE1: `.map` on `T?` uses Rust's native `Option::map` directly —
             // never the mutable-list form.

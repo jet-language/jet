@@ -134,6 +134,23 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
+        // A list returned by `get_disjoint_write` contains opaque mutable-window
+        // handles. Sema makes iteration lending-only, so the JIT may load one
+        // handle for the current turn without granting an escaping alias.
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(
+                inner.as_ref(),
+                Type::Apply { name, args }
+                    if name == "ViewMut"
+                        && args.len() == 1
+                        && (matches!(
+                            &args[0],
+                            Type::Int | Type::Float | Type::String | Type::Char
+                        ) || record_type_key(&args[0]).is_some())
+            ) =>
+        {
+            Some(inner.as_ref().clone())
+        }
         // Nested list rows (`[[String]]` CSV, etc.) — outer iterates i64 handles.
         Type::List(inner) | Type::FixedList { elem: inner, .. }
             if jit_list_native_type(inner) =>
@@ -305,13 +322,13 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                             | Type::Named(_)
                             | Type::Tuple(_)
                             | Type::List(_)
-                    )
+                        )
                         || matches!(
                             t.as_ref(),
                             Type::Apply { name, .. }
                                 if matches!(
                                     name.as_str(),
-                                    "CellReadGuard" | "CellEditGuard"
+                                    "CellReadGuard" | "CellEditGuard" | "ViewMut"
                                 )
                         )
                 })
@@ -939,6 +956,16 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
         }
         TExprKind::Field { recv, .. } => match &recv.kind {
+            TExprKind::Local(_)
+                if matches!(&recv.ty, Type::Tuple(_))
+                    && matches!(
+                        &expr.ty,
+                        Type::Apply { name, args }
+                            if name == "ViewMut" && args.len() == 1
+                    ) =>
+            {
+                true
+            }
             TExprKind::Index {
                 base,
                 index,
@@ -1198,7 +1225,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && matches!(&index.ty, Type::Int | Type::IntN { .. } | Type::Named(_))
             }
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
-            THostCall::SwitchSubjectField { .. } => true,
+            THostCall::SwitchSubjectField { .. } | THostCall::SwitchSubjectValue => true,
             THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
             // Sema emits this node only after proving the receiver is a live
             // Cell guard and every projected path is valid and disjoint.
@@ -1495,6 +1522,23 @@ fn resident_safe_closure_method(
         return false;
     }
     match op {
+        TIR::TClosureOp::EditDisjoint => {
+            let callback = args.get(1);
+            args.len() == 2
+                && resident_safe_expr(&args[0], callees)
+                && matches!(
+                    callback.map(|arg| &arg.kind),
+                    Some(TExprKind::Lambda(lambda))
+                        if lambda.prep.is_empty()
+                            && lambda.source_params.len() == 2
+                            && match &lambda.executable {
+                                TIR::TLambdaBody::Expr(body) => resident_safe_expr(body, callees),
+                                TIR::TLambdaBody::Block(stmts) => {
+                                    stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                                }
+                            }
+                )
+        }
         TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::ViewMap => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
@@ -1796,6 +1840,18 @@ fn resident_safe_builtin_op(
                     _ => false,
                 }
         }
+        TBuiltinOp::SplitWrite { .. } => {
+            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::GetDisjointWrite => {
+            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+                && args.len() == 1
+                && jit_list_int_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
         // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
         TBuiltinOp::RemoveList { .. } => {
             jit_list_int_type(&recv.ty)
@@ -1968,6 +2024,7 @@ fn resident_safe_builtin_op(
 
 pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
+        TStmt::LineMarker(_) | TStmt::SourceSpan(_) => true,
         TStmt::Let { init, gc_promotion: _, gc_transferred: _, .. } => {
             // Promotion/transfer only wraps the same payload handle for the
             // collector; JIT stores the finite snapshot directly (D-OPTGC1).
@@ -2333,6 +2390,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             subject,
             arms,
             else_body,
+            ..
         } => {
             resident_safe_expr(subject, callees)
                 && arms.iter()
@@ -2538,6 +2596,10 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
     match stmt {
         TStmt::Let { .. } => "Let",
         TStmt::Assign { .. } => "Assign",
+        TStmt::IndexAssign { .. } => "IndexAssign",
+        TStmt::IndexFieldAssign(_) => "IndexFieldAssign",
+        TStmt::SplitViews { .. } => "SplitViews",
+        TStmt::LineMarker(_) => "LineMarker",
         TStmt::Return(_) => "Return",
         TStmt::ExprStmt(_) => "ExprStmt",
         TStmt::Reactive { .. } => "Reactive",
@@ -2550,6 +2612,7 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
         TStmt::Region(_) => "Region",
         TStmt::TaskGroup { .. } => "TaskGroup",
         TStmt::Unsafe(_) => "Unsafe",
+        TStmt::SourceSpan(_) => "SourceSpan",
         _ => "Other",
     }
 }

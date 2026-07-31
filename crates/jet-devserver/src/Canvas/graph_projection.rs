@@ -6,8 +6,8 @@ use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
 
 use super::graph_helpers::{
     assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title,
-    expr_type, graph_id, insert_offset, lvalue_type, pure_leaf, snippet, starts_uppercase,
-    text_matches, wire_ident_refs,
+    expr_type, graph_id, insert_offset, lvalue_type, pure_leaf, snippet,
+    span_through_closing_parens, starts_uppercase, text_matches, wire_ident_refs,
 };
 use super::graph_json::{
     add_arm_pin, add_execution_overlay, add_inline, add_node, add_pin, add_region,
@@ -570,67 +570,6 @@ fn project_stmt(
                 );
             }
         }
-        Stmt::If(ifs) => {
-            let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
-            let mut affordances = vec!["edit_inline_expr", "source_jump"];
-            let is_pattern_test = matches!(ifs.cond, Expr::PatternTest { .. });
-            if is_pattern_test {
-                affordances.push("add_pattern_arm");
-            }
-            let title = if is_pattern_test { "if ==" } else { "if" };
-            add_node(
-                g,
-                &node_id,
-                "branch",
-                title,
-                ifs.cond.span().into(),
-                x,
-                y,
-                vec!["control"],
-                affordances,
-            );
-            let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
-            if matches!(ifs.cond, Expr::PatternTest { .. }) {
-                let span = pattern_arm_edit_span(&ifs.cond);
-                add_arm_pin(
-                    g,
-                    &node_id,
-                    "arm1",
-                    &pattern_pin_label(src, &ifs.cond),
-                    span,
-                );
-            }
-            connect_expr_to_input(
-                g,
-                index,
-                src,
-                &ifs.cond,
-                ordinal,
-                "cond",
-                &node_id,
-                &cond,
-                x - 220,
-                y,
-            );
-            project_stmt_block(
-                g,
-                index,
-                src,
-                &ifs.then_body,
-                ordinal * 100 + 10,
-                x + 230,
-                y + 70,
-            );
-            project_else_branch(
-                g,
-                index,
-                src,
-                ifs.else_branch.as_ref(),
-                ordinal,
-                x + 460,
-                y + 70,
-            );
-        }
         Stmt::While {
             cond, body, span, ..
         } => {
@@ -771,6 +710,69 @@ fn project_stmt(
             span,
         } => {
             let subjectless = AST::is_subjectless_guard(subject, *span);
+            if subjectless && switch_was_classic_if(src, arms, *span) {
+                let Some(arm) = arms.first() else {
+                    return;
+                };
+                let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
+                let mut affordances = vec!["edit_inline_expr", "source_jump"];
+                let is_pattern_test = matches!(arm.cond, Expr::PatternTest { .. });
+                if is_pattern_test {
+                    affordances.push("add_pattern_arm");
+                }
+                add_node(
+                    g,
+                    &node_id,
+                    "branch",
+                    if is_pattern_test { "if ==" } else { "if" },
+                    arm.cond.span().into(),
+                    x,
+                    y,
+                    vec!["control"],
+                    affordances,
+                );
+                let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
+                if is_pattern_test {
+                    add_arm_pin(
+                        g,
+                        &node_id,
+                        "arm1",
+                        &pattern_pin_label(src, &arm.cond),
+                        pattern_arm_edit_span(src, &arm.cond),
+                    );
+                }
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    &arm.cond,
+                    ordinal,
+                    "cond",
+                    &node_id,
+                    &cond,
+                    x - 220,
+                    y,
+                );
+                project_stmt_block(
+                    g,
+                    index,
+                    src,
+                    &arm.body,
+                    ordinal * 100 + 10,
+                    x + 230,
+                    y + 70,
+                );
+                project_classic_switch_else(
+                    g,
+                    index,
+                    src,
+                    else_body.as_deref(),
+                    ordinal,
+                    x + 460,
+                    y + 70,
+                );
+                return;
+            }
             let node_id = format!("{}:stmt:{ordinal}:dispatch", g.graph_id);
             add_node(
                 g,
@@ -971,13 +973,13 @@ fn project_stmt(
             span,
             ..
         } => {
-            add_region(g, ordinal, "comptime_if", "comptime if", *span);
+            add_region(g, ordinal, "comptime_if", "#Known if", *span);
             let node_id = format!("{}:stmt:{ordinal}:comptime_if", g.graph_id);
             add_node(
                 g,
                 &node_id,
                 "branch",
-                "comptime if",
+                "#Known if",
                 (*span).into(),
                 x,
                 y,
@@ -1071,6 +1073,13 @@ fn project_stmt(
     }
 }
 
+fn switch_was_classic_if(src: &str, arms: &[AST::SwitchArm], span: Span) -> bool {
+    let Some(first) = arms.first() else {
+        return false;
+    };
+    AST::uses_classic_if_spelling(src, span, first.cond.span())
+}
+
 fn pattern_pin_label(src: &str, expr: &Expr) -> String {
     let raw = snippet(src, expr.span());
     let balanced = balance_closing_parens(raw.trim());
@@ -1083,12 +1092,9 @@ fn pattern_pin_label(src: &str, expr: &Expr) -> String {
     balanced
 }
 
-/// Label for a dispatch-form (`if subject == { ... }`) arm pattern. Unlike
-/// `pattern_pin_label`, dispatch arms never carry their own `==` (the
-/// operator belongs to the dispatch header, not the arm line) and the
-/// leading dot on enum-variant patterns (D-ENUMDOT1) is a source spelling
-/// detail, not part of the arm's identity — so both are stripped for the
-/// Canvas label.
+/// Label for a dispatch-form (`if subject == { ... }`) arm pattern.
+/// Dispatch arms never carry their own `==`, and the leading dot on
+/// enum-variant patterns is source spelling rather than arm identity.
 fn dispatch_arm_pattern_label(src: &str, expr: &Expr) -> String {
     let raw = snippet(src, expr.span());
     let mut balanced = balance_closing_parens(raw.trim());
@@ -1098,9 +1104,9 @@ fn dispatch_arm_pattern_label(src: &str, expr: &Expr) -> String {
     balanced.strip_prefix('.').unwrap_or(&balanced).to_string()
 }
 
-fn pattern_arm_edit_span(expr: &Expr) -> SourceSpan {
+fn pattern_arm_edit_span(src: &str, expr: &Expr) -> SourceSpan {
     match expr {
-        Expr::PatternTest { pattern, .. } => pattern.span().into(),
+        Expr::PatternTest { pattern, .. } => span_through_closing_parens(src, pattern.span()),
         _ => expr.span().into(),
     }
 }
@@ -1115,28 +1121,28 @@ fn balance_closing_parens(s: &str) -> String {
     out
 }
 
-fn project_else_branch(
+#[allow(clippy::too_many_arguments)]
+fn project_classic_switch_else(
     g: &mut GraphBuilder,
     index: &SemIndex,
     src: &str,
-    branch: Option<&AST::ElseBranch>,
+    else_body: Option<&[Stmt]>,
     ordinal: usize,
     x: i32,
     y: i32,
 ) {
-    match branch {
-        Some(AST::ElseBranch::ElseIf(ifs)) => {
-            project_stmt(
-                g,
-                index,
-                src,
-                &Stmt::If((**ifs).clone()),
-                ordinal * 100 + 60,
-                x,
-                y,
-            );
+    match else_body {
+        Some([stmt @ Stmt::Switch {
+            subject,
+            arms,
+            span,
+            ..
+        }]) if AST::is_subjectless_guard(subject, *span)
+            && switch_was_classic_if(src, arms, *span) =>
+        {
+            project_stmt(g, index, src, stmt, ordinal * 100 + 60, x, y);
         }
-        Some(AST::ElseBranch::Else(body)) => {
+        Some(body) => {
             project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y);
         }
         None => {}

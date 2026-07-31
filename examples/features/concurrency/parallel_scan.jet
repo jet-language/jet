@@ -54,7 +54,7 @@ fn scan_parallel(paths: [String]) => [String] {
     expected :: paths.len()
     (sender, ch) :: tasks.channel<String>()
     workers := [Task<Unit>].{}
-    loop path; paths {
+    loop path, paths {
         tx :: ~sender
         file :: ~path
         workers.push(tasks.spawn(() => {
@@ -87,7 +87,7 @@ fn run() {
     print("")
     parallel_paths :: copy_paths(paths)
     parallel :: scan_parallel(parallel_paths)
-    loop line; parallel { print(line) }
+    loop line, parallel { print(line) }
     print("")
     print("done — {paths.len()} files scanned in parallel")
 }

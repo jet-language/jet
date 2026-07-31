@@ -580,6 +580,7 @@ impl<'a> Checker<'a> {
             if b.ty.is_none() {
                 b.ty = Some(final_ty.clone());
             }
+            self.report_lending_view_escape(&b.init, "be stored in a binding");
             // D-DECIMAL1: default-on float-money lint for money-like binding names.
             if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
                 self.diags.push(Diagnostic::lint(
@@ -617,6 +618,26 @@ impl<'a> Checker<'a> {
                         self.ct_embed_inputs.extend(inputs);
                     }
                     Err(d) => self.diags.push(d),
+                }
+            } else if !b.mutable {
+                // D-VERDICT-1308-1: an ordinary immutable binding is an
+                // implicit folding opportunity. Failure is silent; only
+                // explicit `#Known` demands a compile-time answer.
+                let globals = self.current_ct_globals();
+                if let Ok((v, _)) =
+                    crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                        &b.init,
+                        self.ct_funcs,
+                        self.ct_externs,
+                        self.ct_base_dir,
+                        &globals,
+                        self.core_imports,
+                        false,
+                        0,
+                    )
+                {
+                    b.ct = Some(v.clone());
+                    self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
                 }
             }
             if b.name == "_" {

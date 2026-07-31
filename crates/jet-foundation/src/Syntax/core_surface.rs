@@ -97,6 +97,10 @@ pub const SIGIL_FENCE_CLOSE: &str = "]$";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const ATTR_TRACK: &str = "Track";
 
+/// D-VERDICT-1308-1/2: demand compile-time knowledge for a binding, block, or
+/// conditional. Ordinary foldable expressions need no marker.
+pub const ATTR_KNOWN: &str = "Known";
+
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.
 /// `#Off <stmt>` parses and type-checks the statement, then emits no code.
 pub const ATTR_OFF: &str = "Off";
@@ -410,7 +414,7 @@ pub const TARGET_OS_MACOS: &str = "MacOS";
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
-/// `build` and its `.os` field — the subject of a `comptime if build.os == { }`
+/// `build` and its `.os` field — the subject of a `#Known if build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
 /// ordinary local named `build` is still fine); a `build.os` anywhere else has

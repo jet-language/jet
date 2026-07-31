@@ -30,6 +30,51 @@ pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
     matches!(subject, Expr::Bool(true, subject_span) if *subject_span == span)
 }
 
+/// Whether a subjectless `Stmt::Switch` came from classic `if condition { ... }`
+/// spelling rather than `if { condition -> ... }`.
+///
+/// The parser intentionally gives both forms one semantic node. Tooling may
+/// still need the authored spelling for formatting and edit affordances. Look
+/// only at significant source between the `if` token and the first condition;
+/// braces inside comments are trivia and must not turn a classic branch into a
+/// guard table.
+pub fn uses_classic_if_spelling(src: &str, if_span: Span, first_condition: Span) -> bool {
+    let Some(gap) = src.get(if_span.end..first_condition.start) else {
+        return false;
+    };
+    let bytes = gap.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b if b.is_ascii_whitespace() => i += 1,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                let mut depth = 1usize;
+                while i < bytes.len() && depth > 0 {
+                    if bytes.get(i..i + 2) == Some(b"/*") {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes.get(i..i + 2) == Some(b"*/") {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b'{' => return false,
+            _ => return true,
+        }
+    }
+    true
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// A call used for its effect, e.g. `print(x);`.
@@ -43,7 +88,6 @@ pub enum Stmt {
         value: Expr,
     },
     Return(Option<Expr>, Span),
-    If(IfStmt),
     While {
         cond: Expr,
         body: Vec<Stmt>,
@@ -218,7 +262,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if <cond> { … } else { … }`.
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `#Known if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
     /// `else_body` is None when no `else` clause is written (statement position
@@ -233,7 +277,7 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
-    /// D-OSTARGET2 (=B, ratified 2026-07-03): `comptime if build.os == { .Linux
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `#Known if build.os == { .Linux
     /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
     /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
     /// compiler-known comptime value; the switch folds to the arm matching the
@@ -250,7 +294,7 @@ pub enum Stmt {
         else_body: Option<Vec<Stmt>>,
         span: Span,
     },
-    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` — a
+    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` — a
     /// build-time execution block. Runs at compile time via the tree-walking
     /// comptime interpreter; erases entirely (no runtime Rust emitted, I3).
     /// Pure-only in Stage A (D-CTCORE1 whitelist + E0951/E0958/E0953/E0956);
@@ -385,7 +429,6 @@ impl Stmt {
             | Stmt::Transact { span, .. }
             | Stmt::ScopeMember { span, .. } => *span,
             Stmt::Yield(_, span) => *span,
-            Stmt::If(ifs) => ifs.cond.span(),
         }
     }
 }

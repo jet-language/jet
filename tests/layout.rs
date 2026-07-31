@@ -225,7 +225,7 @@ fn run() {
         a.width <= 50.0
     }
     print("feasible={(form.is_feasible())}")
-    loop c; form.conflict() {
+    loop c, form.conflict() {
         print("conflict: {c}")
     }
 }

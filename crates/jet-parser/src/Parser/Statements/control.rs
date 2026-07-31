@@ -32,11 +32,12 @@ impl<'a> Parser<'a> {
                 span: Span::new(start.start, end),
             });
         }
-        let finite_header = matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(
-                self.peek2().kind,
-                TokKind::ColonEq | TokKind::Semi | TokKind::Comma
-            );
+        let finite_header = matches!(self.peek().kind, TokKind::LParen)
+            || (matches!(self.peek().kind, TokKind::Ident(_))
+                && matches!(
+                    self.peek2().kind,
+                    TokKind::ColonEq | TokKind::Semi | TokKind::Comma
+                ));
         if !finite_header {
             return Err(Diagnostic::error(
                 "E0072",
@@ -56,10 +57,9 @@ impl<'a> Parser<'a> {
             && matches!(self.peek2().kind, TokKind::ColonEq)
         {
             let init = self.sigil_binding()?;
-            self.expect(TokKind::Semi, "after the state initializer")?;
+            self.expect_loop_comma("after the state initializer")?;
             let cond = self.expr_no_struct_lit()?;
-            let step = if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
+            let step = if self.take_loop_comma() {
                 let step_expr = self.expr()?;
                 let step = if matches!(self.peek().kind, TokKind::Eq)
                     || self.peek().kind.compound_op().is_some()
@@ -83,17 +83,8 @@ impl<'a> Parser<'a> {
             counted = Some((init, cond, step));
         } else {
             loop {
-                let (var, var_span) = self.expect_ident("as the loop variable")?;
-                let mut var2 = None;
-                if matches!(self.peek().kind, TokKind::Comma)
-                    && matches!(self.peek3().kind, TokKind::Semi)
-                {
-                    self.bump();
-                    let (name, span) =
-                        self.expect_ident("after `,` in `loop key, value; source`")?;
-                    var2 = Some((name, span));
-                }
-                self.expect(TokKind::Semi, "after the loop source binding")?;
+                let (var, var_span, var2) = self.loop_source_binding()?;
+                self.expect_loop_comma("after the loop source binding")?;
                 let first = self.expr_no_struct_lit()?;
                 let kind = if let Expr::Range {
                     start,
@@ -102,8 +93,8 @@ impl<'a> Parser<'a> {
                     ..
                 } = &first
                 {
-                    let step = if matches!(self.peek().kind, TokKind::Semi) {
-                        self.bump();
+                    let step = if self.at_yielding_loop_stride() {
+                        self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
                         None
@@ -118,8 +109,8 @@ impl<'a> Parser<'a> {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    let step = if matches!(self.peek().kind, TokKind::Semi) {
-                        self.bump();
+                    let step = if self.at_yielding_loop_stride() {
+                        self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
                         None
@@ -131,8 +122,8 @@ impl<'a> Parser<'a> {
                         exclusive,
                     }
                 } else {
-                    let step = if matches!(self.peek().kind, TokKind::Semi) {
-                        self.bump();
+                    let step = if self.at_yielding_loop_stride() {
+                        self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
                         None
@@ -143,7 +134,7 @@ impl<'a> Parser<'a> {
                     }
                 };
                 clauses.push((var, var_span, var2, kind));
-                if !matches!(self.peek().kind, TokKind::Comma) {
+                if !self.at_yielding_loop_clause() {
                     break;
                 }
                 self.bump();
@@ -208,12 +199,16 @@ impl<'a> Parser<'a> {
             Span::new(start.start, start.start),
         ));
         if let Some(cond) = guard {
-            body = vec![Stmt::If(IfStmt {
-                cond,
-                then_body: body,
-                else_branch: None,
+            body = vec![Stmt::Switch {
+                subject: Expr::Bool(true, start),
+                arms: vec![SwitchArm {
+                    span: cond.span(),
+                    cond,
+                    body,
+                }],
+                else_body: None,
                 span: start,
-            })];
+            }];
         }
         // A source comprehension may lower to several nested loops, but source
         // `break` exits the comprehension as one control construct. Give the
@@ -326,7 +321,7 @@ impl<'a> Parser<'a> {
             )
     }
 
-    /// After `#Meta(...)`, is the next item `#Static`/`#Inline` (comptime markers)?
+    /// After `#Meta(...)`, is the next item an explicit compile-time marker?
     pub(in super::super) fn at_comptime_marker_after_meta(&self) -> bool {
         let Some(i) = self.meta_attr_next_index() else {
             return false;
@@ -335,7 +330,10 @@ impl<'a> Parser<'a> {
             && matches!(
                 self.toks.get(i + 1).map(|t| &t.kind),
                 Some(TokKind::Ident(n))
-                    if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
+                    if matches!(
+                        n.as_str(),
+                        "Known" | "Static" | "Inline" | "static" | "inline"
+                    )
             )
     }
 
@@ -880,6 +878,29 @@ impl<'a> Parser<'a> {
         }
         let marker = self.parse_rule_marker()?;
         let marker_span = marker.span;
+        if let Some((field_name, field_name_span)) = marker
+            .arg_labels
+            .iter()
+            .flatten()
+            .find(|(field_name, _)| {
+                field_name != Syntax::CTX_FIELD_ALLOCATOR
+                    && field_name != Syntax::CTX_FIELD_LOGGER
+                    && field_name != Syntax::CTX_FIELD_DEADLINE
+            })
+        {
+            return Err(Diagnostic::error(
+                "E0761",
+                format!("`{field_name}` isn't a context field"),
+                "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
+                format!(
+                    "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+                    Syntax::CTX_BLOCK,
+                    Syntax::CTX_BLOCK,
+                    Syntax::CTX_BLOCK
+                ),
+                Some(*field_name_span),
+            ));
+        }
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let parameter_indices = (0..marker.args.len())
             .map(|index| arguments.parameter_for_source(index))
@@ -1086,8 +1107,8 @@ impl<'a> Parser<'a> {
                                      // S19-amend: `loop` handles all three loop forms by header.
                                      //   loop { }               → infinite
                                      //   loop cond { }          → conditional (was `while`)
-                                     //   loop x; ... { }      → iteration (was `for`)
-                                     //   loop k, v; ... { }   → key-value iteration
+                                     //   loop x, ... { }        → iteration (was `for`)
+                                     //   loop (k, v), ... { }   → key-value iteration
         if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop
             self.bump();
@@ -1105,17 +1126,13 @@ impl<'a> Parser<'a> {
                     "loop state needs one mutable name binding".to_string(),
                     "state changes between loop turns, so its header starts with `name := value`"
                         .to_string(),
-                    "write `loop name := value; condition { ... }`".to_string(),
+                    "write `loop name := value, condition { ... }`".to_string(),
                     Some(init.name_span),
                 ));
             }
-            self.expect(
-                TokKind::Semi,
-                "after the state initializer",
-            )?;
+            self.expect_loop_comma("after the state initializer")?;
             let cond = self.expr_no_struct_lit()?;
-            let step = if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
+            let step = if self.take_loop_comma() {
                 let step_expr = self.expr()?;
                 let step = if matches!(self.peek().kind, TokKind::Eq)
                     || self.peek().kind.compound_op().is_some()
@@ -1146,18 +1163,14 @@ impl<'a> Parser<'a> {
                 span,
                 label,
             })
-        } else if matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma)
+        } else if (matches!(&self.peek().kind, TokKind::Ident(_))
+            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma))
+            || matches!(&self.peek().kind, TokKind::LParen)
         {
-            // D-LOOP-HEADER2=A: `loop x; source [; stride]` (or map k,v).
-            let (var, var_span) = self.expect_ident("as the loop variable")?;
-            let mut var2 = None;
-            if matches!(self.peek().kind, TokKind::Comma) {
-                self.bump();
-                let (v2, s2) = self.expect_ident("after `,` in `loop key, value; source`")?;
-                var2 = Some((v2, s2));
-            }
-            self.expect(TokKind::Semi, "after the loop source binding")?;
+            // D-LOOP-COMMA1=A: `loop x, source [, stride]`; two-name
+            // iteration groups the binding as `loop (key, value), source`.
+            let (var, var_span, var2) = self.loop_source_binding()?;
+            self.expect_loop_comma("after the loop source binding")?;
             let first = self.expr_no_struct_lit()?;
             let kind = if let Expr::Range {
                 start,
@@ -1166,8 +1179,7 @@ impl<'a> Parser<'a> {
                 ..
             } = &first
             {
-                let step = if matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
+                let step = if self.take_loop_comma() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1183,8 +1195,7 @@ impl<'a> Parser<'a> {
                 let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                 self.bump();
                 let end = self.expr_no_struct_lit()?;
-                let step = if matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
+                let step = if self.take_loop_comma() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1196,8 +1207,7 @@ impl<'a> Parser<'a> {
                     exclusive,
                 }
             } else {
-                let step = if matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
+                let step = if self.take_loop_comma() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1235,7 +1245,7 @@ impl<'a> Parser<'a> {
                 "this effect-only loop uses a result arrow".to_string(),
                 "an arrow says that the loop yields values; this statement discards a result"
                     .to_string(),
-                "remove `->`; keep the one-line body adjacent or use braces".to_string(),
+                "remove `->` and wrap the body in `{ ... }`".to_string(),
                 Some(arrow.span),
             ));
         }
@@ -1247,8 +1257,8 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0003",
                 "this loop has no body".to_string(),
-                "a loop header must be followed by one adjacent statement or a block".to_string(),
-                "add a one-line body, or write `{ ... }`".to_string(),
+                "a loop header must be followed by a braced block".to_string(),
+                "add a body written as `{ ... }`".to_string(),
                 Some(self.peek().span),
             ));
         }
@@ -1261,7 +1271,73 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
+        self.teach_control_braces("loop", self.peek().span);
         Ok(vec![self.stmt()?])
+    }
+
+    fn loop_source_binding(&mut self) -> Result<(String, Span, Option<(String, Span)>), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            let (first, first_span) = self.expect_ident("as the first loop variable")?;
+            self.expect(TokKind::Comma, "between the two loop variables")?;
+            let second = self.expect_ident("as the second loop variable")?;
+            self.expect(TokKind::RParen, "after the two loop variables")?;
+            return Ok((first, first_span, Some(second)));
+        }
+
+        let (first, first_span) = self.expect_ident("as the loop variable")?;
+        // Retired `loop key, value; source`: retain enough structure for fmt
+        // to produce `loop (key, value), source`.
+        if matches!(self.peek().kind, TokKind::Comma)
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+            && matches!(self.peek3().kind, TokKind::Semi)
+        {
+            self.bump();
+            let second = self.expect_ident("as the second loop variable")?;
+            return Ok((first, first_span, Some(second)));
+        }
+        Ok((first, first_span, None))
+    }
+
+    fn expect_loop_comma(&mut self, context: &str) -> Result<(), Diagnostic> {
+        if self.take_loop_comma() {
+            Ok(())
+        } else {
+            self.expect(TokKind::Comma, context)
+        }
+    }
+
+    fn take_loop_comma(&mut self) -> bool {
+        match self.peek().kind {
+            TokKind::Comma => {
+                self.bump();
+                true
+            }
+            TokKind::Semi if self.peek().span.start < self.peek().span.end => {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0373",
+                    "this loop header uses a semicolon".to_string(),
+                    "commas separate loop clauses; semicolons separate statements".to_string(),
+                    "replace `;` with `,`; `jet fmt` applies this fix".to_string(),
+                    Some(span),
+                ));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn at_yielding_loop_clause(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Comma)
+            && (matches!(self.peek2().kind, TokKind::LParen)
+                || (matches!(self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::Comma)))
+    }
+
+    fn at_yielding_loop_stride(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Semi)
+            || (matches!(self.peek().kind, TokKind::Comma) && !self.at_yielding_loop_clause())
     }
 
     /// Parse statements until the closing `}` (consumed). Recovers at
@@ -1349,17 +1425,28 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::KwComptime => {
-                // D-WHEN1 (ratified 2026-06-19): `comptime if <cond> { … }` is
+                // D-WHEN1 (ratified 2026-06-19): `#Known if <cond> { … }` is
                 // a compile-time conditional — not a binding. Detect by peeking
                 // at the second token; `comptime NAME` is always a binding.
                 if matches!(self.peek2().kind, TokKind::KwIf) {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
-                // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` block.
+                // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` block.
                 if matches!(self.peek2().kind, TokKind::LBrace) {
                     let stmt = self.comptime_block_stmt()?;
                     return Ok(stmt);
+                }
+                let binding = self.comptime_binding()?;
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
+            TokKind::Hash if self.at_known_lead() => {
+                if matches!(self.peek3().kind, TokKind::KwIf) {
+                    return self.comptime_if_stmt();
+                }
+                if matches!(self.peek3().kind, TokKind::LBrace) {
+                    return self.comptime_block_stmt();
                 }
                 let binding = self.comptime_binding()?;
                 self.finish_stmt()?;
@@ -2189,18 +2276,6 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
                 let value = std::mem::replace(value, Expr::Absent(*span));
                 *stmt = Stmt::BreakLabelValue(target.to_string(), *span, value, *span);
             }
-            Stmt::If(branch) => {
-                rewrite_collect_root_exits(&mut branch.then_body, target, nested_loop_depth);
-                match &mut branch.else_branch {
-                    Some(ElseBranch::ElseIf(next)) => {
-                        rewrite_collect_if_root_exits(next, target, nested_loop_depth)
-                    }
-                    Some(ElseBranch::Else(body)) => {
-                        rewrite_collect_root_exits(body, target, nested_loop_depth)
-                    }
-                    None => {}
-                }
-            }
             Stmt::Switch {
                 arms, else_body, ..
             }
@@ -2250,14 +2325,5 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
             }
             _ => {}
         }
-    }
-}
-
-fn rewrite_collect_if_root_exits(branch: &mut IfStmt, target: &str, depth: usize) {
-    rewrite_collect_root_exits(&mut branch.then_body, target, depth);
-    match &mut branch.else_branch {
-        Some(ElseBranch::ElseIf(next)) => rewrite_collect_if_root_exits(next, target, depth),
-        Some(ElseBranch::Else(body)) => rewrite_collect_root_exits(body, target, depth),
-        None => {}
     }
 }

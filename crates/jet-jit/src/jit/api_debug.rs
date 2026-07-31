@@ -411,7 +411,8 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 else_body: None, ..
             }
             | TStmt::Reactive { .. }
-            | TStmt::LineMarker(_) => {}
+            | TStmt::LineMarker(_)
+            | TStmt::SourceSpan(_) => {}
         }
     }
 }

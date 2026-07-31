@@ -8,7 +8,7 @@ use crate::Syntax::{self, OSTarget as OS};
 use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use std::collections::HashMap;
 
-/// D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
+/// D-OSTARGET2=B (ratified 2026-07-03): fold every `#Known if build.os == {
 /// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
 /// matching this build's active OS (`bundle.active_os`), discarding the rest.
 ///
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
 /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
 /// whose arm conditions are the compile-time constants `build.os == .OS`
-/// (emitted here as a `Bool` literal), so all the existing `comptime if`
+/// (emitted here as a `Bool` literal), so all the existing `#Known if`
 /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
 /// handles it unchanged. `build.os` is meaningful only as this switch's
 /// subject; anywhere else `build` is an ordinary identifier (unknown at
@@ -92,7 +92,6 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>
         Stmt::Val(b) => desugar_expr(&mut b.init, active, diags),
         Stmt::Assign { value, .. } => desugar_expr(value, active, diags),
         Stmt::Return(Some(e), _) => desugar_expr(e, active, diags),
-        Stmt::If(ifs) => desugar_if(ifs, active, diags),
         Stmt::While { body, .. } | Stmt::For { body, .. } => desugar_stmts(body, active, diags),
         Stmt::Switch {
             arms, else_body, ..
@@ -138,15 +137,6 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>
     }
 }
 
-fn desugar_if(ifs: &mut crate::AST::IfStmt, active: OS, diags: &mut Vec<Diagnostic>) {
-    desugar_stmts(&mut ifs.then_body, active, diags);
-    match &mut ifs.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => desugar_if(inner, active, diags),
-        Some(crate::AST::ElseBranch::Else(body)) => desugar_stmts(body, active, diags),
-        None => {}
-    }
-}
-
 /// Descend into the few expression shapes that can hold statement blocks
 /// (lambda block bodies, value-position `if` branches).
 fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
@@ -169,7 +159,7 @@ fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Validate one `comptime if build.os == { … }` switch and rewrite it into the
+/// Validate one `#Known if build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
 fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {

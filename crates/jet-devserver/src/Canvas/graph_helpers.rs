@@ -25,6 +25,23 @@ pub(super) fn graph_id(module_display: &str, f: &AST::Func) -> String {
     )
 }
 
+pub(super) fn span_through_closing_parens(src: &str, span: Span) -> SourceSpan {
+    let Some(text) = src.get(span.start..span.end) else {
+        return span.into();
+    };
+    let opens = text.bytes().filter(|byte| *byte == b'(').count();
+    let mut closes = text.bytes().filter(|byte| *byte == b')').count();
+    let mut end = span.end;
+    while closes < opens && src.as_bytes().get(end) == Some(&b')') {
+        end += 1;
+        closes += 1;
+    }
+    SourceSpan {
+        start: span.start,
+        end,
+    }
+}
+
 pub(super) fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
     let (_, range) = graph_id.rsplit_once('@')?;
     let (start, end) = range.split_once('-')?;

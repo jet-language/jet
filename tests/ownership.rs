@@ -696,7 +696,7 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static comptime limit = 10
+#Static #Known limit :: 10
 
 fn show(n: Int) {
     print(n)
@@ -2231,7 +2231,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn inspect_all(items: ...[Inspect, Edit]) {
-    loop item; items {
+    loop item, items {
         call(() => { item.touch() })
     }
 }
@@ -2249,7 +2249,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn edit_all(items: ...[Edit, Inspect]) {
-    loop item; items {
+    loop item, items {
         call(() => { item.touch() })
     }
 }
@@ -3098,7 +3098,7 @@ fn place_write_window_is_scoped_per_loop_iteration() {
     let src = r#"
 fn run() {
     xs := [1, 2]
-    loop i; 0..1 {
+    loop i, 0..1 {
         edit :: &xs[0]
         edit = edit + 1
     }
@@ -4217,8 +4217,9 @@ fn run() {
 
     indexed_values := [5, 6, 7, 8]
     edits :: indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
-    edits[0][0] = 50
-    edits[1][0] = 80
+    loop edit, edits {
+        edit[0] = edit[0] + 45
+    }
     print(indexed_values)
 }
 "#;
@@ -4229,7 +4230,7 @@ fn run() {
         let (code, stdout, stderr) =
             common::build_and_run("jet_runtime_disjoint", "runtime_disjoint", src);
         assert_eq!(code, 0, "{stderr}");
-        assert_eq!(stdout, "[10, 2, 30, 4]\n[50, 6, 7, 80]\n");
+        assert_eq!(stdout, "[10, 2, 30, 4]\n[50, 6, 7, 53]\n");
     }
 }
 
@@ -4266,6 +4267,253 @@ fn run() {
             assert_eq!(code, 0, "{stderr}");
             assert!(stdout.contains(message), "{stdout}");
         }
+    }
+}
+
+#[test]
+fn runtime_disjoint_views_match_aot_jit_dev_and_interpreter() {
+    use jet::Interpreter::RunOutcome;
+
+    let src = r#"
+fn run() {
+    values := [1, 2, 3, 4]
+    parts :: values.split_write(2) ?? panic("split failed")
+    parts.left[0] = 10
+    parts.right[1] = 40
+
+    values.edit_disjoint([0, 2], (left, right) => {
+        left[0] = left[0] + 1
+        right[0] = right[0] + 2
+    }) ?? panic("edit failed")
+
+    selected :: values.get_disjoint_write([1, 3]) ?? panic("selection failed")
+    loop edit, selected {
+        edit[0] = edit[0] + 5
+    }
+    print(values)
+}
+"#;
+    let expected = "[11, 7, 5, 45]\n";
+    let root = common::unique_tmp("jet_runtime_disjoint_tiers");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, src).unwrap();
+
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_runtime_disjoint_tiers", "aot", src);
+        assert_eq!(code, 0, "AOT failed: {stderr}");
+        assert_eq!(stdout, expected, "AOT output drift");
+    }
+
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "{}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle).expect("disjoint views must lower to resident JIT");
+
+    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+        jet_jit::reset_jit_trace_for_test();
+        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "{tier}: {stderr}");
+                assert_eq!(stderr, "", "{tier} stderr drift");
+                assert_eq!(stdout, expected, "{tier} output drift");
+            }
+            RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
+        }
+        if !force_interpreter {
+            assert!(jet_jit::jit_executed_for_test(), "resident JIT did not execute");
+            assert!(
+                !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
+                "resident JIT used an interpreter fallback"
+            );
+        }
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run disjoint views through the default tier");
+    assert!(
+        output.status.success(),
+        "default run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+}
+
+#[test]
+fn runtime_disjoint_views_reject_alias_storage_and_owner_invalidation() {
+    let alias = r#"
+fn run() {
+    values := [1, 2]
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    saved := [ViewMut<Int>].{}
+    loop edit, selected {
+        saved.push(edit)
+    }
+}
+"#;
+    let alias_diags =
+        jet::compile(alias).expect_err("a lending loop must not let an exclusive view escape");
+    assert!(
+        alias_diags
+            .iter()
+            .any(|diag| matches!(diag.code.as_str(), "E0120" | "E0212")),
+        "{alias_diags:?}"
+    );
+
+    let invalidation = r#"
+fn run() {
+    values := [1, 2]
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    values.push(3)
+    selected[0][0] = 9
+}
+"#;
+    let invalidation_diags =
+        jet::compile(invalidation).expect_err("the owner must stay borrowed while views are live");
+    assert!(
+        invalidation_diags
+            .iter()
+            .any(|diag| matches!(diag.code.as_str(), "E0212" | "E0507")),
+        "{invalidation_diags:?}"
+    );
+}
+
+#[test]
+fn lending_disjoint_views_reject_every_retaining_boundary() {
+    let cases = [
+        (
+            "aggregate binding",
+            r#"
+fn run() {
+    values := [1, 2]
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    loop edit, selected { held :: [edit] }
+}
+"#,
+        ),
+        (
+            "assignment",
+            r#"
+fn run() {
+    values := [1, 2]
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    held := [ViewMut<Int>].{}
+    loop edit, selected { held = [edit] }
+}
+"#,
+        ),
+        (
+            "named helper",
+            r#"
+fn retain(view: ViewMut<Int>) {}
+fn run() {
+    values := [1, 2]
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    loop edit, selected { retain(edit) }
+}
+"#,
+        ),
+        (
+            "return",
+            r#"
+fn leak(values: &[Int]) => ViewMut<Int> {
+    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    loop edit, selected { return edit }
+    panic("unreachable")
+}
+fn run() {
+    values := [1, 2]
+    leak(&values)
+}
+"#,
+        ),
+    ];
+    for (boundary, src) in cases {
+        let diagnostics = jet::compile(src)
+            .expect_err("a lending mutable view must not cross a retaining boundary");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0212"),
+            "{boundary}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn edit_disjoint_callback_views_reject_every_retaining_boundary() {
+    let cases = [
+        (
+            "aggregate binding",
+            r#"
+fn run() {
+    values := [1, 2]
+    values.edit_disjoint([0, 1], (left, right) => {
+        held :: [left, right]
+    })
+}
+"#,
+        ),
+        (
+            "assignment",
+            r#"
+fn run() {
+    values := [1, 2]
+    held := [ViewMut<Int>].{}
+    values.edit_disjoint([0, 1], (left, right) => {
+        held = [left, right]
+    })
+}
+"#,
+        ),
+        (
+            "named helper",
+            r#"
+fn retain(view: ViewMut<Int>) {}
+fn run() {
+    values := [1, 2]
+    values.edit_disjoint([0, 1], (left, right) => {
+        retain(left)
+    })
+}
+"#,
+        ),
+        (
+            "return",
+            r#"
+fn leak(values: &[Int]) => ViewMut<Int> {
+    return values.edit_disjoint([0, 1], (left, right) => {
+        return left
+    }) ?? panic("selection failed")
+}
+fn run() {
+    values := [1, 2]
+    leak(&values)
+}
+"#,
+        ),
+    ];
+    for (boundary, src) in cases {
+        let diagnostics = jet::compile(src)
+            .expect_err("an edit_disjoint callback view must not cross a retaining boundary");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0212"),
+            "{boundary}: {diagnostics:?}"
+        );
     }
 }
 

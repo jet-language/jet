@@ -930,7 +930,7 @@ fn run() {
     x :: arena.alloc(42)
     probe_work()
     digest := crypto.sha256("trace-work".bytes())
-    loop i; 0..16384 {
+    loop i, 0..16384 {
         digest = crypto.sha256(digest.hex().bytes())
     }
     print("READY {digest.hex().len()}")

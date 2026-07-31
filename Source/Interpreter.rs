@@ -297,7 +297,7 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
 /// tree-walker (see module doc), so a construct it can't run leaks the
 /// comptime evaluator's own E0956 ("unsupported")/E0951 ("impurity") /
 /// E3410/E3412 (Tier-2 / live-net comptime) codes — correct for a real
-/// `comptime { }` block, but wrong voice here: the "compute this at runtime"
+/// `#Known { }` block, but wrong voice here: the "compute this at runtime"
 /// / "only fetch at comptime" fix advice is nonsense when the user is already
 /// trying to run this at runtime via `jet dev`. Rewrap as the dev-loop's own
 /// E2201 boundary diagnostic instead, preserving what construct tripped it.
@@ -344,7 +344,39 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
-        match crate::Loader::load_entry_with_overlay(file, None, false) {
+        let source = std::fs::read_to_string(file).ok();
+        let web_entry = source.as_ref().and_then(|source| {
+            let (tokens, diagnostics) = crate::Lexer::lex(source);
+            if !diagnostics.is_empty() {
+                return None;
+            }
+            let program = crate::Parser::parse(&tokens).ok()?;
+            let has_app = program.items.iter().any(|item| {
+                matches!(
+                    item,
+                    crate::AST::Item::Func(function)
+                        if function.name == "app"
+                            && matches!(
+                                function.return_type.as_ref(),
+                                Some(crate::AST::Type::Named(name)) if name == "WebApp"
+                            )
+                )
+            });
+            let has_run = program.items.iter().any(
+                |item| matches!(item, crate::AST::Item::Func(function) if function.name == "run"),
+            );
+            (has_app && !has_run)
+                .then(|| format!("{source}\nfn run() {{ app().serve() }}\n"))
+        });
+        let overlay_path = std::fs::canonicalize(file).unwrap_or_else(|_| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(file)
+        });
+        let overlay = web_entry
+            .as_deref()
+            .map(|source| (overlay_path.as_path(), source));
+        match crate::Loader::load_entry_with_overlay(file, overlay, false) {
             Ok(mut bundle) => {
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);

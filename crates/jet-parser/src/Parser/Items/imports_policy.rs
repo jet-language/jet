@@ -1213,6 +1213,9 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_comptime_marker() => {
                         self.comptime_def().map(Item::Const)
                     }
+                    TokKind::Hash if self.at_known_lead() => {
+                        self.comptime_def().map(Item::Const)
+                    }
                     TokKind::At => {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(

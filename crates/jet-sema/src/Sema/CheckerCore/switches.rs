@@ -1,4 +1,4 @@
-use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type};
+use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, pattern_variant_name};
 use crate::Sema::{Checker, LocalInfo};
@@ -242,53 +242,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        /// D-FLOWTYPE1=A: `if x == None { A } else { B }` ≡ `if x == Val(x) { B } else { A }`.
-        /// Only atomic None tests invert — compound conditions do not prove presence on the
-        /// false path.
-        pub(crate) fn invert_optional_none_else_narrow(&self, ifs: &mut IfStmt) {
-            if ifs.else_branch.is_none() {
-                return;
-            }
-            let Some((name, name_span, span)) = atomic_absent_optional_subject(&ifs.cond) else {
-                return;
-            };
-            if self.flow_narrowable_optional_inner(&name).is_none() {
-                return;
-            }
-            let then_body = std::mem::take(&mut ifs.then_body);
-            let else_branch = ifs.else_branch.take();
-            match else_branch {
-                Some(ElseBranch::Else(else_body)) => {
-                    ifs.then_body = else_body;
-                    ifs.else_branch = Some(ElseBranch::Else(then_body));
-                }
-                Some(ElseBranch::ElseIf(next)) => {
-                    ifs.then_body = vec![Stmt::If(*next)];
-                    ifs.else_branch = Some(ElseBranch::Else(then_body));
-                }
-                None => return,
-            }
-            ifs.cond = Expr::PatternTest {
-                subject: Box::new(Expr::Ident(name.clone(), name_span)),
-                pattern: Pattern::Present {
-                    binding: name,
-                    binding_span: name_span,
-                    span,
-                },
-                span,
-            };
-        }
-
-        pub(crate) fn prepare_optional_flow_if(&self, ifs: &mut IfStmt) {
-            self.invert_optional_none_else_narrow(ifs);
-            self.rewrite_optional_flow_ne_none(&mut ifs.cond);
-        }
-
         pub(crate) fn check_condition_with_bindings(
             &mut self,
             cond: &mut Expr,
         ) -> HashMap<String, Type> {
-            // Idempotent with `prepare_optional_flow_if` for statement `if`.
             self.rewrite_optional_flow_ne_none(cond);
             match cond {
                 Expr::PatternTest {

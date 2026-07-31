@@ -1255,17 +1255,16 @@ impl<'a> Fmt<'a> {
             return;
         }
         if c.is_comptime {
-            // D-CONSTMARK1: `#Static` / `#Inline` precede `comptime`.
+            // D-CONSTMARK1: `#Static` / `#Inline` precede `#Known`.
             for attr in &c.attrs {
                 match attr {
                     ConstAttr::ForceStatic => self.write("#Static "),
                     ConstAttr::ForceInline => self.write("#Inline "),
                 }
             }
-            self.write(Syntax::KW_COMPTIME);
-            self.write(" ");
+            self.write(&format!("#{} ", Syntax::ATTR_KNOWN));
             self.write(&c.name);
-            self.write(" = ");
+            self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
             return;
         }
@@ -1285,11 +1284,10 @@ impl<'a> Fmt<'a> {
             self.write(";");
             return;
         }
-        // Fallback: treat as comptime (D-CONST-RETIRE1 — no live `const` keyword).
-        self.write(Syntax::KW_COMPTIME);
-        self.write(" ");
+        // Fallback: treat as an explicit known value.
+        self.write(&format!("#{} ", Syntax::ATTR_KNOWN));
         self.write(&c.name);
-        self.write(" = ");
+        self.write(" :: ");
         self.fmt_expr(&c.value, Prec::OrFallback);
     }
 

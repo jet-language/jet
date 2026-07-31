@@ -70,7 +70,7 @@ use core.data as data
 
 fn show_bridge(step: String) {
     status :: data.status()
-    loop row; status {
+    loop row, status {
         if row.step == step {
             print("{row.step} path={row.path} copy={row.copy} ownership={row.ownership} trust={row.trust} fallback={row.fallback} replacement={row.replacement}")
         }
@@ -197,7 +197,7 @@ fn data_bridges_r_fails_closed_without_rscript_on_path() {
 use core.data as data
 fn run() {
     status :: data.status()
-    loop row; status {
+    loop row, status {
         if row.step == "r.*" {
             print("{row.step}:{row.path}")
         }

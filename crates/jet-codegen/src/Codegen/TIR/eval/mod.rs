@@ -10,6 +10,7 @@ mod handles;
 mod local_cell;
 mod regex_ops;
 mod stmts;
+mod webapp;
 
 mod range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
@@ -131,14 +132,13 @@ pub(super) fn view_bounds_diagnostic(
     span: Span,
 ) -> Diagnostic {
     Diagnostic::error(
-        "E0953",
-        "your comptime code stopped the build".to_string(),
+        "E3001",
         format!(
-            "while computing this value at compile time, the program panicked: can't view {len} items from {start} to {end} ({})",
+            "can't view {len} items from {start} to {end} ({})",
             if exclusive { "exclusive" } else { "inclusive" }
         ),
-        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
-            .to_string(),
+        "the requested view is outside the list at runtime".to_string(),
+        format!("use bounds between 0 and {len}, with the end after the start"),
         Some(span),
     )
 }
@@ -484,6 +484,17 @@ enum EvalCallable<'a> {
     Named(&'a str),
 }
 
+#[derive(Clone)]
+struct EvalWebApp {
+    steps: Vec<EvalWebAppStep>,
+}
+
+#[derive(Clone)]
+struct EvalWebAppStep {
+    method: String,
+    args: Vec<CtValue>,
+}
+
 struct EvalStream<'a> {
     func: &'a TFunc,
     args: Vec<CtValue>,
@@ -498,6 +509,7 @@ struct EvalRuntime<'a> {
     clocks: Vec<i64>,
     task_groups: Vec<Vec<usize>>,
     tasks: Vec<Option<EvalTask>>,
+    web_apps: Vec<EvalWebApp>,
     completion_order: AtomicU64,
 }
 
@@ -650,6 +662,7 @@ impl EvalRuntime<'_> {
             clocks: Vec::new(),
             task_groups: Vec::new(),
             tasks: Vec::new(),
+            web_apps: Vec::new(),
             completion_order: AtomicU64::new(0),
         }
     }

@@ -424,11 +424,11 @@ impl<'a> Parser<'a> {
     /// so this only catches the REDUNDANT case structurally — cases genuinely
     /// requiring the struct's field count are re-checked in sema, which has
     /// the registry. A `..` present with zero named fields is never redundant.
-    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): parse `comptime { … }`.
+    /// D-VERDICT-1308-1: parse `#Known { … }`; recover retired `comptime`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span; // `comptime`
-        self.expect(TokKind::LBrace, "to open the `comptime` block body")?;
+        let start = self.take_known_lead()?;
+        self.expect(TokKind::LBrace, "to open the `#Known` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
@@ -437,16 +437,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-WHEN1 (ratified 2026-06-19): parse `comptime if <cond> { … } else { … }`.
-    /// Both arms require `{ }` (braceless bodies are not allowed for `comptime if`).
+    /// D-VERDICT-1308-2: parse `#Known if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `#Known if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span; // `comptime`
+        let start = self.take_known_lead()?;
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `comptime if build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `#Known if build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -458,7 +458,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBrace)
             {
                 self.bump(); // `==`
-                self.expect(TokKind::LBrace, "to open the `comptime if` dispatch body")?;
+                self.expect(TokKind::LBrace, "to open the `#Known if` dispatch body")?;
                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
@@ -478,25 +478,26 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Not the dispatch form — rewind and parse the boolean `comptime if`.
+        // Not the dispatch form — rewind and parse the boolean `#Known if`.
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-        self.expect(TokKind::LBrace, "to open the `comptime if` body")?;
+        self.expect(TokKind::LBrace, "to open the `#Known if` body")?;
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
-            // Allow `else if` chained with another `comptime if`.
-            if matches!(self.peek().kind, TokKind::KwComptime)
-                && matches!(self.peek2().kind, TokKind::KwIf)
+            // Allow `else if` chained with another `#Known if`.
+            if (matches!(self.peek().kind, TokKind::KwComptime)
+                && matches!(self.peek2().kind, TokKind::KwIf))
+                || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
                 Some(vec![chain])
             } else {
-                self.expect(TokKind::LBrace, "to open the `comptime if` else body")?;
+                self.expect(TokKind::LBrace, "to open the `#Known if` else body")?;
                 Some(self.block_stmts())
             }
         } else {
@@ -514,9 +515,14 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
-        self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
-        let (name, name_span) = self.expect_ident("after `comptime`")?;
-        self.expect(TokKind::Eq, "in a comptime binding")?;
+        let retired = matches!(self.peek().kind, TokKind::KwComptime);
+        self.take_known_lead()?;
+        let (name, name_span) = self.expect_ident("after `#Known`")?;
+        if retired {
+            self.expect(TokKind::Eq, "in the retired comptime binding")?;
+        } else {
+            self.expect(TokKind::ColonColon, "in a `#Known` binding")?;
+        }
         let init = self.expr()?;
         Ok(Binding {
             mutable: false,
@@ -542,6 +548,31 @@ impl<'a> Parser<'a> {
             gc_promotion: None,
             gc_transferred: false,
         })
+    }
+
+    pub(in crate::Parser) fn at_known_lead(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::ATTR_KNOWN)
+    }
+
+    fn take_known_lead(&mut self) -> Result<Span, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::KwComptime) {
+            let span = self.bump().span;
+            self.diags.push(Diagnostic::error(
+                "E0374",
+                "`comptime` is retired".to_string(),
+                "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
+                    .to_string(),
+                "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                    .to_string(),
+                Some(span),
+            ));
+            return Ok(span);
+        }
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "to start `#Known`")?;
+        let (_, end) = self.expect_ident("after `#`")?;
+        Ok(Span::new(start.start, end.end))
     }
 
     // --- expressions -----------------------------------------------------

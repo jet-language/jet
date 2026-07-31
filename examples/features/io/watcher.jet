@@ -32,7 +32,7 @@ fn run() {
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
     first_kind := "none"
-    loop ev; first {
+    loop ev, first {
         if ev.path == created { first_kind = ev.kind }
     }
     print("recursive file: {first_kind}")
@@ -50,7 +50,7 @@ fn run() {
     fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
     after_drop_events :: files.poll()
     after_drop_kind := "none"
-    loop ev; after_drop_events {
+    loop ev, after_drop_events {
         if ev.path == after_drop { after_drop_kind = ev.kind }
     }
     print("scope drop file: {after_drop_kind}")
@@ -70,7 +70,7 @@ fn run() {
     combined :: set.poll()
     process_kind := "none"
     port_kind := "none"
-    loop ev; combined {
+    loop ev, combined {
         if ev.domain == {
             "process" -> process_kind = ev.kind
             "port" -> port_kind = ev.kind

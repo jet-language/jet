@@ -1223,12 +1223,16 @@ impl<'a> Fmt<'a> {
                         self.write(", ");
                     }
                     first_clause = false;
+                    if var2.is_some() {
+                        self.write("(");
+                    }
                     self.write(var);
                     if let Some((name, _)) = var2 {
                         self.write(", ");
                         self.write(name);
+                        self.write(")");
                     }
-                    self.write("; ");
+                    self.write(", ");
                     match kind {
                         ForKind::Range {
                             start,
@@ -1240,14 +1244,14 @@ impl<'a> Fmt<'a> {
                             self.write(if *exclusive { "..<" } else { ".." });
                             self.fmt_expr(end, Prec::OrFallback);
                             if let Some(step) = step {
-                                self.write("; ");
+                                self.write(", ");
                                 self.fmt_expr(step, Prec::OrFallback);
                             }
                         }
                         ForKind::In { collection, step } => {
                             self.fmt_expr(collection, Prec::OrFallback);
                             if let Some(step) = step {
-                                self.write("; ");
+                                self.write(", ");
                                 self.fmt_expr(step, Prec::OrFallback);
                             }
                         }
@@ -1267,10 +1271,10 @@ impl<'a> Fmt<'a> {
                     ..
                 } => {
                     self.fmt_binding(init);
-                    self.write("; ");
+                    self.write(", ");
                     self.fmt_expr(cond, Prec::OrFallback);
                     if let Some(step) = step {
-                        self.write("; ");
+                        self.write(", ");
                         self.fmt_stmt(step);
                     }
                     self.fmt_collecting_body(body);
@@ -1282,11 +1286,17 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_collecting_body(&mut self, body: &[Stmt]) {
-        let body = if let [Stmt::If(ifs)] = body {
-            if ifs.else_branch.is_none() {
+        let body = if let [Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            span,
+        }] = body
+        {
+            if crate::AST::is_subjectless_guard(subject, *span) && arms.len() == 1 {
                 self.write(" if ");
-                self.fmt_expr(&ifs.cond, Prec::OrFallback);
-                ifs.then_body.as_slice()
+                self.fmt_expr(&arms[0].cond, Prec::OrFallback);
+                arms[0].body.as_slice()
             } else {
                 body
             }

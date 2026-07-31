@@ -61,8 +61,12 @@
 // control syntax. OP_CALLABLE_ARROW (`=>`) defines callable results.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
-// items. Effect-only `if` and `loop` bodies use no arrow. Braces only group
-// multiline bodies. D-LOOPSTATE1 owns break/next target arguments, and
+// items. Effect-only `if` and `loop` bodies use no arrow. D-BRACE1=A
+// (ratified 2026-07-30, card #1335) requires braces around every effect
+// `if`/`else`/`loop` body and makes fmt collapse fitting simple bodies.
+// D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
+// clauses and `(key, value)` for a two-name source binding.
+// D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
 // reuse KW_IF, KW_ELSE, OP_ARM_ARROW, braces, and ordinary Bool expressions.

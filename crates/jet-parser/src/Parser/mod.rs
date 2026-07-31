@@ -167,6 +167,9 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0992"
             | "E0994"
             | "E0366"
+            | "E0372"
+            | "E0373"
+            | "E0374"
             | "E0999"
             | "E0412"
             | "E0413"
@@ -176,6 +179,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0417"
             | "E0418"
             | "E0998"
+            | "E0927"
     )
 }
 
@@ -689,7 +693,7 @@ mod s61_tests {
 
     #[test]
     fn grouped_function_rules_keep_meta_and_policy_semantics() {
-        let src = "#[Policy(no_alloc), Meta(category: \"api\", maturity: .Tested), Task]\nfn sync() {}\n";
+        let src = "#[Policy(no_alloc), Meta(category: \"api\", maturity: .Tested), Job]\nfn sync() {}\n";
         let p = program(src);
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
@@ -816,7 +820,7 @@ mod s61_tests {
         for (src, expected) in [
             (
                 "#Job\n#Every(1s)\nfn tick() {}\n",
-                "#[Task, Every(1s)]",
+                "#[Job, Every(1s)]",
             ),
             (
                 "use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nfn add() { \"\"\"void add(void) {}\"\"\" }\n",
@@ -852,8 +856,8 @@ mod s61_tests {
         use crate::Formatter::format_source;
         for (src, expected_group) in [
             (
-                "use core.mem\n#[Policy(no_alloc), Meta(category: \"ffi\"), Task, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {\n    \"\"\"void add(void) {}\"\"\"\n}\n",
-                "#[Policy(no_alloc), Meta(category: \"ffi\"), Task, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
+                "use core.mem\n#[Policy(no_alloc), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {\n    \"\"\"void add(void) {}\"\"\"\n}\n",
+                "#[Policy(no_alloc), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
             ),
             (
                 "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
@@ -870,10 +874,10 @@ mod s61_tests {
     #[test]
     fn grouped_retired_function_markers_keep_known_teaching() {
         for (src, code) in [
-            ("#[Pure, Task]\nfn work() {}\n", "E0066"),
-            ("#[InlineAlways, Task]\nfn work() {}\n", "E0927"),
-            ("#[Pure(), Task]\nfn work() {}\n", "E0066"),
-            ("#[InlineAlways(), Task]\nfn work() {}\n", "E0927"),
+            ("#[Pure, Job]\nfn work() {}\n", "E0066"),
+            ("#[InlineAlways, Job]\nfn work() {}\n", "E0927"),
+            ("#[Pure(), Job]\nfn work() {}\n", "E0066"),
+            ("#[InlineAlways(), Job]\nfn work() {}\n", "E0927"),
         ] {
             let (tokens, lex_diagnostics) = lex(src);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
@@ -950,7 +954,7 @@ mod s61_tests {
 
     #[test]
     fn doc_on_a_function_requires_task() {
-        let task_src = "#[Doc(\"task text\"), Task] fn work() {}\n";
+        let task_src = "#[Doc(\"task text\"), Job] fn work() {}\n";
         let (task_tokens, task_lex_diagnostics) = lex(task_src);
         assert!(
             task_lex_diagnostics.is_empty(),

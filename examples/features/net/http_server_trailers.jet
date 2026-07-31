@@ -17,15 +17,15 @@ fn run() {
     serving :: tasks.spawn(() => http_server.serve_once_listener(listener, mux) ?? panic("serve"))
     stream :: net.tcp_connect(addr) ?? panic("connect")
     request := "".bytes()
-    loop line;
+    loop line,
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
-        loop byte; line.bytes() { request.push(byte) }
+        loop byte, line.bytes() { request.push(byte) }
         request.push(13)
         request.push(10)
     }
     stream.write_all(request) ?? panic("write")
     response := ""
-    loop _; 0..32 {
+    loop _, 0..32 {
         part :: stream.read_text(8192) ?? panic("read")
         if part == "" { break }
         response = "{response}{part}"

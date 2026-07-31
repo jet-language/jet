@@ -53,6 +53,67 @@ fn emit_tir_stmts_nested(
     emit_tir_stmts_inline(stmts, cx, out, indent, &mut active);
 }
 
+fn branch_int_literal(cond: &crate::Codegen::TIR::TExpr) -> i64 {
+    match &cond.kind {
+        crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match rhs.kind {
+            crate::Codegen::TIR::TExprKind::IntLit(value, _) => value,
+            _ => unreachable!("integer branch class contains only integer literals"),
+        },
+        _ => unreachable!("integer branch class contains only equality tests"),
+    }
+}
+
+fn branch_bool_literal(cond: &crate::Codegen::TIR::TExpr) -> bool {
+    match &cond.kind {
+        crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match rhs.kind {
+            crate::Codegen::TIR::TExprKind::BoolLit(value) => value,
+            _ => unreachable!("boolean branch class contains only boolean literals"),
+        },
+        _ => unreachable!("boolean branch class contains only equality tests"),
+    }
+}
+
+fn emit_sparse_branch_tree(
+    arms: &[(i64, &[TStmt])],
+    else_body: Option<&[TStmt]>,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_cleanups: &[ActiveCleanup],
+) {
+    let pad = "    ".repeat(indent);
+    let Some((pivot, body)) = arms.get(arms.len() / 2) else {
+        if let Some(body) = else_body {
+            emit_tir_stmts_nested(body, cx, out, indent, active_cleanups);
+        }
+        return;
+    };
+    out.push_str(&format!("{pad}if *_jet_switch_subject == {pivot} {{\n"));
+    emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
+    let middle = arms.len() / 2;
+    if middle > 0 {
+        out.push_str(&format!("{pad}}} else if *_jet_switch_subject < {pivot} {{\n"));
+        emit_sparse_branch_tree(
+            &arms[..middle],
+            else_body,
+            cx,
+            out,
+            indent + 1,
+            active_cleanups,
+        );
+    }
+    out.push_str(&format!("{pad}}} else {{\n"));
+    emit_sparse_branch_tree(
+        &arms[middle + 1..],
+        else_body,
+        cx,
+        out,
+        indent + 1,
+        active_cleanups,
+    );
+    out.push_str(&format!("{pad}}}\n"));
+}
+
 fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     for cleanup in cleanups.iter().rev() {
@@ -1145,6 +1206,18 @@ fn emit_tir_stmt(
                                 format!("({})", collection_str)
                             } else if *columnar {
                                 format!("({}).iter_aos()", collection_str)
+                            } else if matches!(
+                                &collection.ty,
+                                Type::List(inner) | Type::FixedList { elem: inner, .. }
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Apply { name, .. } if name == "ViewMut"
+                                    )
+                            ) {
+                                format!(
+                                    "({}).iter_mut().map(|_jet_view| &mut **_jet_view)",
+                                    collection_str
+                                )
                             } else {
                                 format!("({}).iter().cloned()", collection_str)
                             };
@@ -1211,6 +1284,18 @@ fn emit_tir_stmt(
                             format!("({})", collection_str)
                         } else if *columnar {
                             format!("({}).iter_aos()", collection_str)
+                        } else if matches!(
+                            &collection.ty,
+                            Type::List(inner) | Type::FixedList { elem: inner, .. }
+                                if matches!(
+                                    inner.as_ref(),
+                                    Type::Apply { name, .. } if name == "ViewMut"
+                                )
+                        ) {
+                            format!(
+                                "({}).iter_mut().map(|_jet_view| &mut **_jet_view)",
+                                collection_str
+                            )
                         } else {
                             format!("({}).iter().cloned()", collection_str)
                         };
@@ -1522,6 +1607,7 @@ fn emit_tir_stmt(
         // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
         TStmt::MixedSwitch {
             subject,
+            class,
             arms,
             else_body,
         } => {
@@ -1532,6 +1618,102 @@ fn emit_tir_stmt(
                 "{}let _jet_switch_subject = &({});\n",
                 inner_pad, subject_str
             ));
+            if matches!(class, crate::Codegen::TIR::BranchClass::Bool2) {
+                out.push_str(&format!("{}// jet:branch bool-two-way\n", inner_pad));
+                let true_body = arms
+                    .iter()
+                    .find(|(cond, _)| branch_bool_literal(cond))
+                    .map(|(_, body)| body.as_slice())
+                    .expect("classified bool branch has true arm");
+                let false_body = arms
+                    .iter()
+                    .find(|(cond, _)| !branch_bool_literal(cond))
+                    .map(|(_, body)| body.as_slice())
+                    .expect("classified bool branch has false arm");
+                out.push_str(&format!("{}if *_jet_switch_subject {{\n", inner_pad));
+                emit_tir_stmts_nested(
+                    true_body,
+                    cx,
+                    out,
+                    indent + 2,
+                    active_deferred_closes,
+                );
+                out.push_str(&format!("{}}} else {{\n", inner_pad));
+                emit_tir_stmts_nested(
+                    false_body,
+                    cx,
+                    out,
+                    indent + 2,
+                    active_deferred_closes,
+                );
+                out.push_str(&format!("{}}}\n", inner_pad));
+                out.push_str(&format!("{}}}\n", pad));
+                return;
+            }
+            if matches!(class, crate::Codegen::TIR::BranchClass::DenseInt) {
+                out.push_str(&format!("{}// jet:branch dense-table\n", inner_pad));
+                out.push_str(&format!("{}match *_jet_switch_subject {{\n", inner_pad));
+                for (cond, body) in arms {
+                    let literal = match &cond.kind {
+                        crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match &rhs.kind {
+                            crate::Codegen::TIR::TExprKind::IntLit(value, _) => value.to_string(),
+                            crate::Codegen::TIR::TExprKind::BoolLit(value) => value.to_string(),
+                            _ => unreachable!("classified literal branch"),
+                        },
+                        _ => unreachable!("classified literal branch"),
+                    };
+                    out.push_str(&format!("{}    {} => {{\n", inner_pad, literal));
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 3,
+                        active_deferred_closes,
+                    );
+                    out.push_str(&format!("{}    }}\n", inner_pad));
+                }
+                out.push_str(&format!("{}    _ => {{\n", inner_pad));
+                if let Some(body) = else_body {
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 3,
+                        active_deferred_closes,
+                    );
+                }
+                out.push_str(&format!("{}    }}\n", inner_pad));
+                out.push_str(&format!("{}}}\n", inner_pad));
+                out.push_str(&format!("{}}}\n", pad));
+                return;
+            }
+            if matches!(class, crate::Codegen::TIR::BranchClass::SparseInt) {
+                out.push_str(&format!("{}// jet:branch sparse-search\n", inner_pad));
+                let mut sparse_arms = arms
+                    .iter()
+                    .map(|(cond, body)| (branch_int_literal(cond), body.as_slice()))
+                    .collect::<Vec<_>>();
+                sparse_arms.sort_unstable_by_key(|(value, _)| *value);
+                emit_sparse_branch_tree(
+                    &sparse_arms,
+                    else_body.as_deref(),
+                    cx,
+                    out,
+                    indent + 1,
+                    active_deferred_closes,
+                );
+                out.push_str(&format!("{}}}\n", pad));
+                return;
+            }
+            let shape = match class {
+                crate::Codegen::TIR::BranchClass::Ordered => "ordered-compare",
+                crate::Codegen::TIR::BranchClass::Mixed => "mixed-compare",
+                crate::Codegen::TIR::BranchClass::Enum => "enum-table",
+                crate::Codegen::TIR::BranchClass::Bool2
+                | crate::Codegen::TIR::BranchClass::DenseInt
+                | crate::Codegen::TIR::BranchClass::SparseInt => unreachable!(),
+            };
+            out.push_str(&format!("{}// jet:branch {shape}\n", inner_pad));
             for (i, (cond, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
                 out.push_str(&format!(
@@ -1586,6 +1768,7 @@ fn emit_tir_stmt(
         TStmt::LineMarker(n) => {
             out.push_str(&format!("{}// jet:line {}\n", pad, n));
         }
+        TStmt::SourceSpan(_) => {}
     }
 }
 

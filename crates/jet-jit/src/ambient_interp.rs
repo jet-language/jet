@@ -3,7 +3,9 @@
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
 use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
 use jet_codegen::Diagnostics::{Diagnostic, Span};
@@ -598,12 +600,319 @@ pub fn ambient_core_call(
     }
 }
 
+struct InterpWebCallback {
+    id: i64,
+    callable: CtValue,
+    args: Vec<CtValue>,
+    reply: mpsc::SyncSender<CtValue>,
+}
+
+struct InterpWebServer {
+    requests: Mutex<mpsc::Receiver<InterpWebCallback>>,
+    replies: Mutex<HashMap<i64, mpsc::SyncSender<CtValue>>>,
+}
+
+static INTERP_WEB_SERVERS: OnceLock<Mutex<Vec<Arc<InterpWebServer>>>> = OnceLock::new();
+static INTERP_WEB_CALLBACK_ID: AtomicI64 = AtomicI64::new(1);
+
+fn interp_web_servers() -> &'static Mutex<Vec<Arc<InterpWebServer>>> {
+    INTERP_WEB_SERVERS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn interp_web_server_value(index: usize) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetInterpWebServer".to_string(),
+        fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+    }
+}
+
+fn interp_web_server(value: &CtValue) -> Option<Arc<InterpWebServer>> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetInterpWebServer" {
+        return None;
+    }
+    let index = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+        _ => None,
+    })?;
+    interp_web_servers().lock().ok()?.get(index).cloned()
+}
+
+fn interp_web_field<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+) -> Option<&'a CtValue> {
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+}
+
+fn interp_web_steps(value: &CtValue, span: Span) -> Result<Vec<(String, Vec<CtValue>)>, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("WebApp state", span));
+    };
+    if type_name != "__JetTirWebAppState" {
+        return Err(unsupported("WebApp state", span));
+    }
+    let Some(CtValue::List(steps)) = interp_web_field(fields, "steps") else {
+        return Err(unsupported("WebApp steps", span));
+    };
+    steps
+        .iter()
+        .map(|step| {
+            let CtValue::Struct { type_name, fields } = step else {
+                return Err(unsupported("WebApp step", span));
+            };
+            if type_name != "__JetTirWebAppStep" {
+                return Err(unsupported("WebApp step", span));
+            }
+            let method = match interp_web_field(fields, "method") {
+                Some(CtValue::Str(method)) => method.clone(),
+                _ => return Err(unsupported("WebApp step method", span)),
+            };
+            let args = match interp_web_field(fields, "args") {
+                Some(CtValue::List(args)) => args.clone(),
+                _ => return Err(unsupported("WebApp step arguments", span)),
+            };
+            Ok((method, args))
+        })
+        .collect()
+}
+
+fn interp_web_string(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(unsupported("WebApp text argument", span)),
+    }
+}
+
+fn interp_web_callback(
+    sender: &mpsc::Sender<InterpWebCallback>,
+    callable: CtValue,
+    args: Vec<CtValue>,
+) -> CtValue {
+    let id = INTERP_WEB_CALLBACK_ID.fetch_add(1, Ordering::Relaxed);
+    let (reply, receive) = mpsc::sync_channel(1);
+    if sender
+        .send(InterpWebCallback {
+            id,
+            callable,
+            args,
+            reply,
+        })
+        .is_err()
+    {
+        return CtValue::Unit;
+    }
+    receive.recv().unwrap_or(CtValue::Unit)
+}
+
+fn interp_web_page(value: CtValue) -> crate::Web::web_rt::JetWebPage {
+    let CtValue::Struct { type_name, fields } = value else {
+        return crate::Web::web_rt::jet_web_page(String::new(), String::new());
+    };
+    if type_name != "__JetTirWebPage" {
+        return crate::Web::web_rt::jet_web_page(String::new(), String::new());
+    }
+    let text = |name| match interp_web_field(&fields, name) {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => String::new(),
+    };
+    crate::Web::web_rt::jet_web_page(text("title"), text("body"))
+}
+
+fn materialize_interp_web_app(
+    state: &CtValue,
+    sender: Option<&mpsc::Sender<InterpWebCallback>>,
+    span: Span,
+) -> Result<crate::Web::web_rt::JetWebApp, Diagnostic> {
+    let mut app = crate::Web::web_rt::jet_web_app();
+    for (method, args) in interp_web_steps(state, span)? {
+        app = match method.as_str() {
+            "route" | "page" | "layout" => {
+                let path = interp_web_string(&args, 0, span)?;
+                let callable = args
+                    .get(1)
+                    .cloned()
+                    .ok_or_else(|| unsupported("WebApp page callback", span))?;
+                let callback_sender = sender.cloned();
+                let handler = move || {
+                    callback_sender
+                        .as_ref()
+                        .map(|sender| {
+                            interp_web_page(interp_web_callback(
+                                sender,
+                                callable.clone(),
+                                Vec::new(),
+                            ))
+                        })
+                        .unwrap_or_default()
+                };
+                match method.as_str() {
+                    "route" => app.route(path, handler),
+                    "page" => app.page(path, handler),
+                    _ => app.layout(path, handler),
+                }
+            }
+            "action" | "form" | "data" => {
+                let name = interp_web_string(&args, 0, span)?;
+                let callable = args
+                    .get(1)
+                    .cloned()
+                    .ok_or_else(|| unsupported("WebApp action callback", span))?;
+                let callback_sender = sender.cloned();
+                let handler = move || {
+                    if let Some(sender) = &callback_sender {
+                        let _ = interp_web_callback(sender, callable.clone(), Vec::new());
+                    }
+                };
+                match method.as_str() {
+                    "action" => app.action(name, handler),
+                    "form" => app.form(name, handler),
+                    _ => app.data(name, handler),
+                }
+            }
+            "mount" => {
+                let prefix = interp_web_string(&args, 0, span)?;
+                let callable = args
+                    .get(1)
+                    .cloned()
+                    .ok_or_else(|| unsupported("WebApp mount callback", span))?;
+                let callback_sender = sender.cloned();
+                app.mount(prefix, move |path| {
+                    if let Some(sender) = &callback_sender {
+                        let _ = interp_web_callback(
+                            sender,
+                            callable.clone(),
+                            vec![CtValue::Str(path.clone())],
+                        );
+                    }
+                })
+            }
+            "routes" => app.routes(interp_web_string(&args, 0, span)?),
+            "security" => app.security(interp_web_string(&args, 0, span)?),
+            "assets" => app.assets(interp_web_string(&args, 0, span)?),
+            "split" => app.split(interp_web_string(&args, 0, span)?),
+            "code_split" => app.code_split(interp_web_string(&args, 0, span)?),
+            "cache" => app.cache(interp_web_string(&args, 0, span)?),
+            "a11y" => app.a11y(interp_web_string(&args, 0, span)?),
+            "adapter" => app.adapter(interp_web_string(&args, 0, span)?),
+            "csr" => app.csr(),
+            "ssr" => app.ssr(),
+            "ssg" => app.ssg(),
+            "stream" => app.stream(),
+            "streaming" => app.streaming(),
+            "island" => app.island(),
+            "hydration_dev" => app.hydration_dev(),
+            "hydration_release" => app.hydration_release(),
+            _ => return Err(unsupported(&format!("WebApp.{method}"), span)),
+        };
+    }
+    Ok(app)
+}
+
+fn ambient_webapp_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let result = match op {
+        "WebAppFacts" => materialize_interp_web_app(recv, None, span)
+            .map(|app| CtValue::Str(app.facts_json())),
+        "WebAppServe" => {
+            let (requests, receiver) = mpsc::channel();
+            let app = match materialize_interp_web_app(recv, Some(&requests), span) {
+                Ok(app) => app,
+                Err(error) => return Some(Err(error)),
+            };
+            let port = match args.first() {
+                Some(CtValue::Int(port)) => Some(*port),
+                None => None,
+                _ => return Some(Err(unsupported("WebApp serve port", span))),
+            };
+            std::thread::spawn(move || match port {
+                Some(port) => app.serve_on(port),
+                None => app.serve(),
+            });
+            let server = Arc::new(InterpWebServer {
+                requests: Mutex::new(receiver),
+                replies: Mutex::new(HashMap::new()),
+            });
+            let mut servers = interp_web_servers()
+                .lock()
+                .expect("interpreter WebApp registry poisoned");
+            let index = servers.len();
+            servers.push(server);
+            Ok(interp_web_server_value(index))
+        }
+        "WebAppNext" => {
+            let server = match interp_web_server(recv) {
+                Some(server) => server,
+                None => return Some(Err(unsupported("WebApp server handle", span))),
+            };
+            let request = match server
+                .requests
+                .lock()
+                .expect("interpreter WebApp request queue poisoned")
+                .recv()
+            {
+                Ok(request) => request,
+                Err(_) => return Some(Err(unsupported("WebApp request queue", span))),
+            };
+            server
+                .replies
+                .lock()
+                .expect("interpreter WebApp reply queue poisoned")
+                .insert(request.id, request.reply);
+            Ok(CtValue::Struct {
+                type_name: "__JetInterpWebCallback".to_string(),
+                fields: vec![
+                    ("id".to_string(), CtValue::Int(request.id)),
+                    ("callable".to_string(), request.callable),
+                    ("args".to_string(), CtValue::List(request.args)),
+                ],
+            })
+        }
+        "WebAppReply" => {
+            let server = match interp_web_server(recv) {
+                Some(server) => server,
+                None => return Some(Err(unsupported("WebApp server handle", span))),
+            };
+            let id = match args.first() {
+                Some(CtValue::Int(id)) => *id,
+                _ => return Some(Err(unsupported("WebApp callback id", span))),
+            };
+            let value = args.get(1).cloned().unwrap_or(CtValue::Unit);
+            let reply = server
+                .replies
+                .lock()
+                .expect("interpreter WebApp reply queue poisoned")
+                .remove(&id);
+            match reply {
+                Some(reply) => reply
+                    .send(value)
+                    .map(|_| CtValue::Unit)
+                    .map_err(|_| unsupported("WebApp callback reply", span)),
+                None => Err(unsupported("WebApp callback reply id", span)),
+            }
+        }
+        _ => return None,
+    };
+    Some(result)
+}
+
 pub fn ambient_handle(
     op: &str,
     recv: &mut CtValue,
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = ambient_webapp_handle(op, recv, args, span) {
+        return Some(result);
+    }
     if let Some(result) = ambient_http_handle(op, recv, args, span) {
         return Some(result);
     }

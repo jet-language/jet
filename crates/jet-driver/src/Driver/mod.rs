@@ -523,11 +523,6 @@ fn collect_mmio_stmts(
             crate::AST::Stmt::Assign { value, .. } => {
                 collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
             }
-            crate::AST::Stmt::If(i) => {
-                collect_mmio_expr(&i.cond, core_aliases, ptrs, unsafe_reason, out);
-                collect_mmio_stmts(&i.then_body, core_aliases, ptrs, unsafe_reason, out);
-                collect_mmio_else(&i.else_branch, core_aliases, ptrs, unsafe_reason, out);
-            }
             crate::AST::Stmt::While { cond, body, .. } => {
                 collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
@@ -591,26 +586,6 @@ fn collect_mmio_stmts(
             | crate::AST::Stmt::ContinueLabel(_, _) => {}
             _ => {}
         }
-    }
-}
-
-fn collect_mmio_else(
-    branch: &Option<crate::AST::ElseBranch>,
-    core_aliases: &std::collections::HashMap<String, String>,
-    ptrs: &mut std::collections::HashMap<String, PtrFact>,
-    unsafe_reason: Option<&str>,
-    out: &mut Vec<crate::TargetProfile::MmioAccess>,
-) {
-    match branch {
-        Some(crate::AST::ElseBranch::Else(body)) => {
-            collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
-        }
-        Some(crate::AST::ElseBranch::ElseIf(i)) => {
-            collect_mmio_expr(&i.cond, core_aliases, ptrs, unsafe_reason, out);
-            collect_mmio_stmts(&i.then_body, core_aliases, ptrs, unsafe_reason, out);
-            collect_mmio_else(&i.else_branch, core_aliases, ptrs, unsafe_reason, out);
-        }
-        None => {}
     }
 }
 
@@ -1866,7 +1841,7 @@ fn compile_bundle_path_opts_full(
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    // D-OSTARGET2=B: the `comptime if build.os == { … }` desugar (run in sema)
+    // D-OSTARGET2=B: the `#Known if build.os == { … }` desugar (run in sema)
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;

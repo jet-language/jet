@@ -549,7 +549,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 fn parse_option_fn() {
     let src = r#"
 fn find_even(limit: Int) => (Int?) {
-    loop i; 1..limit {
+    loop i, 1..limit {
         if i % 2 == 0 {
             return Val(i);
         }
@@ -622,7 +622,7 @@ fn run() {
         stale -> "stale"
         else -> "waiting"
     }
-    if ready print(label)
+    if ready { print(label) }
 }
 "#;
     let (toks, lex_diags) = jet::Lexer::lex(src);
@@ -641,7 +641,7 @@ fn run() {
         panic!("expected value guard binding");
     };
     assert!(matches!(label.init, jet::AST::Expr::If { .. }));
-    assert!(matches!(run.body[4], jet::AST::Stmt::If(_)));
+    assert!(matches!(run.body[4], jet::AST::Stmt::Switch { .. }));
 }
 
 #[test]

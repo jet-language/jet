@@ -95,6 +95,16 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
     jet_codegen::Comptime::with_runtime_argv(args, run)
 }
 
+/// Install the runtime ambient adapters around an explicitly forced
+/// interpreter run, matching whole-program deopt.
+pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
+    jet_codegen::Comptime::with_ambient(
+        Some(ambient_interp::ambient_core_call),
+        Some(ambient_interp::ambient_handle),
+        body,
+    )
+}
+
 pub(crate) fn program_args() -> Vec<String> {
     PROGRAM_ARGS.with(|slot| slot.borrow().clone())
 }

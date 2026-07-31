@@ -4,9 +4,7 @@
 //! Keeping the pure AST walk in the driver prevents either product from
 //! depending on the root host or inventing a second boundary vocabulary.
 
-use crate::AST::{
-    ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt,
-};
+use crate::AST::{Expr, ImportKind, Item, ProgramBundle, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::HashSet;
 
@@ -137,7 +135,6 @@ fn scan_stmt_for_mut_arg(
         Stmt::Val(binding) => expr_mut_arg(&binding.init, interpreted_functions),
         Stmt::Assign { value, .. } => expr_mut_arg(value, interpreted_functions),
         Stmt::Return(Some(expr), _) => expr_mut_arg(expr, interpreted_functions),
-        Stmt::If(statement) => scan_if_for_mut_arg(statement, interpreted_functions),
         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {
             expr_mut_arg(cond, interpreted_functions)
                 .or_else(|| scan_stmts_for_mut_arg(body, interpreted_functions))
@@ -152,23 +149,6 @@ fn scan_stmt_for_mut_arg(
             })),
         _ => None,
     }
-}
-
-fn scan_if_for_mut_arg(
-    statement: &IfStmt,
-    interpreted_functions: &HashSet<&str>,
-) -> Option<Boundary> {
-    expr_mut_arg(&statement.cond, interpreted_functions)
-        .or_else(|| scan_stmts_for_mut_arg(&statement.then_body, interpreted_functions))
-        .or_else(|| match &statement.else_branch {
-            Some(ElseBranch::ElseIf(inner)) => {
-                scan_if_for_mut_arg(inner, interpreted_functions)
-            }
-            Some(ElseBranch::Else(body)) => {
-                scan_stmts_for_mut_arg(body, interpreted_functions)
-            }
-            None => None,
-        })
 }
 
 fn expr_mut_arg(expr: &Expr, interpreted_functions: &HashSet<&str>) -> Option<Boundary> {

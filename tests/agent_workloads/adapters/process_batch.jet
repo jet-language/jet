@@ -11,18 +11,18 @@ fn run() {
     input :: args.get(1) ?? panic("missing input file")
     text :: fs.read(input) ?? panic("cannot read input")
     line_number := 0
-    loop line; text.split("\n") {
+    loop line, text.split("\n") {
         line_number += 1
         if line_number != 1 && line != "" {
             fields :: line.split("\t").to_list()
-            if fields.len() != 4 panic("bad process row {line_number}")
+            if fields.len() != 4 { panic("bad process row {line_number}") }
             label :: fields[0]
             program :: fields[1]
             arguments :: fields[2]
             timeout_ms :: Int.parse(fields[3]) ?? panic("bad timeout")
             timeout :: Duration.milliseconds(timeout_ms) ?? panic("bad timeout")
             argv := [String].{~program}
-            loop argument; arguments.split("|") {
+            loop argument, arguments.split("|") {
                 argv.push(argument)
             }
             result :: process.cmd(argv)
@@ -30,7 +30,7 @@ fn run() {
                 .stderr(.Capture)
                 .timeout(timeout)
                 .run() ?? panic("process failed")
-            if result.timed_out print("{label}|timeout") else print("{label}|exit={result.code}|stdout={result.output.trim()}")
+            if result.timed_out { print("{label}|timeout") } else { print("{label}|exit={result.code}|stdout={result.output.trim()}") }
         }
     }
 }

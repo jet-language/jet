@@ -9,6 +9,11 @@ use cranelift_module::{FuncId, Linkage, Module};
 
 #[allow(dead_code, unused_imports)]
 pub(crate) mod web_rt {
+    pub(crate) use crate::net_http_rt::{
+        jet_webapp_http_action, jet_webapp_http_assets, jet_webapp_http_mount,
+        jet_webapp_http_mux_new, jet_webapp_http_page, jet_webapp_http_reload,
+        jet_webapp_http_serve,
+    };
     include!("../../jet-codegen/src/Prelude/WebApp.rs");
     include!("../../jet-codegen/src/Prelude/DevServer.rs");
 }
@@ -53,8 +58,22 @@ extern "C" fn jet_jit_web_page(title: i64, body: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
+    let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
+    if method_name == "serve" {
+        let app_handle = with_rt(|rt| {
+            rt.web
+                .apps
+                .get(app.saturating_sub(1) as usize)
+                .cloned()
+        })
+        .expect("jit web app: bad handle");
+        // Serving blocks. Keep the resident runtime published, but release its
+        // access lock so HTTP worker callbacks can enter Jet one at a time.
+        app_handle.serve();
+        return app;
+    }
     with_rt(|rt| {
-        let method = rt.heap.clone_string(method).unwrap_or_default();
+        let method = method_name;
         let app_handle = rt
             .web
             .apps
@@ -74,25 +93,57 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
                 let _ = app_handle.facts_json();
                 app_handle
             }
-            "serve" => {
-                app_handle.serve();
-                app_handle
-            }
             "route" | "page" | "layout" | "action" | "form" | "data" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
-                let _ = a1;
                 match method.as_str() {
-                    "route" => app_handle.route(key, String::new()),
-                    "page" => app_handle.page(key, String::new()),
-                    "layout" => app_handle.layout(key, String::new()),
-                    "action" => app_handle.action(key, String::new()),
-                    "form" => app_handle.form(key, String::new()),
-                    _ => app_handle.data(key, String::new()),
+                    "route" | "page" | "layout" => {
+                        let handler = move || {
+                            Concurrency::with_http_jet_runtime(|| {
+                                let call: extern "C" fn() -> i64 =
+                                    unsafe { std::mem::transmute(a1 as usize) };
+                                let page = call();
+                                with_rt(|rt| {
+                                    rt.web
+                                        .pages
+                                        .get(page.saturating_sub(1) as usize)
+                                        .cloned()
+                                        .unwrap_or_default()
+                                })
+                            })
+                        };
+                        match method.as_str() {
+                            "route" => app_handle.route(key, handler),
+                            "page" => app_handle.page(key, handler),
+                            _ => app_handle.layout(key, handler),
+                        }
+                    }
+                    "action" | "form" | "data" => {
+                        let handler = move || {
+                            Concurrency::with_http_jet_runtime(|| {
+                                let call: extern "C" fn() =
+                                    unsafe { std::mem::transmute(a1 as usize) };
+                                call();
+                            });
+                        };
+                        match method.as_str() {
+                            "action" => app_handle.action(key, handler),
+                            "form" => app_handle.form(key, handler),
+                            _ => app_handle.data(key, handler),
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
             "mount" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
-                app_handle.mount(key, String::new())
+                app_handle.mount(key, move |path| {
+                    Concurrency::with_http_jet_runtime(|| {
+                        let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
+                        let call: extern "C" fn(i64) =
+                            unsafe { std::mem::transmute(a1 as usize) };
+                        call(path);
+                    });
+                })
             }
             "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
             | "adapter" => {

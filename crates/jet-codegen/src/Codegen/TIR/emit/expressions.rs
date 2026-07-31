@@ -296,6 +296,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .unwrap_or_else(|| mangle(field));
             format!("((*_jet_switch_subject).{field_rust})")
         }
+        THostCall::SwitchSubjectValue => "(*_jet_switch_subject)".to_string(),
         THostCall::YieldSend { value } => {
             format!(
                 "let _ = __jet_yield_tx.send({});",
@@ -1769,9 +1770,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.file,
                 );
             }
+            let trait_rust = match &e.ty {
+                Type::List(inner) => match inner.as_ref() {
+                    Type::TraitObject(names) if names.len() == 1 => {
+                        Some(crate::Generics::user_trait_rust(&names[0]))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
             let parts = elems
                 .iter()
-                .map(|e| emit_tir_expr(e, cx))
+                .map(|elem| {
+                    let value = emit_tir_expr(elem, cx);
+                    if let Some(trait_rust) = &trait_rust {
+                        if !matches!(elem.ty, Type::TraitObject(_)) {
+                            return format!("Box::new({value}) as Box<dyn {trait_rust}>");
+                        }
+                    }
+                    value
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             if matches!(&e.ty, Type::FixedList { .. }) {
@@ -2158,6 +2176,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .unwrap_or_default()
             };
             match op {
+                TClosureOp::EditDisjoint => {
+                    format!("jet_edit_disjoint(&mut ({}), &({}), {})", recv, a(0), a(1))
+                }
                 TClosureOp::Map => format!("jet_iter_map({as_iter}, {})", a(0)),
                 TClosureOp::MapMut => format!("jet_iter_map_mut({as_iter}, {})", a(0)),
                 // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
@@ -2264,6 +2285,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
                     .unwrap_or_default()
+            };
+            let web_handler = |i: usize| {
+                let mut rendered = a(i);
+                if let Some(end) = rendered.rfind('>') {
+                    rendered.insert_str(end, " + Send + Sync");
+                }
+                rendered
             };
             let root = &cx.root_prefix;
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -2998,24 +3026,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-WEBAPP1=D: WebApp builder methods — Rust names match Jet.
                 THandleOp::WebAppMethod { method } => match method.as_str() {
                     "route" | "page" | "layout" | "action" | "form" | "data" => format!(
-                        "({}).{}(({}).clone(), {{ let _ = &({}); String::new() }})",
+                        "({}).{}(({}).clone(), {})",
                         recv,
                         method,
                         a(0),
-                        a(1)
+                        web_handler(1)
                     ),
                     "mount" => match args.len() {
                         2 => format!(
-                            "({}).mount(({}).clone(), {{ let _ = &({}); String::new() }})",
+                            "({}).mount(({}).clone(), {})",
                             recv,
                             a(0),
-                            a(1)
+                            web_handler(1)
                         ),
                         _ => format!(
-                            "({}).mount(({}).clone(), {{ let _ = &({}); String::new() }})",
+                            "({}).mount(({}).clone(), {})",
                             recv,
                             a(0),
-                            a(1)
+                            web_handler(1)
                         ),
                     },
                     "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
@@ -3023,9 +3051,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}(({}).clone())", recv, method, a(0))
                     }
                     "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
-                    | "hydration_release" | "facts_json" | "serve" => {
+                    | "hydration_release" | "facts_json" => {
                         format!("({}).{}()", recv, method)
                     }
+                    "serve" if args.is_empty() => format!("({}).serve()", recv),
+                    "serve" => format!("({}).serve_on({})", recv, a(0)),
                     _ => format!("({}).{}()", recv, method),
                 },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.

@@ -92,24 +92,24 @@ fence    = "$[" fence-entry { "," fence-entry } "]$"
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
-if       = "if" cond effect-body
-           { "else" "if" cond effect-body } [ "else" effect-body ]
+if       = "if" cond block
+           { "else" "if" cond block } [ "else" block ]
          | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // ordered arm table with named subject
          | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // ordered arm table
 arm      = arm-head "->" arm-body NL ;
 guard-arm = cond "->" guard-stmt-body NL ;
-effect-body = block | non-if-stmt ;
+effect-body = block ;
 guard-stmt-body = block | non-if-stmt ;
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
-loop-body= "loop" effect-body
-         | "loop" cond effect-body
+loop-body= "loop" block
+         | "loop" cond block
          | "loop" source-clauses [ "if" cond ] loop-result-body
-         | "loop" ident ":=" expr ";" cond [ ";" expr ] loop-result-body ;
+         | "loop" ident ":=" expr "," cond [ "," expr ] loop-result-body ;
 source-clauses = source-clause { "," source-clause } ;
-source-clause = ident [ "," ident ] ";" source [ ";" expr ] ;
+source-clause = ( ident | "(" ident "," ident ")" ) "," source [ "," expr ] ;
 loop-result-body = effect-body | "->" value-arm-body ;
 source   = expr ;                              // a range literal is one Range expression (D-RANGE-VALUE1)
 break    = "break" [ expr | "(" ident [ "," expr ] ")" ] NL ;
@@ -181,8 +181,9 @@ keep code readable from top to bottom. See
   arm, including a Void arm. Value branches require `else` unless a closed
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
-  conditional, source (`loop x; source [; stride]`), map-pair, and explicit-state
-  (`loop i := init; cond [; afterthought]`) headers. `a..b` and `a..<b`
+  conditional, source (`loop x, source [, stride]`), map-pair
+  (`loop (key, value), source`), and explicit-state
+  (`loop i := init, cond [, afterthought]`) headers. `a..b` and `a..<b`
   construct one `Range` value over `Int`; the first includes `b` and the second
   excludes it. A Range may be stored, passed, returned, and used as a loop
   source or slice bound. It exposes `.start`, `.end`, and `.contains(value)`.
@@ -625,8 +626,9 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 Card #644 owns the implementation migration from the shipped module-local
 `no_alloc` denylist to this transitive contract.
 
-`comptime name = value` is the module immutable binding (S57 / D-CONST-RETIRE1);
-plain comptime inlines at use sites. `#Static comptime` emits a Rust `static`
+`#Known name :: value` is the explicit compile-time-demand binding
+(S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
+`#Static #Known` emits a Rust `static`
 when a stable address is required. `#Persist name := value` marks hot-reload
 state on a bare binding (D-PERSIST1).
 
@@ -786,8 +788,8 @@ impl Circle {
   (D-CASING1). Prelude declares `Input`, `PII`, `Secret`, and `Credential`.
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. An explicit empty effect row is `=[]=>`; `comptime`
-  stays a prefix keyword.
+  arguments when arguments exist. An explicit empty effect row is `=[]=>`;
+  compile-time demand is the prefix marker `#Known`.
 - **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
   code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
@@ -802,7 +804,7 @@ impl Circle {
   |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
-  **`comptime if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
+  **`#Known if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
   }`** — `build.os` is a compiler-known comptime value, the switch folds to the
   arm matching the build's target OS and discards the rest before any gating
   check runs. Arms must cover every OS or carry an `else`
@@ -810,7 +812,7 @@ impl Circle {
   (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
-- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `comptime` binding,
+- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `#Known` binding,
   **`embed_file("path") => String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") => [U8]`** bakes its raw bytes (binary-safe, no
   UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
@@ -2088,6 +2090,14 @@ channel (ownership semantics for non-copy values), and
 `receiver.receive() => T ? Closed` blocks until a value arrives or all senders
 are gone. Channel payloads
 must be sendable (**E1102**).
+
+`tasks.channel<T>(capacity: N)` creates the same pair with a bounded buffer.
+When the buffer already holds `N` values, `send` waits until a receiver removes
+one. A bounded work queue therefore limits queued memory and applies
+backpressure to producers. To limit active work, seed the channel with `N`
+tokens; each worker receives one before work and sends it back afterward. Token
+ownership then admits at most `N` active workers. Both patterns are demonstrated
+in `examples/features/concurrency/bounded_workers.jet`.
 
 D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
 `#Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points

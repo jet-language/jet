@@ -560,7 +560,7 @@ pub enum Expr {
         span: Span,
     },
     /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
-    /// context (derive body, `comptime {}` block, comptime binding RHS), looks
+    /// context (derive body, `#Known {}` block, comptime binding RHS), looks
     /// up `name` in the comptime scope. Outside comptime context: E2712.
     /// Inside `emit("… $name …")` strings, `$name` is handled by
     /// `apply_dollar_splices` (string interpolation, not this AST node).

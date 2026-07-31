@@ -3059,7 +3059,11 @@ pub(crate) fn lower_method_call(
                     .and_then(|all| all.get(index))
                     .or(callback_params.as_ref());
                 if let (Expr::Lambda(lam), Some(params)) = (&a.expr, params) {
-                    let tl = lower_lambda_expecting_host_borrow(lam, cx, env, params, false);
+                    let tl = if method == "edit_disjoint" {
+                        crate::Codegen::TIR::lower_lambda_expecting_value(lam, cx, env, params)
+                    } else {
+                        lower_lambda_expecting_host_borrow(lam, cx, env, params, false)
+                    };
                     return TExpr {
                         ty: Type::Fn {
                             params: params.clone(),

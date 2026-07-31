@@ -125,7 +125,7 @@ struct Holder {
 fn run() {
     h := Holder.{ items: [] }
     h.items["x"] = 1
-    loop k, v; h.items {
+    loop (k, v), h.items {
         print(k)
         print(v)
     }

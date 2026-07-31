@@ -27,8 +27,8 @@
 
 use super::*;
 use crate::AST::{
-    AccessConvention, Binding, CallArg, CallArgFlags, Expr, Func, IfStmt, ImplDef, Item, Param,
-    Stmt, StrPart, StructDef, Type,
+    AccessConvention, Binding, CallArg, CallArgFlags, Expr, Func, ImplDef, Item, Param, Stmt,
+    StrPart, StructDef, SwitchArm, Type,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
@@ -228,12 +228,16 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
             span,
         ));
         let not_cond = Expr::Unary(crate::AST::UnOp::Not, Box::new(cond), span);
-        body.push(Stmt::If(IfStmt {
-            cond: not_cond,
-            then_body: vec![push_stmt],
-            else_branch: None,
+        body.push(Stmt::Switch {
+            subject: Expr::Bool(true, span),
+            arms: vec![SwitchArm {
+                span: not_cond.span(),
+                cond: not_cond,
+                body: vec![push_stmt],
+            }],
+            else_body: None,
             span,
-        }));
+        });
     }
 
     let has_errors = Expr::Unary(
@@ -245,12 +249,16 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         Some(Expr::Err(Box::new(ident(ERRORS_VAR, span)), span)),
         span,
     );
-    body.push(Stmt::If(IfStmt {
-        cond: has_errors,
-        then_body: vec![return_err],
-        else_branch: None,
+    body.push(Stmt::Switch {
+        subject: Expr::Bool(true, span),
+        arms: vec![SwitchArm {
+            span: has_errors.span(),
+            cond: has_errors,
+            body: vec![return_err],
+        }],
+        else_body: None,
         span,
-    }));
+    });
     body.push(Stmt::Return(
         Some(Expr::Ok(
             Box::new(Expr::Copy(Box::new(ident(VALUE_VAR, span)), span)),

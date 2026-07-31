@@ -280,20 +280,6 @@ pub(super) fn substitute_expr(
     }
 }
 
-fn substitute_if(
-    branch: &mut IfStmt,
-    types: &HashMap<String, Type>,
-    values: &HashMap<String, crate::AST::CtValue>,
-) {
-    substitute_expr(&mut branch.cond, types, values);
-    substitute_stmts(&mut branch.then_body, types, values);
-    match &mut branch.else_branch {
-        Some(ElseBranch::ElseIf(next)) => substitute_if(next, types, values),
-        Some(ElseBranch::Else(body)) => substitute_stmts(body, types, values),
-        None => {}
-    }
-}
-
 pub(super) fn substitute_stmts(
     stmts: &mut [Stmt],
     types: &HashMap<String, Type>,
@@ -320,7 +306,6 @@ pub(super) fn substitute_stmts(
             | Stmt::Continue(_)
             | Stmt::BreakLabel(..)
             | Stmt::ContinueLabel(..) => {}
-            Stmt::If(branch) => substitute_if(branch, types, values),
             Stmt::While { cond, body, .. } => {
                 substitute_expr(cond, types, values);
                 substitute_stmts(body, types, values);

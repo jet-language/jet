@@ -1748,6 +1748,9 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if let crate::Codegen::TIR::THandleOp::WebAppMethod { method } = op {
+                    return self.eval_web_app_method(&r, method, argv);
+                }
                 if let Some(index) = handle_index(&r, "__JetTirClock") {
                     let delta = argv.first().and_then(|value| match value {
                         CtValue::Int(value) => Some(*value),
@@ -1986,6 +1989,9 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                if module == "core.web" && matches!(method.as_str(), "app" | "page") {
+                    return self.eval_web_core_call(method, argv);
                 }
                 if module == "core.http.server" && method == "json" && args.len() == 2 {
                     let tree =
@@ -2848,6 +2854,10 @@ impl<'a> EvalCtx<'a> {
                         .find_map(|(name, value)| (name == field).then(|| value.clone()))
                         .ok_or_else(|| unsupported(&format!("switch subject field `{field}`"), self.span()))
                 }
+                crate::Codegen::TIR::THostCall::SwitchSubjectValue => self
+                    .switch_subject
+                    .clone()
+                    .ok_or_else(|| unsupported("switch subject", self.span())),
                 crate::Codegen::TIR::THostCall::CellGuardProject {
                     recv,
                     paths,

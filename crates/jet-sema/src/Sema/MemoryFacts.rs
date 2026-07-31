@@ -393,9 +393,6 @@ fn annotate_scope(
                 nested.extend(declarations.clone());
                 promoted_return |= annotate_scope(body, &nested, diagnostics);
             }
-            Stmt::If(ifs) => {
-                promoted_return |= annotate_if_scope(ifs, chain, diagnostics);
-            }
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
@@ -416,24 +413,6 @@ fn annotate_scope(
         }
     }
     promoted_return
-}
-
-fn annotate_if_scope(
-    ifs: &mut crate::AST::IfStmt,
-    chain: &[PolicyDeclaration],
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let mut promoted = annotate_scope(&mut ifs.then_body, chain, diagnostics);
-    match &mut ifs.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => {
-            promoted |= annotate_if_scope(inner, chain, diagnostics);
-        }
-        Some(crate::AST::ElseBranch::Else(body)) => {
-            promoted |= annotate_scope(body, chain, diagnostics);
-        }
-        None => {}
-    }
-    promoted
 }
 
 fn effective_gc_policy(
@@ -495,9 +474,6 @@ fn returned_names(stmts: &[Stmt]) -> HashSet<String> {
                 names.insert(name.clone());
             }
             Stmt::Policy { body, .. } => names.extend(returned_names(body)),
-            Stmt::If(ifs) => {
-                collect_returned_if(ifs, &mut names);
-            }
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
@@ -516,15 +492,6 @@ fn returned_names(stmts: &[Stmt]) -> HashSet<String> {
         }
     }
     names
-}
-
-fn collect_returned_if(ifs: &crate::AST::IfStmt, names: &mut HashSet<String>) {
-    names.extend(returned_names(&ifs.then_body));
-    match &ifs.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => collect_returned_if(inner, names),
-        Some(crate::AST::ElseBranch::Else(body)) => names.extend(returned_names(body)),
-        None => {}
-    }
 }
 
 fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {

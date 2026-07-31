@@ -54,6 +54,8 @@ impl<'a> Checker<'a> {
                             &self.loop_labels,
                             name_span,
                         ));
+                        self.infer(value);
+                        return;
                     }
                     found
                 }
@@ -125,6 +127,7 @@ impl<'a> Checker<'a> {
                             &self.loop_labels,
                             name_span,
                         ));
+                        return;
                     }
                     found
                 }
@@ -462,6 +465,7 @@ impl<'a> Checker<'a> {
                     }
                     let mut vt = self.infer(value);
                     self.expected_type = saved_expected;
+                    self.report_lending_view_escape(value, "replace another value");
                     if let (Some(source), Some(target_ty)) = (vt.as_ref(), place_ty.as_ref()) {
                         if source != target_ty
                             && source.numeric_widening_to(target_ty).is_some()
@@ -947,7 +951,7 @@ impl<'a> Checker<'a> {
                                     "E0503",
                                     "strings aren't indexed with `[ ]`".to_string(),
                                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                                    "e.g. `loop c; s.chars() { }` or `s.slice(0..2)`".to_string(),
+                                    "e.g. `loop c, s.chars() { }` or `s.slice(0..2)`".to_string(),
                                     Some(*span),
                                 ));
                             }
@@ -1321,6 +1325,7 @@ impl<'a> Checker<'a> {
                                 self.allow_string_view_read = true;
                             }
                             let mut et = self.infer(e);
+                            self.report_lending_view_escape(e, "be returned");
                             self.allow_string_view_read = saved_string_view_read;
                             self.expected_type = saved_expected;
                             if let Some(source) = et.as_ref() {
@@ -1624,7 +1629,6 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                Stmt::If(ifs) => self.check_if(ifs),
                 // D-CTMARKER1 (ratified 2026-06-25, piece 2): build-time execution block.
                 Stmt::ComptimeBlock { .. } => self.check_comptime_block(stmt),
                 // D-WHEN1/D-WHEN2 (ratified 2026-06-19): compile-time conditional.
@@ -1713,7 +1717,7 @@ impl<'a> Checker<'a> {
                                         ),
                                         "the stride is how far to count each turn, so it must be a whole number"
                                             .to_string(),
-                                        "use an Int stride, like `loop i; 0..10; 2 { ... }`".to_string(),
+                                        "use an Int stride, like `loop i, 0..10, 2 { ... }`".to_string(),
                                         Some(step.span()),
                                     ));
                                     }
@@ -1725,7 +1729,7 @@ impl<'a> Checker<'a> {
                                             format!("a range loop stride must be positive, not {}", n),
                                             "a zero or negative stride would never reach the end"
                                                 .to_string(),
-                                            "use a stride of 1 or more, like `loop i; 0..10; 2 { ... }`".to_string(),
+                                            "use a stride of 1 or more, like `loop i, 0..10, 2 { ... }`".to_string(),
                                             Some(*sp),
                                         ));
                                     }
@@ -1773,7 +1777,7 @@ impl<'a> Checker<'a> {
                                                 "`{root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{root}`"
                                             ),
                                             format!(
-                                                "write `loop i, item; {root}` — or `loop i; {root}.indexes` — or `0..<{root}.len()`"
+                                                "write `loop (i, item), {root}` — or `loop i, {root}.indexes` — or `0..<{root}.len()`"
                                             ),
                                             Some(end_span),
                                         ));
@@ -1808,6 +1812,23 @@ impl<'a> Checker<'a> {
                             }
                             let coll_ty = self.infer(collection);
                             let borrowed = collection_root_name(collection);
+                            let lending_var = match (&coll_ty, var2.as_ref()) {
+                                (
+                                    Some(Type::List(inner) | Type::FixedList { elem: inner, .. }),
+                                    None,
+                                ) if matches!(
+                                    inner.as_ref(),
+                                    Type::Apply { name, .. } if name == "ViewMut"
+                                ) => Some(var.clone()),
+                                (
+                                    Some(Type::List(inner) | Type::FixedList { elem: inner, .. }),
+                                    Some((value, _)),
+                                ) if matches!(
+                                    inner.as_ref(),
+                                    Type::Apply { name, .. } if name == "ViewMut"
+                                ) => Some(value.clone()),
+                                _ => None,
+                            };
                             self.loop_depth += 1;
                             if let Some(n) = borrowed.clone() {
                                 self.iter_borrowed.insert(n);
@@ -1939,16 +1960,22 @@ impl<'a> Checker<'a> {
                                             "`for x in` needs a list or map, not {}",
                                             other.show()
                                         ),
-                                        "walk items with `loop item; items { }` or characters with `loop c; s.chars() { }`".to_string(),
+                                        "walk items with `loop item, items { }` or characters with `loop c, s.chars() { }`".to_string(),
                                         "use a `List`, `Map`, or `s.chars()`".to_string(),
                                         Some(collection.span()),
                                     ));
                                 }
                                 None => {}
                             }
+                            if let Some(name) = &lending_var {
+                                self.lending_view_loop_vars.insert(name.clone());
+                            }
                             self.memory_control_multiplier = loop_multiplier;
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
+                            }
+                            if let Some(name) = &lending_var {
+                                self.lending_view_loop_vars.remove(name);
                             }
                             self.pop_scope();
                             if let Some(n) = borrowed {
@@ -2734,18 +2761,6 @@ fn stmts_index_root_with(body: &[Stmt], root: &str, index_var: &str) -> bool {
     body.iter().any(|s| stmt_indexes_root_with(s, root, index_var))
 }
 
-fn else_indexes_root_with(branch: &Option<crate::AST::ElseBranch>, root: &str, index_var: &str) -> bool {
-    match branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => {
-            expr_indexes_root_with(&inner.cond, root, index_var)
-                || stmts_index_root_with(&inner.then_body, root, index_var)
-                || else_indexes_root_with(&inner.else_branch, root, index_var)
-        }
-        Some(crate::AST::ElseBranch::Else(body)) => stmts_index_root_with(body, root, index_var),
-        None => false,
-    }
-}
-
 fn stmt_indexes_root_with(stmt: &Stmt, root: &str, index_var: &str) -> bool {
     match stmt {
         Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_indexes_root_with(e, root, index_var),
@@ -2753,11 +2768,6 @@ fn stmt_indexes_root_with(stmt: &Stmt, root: &str, index_var: &str) -> bool {
         Stmt::Assign { target, value, .. } => {
             lvalue_indexes_root_with(target, root, index_var)
                 || expr_indexes_root_with(value, root, index_var)
-        }
-        Stmt::If(iff) => {
-            expr_indexes_root_with(&iff.cond, root, index_var)
-                || stmts_index_root_with(&iff.then_body, root, index_var)
-                || else_indexes_root_with(&iff.else_branch, root, index_var)
         }
         Stmt::While { cond, body, .. } => {
             expr_indexes_root_with(cond, root, index_var) || stmts_index_root_with(body, root, index_var)

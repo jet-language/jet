@@ -511,7 +511,6 @@ pub(crate) fn collect_core_stmts(
                 collect_core_expr(e, imports, used, spans, ffi_cb)
             }
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => collect_core_if(ifs, imports, used, spans, ffi_cb),
             Stmt::While { cond, body, .. } => {
                 collect_core_expr(cond, imports, used, spans, ffi_cb);
                 collect_core_stmts(body, imports, used, spans, ffi_cb);
@@ -631,22 +630,6 @@ pub(crate) fn collect_core_stmts(
                 collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
         }
-    }
-}
-
-pub(crate) fn collect_core_if(
-    ifs: &IfStmt,
-    imports: &HashMap<String, String>,
-    used: &mut HashSet<String>,
-    spans: &mut HashMap<String, crate::Diagnostics::Span>,
-    ffi_cb: &mut HashSet<String>,
-) {
-    collect_core_expr(&ifs.cond, imports, used, spans, ffi_cb);
-    collect_core_stmts(&ifs.then_body, imports, used, spans, ffi_cb);
-    match &ifs.else_branch {
-        Some(ElseBranch::Else(body)) => collect_core_stmts(body, imports, used, spans, ffi_cb),
-        Some(ElseBranch::ElseIf(next)) => collect_core_if(next, imports, used, spans, ffi_cb),
-        None => {}
     }
 }
 
@@ -2092,6 +2075,7 @@ pub(crate) fn check_func_body_bundle(
             .collect(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
+        lending_view_loop_vars: HashSet::new(),
         view_facts: Default::default(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),
@@ -2103,6 +2087,7 @@ pub(crate) fn check_func_body_bundle(
         lambda_escapes: true,
         in_lambda_body: false,
         inferred_lambda_mut_captures: HashSet::new(),
+        lambda_params_are_lending_views: false,
         is_task_spawn: false,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,
@@ -2271,17 +2256,6 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::Transact { body, .. }
                 | Stmt::Off { body, .. }
                 | Stmt::DebugOnly { body, .. } => walk(body, names),
-                Stmt::If(i) => {
-                    walk(&mut i.then_body, names);
-                    match &mut i.else_branch {
-                        Some(ElseBranch::Else(body)) => walk(body, names),
-                        Some(ElseBranch::ElseIf(inner)) => {
-                            walk(&mut inner.then_body, names);
-                            // nested else handled by recursive structure if present
-                        }
-                        None => {}
-                    }
-                }
                 Stmt::Switch { arms, else_body, .. }
                 | Stmt::ComptimeSwitch { arms, else_body, .. } => {
                     for arm in arms.iter_mut() {

@@ -420,11 +420,11 @@ fn range_loops_inclusive_and_step() {
     let src = "\
 fn run() {
     total := 0
-    loop n; 1..5 {
+    loop n, 1..5 {
         total = (total + n)
     }
     print(total)
-    loop k; 0..10; 2 {
+    loop k, 0..10, 2 {
         print(k)
     }
 }
@@ -453,12 +453,12 @@ fn range_loops_exclusive() {
     let src = "\
 fn run() {
     total := 0
-    loop n; 0..<5 {
+    loop n, 0..<5 {
         total = (total + n)
     }
     print(total)
     empty := 0
-    loop n; 3..<3 {
+    loop n, 3..<3 {
         empty = (empty + 1)
     }
     print(empty)
@@ -496,7 +496,7 @@ fn run() {
     print(band.contains(7))
     print((7..4).contains(5))
     total := 0
-    loop n; band {
+    loop n, band {
         total = (total + n)
     }
     print(total)
@@ -534,8 +534,8 @@ fn labeled_break_and_continue() {
     }
     let src = "\
 fn run() {
-    outer :: loop i; 1..3 {
-        loop j; 1..3 {
+    outer :: loop i, 1..3 {
+        loop j, 1..3 {
             if (j == 2) {
                 next(outer)
             }
@@ -564,7 +564,7 @@ fn labeled_break_and_continue_fallbacks() {
     }
     let src = r#"
 fn run() {
-    outer :: loop text; ["skip", "7"] {
+    outer :: loop text, ["skip", "7"] {
         loop {
             value :: Int.parse(text) ?? next(outer)
             print(value)
@@ -587,7 +587,7 @@ fn yielding_and_result_loops_compile_and_run() {
     let src = r#"
 fn find(xs: [Int]) => Int {
     found :: loop {
-        loop x; xs {
+        loop x, xs {
             if x > 2 break(found, x)
         }
         break -1
@@ -655,7 +655,7 @@ fn counted_init_exit() => Int {
 
 fn counted_step_exit() => Int {
     result :: loop {
-        loop i := 0; i < 2; i = (loop {
+        loop i := 0, i < 2, i = (loop {
             break(result, 15)
             break 0
         }) {}
@@ -677,15 +677,15 @@ fn value_if_exit() => Int {
 
 fn run() {
     xs :: [Int].{ 1, 2, 3, 4 }
-    prefix :: loop x; xs -> {
+    prefix :: loop x, xs -> {
         if x > 3 break
         x * 2
     }
-    rows :: loop x; xs, y; [10, 20] -> {
+    rows :: loop x, xs, y, [10, 20] -> {
         if x == 2 && y == 20 break
         x + y
     }
-    outer :: loop x; xs {
+    outer :: loop x, xs {
         ignored :: loop {
             if x == 1 next(outer)
             if x == 2 break(outer)
@@ -733,7 +733,7 @@ fn stride() => Int {
 }
 
 fn run() {
-    loop item; source(); stride() {
+    loop item, source(), stride() {
         print(item)
         if item == 0 { next }
     }
@@ -761,7 +761,7 @@ fn stride() => Int {
     return 0
 }
 fn run() {
-    loop item; source(); stride() {
+    loop item, source(), stride() {
         print(item)
     }
 }
@@ -1009,4 +1009,88 @@ fn run() {
     let (code, stdout) = build_and_run("tir_range_dispatch", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "A\nC\nF\n?\n");
+}
+
+#[test]
+fn branch_classifier_emits_table_and_ordered_shapes_with_one_subject_evaluation() {
+    let table = compile(
+        "tir_branch_table",
+        r#"
+fn dense(n: Int) => String {
+    if n == {
+        1 -> { return "one" }
+        2 -> { return "two" }
+        3 -> { return "three" }
+        else -> { return "other" }
+    }
+}
+fn sparse(n: Int) => String {
+    if n == {
+        1 -> { return "one" }
+        100 -> { return "hundred" }
+        else -> { return "other" }
+    }
+}
+fn truth(flag: Bool) => String {
+    if flag == {
+        true -> { return "yes" }
+        false -> { return "no" }
+        else -> { return "no" }
+    }
+}
+fn run() {
+    print(dense(1))
+    print(sparse(100))
+    print(truth(true))
+}
+"#,
+    );
+    assert!(table.contains("// jet:branch dense-table"), "{table}");
+    assert!(table.contains("// jet:branch sparse-search"), "{table}");
+    assert!(table.contains("// jet:branch bool-two-way"), "{table}");
+    assert!(
+        table.contains("else if *_jet_switch_subject < 100"),
+        "sparse integers should emit a balanced search tree: {table}"
+    );
+    assert!(
+        table.contains("if *_jet_switch_subject {"),
+        "two-way Bool dispatch should branch on the subject directly: {table}"
+    );
+    assert_eq!(
+        table.matches("match *_jet_switch_subject").count(),
+        1,
+        "only dense integer arms should use table lowering: {table}"
+    );
+
+    let ordered = compile(
+        "tir_branch_ordered",
+        r#"
+fn subject() => Int { return 7 }
+fn run() {
+    if subject() == {
+        0..3 -> { print("low") }
+        4..9 -> { print("mid") }
+        42 -> { print("answer") }
+        else -> { print("other") }
+    }
+}
+"#,
+    );
+    assert!(
+        ordered.contains("let _jet_switch_subject = &(user_subject())"),
+        "{ordered}"
+    );
+    assert!(
+        ordered.contains("(*_jet_switch_subject)"),
+        "conditions must reuse the evaluated subject: {ordered}"
+    );
+    assert_eq!(
+        ordered.matches("&(user_subject())").count(),
+        1,
+        "branch subject was evaluated more than once: {ordered}"
+    );
+    assert!(
+        !ordered.contains("_jet_switch_subject.clone()"),
+        "branch dispatch must not clone its subject: {ordered}"
+    );
 }

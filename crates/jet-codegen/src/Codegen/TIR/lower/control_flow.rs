@@ -1,4 +1,4 @@
-use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
@@ -10,6 +10,7 @@ use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
+use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lower::bool_and_chain;
@@ -34,6 +35,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::variant_binding_types;
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -527,49 +529,6 @@ fn lower_if_cond_atom(
     (TIfCond::Plain(lower_expr(cond, cx, env)), None, Vec::new())
 }
 
-pub(crate) fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-    // c109 Phase 22: classify the condition and collect every binding introduced by
-    // a short-circuiting conjunction into the then-branch scope.
-    let (cond, then_bindings, then_prefix) = lower_if_cond(&ifs.cond, cx, env);
-    // Each branch gets its own lexical scope, so its bindings are available to panic
-    // context inside the branch but not after the `if`.
-    let then_body = {
-        let mut branch = if then_bindings.is_empty() {
-            clone_env(env)
-        } else {
-            fork_panic(env)
-        };
-        for (name, place, ty) in then_bindings {
-            branch.bind(&name, place, ty);
-        }
-        // D-ENC-DYN1=A+: a `Data` `Object(entries)` if-let prepends a `let` that
-        // collects the matched `Vec<(String, DataTree)>` pairs into the `BTreeMap` the
-        // body sees. Emitted before the source body statements.
-        let mut body = then_prefix;
-        body.extend(lower_stmts(&ifs.then_body, cx, &mut branch));
-        body
-    };
-    let (else_body, else_is_elseif) = match &ifs.else_branch {
-        None => (None, false),
-        Some(ElseBranch::Else(body)) => {
-            let mut branch = clone_env(env);
-            (Some(lower_stmts(body, cx, &mut branch)), false)
-        }
-        // `else if` nests as an else-body holding a single `If`; the flag marks it so
-        // emit renders `} else if …` (an explicit `else { if … }` block does NOT).
-        Some(ElseBranch::ElseIf(next)) => {
-            let mut branch = clone_env(env);
-            (Some(vec![lower_if(next, cx, &mut branch)]), true)
-        }
-    };
-    TStmt::If {
-        cond,
-        then_body,
-        else_body,
-        else_is_elseif,
-    }
-}
-
 /// c109 Phase 4: lower a `when`/match. The gate (`switch_in_subset`) has already
 /// proved one of the two covered shapes; pick the matching lowering.
 pub(crate) fn lower_switch(
@@ -599,6 +558,7 @@ pub(crate) fn lower_switch(
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
+    let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
     // heads / D-DESTRUCT1 struct-pattern heads mixed in — → the general mixed
     // `if/else if … else` chain. (An all-range + else switch already routed to shape B
@@ -610,10 +570,132 @@ pub(crate) fn lower_switch(
             || arm_str_match_pattern(cx, &a.cond, subject).is_some()
             || arm_bin_match_pattern(cx, &a.cond, subject).is_some()
     }) {
-        return lower_mixed_switch(subject, arms, else_body, cx, env);
+        return lower_mixed_switch(subject, arms, else_body, class, cx, env);
     }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
     lower_enum_match(subject, arms, else_body, cx, env)
+}
+
+fn same_branch_subject(candidate: &Expr, subject: &Expr) -> bool {
+    candidate.span() == subject.span()
+        || matches!((candidate, subject), (Expr::Ident(a, _), Expr::Ident(b, _)) if a == b)
+}
+
+fn equality_literal<'a>(subject: &Expr, cond: &'a Expr) -> Option<&'a Expr> {
+    match cond {
+        Expr::Binary(BinOp::Eq, left, right, _) if same_branch_subject(left, subject) => {
+            Some(right)
+        }
+        // Boolean switch heads remain bare literals in the parsed switch AST.
+        Expr::Bool(..) => Some(cond),
+        _ => None,
+    }
+}
+
+fn switch_subject_expr(ty: Type) -> TExpr {
+    TExpr {
+        ty,
+        kind: TExprKind::HostCall(Box::new(
+            crate::Codegen::TIR::THostCall::SwitchSubjectValue,
+        )),
+    }
+}
+
+fn lower_branch_condition(
+    condition: &Expr,
+    subject: &Expr,
+    subject_ty: &Type,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    if matches!(condition, Expr::Bool(..)) && matches!(subject_ty, Type::Bool) {
+        return TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::Binary {
+                op: BinOp::Eq,
+                overflow: false,
+                line: 0,
+                lhs: Box::new(switch_subject_expr(subject_ty.clone())),
+                rhs: Box::new(lower_expr(condition, cx, env)),
+            },
+        };
+    }
+    if let Expr::Binary(op, left, right, _) = condition {
+        if matches!(
+            op,
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        ) && same_branch_subject(left, subject)
+        {
+            return TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::Binary {
+                    op: *op,
+                    overflow: false,
+                    line: 0,
+                    lhs: Box::new(switch_subject_expr(subject_ty.clone())),
+                    rhs: Box::new(lower_expr(right, cx, env)),
+                },
+            };
+        }
+    }
+    lower_expr(condition, cx, env)
+}
+
+pub(crate) fn classify_branch(subject: &Expr, arms: &[SwitchArm], cx: &Cx) -> BranchClass {
+    if !arms.is_empty()
+        && arms
+            .iter()
+            .all(|arm| arm_variant_pattern(cx, &arm.cond, subject).is_some())
+    {
+        return BranchClass::Enum;
+    }
+    let bools = arms
+        .iter()
+        .filter_map(|arm| equality_literal(subject, &arm.cond))
+        .filter_map(|value| match value {
+            Expr::Bool(value, _) => Some(*value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if arms.len() == 2 && bools.len() == 2 && bools[0] != bools[1] {
+        return BranchClass::Bool2;
+    }
+    let mut ints = arms
+        .iter()
+        .filter_map(|arm| equality_literal(subject, &arm.cond))
+        .filter_map(|value| match value {
+            Expr::Int(value, ..) => Some(*value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !ints.is_empty() && ints.len() == arms.len() {
+        ints.sort_unstable();
+        if ints.windows(2).any(|pair| pair[0] == pair[1]) {
+            return BranchClass::Mixed;
+        }
+        let span = ints.last().unwrap().saturating_sub(*ints.first().unwrap()) as usize + 1;
+        return if span <= ints.len().saturating_mul(2) {
+            BranchClass::DenseInt
+        } else {
+            BranchClass::SparseInt
+        };
+    }
+    if arms.iter().all(|arm| {
+        arm_head_range(cx, &arm.cond, subject).is_some()
+            || matches!(
+                arm.cond,
+                Expr::Binary(
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge,
+                    _,
+                    _,
+                    _
+                )
+            )
+    }) {
+        BranchClass::Ordered
+    } else {
+        BranchClass::Mixed
+    }
 }
 
 fn lower_guard_switch(
@@ -648,7 +730,7 @@ fn lower_guard_switch(
 }
 
 /// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.
-fn range_inclusive_cond(subject: &Expr, lo: i64, hi: i64, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+fn range_inclusive_cond(subject_ty: &Type, lo: i64, hi: i64) -> TExpr {
     let lo_e = TExpr {
         ty: Type::Int,
         kind: TExprKind::IntLit(lo, None),
@@ -657,8 +739,8 @@ fn range_inclusive_cond(subject: &Expr, lo: i64, hi: i64, cx: &Cx, env: &mut Low
         ty: Type::Int,
         kind: TExprKind::IntLit(hi, None),
     };
-    let lhs_ge = lower_expr(subject, cx, env);
-    let lhs_le = lower_expr(subject, cx, env);
+    let lhs_ge = switch_subject_expr(subject_ty.clone());
+    let lhs_le = switch_subject_expr(subject_ty.clone());
     let ge = TExpr {
         ty: Type::Bool,
         kind: TExprKind::Binary {
@@ -700,6 +782,7 @@ pub(crate) fn lower_mixed_switch(
     subject: &Expr,
     arms: &[SwitchArm],
     else_body: &Option<Vec<Stmt>>,
+    class: BranchClass,
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TStmt {
@@ -711,7 +794,7 @@ pub(crate) fn lower_mixed_switch(
         let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
         let bin_match_pat = arm_bin_match_pattern(cx, &arm.cond, subject);
         let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
-            range_inclusive_cond(subject, lo, hi, cx, env)
+            range_inclusive_cond(&subject_ty, lo, hi)
         } else if let Some(pattern) = struct_pat.as_ref() {
             struct_pattern_cond_expr(pattern, &subject_ty, cx, env)
         } else if let Some(pattern) = str_match_pat.as_ref() {
@@ -719,7 +802,7 @@ pub(crate) fn lower_mixed_switch(
         } else if let Some(pattern) = bin_match_pat.as_ref() {
             bin_match_pattern_cond_expr(pattern, cx)
         } else {
-            lower_expr(&arm.cond, cx, env)
+            lower_branch_condition(&arm.cond, subject, &subject_ty, cx, env)
         };
         // Each arm body has its own lexical bindings.
         let mut branch = clone_env(env);
@@ -741,6 +824,7 @@ pub(crate) fn lower_mixed_switch(
     });
     TStmt::MixedSwitch {
         subject: subject_expr,
+        class,
         arms: tarms,
         else_body: else_lowered,
     }

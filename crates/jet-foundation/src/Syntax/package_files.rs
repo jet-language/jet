@@ -393,8 +393,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // D-CONST-RETIRE1: `const` is retired teaching-only (E0146 → `comptime`).
-    KW_COMPTIME,
+    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `#Known`).
     KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION,
@@ -563,7 +562,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // machinery — the built-in/user line IS the plane line.
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
-    KW_BREAK, KW_COMPTIME, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
+    KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TASK, KW_TASKGROUP, KW_TEST,

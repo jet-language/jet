@@ -261,20 +261,20 @@ use core.files as fs
 
 fn write_a() => Int {{
     bytes :: [U8].{{ {} }}
-    loop _; 1..25 {{
+    loop _, 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer a failed")
     }}
     return 1
 }}
 fn write_b() => Int {{
     bytes :: [U8].{{ {} }}
-    loop _; 1..25 {{
+    loop _, 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer b failed")
     }}
     return 2
 }}
 fn observe() => Int {{
-    loop _; 1..100 {{
+    loop _, 1..100 {{
         value :: fs.read("{}") ?? panic("observer read failed")
         if value != "old" && value != "{}" && value != "{}" {{
             panic("observer saw torn atomic-write payload")

@@ -33,7 +33,7 @@ impl InterpreterBackend {
 impl JitBackend for InterpreterBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         jet_jit::note_fallback_invoked_for_test();
-        run_checked(bundle, try_anyway)
+        jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
     }
 
     fn hot_swap(
@@ -43,7 +43,7 @@ impl JitBackend for InterpreterBackend {
         try_anyway: bool,
     ) -> Result<RunOutcome, Vec<Diagnostic>> {
         jet_jit::note_fallback_invoked_for_test();
-        match run_checked(bundle, try_anyway) {
+        match jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway)) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -61,6 +61,6 @@ impl JitBackend for InterpreterBackend {
         jet_jit::note_fallback_invoked_for_test();
         // D-HOTSWAP1 / D-PERSIST1: interpreter restart drops shared persist.
         jet_foundation::Persist::shared_clear();
-        run_checked(bundle, try_anyway)
+        jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
     }
 }

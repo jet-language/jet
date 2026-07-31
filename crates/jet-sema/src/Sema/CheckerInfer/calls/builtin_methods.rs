@@ -532,9 +532,12 @@ impl<'a> Checker<'a> {
                 };
                 for (i, arg) in args.iter_mut().enumerate() {
                     let saved_esc = self.lambda_escapes;
+                    let saved_lending_params = self.lambda_params_are_lending_views;
                     if Collections::is_closure_method(method) {
                         self.lambda_escapes = false;
                     }
+                    self.lambda_params_are_lending_views =
+                        method == "edit_disjoint" && i == 1;
                     let saved_exp = self.expected_type.clone();
                     if let Some(et) = expected.get(i) {
                         self.expected_type = Some(et.clone());
@@ -550,6 +553,7 @@ impl<'a> Checker<'a> {
                     };
                     self.expected_type = saved_exp;
                     self.lambda_escapes = saved_esc;
+                    self.lambda_params_are_lending_views = saved_lending_params;
                     if Syntax::PARA_METHODS.contains(&method) {
                         self.check_para_lambda(&arg.expr);
                     }

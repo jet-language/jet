@@ -1,8 +1,8 @@
 use super::*;
 use crate::Syntax;
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, LValue, LambdaBody, OrFallback, Pattern, Stmt,
-    StrPart, StructPatField,
+    EnumLitArg, Expr, ForKind, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart,
+    StructPatField,
 };
 use std::collections::HashSet;
 
@@ -21,7 +21,6 @@ pub(crate) fn walk_stmts_for_const_refs(
                 walk_expr_for_const_refs(e, const_names, taken)
             }
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => walk_if_for_const_refs(ifs, const_names, taken),
             Stmt::While { cond, body, .. } => {
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(body, const_names, taken);
@@ -125,20 +124,6 @@ pub(crate) fn walk_stmts_for_const_refs(
                 walk_stmts_for_const_refs(body, const_names, taken);
             }
         }
-    }
-}
-
-pub(crate) fn walk_if_for_const_refs(
-    ifs: &IfStmt,
-    const_names: &[String],
-    taken: &mut HashSet<String>,
-) {
-    walk_expr_for_const_refs(&ifs.cond, const_names, taken);
-    walk_stmts_for_const_refs(&ifs.then_body, const_names, taken);
-    match &ifs.else_branch {
-        Some(ElseBranch::Else(b)) => walk_stmts_for_const_refs(b, const_names, taken),
-        Some(ElseBranch::ElseIf(next)) => walk_if_for_const_refs(next, const_names, taken),
-        None => {}
     }
 }
 
@@ -464,13 +449,6 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
             expr_refs_name(e, name)
         }
-        Stmt::If(i) => {
-            expr_refs_name(&i.cond, name)
-                || i.then_body.iter().any(|s| stmt_refs_name(s, name))
-                || i.else_branch
-                    .as_ref()
-                    .is_some_and(|e| else_refs_name(e, name))
-        }
         Stmt::While { cond, body, .. } => {
             expr_refs_name(cond, name) || body.iter().any(|s| stmt_refs_name(s, name))
         }
@@ -559,19 +537,6 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         // D-TERM1 (ratified 2026-06-22): live block references same as its body.
         Stmt::Live { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::ScopeMember { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
-    }
-}
-
-pub(crate) fn else_refs_name(e: &ElseBranch, name: &str) -> bool {
-    match e {
-        ElseBranch::Else(stmts) => stmts.iter().any(|s| stmt_refs_name(s, name)),
-        ElseBranch::ElseIf(i) => {
-            expr_refs_name(&i.cond, name)
-                || i.then_body.iter().any(|s| stmt_refs_name(s, name))
-                || i.else_branch
-                    .as_ref()
-                    .is_some_and(|e| else_refs_name(e, name))
-        }
     }
 }
 
@@ -832,15 +797,6 @@ pub(crate) fn stmt_collect_captures(
         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
             expr_collect_captures(e, bound, read, mut_cap)
         }
-        Stmt::If(i) => {
-            expr_collect_captures(&i.cond, bound, read, mut_cap);
-            let mut then_bound = bound.clone();
-            block_collect_captures(&i.then_body, &mut then_bound, read, mut_cap);
-            if let Some(e) = &i.else_branch {
-                let mut else_bound = bound.clone();
-                else_collect_captures(e, &mut else_bound, read, mut_cap);
-            }
-        }
         Stmt::While { cond, body, .. } => {
             expr_collect_captures(cond, bound, read, mut_cap);
             let mut body_bound = bound.clone();
@@ -1048,28 +1004,6 @@ pub(crate) fn stmt_collect_captures(
         Stmt::ScopeMember { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
-        }
-    }
-}
-
-pub(crate) fn else_collect_captures(
-    e: &ElseBranch,
-    bound: &mut HashSet<String>,
-    read: &mut HashSet<String>,
-    mut_cap: &mut HashSet<String>,
-) {
-    match e {
-        ElseBranch::Else(stmts) => {
-            block_collect_captures(stmts, bound, read, mut_cap);
-        }
-        ElseBranch::ElseIf(i) => {
-            expr_collect_captures(&i.cond, bound, read, mut_cap);
-            let mut then_bound = bound.clone();
-            block_collect_captures(&i.then_body, &mut then_bound, read, mut_cap);
-            if let Some(e) = &i.else_branch {
-                let mut nested_bound = bound.clone();
-                else_collect_captures(e, &mut nested_bound, read, mut_cap);
-            }
         }
     }
 }

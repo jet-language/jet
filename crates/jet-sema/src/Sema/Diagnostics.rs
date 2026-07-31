@@ -3,7 +3,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
 pub(crate) use crate::Syntax::edit_distance;
-use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
+use crate::AST::{BinOp, Expr, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn undeclared_value_tag(
@@ -199,28 +199,19 @@ pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
         // D-TOOL2 (E2-M11): `todo` is diverging — a bare `todo;` satisfies
         // the "every path must return" check just like `return`.
         Stmt::Expr(Expr::Todo { .. }) => true,
-        Stmt::If(ifs) => if_definitely_returns(ifs),
         Stmt::Switch {
-            arms, else_body, ..
+            subject,
+            arms,
+            else_body,
+            span,
         } => {
             arms.iter().all(|a| block_definitely_returns(&a.body))
                 && else_body
                     .as_ref()
                     .map(|b| block_definitely_returns(b))
-                    .unwrap_or(true)
+                    .unwrap_or_else(|| !crate::AST::is_subjectless_guard(subject, *span))
         }
         _ => false,
-    }
-}
-
-pub(crate) fn if_definitely_returns(ifs: &IfStmt) -> bool {
-    if !block_definitely_returns(&ifs.then_body) {
-        return false;
-    }
-    match &ifs.else_branch {
-        Some(ElseBranch::Else(b)) => block_definitely_returns(b),
-        Some(ElseBranch::ElseIf(next)) => if_definitely_returns(next),
-        None => false,
     }
 }
 
@@ -1160,7 +1151,7 @@ pub(crate) fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
         ),
         "a `loop` borrows the whole collection until the body finishes".to_string(),
         format!(
-            "collect changes into a second list, or loop over indices: `loop i; 0..{}.len()-1 {{ }}`",
+            "collect changes into a second list, or loop over indices: `loop i, 0..{}.len()-1 {{ }}`",
             name
         ),
         Some(span),

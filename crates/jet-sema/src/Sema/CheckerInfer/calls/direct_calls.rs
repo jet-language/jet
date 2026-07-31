@@ -234,18 +234,41 @@ impl<'a> Checker<'a> {
     
             if matches!(
                 call.name.as_str(),
-                Syntax::FOREIGN_MUTEX | Syntax::FOREIGN_LOCK | "RwLock" | "mutex"
+                Syntax::FOREIGN_MUTEX
+                    | Syntax::FOREIGN_LOCK
+                    | "RwLock"
+                    | "mutex"
+                    | "Semaphore"
+                    | "semaphore"
             ) {
+                let semaphore = matches!(call.name.as_str(), "Semaphore" | "semaphore");
                 self.diags.push(Diagnostic::error(
                     "E0041",
-                    format!(
-                        "`{}` is not in Jet; share data through channels",
-                        call.name
-                    ),
-                    "Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory"
-                        .to_string(),
-                    "import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
-                        .to_string(),
+                    if semaphore {
+                        format!(
+                            "`{}` is not in Jet; use a bounded channel as a token pool",
+                            call.name
+                        )
+                    } else {
+                        format!(
+                            "`{}` is not in Jet; share data through channels",
+                            call.name
+                        )
+                    },
+                    if semaphore {
+                        "each received token admits one worker until that worker sends the token back"
+                            .to_string()
+                    } else {
+                        "Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory"
+                            .to_string()
+                    },
+                    if semaphore {
+                        "create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"
+                            .to_string()
+                    } else {
+                        "import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
+                            .to_string()
+                    },
                     Some(call.name_span),
                 ));
                 for a in call.args.iter_mut() {

@@ -272,7 +272,7 @@ use core.time
 fn run() {
     sw := time.start()
     n := 0
-    loop i; 0..100 {
+    loop i, 0..100 {
         n = n + i
     }
     ms := sw.elapsed_millis()
@@ -458,7 +458,7 @@ fn task_spawn_join() {
 use core.tasks as tasks
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
-    loop n; first..last {
+    loop n, first..last {
         total = (total + n)
     }
     return total
@@ -471,7 +471,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_task_spawn_join", src);
     assert_eq!(code, 0);
-    // `loop n; first..last` is inclusive (S22/D-SG8): sum(1..=25) + sum(26..=50).
+    // `loop n, first..last` is inclusive (S22/D-SG8): sum(1..=25) + sum(26..=50).
     assert_eq!(stdout, "1275\n");
 }
 
@@ -549,7 +549,7 @@ fn task_join_all() {
 use core.tasks as tasks
 fn work(value: Int, turns: Int) => Int {
     total := value
-    loop _; 1..turns {
+    loop _, 1..turns {
         total += 1
         total -= 1
     }
@@ -779,7 +779,7 @@ fn run() {
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.sort()
-    loop x; results {
+    loop x, results {
         print(x)
     }
 }
@@ -810,8 +810,8 @@ fn run() {
     assert_eq!(stdout, "42\n");
 }
 
-/// c109 Phase 22: method-call-collection iteration — `loop c; s.chars()` (char
-/// iteration) and `loop w; s.split(sep)` (the `.iter().cloned()` default), both
+/// c109 Phase 22: method-call-collection iteration — `loop c, s.chars()` (char
+/// iteration) and `loop w, s.split(sep)` (the `.iter().cloned()` default), both
 /// reproduced from `emit_for_in`'s `Expr::MethodCall` branches.
 #[test]
 fn method_call_collection_iteration() {
@@ -821,14 +821,14 @@ fn method_call_collection_iteration() {
     let src = "\
 fn count_chars(s: String) => Int {
     n := 0
-    loop c; s.chars() {
+    loop c, s.chars() {
         n+= 1
     }
     return n
 }
 fn join_words(s: String) => String {
     out := \"\"
-    loop w; s.split(\",\") {
+    loop w, s.split(\",\") {
         out = \"{out}[{w}]\"
     }
     return out

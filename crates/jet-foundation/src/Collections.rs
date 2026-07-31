@@ -86,6 +86,7 @@ pub fn is_closure_method(method: &str) -> bool {
         | "filter_map"
         // D-PARCAPTURE1=D: explicit parallel adapters, consistently `para_`.
         | "para_map" | "para_filter" | "para_partition" | "para_fold"
+        | "edit_disjoint"
     )
 }
 
@@ -693,6 +694,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("get_disjoint_write", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::List(Box::new(mutable_view()))),
+            err: Box::new(Type::String),
+        })),
+        ("edit_disjoint", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::Tuple(vec![])),
             err: Box::new(Type::String),
         })),
         _ => None,
@@ -1387,6 +1392,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "clear"
                 | "split_write"
                 | "get_disjoint_write"
+                | "edit_disjoint"
         ),
         Type::Map { .. } => matches!(method, "add" | "add_new" | "remove" | "clear"),
         // D-COLLBREADTH1=A: Set mutating methods.
@@ -1539,6 +1545,24 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "get" | "index_of" | "remove" => Some(vec![Type::Int]),
             "split_write" => Some(vec![Type::Int]),
             "get_disjoint_write" => Some(vec![Type::List(Box::new(Type::Int))]),
+            "edit_disjoint" => Some(vec![
+                Type::List(Box::new(Type::Int)),
+                Type::Fn {
+                    params: vec![
+                        Type::Apply {
+                            name: "ViewMut".to_string(),
+                            args: vec![(**inner).clone()],
+                        },
+                        Type::Apply {
+                            name: "ViewMut".to_string(),
+                            args: vec![(**inner).clone()],
+                        },
+                    ],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                },
+            ]),
             "join" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
@@ -1996,7 +2020,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
     } else if (matches!(recv_ty, Type::List(_))
-        && matches!(method, "remove" | "sort_by"))
+        && matches!(method, "remove" | "sort_by" | "edit_disjoint"))
         || matches!(
             recv_ty,
             Type::Named(name)

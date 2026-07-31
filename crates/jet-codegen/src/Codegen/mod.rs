@@ -16,7 +16,7 @@ use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
 use crate::AST::{
-    BenchDef, ElseBranch, Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef,
+    BenchDef, Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef,
     Type,
 };
 use std::collections::HashSet;
@@ -872,22 +872,6 @@ fn collect_allocator_constructors(
                     }
                 }
                 locals.insert(binding.name.clone());
-            }
-            Stmt::If(branch) => {
-                collect_allocator_nested(&branch.then_body, cx, locals, found, &[]);
-                let mut next = branch.else_branch.as_ref();
-                while let Some(else_branch) = next {
-                    match else_branch {
-                        ElseBranch::Else(body) => {
-                            collect_allocator_nested(body, cx, locals, found, &[]);
-                            break;
-                        }
-                        ElseBranch::ElseIf(branch) => {
-                            collect_allocator_nested(&branch.then_body, cx, locals, found, &[]);
-                            next = branch.else_branch.as_ref();
-                        }
-                    }
-                }
             }
             Stmt::For { var, var2, body, .. } => {
                 let mut names = vec![var.as_str()];
@@ -2071,7 +2055,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
-/// active target OS is Linux. `used_core` is collected before `comptime if
+/// active target OS is Linux. `used_core` is collected before `#Known if
 /// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is

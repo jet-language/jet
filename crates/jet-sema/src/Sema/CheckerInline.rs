@@ -38,7 +38,7 @@
 //! this check (and the rest of sema) has passed.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{Binding, ElseBranch, Expr, Func, LValue, Stmt};
+use crate::AST::{Binding, Expr, Func, LValue, Stmt};
 
 /// D-METHODMACRO1=A: the size ceiling named in E0919's fix text. A statement
 /// count, not a byte/token count — cheap to compute, easy to explain, and
@@ -150,11 +150,6 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.scan_expr(e),
-            Stmt::If(ifs) => {
-                self.scan_expr(&ifs.cond);
-                self.scan_stmts(&ifs.then_body);
-                self.scan_else(ifs.else_branch.as_ref());
-            }
             Stmt::While { cond, body, .. } => {
                 self.scan_expr(cond);
                 self.scan_stmts(body);
@@ -249,18 +244,6 @@ impl<'a> InlineAlwaysScan<'a> {
                 self.scan_stmts(body);
             }
             Stmt::Yield(e, _) => self.scan_expr(e),
-        }
-    }
-
-    fn scan_else(&mut self, e: Option<&ElseBranch>) {
-        match e {
-            Some(ElseBranch::ElseIf(ifs)) => {
-                self.scan_expr(&ifs.cond);
-                self.scan_stmts(&ifs.then_body);
-                self.scan_else(ifs.else_branch.as_ref());
-            }
-            Some(ElseBranch::Else(body)) => self.scan_stmts(body),
-            None => {}
         }
     }
 

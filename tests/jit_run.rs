@@ -20,6 +20,25 @@ mod common;
 use jet::Interpreter::dev_iteration;
 use jet_foundation::JitBackend::RunOutcome;
 
+#[test]
+fn bounded_workers_example_has_total_tir() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/concurrency/bounded_workers.jet");
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "{}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "{}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+}
+
 /// The Cranelift host path is not available on every architecture. Mirrors
 /// `tests/dev.rs`: CI sets `JET_REQUIRE_CRANELIFT_HOST=1` so a missing host is
 /// a loud failure, never a quiet green skip.
