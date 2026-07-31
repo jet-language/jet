@@ -1,0 +1,15 @@
+// D-VERDICT-1323-1: a group of task handles is driven without writing a loop.
+// `tasks.spawn_group(n, body)` starts n tasks from one callable, and every
+// single-handle method has a list twin that means the same thing applied in
+// order: wait_all/join_all and detach_all consume the group, cancel_all,
+// pause_all, resume_all and trace_all borrow it.
+use core.tasks as tasks
+
+fn run() {
+    workers :: tasks.spawn_group(3, () => 7)
+    workers.cancel_all()
+    print(workers.wait_all())
+
+    pair :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]
+    print(pair.join_all())
+}

@@ -3416,6 +3416,12 @@ pub enum TCoreClosureKind {
         /// so it launches through the group's scoped path (loan closed at join).
         scoped: bool,
     },
+    /// D-VERDICT-1323-1: `tasks.spawn_group(n, f)` → n tasks from one callable.
+    SpawnGroup {
+        count: Box<TExpr>,
+        site: usize,
+        spawn_closure: String,
+    },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
@@ -4178,7 +4184,6 @@ pub enum THandleOp {
     TaskTrace,
     // D-VERDICT-1323-1: the list twins. Each calls the same Prelude symbol its
     // single-handle counterpart does, applied over the whole group in order.
-    TaskWaitAll,
     TaskDetachAll,
     TaskCancelAll,
     TaskPauseAll,

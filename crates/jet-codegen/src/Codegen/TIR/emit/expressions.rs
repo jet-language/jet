@@ -2908,9 +2908,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
                 THandleOp::TaskTrace => format!("({}).trace()", recv),
-                THandleOp::TaskWaitAll => {
-                    format!("{}jet_std::jet_task_wait_all({})", cx.root_prefix, recv)
-                }
                 THandleOp::TaskDetachAll => {
                     format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
                 }
@@ -4156,6 +4153,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.root_prefix, spawn_closure
                 ),
             },
+            TCoreClosureKind::SpawnGroup {
+                count,
+                spawn_closure,
+                ..
+            } => format!(
+                "{}jet_std::jet_task_spawn_group({}, {})",
+                cx.root_prefix,
+                emit_tir_expr(count, cx),
+                spawn_closure
+            ),
             TCoreClosureKind::Serve { addr, closure } => format!(
                 "{}jet_http_serve(&({}), {})",
                 cx.root_prefix,

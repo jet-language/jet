@@ -668,6 +668,10 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
             name: "Task".to_string(),
             args: vec![body_ty],
         },
+        ("core.tasks", "spawn_group") => Type::List(Box::new(Type::Apply {
+            name: "Task".to_string(),
+            args: vec![body_ty],
+        })),
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
         ("jet.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),

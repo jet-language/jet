@@ -3235,8 +3235,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             args.is_empty() && jit_concurrency_type(&recv.ty)
         }
         // D-VERDICT-1323-1: the list twins take a list of task handles.
-        THandleOp::TaskWaitAll
-        | THandleOp::TaskDetachAll
+        THandleOp::TaskDetachAll
         | THandleOp::TaskCancelAll
         | THandleOp::TaskPauseAll
         | THandleOp::TaskResumeAll

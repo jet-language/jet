@@ -92,6 +92,30 @@ pub(crate) fn lower_core_closure_call(
                 },
             });
         }
+        // D-VERDICT-1323-1: same capture handling as `spawn`; the count is an
+        // ordinary lowered argument and the body is one rendered spawn closure.
+        ("core.tasks", "spawn_group") if args.len() == 2 => {
+            let lam = lam_at(1)?;
+            let body_ty = lambda_body_ty(lam, cx, env);
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            let spawn_closure = render_spawn_lambda(lam, cx, env);
+            let count = lower_expr(&args[0].expr, cx, env);
+            return Some(TExpr {
+                ty: Type::List(Box::new(Type::Apply {
+                    name: "Task".to_string(),
+                    args: vec![body_ty],
+                })),
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::SpawnGroup {
+                        count: Box::new(count),
+                        site,
+                        spawn_closure,
+                    },
+                },
+            });
+        }
         ("jet.http", "serve") => {
             let lam = lam_at(1)?;
             let addr = lower_expr(&args[0].expr, cx, env);

@@ -11493,6 +11493,12 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
+                // D-VERDICT-1323-1: spawn_group is not resident-lowered yet; the
+                // safety gate below refuses it so the program deopts as a whole
+                // rather than compiling a half-built group.
+                TCoreClosureKind::SpawnGroup { .. } => {
+                    Err("jit spawn_group unsupported".to_string())
+                }
                 TCoreClosureKind::Spawn { group, .. } => {
                     let group = match group {
                         Some(group) => Some(self.lower_expr(group)?),
@@ -15612,13 +15618,6 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.conc.task_trace_all, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
-            }
-            THandleOp::TaskWaitAll => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_wait_all, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
             THandleOp::TaskDetachAll
             | THandleOp::TaskCancelAll

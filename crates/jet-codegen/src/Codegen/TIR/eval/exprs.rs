@@ -1867,6 +1867,26 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
+                // D-VERDICT-1323-1: the group control-plane twins reach the
+                // evaluator's task table, which the shared handle dispatch has
+                // no access to. Each behaves exactly like its single-handle
+                // counterpart does on this tier.
+                match op {
+                    crate::Codegen::TIR::THandleOp::TaskCancelAll => {
+                        let CtValue::List(tasks) = &r else {
+                            return Err(unsupported("task group receiver", self.span()));
+                        };
+                        let tasks = tasks.clone();
+                        for task in &tasks {
+                            self.cancel_task_value(task)?;
+                        }
+                        return Ok(CtValue::Unit);
+                    }
+                    crate::Codegen::TIR::THandleOp::TaskDetachAll => {
+                        return Ok(CtValue::Unit);
+                    }
+                    _ => {}
+                }
                 let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
                 let http_json = matches!(
                     op,
@@ -3946,6 +3966,20 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Spawn { group, site, .. },
             } => self.eval_spawn(*site, group.as_deref(), scope),
+            // D-VERDICT-1323-1: n tasks from one callable — the same spawn the
+            // single form uses, repeated, so the group carries identical meaning.
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::SpawnGroup { count, site, .. },
+            } => {
+                let CtValue::Int(count) = self.eval_expr(count, scope)? else {
+                    return Err(unsupported("spawn_group count", self.span()));
+                };
+                let mut tasks = Vec::new();
+                for _ in 0..count.max(0) {
+                    tasks.push(self.eval_spawn(*site, None, scope)?);
+                }
+                Ok(CtValue::List(tasks))
+            }
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Guard { executable, .. },
             } => {

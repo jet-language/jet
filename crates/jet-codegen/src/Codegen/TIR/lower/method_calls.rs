@@ -2609,6 +2609,19 @@ pub(crate) fn lower_method_call(
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+        // D-VERDICT-1323-1 / I8: `handles.wait_all()` and `handles.join_all()` are
+        // the method spelling of `tasks.join_all`, so they lower to the same node
+        // every engine already drives. No second mechanism.
+        if matches!(method, "wait_all" | "join_all") {
+            let tasks = lower_expr(receiver, cx, env);
+            let elem = taskgroup_result_elem(&tasks);
+            return TExpr {
+                ty: Type::List(Box::new(elem)),
+                kind: TExprKind::TaskGroupAll {
+                    tasks: Box::new(tasks),
+                },
+            };
+        }
         let recv_t = lower_expr(receiver, cx, env);
         // The element type `T` from the receiver's `Apply<T>` (the first type arg).
         let elem = match &recv_t.ty {
@@ -2623,7 +2636,6 @@ pub(crate) fn lower_method_call(
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
             "trace" => (THandleOp::TaskTrace, Type::String),
-            "wait_all" | "join_all" => (THandleOp::TaskWaitAll, Type::List(Box::new(elem))),
             "detach_all" => (THandleOp::TaskDetachAll, unit_type()),
             "cancel_all" => (THandleOp::TaskCancelAll, unit_type()),
             "pause_all" => (THandleOp::TaskPauseAll, unit_type()),

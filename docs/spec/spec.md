@@ -2142,6 +2142,31 @@ serialization or implicit capture merge; callers
 return data, use `para_partition` or `para_fold`, or choose explicit synchronized
 state.
 
+### Task groups without a loop (D-VERDICT-1323-1)
+
+`tasks.spawn_group(n, body) => [Task<T>]` starts `n` tasks from one callable.
+Every single-handle method has a list twin on `[Task<T>]` that means the same
+thing applied in list order:
+
+| single | group | ownership |
+| --- | --- | --- |
+| `.join()` / `.wait()` | `.join_all()` / `.wait_all()` | consumes |
+| `.detach()` | `.detach_all()` | consumes |
+| `.cancel()` | `.cancel_all()` | borrows |
+| `.pause()` | `.pause_all()` | borrows |
+| `.resume()` | `.resume_all()` | borrows |
+| `.trace()` | `.trace_all()` | borrows |
+
+```jet
+workers :: tasks.spawn_group(3, () => 7)
+workers.cancel_all()
+print(workers.wait_all())
+```
+
+`handles.join_all()` is the method spelling of `tasks.join_all(^handles)` — one
+mechanism, two spellings, not two mechanisms. Example:
+`examples/features/concurrency/task_group_helpers.jet`.
+
 ### Taskgroups and structured combinators (D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-07-29)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside

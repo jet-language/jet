@@ -318,6 +318,8 @@ pub(crate) fn core_closure_call_in_subset(
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
         ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-VERDICT-1323-1: (count, body); the body is a spawn lambda like `spawn`.
+        ("core.tasks", "spawn_group") => args.len() == 2 && no_labels && lambda_arg(1),
         ("jet.http", "serve") => {
             args.len() == 2
                 && no_labels

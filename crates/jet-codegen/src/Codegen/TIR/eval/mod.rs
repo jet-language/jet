@@ -927,6 +927,23 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    /// D-VERDICT-1323-1: request cancellation for one task without consuming
+    /// it, the evaluator twin of `JetTask::cancel`.
+    pub(super) fn cancel_task_value(&mut self, value: &CtValue) -> Result<(), Diagnostic> {
+        let index = Self::task_index(value)
+            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        if let Some(Some(task)) = self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .tasks
+            .get(index)
+        {
+            task.cancel.store(true, Ordering::Release);
+        }
+        Ok(())
+    }
+
     fn take_task_entry(&mut self, value: &CtValue) -> Result<EvalTask, Diagnostic> {
         let index = Self::task_index(value)
             .ok_or_else(|| unsupported("task receiver", self.span()))?;
