@@ -34,9 +34,13 @@ fn union_member_has_open_shape(ty: &Type) -> bool {
 }
 
 fn is_core_view_generic(ty: &Type) -> bool {
+    // D-PIN1=A / D-PIN3=A: `Pin<T>` joins the borrowed-window family. It is a
+    // core generic like `View`/`ViewMut` — declarable on fields, parameters,
+    // and returns, and constructed only by `mem.pin`.
     matches!(
         ty,
-        Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
     )
 }
 

@@ -172,14 +172,45 @@ fn split_owner_key(expr: &Expr) -> Option<String> {
     }
 }
 
+/// D-PIN1=A: `mem.pin(&place)` IS a write window on `place` — the pin adds a
+/// sema-side no-move promise, not a second runtime shape. Every tier therefore
+/// lowers it through the same path as a written `Expr::Place`, which is what
+/// keeps the interpreter and JIT aliasing behaviour identical to AOT (I9).
+/// Returns the windowed place and its access when `init` is either spelling.
+pub(crate) fn place_window_init<'a>(
+    init: &'a Expr,
+    cx: &Cx,
+) -> Option<(&'a Expr, PlaceAccess)> {
+    match init {
+        Expr::Place(inner, access, _) => Some((inner.as_ref(), *access)),
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == crate::Syntax::MEM_PIN
+            && matches!(receiver.as_ref(), Expr::Ident(alias, _)
+                if cx.core_imports.get(alias).is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
+        {
+            let inner = &args.first()?.expr;
+            Some((
+                match inner {
+                    Expr::Place(place, _, _) => place.as_ref(),
+                    other => other,
+                },
+                PlaceAccess::Write,
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<SplitViewCandidate> {
     let Stmt::Val(binding) = stmt else {
         return None;
     };
-    let Expr::Place(inner, access, _) = &binding.init else {
-        return None;
-    };
-    let (base, start, end, single) = match inner.as_ref() {
+    let (inner, access) = place_window_init(&binding.init, cx)?;
+    let (base, start, end, single) = match inner {
         Expr::Slice {
             base,
             start,
@@ -657,7 +688,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // D-SHAPE-PLACE1=A: local place windows are references with no
             // written Rust type clause. Range windows already behave as slices;
             // whole/field/index windows bind a dereferenced transparent slot.
-            let moved_view = if let Expr::Place(inner, _, _) = &b.init {
+            let moved_view = if let Some((inner, _)) = place_window_init(&b.init, cx) {
                 let moved = lower_owned_expr(inner, cx, env);
                 if matches!(
                     &moved.ty,
@@ -665,7 +696,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 ) {
                     Some(moved)
                 } else {
-                    let range = matches!(inner.as_ref(), Expr::Slice { .. });
+                    let range = matches!(inner, Expr::Slice { .. });
                     let init = lower_expr(&b.init, cx, env);
                     let slot = if range {
                         TLocal::user(&b.name)

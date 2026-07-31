@@ -1223,8 +1223,11 @@ pub(crate) fn check_module_bodies(
     }
     fn contains_view(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
         match ty {
+            // D-PIN1=A: `Pin<T>` borrows its owner's storage, so it carries
+            // provenance across a signature exactly like `View`/`ViewMut`.
             Type::Apply { name, args }
-                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => true,
+                if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                    && args.len() == 1 => true,
             Type::Named(name) => {
                 seen.insert(name.clone())
                     && registry.struct_fields(name).is_some_and(|fields| {

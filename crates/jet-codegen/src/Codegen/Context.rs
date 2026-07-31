@@ -838,10 +838,14 @@ impl Cx {
             mutable_only: bool,
         ) -> bool {
             match ty {
+                // D-PIN1=A: `Pin<T>` is a borrowed window like `View`/`ViewMut`,
+                // so it needs the same hidden Rust lifetime everywhere it is
+                // stored or returned. It is always a write window.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                        && args.len() == 1 =>
                 {
-                    !mutable_only || name == "ViewMut"
+                    !mutable_only || name == "ViewMut" || name == Syntax::TYPE_PIN
                 }
                 Type::Named(name) => named_contains(cx, name, seen, mutable_only),
                 Type::Apply { name, args } => {
@@ -997,7 +1001,8 @@ impl Cx {
         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
             match ty {
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                        && args.len() == 1 =>
                 {
                     add_reference_lifetime(base(ty))
                 }
@@ -1889,6 +1894,14 @@ impl Cx {
             }
             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                 format!("&mut [{}]", self.rust_type(&args[0]))
+            }
+            // D-PIN1=A: `Pin<T>` is the address-stability contract, which sema
+            // proves before this type is ever emitted (I3). The value itself is
+            // an ordinary exclusive Rust reference to the pinned place — that is
+            // exactly what "the storage does not move while the pin is live"
+            // means once the proof is done, so no runtime wrapper is emitted.
+            Type::Apply { name, args } if name == Syntax::TYPE_PIN && args.len() == 1 => {
+                format!("&mut {}", self.rust_type(&args[0]))
             }
             // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
             Type::Apply { name, args }
@@ -3581,8 +3594,11 @@ pub(crate) fn field_type_cloneable(
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
+        // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
+        // than `ViewMut` — duplicating it would hand out a second no-move claim.
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "ViewMut" | "Task") || name == Syntax::TYPE_SHARED_GUARD =>
+            if matches!(name.as_str(), "ViewMut" | "Task" | Syntax::TYPE_PIN)
+                || name == Syntax::TYPE_SHARED_GUARD =>
         {
             false
         }

@@ -222,6 +222,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "volatile_read",
             "volatile_write",
             "address_of",
+            // D-PIN1=A: the address-stability contract.
+            "pin",
+            "Pin",
             "Arena",
             "Bump",
             "Pool",

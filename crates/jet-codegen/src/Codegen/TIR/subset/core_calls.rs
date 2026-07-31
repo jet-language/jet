@@ -41,6 +41,13 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.mem" && matches!(method, "address_of" | "volatile_read" | "volatile_write") {
         return true;
     }
+    // D-PIN1=A: `mem.pin(&place)` lowers to the same exclusive borrow node as
+    // `&place` (see `lower_method_call`), so every tier emits the identical
+    // form and none of them re-encodes the address-stability rule — sema owns
+    // it (I3/I9). The `Pin<T>` return type is total from the argument's type.
+    if module == "core.mem" && method == crate::Syntax::MEM_PIN {
+        return true;
+    }
     // c109 Phase 20: the polymorphic core specials (`math.abs/min/max/clamp`,
     // `random.pick/shuffle`, `io.eprint`). NOT in `core_fixed_sig` — their return
     // type is arg-type dependent, resolved by sema's bespoke `infer_core_call` and

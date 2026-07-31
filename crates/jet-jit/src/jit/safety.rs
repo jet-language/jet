@@ -276,6 +276,13 @@ pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
 pub(crate) fn user_type_name(ty: &Type) -> Option<&str> {
     match ty {
         Type::Named(n) if n != "Unit" => Some(n.as_str()),
+        // D-PIN1=A: `Pin<T>` is a window onto a `T` place, not a record of its
+        // own. Field layout, printing, and the record ABI all belong to `T`.
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_PIN && args.len() == 1 =>
+        {
+            user_type_name(&args[0])
+        }
         Type::Apply { name, .. } => Some(name.as_str()),
         Type::Tagged { inner, .. } => user_type_name(inner),
         _ => None,

@@ -480,6 +480,18 @@ pub const MEM_VOLATILE_WRITE: &str = "volatile_write";
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 pub const MEM_ADDRESS_OF: &str = "address_of";
 
+/// D-PIN1=A (ratified 2026-07-26): `mem.pin(&place)` — start the address-stable
+/// window on `place`. Safe code may still read and edit through the returned
+/// `Pin<T>`; it may not move, replace, or resize the pinned storage while any
+/// pin is live. Gated by `use core.mem` like the rest of the low-level surface.
+pub const MEM_PIN: &str = "pin";
+
+/// D-PIN1=A / D-PIN3=A (ratified 2026-07-31): `Pin<T>` — the tracked write view
+/// that carries the no-move promise. It is also the field mark: a struct field
+/// declared `Pin<U>` projects to `Pin<U>` through a pinned value, and every
+/// other field projects as an ordinary view (D-PIN2=A, D-PIN3=A).
+pub const TYPE_PIN: &str = "Pin";
+
 /// D-ALLOC1 (ratified 2026-06-19): arena allocator type name.
 /// Construct with `mem.Arena.new()`, allocate with `arena.alloc(value)`.
 /// Gated by `use core.mem` (E3102); no `#Unsafe` needed.

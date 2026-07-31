@@ -300,6 +300,25 @@ impl<'a> Checker<'a> {
                 Some(span),
             )),
             ViewKind::String => self.report_string_view_unsupported_use(name, what, span),
+            // D-PIN1=A: the no-move promise ends with the pin. Letting the pin
+            // outlive the pinned place would keep the promise alive after the
+            // storage it describes is gone.
+            ViewKind::Pin => self.diags.push(Diagnostic::error(
+                "E2305",
+                format!(
+                    "`{}` cannot be shared — the pin does not live long enough to {}",
+                    name, what
+                ),
+                format!(
+                    "`{}` pins `{}`; sharing it outside `{}`'s scope would let the no-move promise outlive the storage it protects",
+                    name, fact.place.owner.name, fact.place.owner.name
+                ),
+                format!(
+                    "keep `{}` inside `{}`'s scope, or pin the place again where it is needed",
+                    name, fact.place.owner.name
+                ),
+                Some(span),
+            )),
             ViewKind::List | ViewKind::Buffer | ViewKind::Matrix => {
                 self.diags.push(Diagnostic::error(
                     "E2305",
@@ -427,6 +446,16 @@ impl<'a> Checker<'a> {
                             &output_path,
                         )
                     }))
+            {
+                return false;
+            }
+            // D-PIN2=A / D-PIN3=A: reaching a declared `Pin<U>` field through a
+            // live pin is structural projection, not a second borrow — parent
+            // and child are one contract. Only nesting is exempt; two pins on
+            // unrelated-but-overlapping places still conflict.
+            if kind == ViewKind::Pin
+                && fact.kind == ViewKind::Pin
+                && (place.extends(&fact.place) || fact.place.extends(&place))
             {
                 return false;
             }
@@ -563,6 +592,18 @@ impl<'a> Checker<'a> {
             })
         {
             return fact.kind;
+        }
+        // D-PIN2=A / D-PIN3=A: a place reached through a live pin is still
+        // pinned. Only `Pin` inherits this way — every other window kind keeps
+        // its own owner-shaped classification below.
+        if self
+            .view_facts
+            .bindings
+            .iter()
+            .rev()
+            .any(|(_, fact)| fact.kind == ViewKind::Pin && place.extends(&fact.place))
+        {
+            return ViewKind::Pin;
         }
         match self.lookup(&place.owner.name).map(|info| &info.ty) {
             Some(Type::Named(name)) if name == Syntax::TYPE_BYTE_BUFFER => ViewKind::Buffer,
@@ -2228,7 +2269,7 @@ impl<'a> Checker<'a> {
         if self.report_scoped_loan_conflict(changed, action, span) {
             return;
         }
-        let Some((view, access, place)) = self
+        let Some((view, access, place, kind)) = self
             .view_facts
             .bindings
             .iter()
@@ -2238,10 +2279,35 @@ impl<'a> Checker<'a> {
                     && fact.place.overlaps(changed)
                     && fact.invalidated.is_none()
             })
-            .map(|(name, fact)| (name.clone(), fact.access, Self::place_name(&fact.place)))
+            .map(|(name, fact)| {
+                (
+                    name.clone(),
+                    fact.access,
+                    Self::place_name(&fact.place),
+                    fact.kind,
+                )
+            })
         else {
             return;
         };
+        // D-PIN1=A: a pin is not an aliasing complaint — it is a promise the
+        // pinned storage keeps its address. Say that instead of E0212's view
+        // wording so the fix names the pin, not "make an owned copy".
+        if kind == ViewKind::Pin {
+            let changed_name = Self::place_name(changed);
+            self.diags.push(Diagnostic::error(
+                "E0219",
+                format!("`{changed_name}` cannot {action} while it is pinned"),
+                format!(
+                    "`{view}` pinned `{place}`, which promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place"
+                ),
+                format!(
+                    "finish using `{view}` before changing `{changed_name}`, or narrow the pin's scope"
+                ),
+                Some(span),
+            ));
+            return;
+        }
         let access = if access == ViewAccess::Write {
             "exclusive mutable view"
         } else {
@@ -2599,6 +2665,28 @@ impl<'a> Checker<'a> {
                     }
                     return sources;
                 }
+            }
+        }
+        // D-PIN1=A: `mem.pin(&place)` opens the address-stability window on
+        // `place`. The recorded fact IS the contract: `check_place_change`
+        // rejects every move, replacement, and resize of that place while the
+        // pin is live, and the fact disappears with the pin binding's scope.
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = init
+        {
+            if method == Syntax::MEM_PIN
+                && matches!(receiver.as_ref(), Expr::Ident(alias, _)
+                    if self.core_imports.get(alias).is_some_and(|m| m == Syntax::CORE_MEM_MODULE))
+            {
+                return args
+                    .first()
+                    .and_then(|arg| self.place_from_expr(&arg.expr))
+                    .map(|place| vec![(Vec::new(), place, ViewKind::Pin, ViewAccess::Write)])
+                    .unwrap_or_default();
             }
         }
         if let Expr::MethodCall {
@@ -2988,13 +3076,16 @@ impl<'a> Checker<'a> {
             out: &mut Vec<(Vec<String>, ViewAccess)>,
         ) {
             match ty {
-                Type::Apply { name, .. } if name == "View" || name == "ViewMut" => {
+                // D-PIN1=A: a pin is a write window, so it is a view leaf too.
+                Type::Apply { name, .. }
+                    if name == "View" || name == "ViewMut" || name == Syntax::TYPE_PIN =>
+                {
                     out.push((
                         path.clone(),
-                        if name == "ViewMut" {
-                            ViewAccess::Write
-                        } else {
+                        if name == "View" {
                             ViewAccess::Read
+                        } else {
+                            ViewAccess::Write
                         },
                     ));
                 }
@@ -3231,8 +3322,12 @@ impl<'a> Checker<'a> {
             seen: &mut HashSet<String>,
         ) -> bool {
             match ty {
+                // D-PIN1=A: `Pin<T>` is a borrowed window like `View`/`ViewMut`,
+                // so it crosses the same provenance boundary — a returned or
+                // stored pin must name the owner it borrows from.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+                        && args.len() == 1 =>
                 {
                     true
                 }
@@ -4397,11 +4492,17 @@ impl<'a> Checker<'a> {
             // D-DYNARRAY1 (E2303, reported as E1102): a `View<T>` is a borrow into
             // its owner's backing storage — it can never cross a task/channel
             // boundary, the same rule a `-> view`/`ref` value already gets.
-            Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut") => Some(SendabilityProblem {
-                root: None,
-                path: Vec::new(),
-                kind: SendProblemKind::ViewBorrow,
-            }),
+            // D-PIN1=A: a pin is a borrow into one owner's storage too, and the
+            // no-move promise only holds inside the owner's thread.
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN) =>
+            {
+                Some(SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ViewBorrow,
+                })
+            }
             Type::Apply { name, args } => self.named_sendability_problem(name, args, seen),
             Type::TraitObject(names) => Some(SendabilityProblem {
                 root: None,

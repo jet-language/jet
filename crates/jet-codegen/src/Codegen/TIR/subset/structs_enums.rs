@@ -111,7 +111,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
     // D-MEMPROVENANCE2=A: sema already proved every stored view's bounded owner
     // set. TIR carries the slice value unchanged; the hidden Rust lifetime is
     // rendered on the enum declaration and containing signatures.
-    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1)
+    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut" | crate::Syntax::TYPE_PIN) && args.len() == 1)
     {
         return true;
     }
@@ -318,7 +318,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     // D-MEM-VIEWRET1=B: sema is the sole authority for whether a stored view
     // has a stable owner. Once admitted, a View field is an ordinary borrowed
     // slice value for TIR; codegen only threads the hidden Rust lifetime.
-    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1)
+    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut" | crate::Syntax::TYPE_PIN) && args.len() == 1)
     {
         return true;
     }

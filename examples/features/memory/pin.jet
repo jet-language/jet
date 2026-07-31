@@ -1,0 +1,46 @@
+// D-PIN1=A / D-PIN2=A / D-PIN3=A: `Pin<T>` is the address-stability contract.
+// Most values survive being moved to a new address. A value that stores an
+// address into itself, or that another value links to, does not — after a move
+// every stored address points at the old place. `mem.pin(&place)` opens a
+// tracked write window on `place` and promises that safe code will not move,
+// replace, or resize it while the window is live (E0219). Reading and editing
+// through the pin stay legal, and the edits land in the caller's storage.
+//
+// The mark for a field that carries the same promise is the field's own type: a
+// field declared `Pin<T>` projects to `Pin<T>` through a pinned value
+// (D-PIN3=A), and every other field projects as an ordinary value. That is the
+// one expert stored-window exception to "a struct field owns its value"
+// (see ref_field.jet).
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+// An intrusive queue. It never allocates a node: the caller owns the storage
+// and lends it, so `Queue` records the promise instead of copying the node.
+struct Queue {
+    label: String
+    head: Pin<Node>
+}
+
+fn run() {
+    // Caller storage: no allocator, no heap node, no copy of `node`.
+    node := Node.{payload: 41, hops: 0}
+    pinned :: mem.pin(&node)
+
+    // Editing through the pin is legal and lands in `node` itself; only moving
+    // or replacing the pinned storage is rejected.
+    pinned.hops += 1
+    pinned.hops += 1
+    pinned.payload += 1
+
+    // The queue stores the same promise. `head` is declared `Pin<Node>`, so
+    // reaching it through the queue projects to a pin again (D-PIN3=A) rather
+    // than to a copy of the node.
+    queue :: Queue.{label: "ready", head: mem.pin(&node)}
+    print("label: {(queue.label)}")
+    print("payload: {(queue.head.payload)}")
+    print("hops: {(queue.head.hops)}")
+}

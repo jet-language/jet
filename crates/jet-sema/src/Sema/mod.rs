@@ -745,6 +745,10 @@ pub(crate) enum ViewKind {
     String,
     Buffer,
     Matrix,
+    /// D-PIN1=A: `mem.pin(&place)`. Same owner graph as every other window —
+    /// the only difference is the product diagnostic, which talks about the
+    /// address-stability promise instead of an aliasing view.
+    Pin,
 }
 
 impl ViewKind {
@@ -898,6 +902,14 @@ impl ViewPlace {
             }
         }
         true
+    }
+
+    /// D-PIN2=A / D-PIN3=A: `self` is `other` or a deeper projection of it —
+    /// the shape of a structural pin projection (`pinned.next` under `pinned`).
+    fn extends(&self, other: &ViewPlace) -> bool {
+        self.owner == other.owner
+            && self.projections.len() >= other.projections.len()
+            && self.overlaps(other)
     }
 }
 

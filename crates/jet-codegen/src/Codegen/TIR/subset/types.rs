@@ -101,10 +101,12 @@ fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
 /// already proved their provenance; the TIR coverage gate only needs to know
 /// that the element type is itself representable.
 fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
+    // D-PIN1=A: `Pin<T>` joins the family — same borrowed representation, same
+    // "sema already proved provenance" argument.
     matches!(
         ty,
         Type::Apply { name, args }
-            if matches!(name.as_str(), "View" | "ViewMut")
+            if matches!(name.as_str(), "View" | "ViewMut" | crate::Syntax::TYPE_PIN)
                 && args.len() == 1
                 && (matches!(&args[0], Type::Named(inner) if inner == "str")
                     || is_subset_param_ty(&args[0], cx))

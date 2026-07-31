@@ -1442,6 +1442,33 @@ pub(crate) fn lower_method_call(
                         },
                     };
                 }
+                // D-PIN1=A: `mem.pin(&place)` IS the exclusive borrow of
+                // `place`. Sema proved the no-move contract before lowering
+                // (I3), so every tier emits exactly what `&place` emits and
+                // none of them re-encode the promise (I9).
+                if module == Syntax::CORE_MEM_MODULE && method == Syntax::MEM_PIN {
+                    if let Some(arg) = args.first() {
+                        // `&place` reaches lowering either as `Expr::Place` (a
+                        // written window) or as a plain place with the call
+                        // argument carrying the write convention; both mean the
+                        // same exclusive borrow.
+                        let lowered = lower_expr(&arg.expr, cx, env);
+                        let ty = Type::Apply {
+                            name: Syntax::TYPE_PIN.to_string(),
+                            args: vec![lowered.ty.clone()],
+                        };
+                        if matches!(lowered.kind, TExprKind::Borrow { .. }) {
+                            return TExpr { ty, kind: lowered.kind };
+                        }
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::Borrow {
+                                place: Box::new(lowered),
+                                mutable: true,
+                            },
+                        };
+                    }
+                }
                 if let Some(t) =
                     lower_core_closure_call(&module, method, method_span, args, cx, env)
                 {

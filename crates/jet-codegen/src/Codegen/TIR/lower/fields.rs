@@ -219,6 +219,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
 /// `None` when the receiver is not a known struct or the field is absent — both
 /// impossible for a covered function (sema validated the access).
 pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Type> {
+    // D-PIN2=A / D-PIN3=A: a pin is a window onto a place, so reaching a field
+    // through `Pin<T>` resolves against `T`. The field's own declared type is
+    // the mark: a `Pin<U>` field comes back as `Pin<U>` and stays a window.
+    if let Type::Apply { name, args } = recv_ty {
+        if name == crate::Syntax::TYPE_PIN && args.len() == 1 {
+            return struct_field_type(cx, &args[0], field);
+        }
+    }
     // c109 Phase 23: a named-tuple field read (`p.x`) — resolve the field's type off
     // the `Type::Tuple` directly (a tuple has no `cx.struct_fields` entry; its struct
     // is the generated `JetTup_<hash>`). Keeps the field read's result type total.

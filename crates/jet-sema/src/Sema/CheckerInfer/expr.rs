@@ -2970,6 +2970,15 @@ impl<'a> Checker<'a> {
     /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
+        // D-PIN2=A / D-PIN3=A: reaching a field through `Pin<T>` resolves against
+        // `T`. The field's own declared type is the mark: a `Pin<U>` field comes
+        // back as `Pin<U>` and keeps the no-move promise, every other field comes
+        // back as an ordinary view. No second projection rule.
+        if let Type::Apply { name, args } = t {
+            if name == crate::Syntax::TYPE_PIN && args.len() == 1 {
+                return self.field_type(&args[0], member, span);
+            }
+        }
         // D-SHAREDGUARD2=A: the guard's held value is a compiler-known place,
         // not a stored public struct field. The hidden tag records whether the
         // place is read-only or editable while diagnostics show one public

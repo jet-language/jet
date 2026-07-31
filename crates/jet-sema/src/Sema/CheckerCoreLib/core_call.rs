@@ -1578,6 +1578,54 @@ impl<'a> Checker<'a> {
                     }
                     return Some(unit_ty());
                 }
+                // D-PIN1=A: `mem.pin(&place) -> Pin<T>`. Pinning is inert on its
+                // own (S58's rule for `address_of`): it starts a tracked write
+                // window, and the window itself is what safe code relies on, so
+                // no `#Unsafe` is needed here. The window is recorded by
+                // `view_call_sources`; this arm only types the call.
+                ("core.mem", "pin") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                        return None;
+                    }
+                    let arg = args.get_mut(0)?;
+                    let write_place = matches!(
+                        &arg.expr,
+                        Expr::Place(_, crate::AST::PlaceAccess::Write, _)
+                    ) || arg.convention == AccessConvention::Write;
+                    let t = self.infer(&mut arg.expr)?;
+                    if !write_place {
+                        self.diags.push(Diagnostic::error(
+                            "E0218",
+                            format!(
+                                "`{}` needs a write window into the place being pinned",
+                                Syntax::MEM_PIN
+                            ),
+                            "a pin promises one storage location will not move, so it has to name that location with write access instead of a copied value"
+                                .to_string(),
+                            format!(
+                                "write `mem.{}({}place)`",
+                                Syntax::MEM_PIN,
+                                Syntax::SIGIL_WRITE
+                            ),
+                            Some(arg.expr.span()),
+                        ));
+                        return None;
+                    }
+                    let _ = alias_span;
+                    // Pinning is idempotent: a place reached through a live pin
+                    // is already address-stable, so `Pin<Pin<T>>` never exists
+                    // (I8 — one mechanism, one spelling for one promise).
+                    if matches!(&t, Type::Apply { name, args }
+                        if name == Syntax::TYPE_PIN && args.len() == 1)
+                    {
+                        return Some(t);
+                    }
+                    return Some(Type::Apply {
+                        name: Syntax::TYPE_PIN.to_string(),
+                        args: vec![t],
+                    });
+                }
                 ("core.mem", "address_of") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
