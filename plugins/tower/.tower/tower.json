@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1363,
-    "rev": 20855,
+    "rev": 20858,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59751,12 +59751,23 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
-      "plan": null,
+      "plan": "## Goal\nMake function values in lists/maps runnable on every tier with one meaning (I9). Fix AOT ICE (Box<dyn Fn> not Clone) and JIT map-dispatch segfault; keep sema acceptance (S47).\n\n## Law\n- Named fns coerce to function values; storing them in collections is valid.\n- No new syntax, deps, or I9 carve-outs. No jit_gaps parking.\n- Prefer Rc/Arc (or borrow without clone) over Box+cloned in emit; engines marshal only.\n\n## Steps\n1. Reproduce both cards' repros on JIT and AOT; capture failure modes.\n2. Fix AOT emit for function-typed list/map elements (clone/share strategy).\n3. Fix JIT host path for map.get → call through function values.\n4. Add golden example for string→fn dispatch; prove jet run and jet run --release.\n5. Confirm no jit_gaps entry; independent review + criteria verify; done.\n\n## Owned paths\ncodegen Prelude/AOT emit for fn values, JIT lower/call for dyn fn in collections, examples/features, golden expected, maybe map get Option handling. Touch only what the fix needs.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "cursor-grok",
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "claimed building in .claude/worktrees/sq-1357"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "plan written: codegen share strategy for fn values in collections; no owner gate"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -59807,8 +59818,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T15:17:31.083Z",
-      "updated": "2026-07-31T15:17:40.206Z",
-      "updatedBy": "cursor-fable"
+      "updated": "2026-07-31T19:06:23.951Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-07-31T19:06:23.950Z"
     },
     {
       "id": "c026wswl",
@@ -79987,6 +79999,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-31T19:06:23.951Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0a7ntql",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T19:06:18.601Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0a7ntql",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-31T19:06:06.655Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0a7ntql",
+      "note": ""
+    },
+    {
       "at": "2026-07-31T19:04:51.111Z",
       "by": "cursor-grok",
       "action": "card.update",
@@ -83463,27 +83496,6 @@
       "by": "codex-batch-verify",
       "action": "card.update",
       "ref": "c0mfdhwp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:44.764Z",
-      "by": "codex-batch-verify",
-      "action": "card.update",
-      "ref": "c0i11n7j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:41.992Z",
-      "by": "codex-batch-verify",
-      "action": "card.update",
-      "ref": "c0b0tifp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-30T18:34:39.020Z",
-      "by": "codex-batch-verify",
-      "action": "card.update",
-      "ref": "c03gs87j",
       "note": "phase,logEntry"
     }
   ],
