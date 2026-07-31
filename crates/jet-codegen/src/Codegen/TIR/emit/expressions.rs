@@ -594,7 +594,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             ),
             _ => format!("jet_mem::JetUninit::<{}>::new()", cx.rust_type(&e.ty)),
         },
-        TExprKind::CtLit(value) => value.serialize(),
+        TExprKind::CtLit(value) => {
+            // D-FIXARR1: comptime list values serialize as `vec![…]` by default;
+            // a `[T#N]` typed binding must bake a Rust array literal instead.
+            if matches!(&e.ty, Type::FixedList { .. }) {
+                if let crate::AST::CtValue::List(xs) = value {
+                    let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
+                    return format!("[{}]", parts.join(", "));
+                }
+            }
+            value.serialize()
+        }
         TExprKind::HostCall(call) => emit_host_call(call, None, cx),
         // A declared const's Rust static name, resolved from its Jet name here so
         // the TIR node carries only the name.

@@ -717,7 +717,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // the interpreter itself, so sema never pre-resolves `b.ct`. There
             // the binding is an ordinary one whose init runs now; only a
             // pre-resolved value becomes literal data.
-            if b.ct.is_some() {
+            // D-FIXARR1: `[T#N]` must emit a Rust array. `CtValue::serialize` always
+            // prints lists as `vec![…]`, so skip the comptime shortcut and lower the
+            // source literal (retag below) instead of baking a CtLit.
+            if b.ct.is_some() && !matches!(b.ty.as_ref(), Some(Type::FixedList { .. })) {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),
@@ -743,13 +746,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             if let Some(want) = &b.ty {
                 init = preserve_typed_list_shape(init, want, cx);
             }
-            // D-FIXARR1: if the binding annotation is `[T#N]` and the init lowered as a
-            // growable list (e.g. a plain list literal), re-tag the TExpr type so the emit
-            // produces a Rust array literal `[e1, …]` instead of `vec![…]`.
+            // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
+            // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
+            // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
             if let Some(fl @ Type::FixedList { .. }) = &b.ty {
-                if matches!(init.ty, Type::List(_)) && matches!(init.kind, TExprKind::ListLit(_)) {
-                    init.ty = fl.clone();
-                }
+                init.ty = fl.clone();
             }
             // D-UNIONTYPE1=A: member → union inject at the binding boundary.
             if let Some(want) = &b.ty {

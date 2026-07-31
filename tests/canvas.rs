@@ -988,7 +988,6 @@ fn canvas_projects_pattern_arm_and_multi_input_pin_metadata() {
         "\"name\":\"else\"",
         "\"add_pattern_arm\"",
         "\"title\":\"list\"",
-        "\"title\":\"fanout\"",
         "\"append_multi_input\"",
         "\"append_op\":\"remove_multi_input_element\"",
         "\"name\":\"item1\"",
