@@ -228,8 +228,10 @@ pub enum Type {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
-        /// Hidden relation from returned view slots to possible parameter
-        /// owners. It is inferred by sema and never appears in source syntax.
+        /// Relation from returned view slots to possible parameter owners.
+        /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
+        /// at parse time (names resolve then and are not kept on the type).
+        /// When absent, sema conservatively freezes every non-scalar argument.
         return_view_provenance: Option<super::ViewProvenanceMap>,
     },
     /// User-defined monomorphic type name.

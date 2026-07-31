@@ -5694,3 +5694,61 @@ fn run() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "9\n", "{stderr}");
 }
+
+/// D-MEMPROVENANCE3=A: undeclared `fn(String, String) => View<str>` freezes every
+/// non-scalar callback argument — mutating the unused second owner is E0212.
+#[test]
+fn undeclared_view_callback_freezes_every_non_scalar_argument() {
+    let src = r#"
+fn pick_first(line: String, noise: String) => View<str> {
+    text :: line.before(":")
+    return text
+}
+
+fn apply(f: fn(String, String) => View<str>, a: String, b: String) => View<str> {
+    return f(a, b)
+}
+
+fn run() {
+    a := "hello:x"
+    b := "world"
+    result :: apply(pick_first, a, b)
+    b = "mutated"
+    print(result)
+}
+"#;
+    let diags = jet::compile(src).expect_err("wide callback must freeze noise owner");
+    assert!(
+        diags.iter().any(|d| d.code == "E0212"),
+        "expected E0212, got {diags:?}"
+    );
+    assert!(
+        diags.iter().all(|d| d.code != "E2307"),
+        "fixture itself must typecheck: {diags:?}"
+    );
+}
+
+/// D-MEMPROVENANCE3=A: `fn(line: String, noise: String) => View<str> from line`
+/// only freezes the named source — mutating the unused argument stays legal.
+#[test]
+fn declared_view_callback_from_freezes_only_named_source() {
+    let src = r#"
+fn pick_first(line: String, noise: String) => View<str> {
+    text :: line.before(":")
+    return text
+}
+
+fn apply(f: fn(line: String, noise: String) => View<str> from line, a: String, b: String) => View<str> {
+    return f(a, b)
+}
+
+fn run() {
+    a := "hello:x"
+    b := "world"
+    result :: apply(pick_first, a, b)
+    b = "mutated"
+    print(result)
+}
+"#;
+    jet::compile(src).expect("narrow from-clause must leave noise free");
+}

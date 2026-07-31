@@ -704,14 +704,32 @@ impl<'a> Parser<'a> {
 
     /// Parse a function type `fn(T1, …) =[E]=> R`, the cursor at `fn`.
     /// `effect_bound` is non-None only while recovering retired prefix syntax.
+    /// D-MEMPROVENANCE3=A: optional `name: Type` params and a trailing `from`
+    /// after the return type populate `return_view_provenance` (names resolve
+    /// here and are not stored on the type).
     fn fn_type(&mut self, mut effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
         self.expect(TokKind::KwFn, "to start a function type")?;
         self.expect(TokKind::LParen, "after `fn` in a function type")?;
         let mut params = Vec::new();
+        let mut param_names: Vec<Option<String>> = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
+                let named = matches!(
+                    (&self.peek().kind, &self.peek2().kind),
+                    (TokKind::Ident(_), TokKind::Colon)
+                );
+                let name = if named {
+                    let TokKind::Ident(name) = self.bump().kind else {
+                        unreachable!("peek matched Ident");
+                    };
+                    self.expect(TokKind::Colon, "after a named function-type parameter")?;
+                    Some(name)
+                } else {
+                    None
+                };
                 let (pty, _) = self.type_()?;
                 params.push(pty);
+                param_names.push(name);
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -751,11 +769,28 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        // Synthetic params so `from line` reuses the same resolver as fn results.
+        let from_params: Vec<crate::AST::Param> = param_names
+            .into_iter()
+            .zip(params.iter())
+            .enumerate()
+            .map(|(index, (name, ty))| crate::AST::Param {
+                convention: crate::AST::AccessConvention::Read,
+                name: name.unwrap_or_else(|| format!("_{index}")),
+                name_span: crate::Diagnostics::Span::new(0, 0),
+                ty: ty.clone(),
+                ty_span: crate::Diagnostics::Span::new(0, 0),
+                default: None,
+                variadic: false,
+                variadic_bound_list: None,
+            })
+            .collect();
+        let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
         Ok(Type::Fn {
             params,
             ret,
             effect_bound,
-            return_view_provenance: None,
+            return_view_provenance,
         })
     }
 

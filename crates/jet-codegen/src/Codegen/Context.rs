@@ -2038,6 +2038,9 @@ impl Cx {
                     .unwrap_or_default()
             });
         let mut independent_lifetimes = Vec::new();
+        // HRTB binder must not reuse the enclosing function's `'__jet_view`
+        // (E0496 shadow when a view-returning fn takes a view-returning callback).
+        const FN_VIEW: &str = "'__jet_fn_view";
         let ps = params
             .iter()
             .enumerate()
@@ -2048,9 +2051,9 @@ impl Cx {
                     let rust = rust_param_type(self, AccessConvention::Read, p);
                     if owner_params.contains(&index) {
                         if let Some(rest) = rust.strip_prefix("&mut ") {
-                            format!("&'__jet_view mut {rest}")
+                            format!("&{FN_VIEW} mut {rest}")
                         } else if let Some(rest) = rust.strip_prefix('&') {
-                            format!("&'__jet_view {rest}")
+                            format!("&{FN_VIEW} {rest}")
                         } else {
                             rust
                         }
@@ -2076,6 +2079,7 @@ impl Cx {
             .map(|t| {
                 if has_view_return {
                     self.rust_type_with_view_lifetime(t)
+                        .replace("'__jet_view", FN_VIEW)
                 } else {
                     self.rust_type(t)
                 }
@@ -2085,7 +2089,7 @@ impl Cx {
         if thread_safe {
             format!("Box<dyn {}({}) -> {} + Send + Sync>", trait_name, ps, r)
         } else if has_view_return {
-            let lifetimes = std::iter::once("'__jet_view".to_string())
+            let lifetimes = std::iter::once(FN_VIEW.to_string())
                 .chain(independent_lifetimes)
                 .collect::<Vec<_>>()
                 .join(", ");
