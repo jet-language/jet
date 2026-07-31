@@ -76,6 +76,13 @@ pub struct JetUiNode {
     /// D-UITREE1=A: every renderer consumes this same typed node kind/tree.
     pub kind: JetUiNodeKind,
     pub children: Vec<JetUiNode>,
+    /// D-UI-NODE-ID1=C: optional author key; when set, identity is the key
+    /// instead of the render path.
+    pub key: Option<String>,
+    /// D-UI-EVT-DISP1=E / D-WEB-CLICK-PORT1=D: handler slot id for portable
+    /// `on_click`. `None` means no click handler. Slots live in
+    /// `jet_ui_click_slots`; identity→slot binding happens at paint/mount.
+    pub on_click: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -331,6 +338,10 @@ impl JetBackend for JetNullBackendState {
             height: node.height,
         });
         jet_ui_paint_tree(node, frame, &mut self.commands);
+        // D-UI-EVT-DISP1=E: bind portable on_click slots by identity. Headless
+        // / TUI backends that cannot produce clicks still register (D-WEB-CLICK-PORT1=D
+        // no-op until an event arrives).
+        jet_ui_bind_tree_clicks(node, "null#0");
         let mut focus = Vec::new();
         jet_ui_collect_focus(node, &mut focus);
         if !focus.is_empty() {
@@ -535,6 +546,7 @@ impl JetBackend for JetTuiBackendState {
         jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
             tui_write_label(&mut self.grid, &leaf_frame, &leaf.label);
         });
+        jet_ui_bind_tree_clicks(node, "tui#0");
         let mut focus = Vec::new();
         jet_ui_collect_focus(node, &mut focus);
         if !focus.is_empty() {
@@ -631,6 +643,8 @@ pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
         color: None,
         kind: JetUiNodeKind::Custom,
         children: Vec::new(),
+        key: None,
+        on_click: None,
     }
 }
 
@@ -652,6 +666,8 @@ pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetAriaRole)
             JetUiNodeKind::Custom
         },
         children: Vec::new(),
+        key: None,
+        on_click: None,
     }
 }
 
@@ -669,6 +685,8 @@ pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> J
         color: Some(color.to_string()),
         kind: JetUiNodeKind::Custom,
         children: Vec::new(),
+        key: None,
+        on_click: None,
     }
 }
 
@@ -683,6 +701,8 @@ pub fn jet_ui_text(text: &str) -> JetUiNode {
         color: None,
         kind: JetUiNodeKind::Text,
         children: Vec::new(),
+        key: None,
+        on_click: None,
     }
 }
 
@@ -695,7 +715,18 @@ pub fn jet_ui_button(label: &str) -> JetUiNode {
         color: None,
         kind: JetUiNodeKind::Button,
         children: Vec::new(),
+        key: None,
+        on_click: None,
     }
+}
+
+/// D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: portable `ui.button(label, on_click:)`.
+/// Registers the handler in the shared slot table and stores the slot id on
+/// the node. Backends bind identity→slot at paint/mount.
+pub fn jet_ui_button_on_click<F: Fn() + Send + Sync + 'static>(label: &str, handler: F) -> JetUiNode {
+    let mut node = jet_ui_button(label);
+    node.on_click = Some(jet_ui_register_click(handler));
+    node
 }
 
 pub fn jet_ui_box(children: Vec<JetUiNode>) -> JetUiNode {
@@ -712,6 +743,94 @@ pub fn jet_ui_box(children: Vec<JetUiNode>) -> JetUiNode {
         color: None,
         kind: JetUiNodeKind::Box,
         children,
+        key: None,
+        on_click: None,
+    }
+}
+
+// ── D-UI-EVT-DISP1=E: O(1) node-keyed click slots ───────────────────────────
+
+type JetUiClickHandler = std::sync::Arc<dyn Fn() + Send + Sync + 'static>;
+
+fn jet_ui_click_slots() -> &'static std::sync::Mutex<std::collections::HashMap<i64, JetUiClickHandler>>
+{
+    static SLOTS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<i64, JetUiClickHandler>>,
+    > = std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn jet_ui_click_bindings()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, i64>> {
+    static BINDINGS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, i64>>,
+    > = std::sync::OnceLock::new();
+    BINDINGS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn jet_ui_next_click_id() -> i64 {
+    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn jet_ui_register_click<F: Fn() + Send + Sync + 'static>(handler: F) -> i64 {
+    let id = jet_ui_next_click_id();
+    jet_ui_click_slots()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, std::sync::Arc::new(handler));
+    id
+}
+
+/// Bind a render-path / author-key identity to a handler slot (paint/mount).
+pub fn jet_ui_bind_click(identity: &str, slot: i64) {
+    jet_ui_click_bindings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(identity.to_string(), slot);
+}
+
+/// Clear the handler binding for an unmounted identity.
+pub fn jet_ui_unbind_click(identity: &str) {
+    jet_ui_click_bindings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(identity);
+}
+
+/// D-UI-EVT-DISP1=E: O(1) dispatch by stable node identity.
+pub fn jet_ui_dispatch(identity: &str) {
+    let slot = jet_ui_click_bindings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(identity)
+        .copied();
+    let Some(slot) = slot else {
+        return;
+    };
+    let handler = jet_ui_click_slots()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&slot)
+        .cloned();
+    if let Some(handler) = handler {
+        handler();
+    }
+}
+
+/// Walk a freshly painted tree and bind each `on_click` slot to its identity.
+pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
+    let identity = match &node.key {
+        Some(key) if !key.is_empty() => format!("key:{key}"),
+        _ => path.to_string(),
+    };
+    if let Some(slot) = node.on_click {
+        jet_ui_bind_click(&identity, slot);
+    }
+    if node.kind == JetUiNodeKind::Box {
+        for (index, child) in node.children.iter().enumerate() {
+            jet_ui_bind_tree_clicks(child, &format!("{path}/{index}"));
+        }
     }
 }
 
@@ -855,5 +974,25 @@ mod tests {
         assert!(JetAriaRole::TextInput.is_interactive());
         assert!(!JetAriaRole::Label.is_interactive());
         assert!(!JetAriaRole::Container.is_interactive());
+    }
+
+    // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: paint binds identity→slot; dispatch runs it.
+    #[test]
+    fn portable_button_on_click_dispatches_after_paint() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static HITS: AtomicUsize = AtomicUsize::new(0);
+        HITS.store(0, Ordering::SeqCst);
+
+        let backend = JetNullBackend::new();
+        let button = jet_ui_button_on_click("Go", || {
+            HITS.fetch_add(1, Ordering::SeqCst);
+        });
+        let tree = jet_ui_box(vec![button]);
+        backend.mount_node(tree, jet_ui_constraint(0.0, 0.0, 80.0, 24.0));
+        // NullBackend keys the root as `null#0`; the button is child 0.
+        jet_ui_dispatch("null#0/0");
+        assert_eq!(HITS.load(Ordering::SeqCst), 1);
+        jet_ui_dispatch("missing");
+        assert_eq!(HITS.load(Ordering::SeqCst), 1);
     }
 }

@@ -2853,6 +2853,68 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
+                // D-WEB-CLICK-PORT1=D: `ui.button(label)` or
+                // `ui.button(label, on_click: () => …)`.
+                ("core.ui", "button") => {
+                    if args.len() != 1 && args.len() != 2 {
+                        self.diags
+                            .push(wrong_core_arity("button", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    if args.len() == 2 {
+                        super::net_text_time::require_exact_labels(
+                            "ui.button",
+                            args,
+                            &[(1, "on_click")],
+                            span,
+                            &mut self.diags,
+                        );
+                    }
+                    let label_ty = self.infer(&mut args[0].expr);
+                    if let Some(got) = label_ty {
+                        if got != Type::String {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`button` wants String for argument 1, but this is {}",
+                                    got.show()
+                                ),
+                                "every argument must match its parameter's type".to_string(),
+                                "pass a string label".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    if args.len() == 2 {
+                        let saved_esc = self.lambda_escapes;
+                        self.lambda_escapes = true;
+                        let lam_ty = self.infer(&mut args[1].expr);
+                        self.lambda_escapes = saved_esc;
+                        match &lam_ty {
+                            Some(Type::Fn { params, .. }) => {
+                                if !params.is_empty() {
+                                    self.diags.push(reactive_lambda_arity(
+                                        "button on_click",
+                                        params.len(),
+                                        args[1].expr.span(),
+                                    ));
+                                }
+                            }
+                            Some(other) => {
+                                self.diags.push(reactive_not_lambda(
+                                    "button on_click",
+                                    other,
+                                    args[1].expr.span(),
+                                ));
+                            }
+                            None => {}
+                        }
+                    }
+                    return Some(Type::Named("UiNode".to_string()));
+                }
                 // D-UI-MOUNT1=A: `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`.
                 ("core.ui", "mount") => {
                     if args.len() != 2 && args.len() != 3 {

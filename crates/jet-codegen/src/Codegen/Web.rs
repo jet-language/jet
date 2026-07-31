@@ -990,6 +990,13 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         }
         E::Lambda(lam) => web_lambda_supported(lam),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } | TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => web_lambda_supported(executable),
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::UiButtonOnClick {
+                label,
+                executable,
+                ..
+            },
+        } => web_expr_supported(label) && web_lambda_supported(executable),
         _ => false,
     }
 }
@@ -4544,6 +4551,17 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Lambda(lam) => tir_js_lambda(lam, funcs, file_prefix)?,
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::UiButtonOnClick {
+                label,
+                executable,
+                ..
+            },
+        } => format!(
+            "jetDom.makeButton({}, {})",
+            tir_js_expr(label, funcs, file_prefix)?,
+            tir_js_lambda(executable, funcs, file_prefix)?
+        ),
         _ => return Err(()),
     })
 }

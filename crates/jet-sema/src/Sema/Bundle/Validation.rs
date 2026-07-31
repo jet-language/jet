@@ -2165,9 +2165,17 @@ pub(crate) fn check_func_body_bundle(
         // D-MEMPROVENANCE3=A: inferred sources must be ⊆ declaration; callers
         // see the declared (possibly wider) contract. A bare `from packet`
         // covers every field/index/range projection of that owner.
+        //
+        // Card #1360: the `from` clause carries access too. Declared maps are
+        // parsed with `mutable: false`; keep the inferred write/read capability
+        // (Pin / ViewMut vs View) so a returned aggregate can store an exclusive
+        // window and the caller may edit through it.
         if let Some(inferred) = f.return_view_provenance.as_ref() {
             for (slot, inferred_prov) in inferred {
-                let Some(declared_prov) = declared.get(slot) else {
+                let Some(declared_prov) = declared
+                    .get(slot)
+                    .or_else(|| declared.get(&Vec::new()))
+                else {
                     ck.diags.push(Diagnostic::error(
                         "E2305",
                         "returned view escapes its declared `from` clause".to_string(),
@@ -2196,7 +2204,64 @@ pub(crate) fn check_func_body_bundle(
                 }
             }
         }
-        f.return_view_provenance = Some(declared);
+        let mut merged = declared.clone();
+        if let Some(inferred) = f.return_view_provenance.as_ref() {
+            // Publish inferred output slots (field paths) so an aggregate that
+            // mixes owned data with a stored window does not treat every field
+            // as a view into the owner. Sources come from the declared contract
+            // (possibly wider); access comes from inference.
+            let mut published = crate::AST::ViewProvenanceMap::new();
+            for (slot, inferred_prov) in inferred {
+                let sources = declared
+                    .get(slot)
+                    .or_else(|| declared.get(&Vec::new()))
+                    .map(|prov| prov.sources.clone())
+                    .unwrap_or_else(|| inferred_prov.sources.clone());
+                published.insert(
+                    slot.clone(),
+                    crate::AST::ViewProvenance {
+                        sources,
+                        mutable: inferred_prov.mutable,
+                    },
+                );
+            }
+            for (slot, declared_prov) in &declared {
+                if slot.is_empty() || published.contains_key(slot) {
+                    continue;
+                }
+                published.insert(slot.clone(), declared_prov.clone());
+            }
+            // Bare `from owner` with no inferred field slots still publishes
+            // the root contract, with write access if the return type needs it.
+            if published.is_empty() {
+                for (slot, declared_prov) in merged.iter_mut() {
+                    if slot.is_empty() {
+                        declared_prov.mutable = inferred.values().any(|prov| prov.mutable);
+                    }
+                }
+                f.return_view_provenance = Some(merged);
+            } else {
+                f.return_view_provenance = Some(published);
+            }
+        } else if let Some(ret) = f.return_type.as_ref() {
+            // No inferred body facts (e.g. abstract signature): derive access
+            // from the return type's view leaves.
+            let leaves = ck.view_leaf_paths(ret);
+            for (slot, declared_prov) in merged.iter_mut() {
+                if slot.is_empty() {
+                    declared_prov.mutable = leaves
+                        .iter()
+                        .any(|(_, access)| *access == ViewAccess::Write);
+                } else {
+                    declared_prov.mutable = leaves.iter().any(|(path, access)| {
+                        path == slot && *access == ViewAccess::Write
+                    });
+                }
+            }
+            f.return_view_provenance = Some(merged);
+        } else {
+            f.return_view_provenance = Some(merged);
+        }
     }
     if let Some(owner) = owner_type {
         if let (Some(signature), Some(provenance)) =

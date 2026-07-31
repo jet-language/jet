@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1373,
-    "rev": 21222,
+    "rev": 21250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "radar:e4"
       ]
     },
-    "completionCursor": "2026-07-31T20:30:34.398Z"
+    "completionCursor": "2026-07-31T22:50:24.152Z"
   },
   "epochs": [
     {
@@ -57042,6 +57042,11 @@
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
+          "text": "implementing portable on_click per ratified D-UI-* / D-WEB-CLICK-PORT1"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
           "text": "handoff: ballot D-WEB-CLICK-PORT1 ready for owner (identity/dispatch/Click set); ui_web_click still web.on until ratified"
         },
         {
@@ -57064,38 +57069,74 @@
         {
           "n": 1,
           "text": "Node identity across renders on the DOM backend is decided and written down",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "cursor-grok",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T16:26:37.479Z"
+          "evidence": "D-UI-NODE-ID1=C written in docs/reference/core-library.md portable click section + DomRuntime.js (key overrides path)",
+          "at": "2026-07-31T23:15:59.246Z"
         },
         {
           "n": 2,
           "text": "The JavaScript-to-wasm event dispatch channel is decided and written down",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "cursor-grok",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T16:26:37.739Z"
+          "evidence": "D-UI-EVT-DISP1=E: jet_ui_dispatch / jetUiDispatch O(1) slots; DomRuntime + Ui.rs + UiGtk bind at paint",
+          "at": "2026-07-31T23:15:59.476Z"
         },
         {
           "n": 3,
           "text": "The portable event set is decided, including what a backend does with an event it cannot produce",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "cursor-grok",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T16:26:38.021Z"
+          "evidence": "D-UI-EVT-SET1=D: portable core is click; rich events need capability module; documented in core-library + syntax-decisions",
+          "at": "2026-07-31T23:15:59.703Z"
         },
         {
           "n": 4,
           "text": "ui_web_click.jet respells to the portable on_click form",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "cursor-grok",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T16:26:38.275Z"
+          "evidence": "examples/features/web/ui_web_click.jet uses ui.button(..., on_click:); HTML #btn and web.on removed",
+          "at": "2026-07-31T23:15:59.924Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "met",
+          "metBy": "cursor-grok",
+          "verifiedBy": null,
+          "evidence": "N/A: on_click is Core labeled arg (S61), not a new Syntax.rs keyword/sigil",
+          "at": "2026-07-31T23:16:00.143Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "cursor-grok",
+          "verifiedBy": null,
+          "evidence": "docs/spec/syntax-decisions.md 2026-07-31 log for D-WEB-CLICK-PORT1/D-UI-NODE-ID1/D-UI-EVT-DISP1/D-UI-EVT-SET1",
+          "at": "2026-07-31T23:16:00.374Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "met",
+          "metBy": "cursor-grok",
+          "verifiedBy": null,
+          "evidence": "N/A: no new grammar surface; S61 labeled calls unchanged",
+          "at": "2026-07-31T23:16:00.590Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "cursor-grok",
+          "verifiedBy": null,
+          "evidence": "N/A: no new diagnostic on this card; no snapshot rebless required",
+          "at": "2026-07-31T23:16:00.805Z"
         }
       ],
       "refs": [
@@ -57105,11 +57146,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T16:26:27.968Z",
-      "updated": "2026-07-31T22:29:26.090Z",
+      "updated": "2026-07-31T23:16:00.806Z",
       "updatedBy": "cursor-grok",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-07-31T22:06:52.113Z"
+      "claimedAt": "2026-07-31T23:04:00.927Z"
     },
     {
       "id": "c0qqnv58",
@@ -60318,23 +60359,35 @@
       "title": "Write windows cannot flow out of a callee inside an aggregate",
       "body": "A live exclusive window (ViewMut<T> or Pin<T>) cannot be returned from a function inside a struct, nor accepted as a parameter and stored, without the ownership checker reporting E0204 or E0212. Return-view provenance was built for read slices: a 'from owner' clause marks the returned aggregate a read view of the owner, so writing through the stored window is then rejected.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Goal\nLet a library take a caller-owned place and hand back an aggregate that stores an exclusive window into it, with the same provenance proof read views already get.\n\n## Why now\nCard #1200 (Pin<T>) met criteria #1 and #3 but left #2, #4, and #5 open on exactly this. The same limitation blocks any ViewMut-storing library API, so it is one shared fix, not pin-specific work.\n\n## Repro\n    fn attach(label: String, node: &Node) => Queue from node {\n        return Queue.{label: ~label, head: mem.pin(&node)}\n    }\n\nWriting through `queue.head` afterwards is E0212: \"queue is a live read view into node\". Dropping the `from` clause instead loses the hidden Rust lifetime and rustc rejects the generated signature (I2).\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs (return-view provenance, call-site composition)\n- crates/jet-sema/src/Sema/Bundle/Validation.rs (declared `from` contract)\n- crates/jet-codegen/src/Codegen/TIR/emit/functions.rs (hidden view lifetime on write windows)\n- tests/ownership.rs, tests/pin.rs\n\n## Scope\nIn: write-access provenance for returned and stored windows; the `from` clause carrying access, not only the owner set; call-site composition for an aggregate that stores a window.\nOut: new syntax. The `from` clause and the `Pin<T>` / `ViewMut<T>` spellings are already ratified.\n\n## Acceptance\nA library function may accept `&owner` and return an aggregate with a `Pin<T>` or `ViewMut<T>` field; the caller may edit through that field; AOT, Cranelift, and the interpreter agree; provenance escape is still rejected.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "cursor-grok",
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "fixing from-clause mutable write provenance"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "plan complete; no owner gates; implementing"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:03:41.244Z",
-      "updated": "2026-07-31T19:03:57.820Z",
-      "updatedBy": "claude-burndown"
+      "updated": "2026-07-31T23:04:01.174Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-07-31T23:04:01.173Z"
     },
     {
       "id": "c0z784jn",
@@ -60342,23 +60395,35 @@
       "title": "Reading a place through its owner while a write window is live reaches rustc (I2)",
       "body": "Sema allows an ordinary read of an owner while an exclusive window into it is still live. rustc then rejects the generated code with E0503, which I2 classifies as an internal compiler error rather than a user diagnostic.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Goal\nReject a read of a place while an exclusive window into it is live, in sema, before rustc sees the code.\n\n## Why\n`check_place_change` only fires on changes. A plain read of the owner while a write window is live passes sema and then hits rustc E0503 (\"cannot use `x.f` because it was mutably borrowed\"), which is an internal compiler error by I2, not a user diagnostic.\n\n## Repro\n    node := Node.{payload: 41, hops: 0}\n    pinned :: mem.pin(&node)\n    if node.payload > 0 {\n        pinned.hops += 1\n    }\n    print(\"{(pinned.hops)}\")\n\nSema accepts this; rustc rejects the generated Rust. It reproduces with a plain `p :: &node` window too, so it is not pin-specific.\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs\n- tests/ownership.rs, tests/ui/\n\n## Scope\nIn: a read-while-write-window-live check with a registered diagnostic and a UI snapshot; the fix should name the window to read through.\nOut: relaxing the existing E0212 change rules.\n\n## Acceptance\nThe repro above is a Jet diagnostic, not an ICE; existing read-view overlap rules are unchanged; a read after the window's last use still compiles.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "cursor-grok",
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "adding sema read-while-write-window check (E0220)"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "plan complete; no owner gates; implementing"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:04:10.953Z",
-      "updated": "2026-07-31T19:04:18.901Z",
-      "updatedBy": "claude-burndown"
+      "updated": "2026-07-31T23:04:01.419Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-07-31T23:04:01.419Z"
     },
     {
       "id": "c0gei5kr",
@@ -60366,23 +60431,35 @@
       "title": "Repo reds: UI snapshots, comptime_diff CBOR, dev stack overflow, golden examples",
       "body": "Four independent red groups observed on master during the 2026-07-31 burn-down. All four reproduce with the pin work reverted, so none of them belong to card #1200.",
       "kind": "bug",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Goal\nGet the three drifted UI snapshots and the CBOR/comptime differential cases green again, and stop `tests/dev.rs` aborting the whole suite on a stack overflow.\n\n## Findings (2026-07-31, observed on master at 011145775, before any pin work)\n- `tests/diagnostic_snapshots.rs::ui_snapshots` — mismatch on `tests/ui/enum_pattern_needs_dot_payload.jet` (an extra E0404 now fires), `tests/ui/trait_not_impl.jet`, and `tests/ui/view_mut_bounds_interpreter.jet`.\n- `tests/comptime_diff.rs` — five failures, four CBOR cases plus `comptime_bigint_matches_runtime`, all reporting \"generated unsafe outside the vetted prelude\".\n- `tests/dev.rs::cranelift_shield_defers_task_cancel_without_unwinding_native_frame` — stack overflow, SIGABRT, which aborts the rest of the `dev` target.\n- `tests/golden.rs::examples_compile_and_run` — around twenty examples, including `basics/if_universal` (L0507 lint), `concurrency/task_runtime_audit` (codegen ICE), the crypto family and the `net`/`io` families (rustc E0308 on generated code).\n\n## Scope\nIn: triage each group to the commit that introduced it, then fix or split into per-owner cards.\nOut: new features.\n\n## Acceptance\n`cargo test --test diagnostic_snapshots`, `--test comptime_diff`, `--test dev`, and `--test golden` all pass, or each remaining failure has its own card with a named owner.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "cursor-grok",
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "triaging and fixing repo reds"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "plan complete; triage+fix reds"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:04:33.761Z",
-      "updated": "2026-07-31T19:04:41.845Z",
-      "updatedBy": "claude-burndown"
+      "updated": "2026-07-31T23:04:01.656Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-07-31T23:04:01.655Z"
     },
     {
       "id": "c0owyfpq",
@@ -61124,20 +61201,32 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
-      "plan": null,
+      "plan": "## Goal\nResolve Shared-in-Shared / cyclic Shared after #1353: either reject with a named diagnostic or execute with full I9 and free-or-leak proof.\n\n## Gate\nOwner ballot D-SHARED-CYCLE1 (reject vs execute vs hybrid). No code until ratified.\n\n## After ratification\n- If A or C (reject / hybrid default): implement sema diagnostic + UI snapshot + example; I9 refuse on all tiers; docs.\n- If B (execute): close Items.rs / quick-run gaps; Prelude cycle lifetime; free-or-leak measurement; full I9.\n- If C expert follow-on: file blocked child card for Weak / allow-cycle with B acceptance law.\n\n## Out\nNo weakref on this card unless B/C follow-on is explicitly in scope after ratification.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "cursor-grok",
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "ballot D-SHARED-CYCLE1 ready for owner (reject vs execute vs hybrid)"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "needs owner ballot: reject vs execute Shared cycles"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T21:15:34.975Z",
-      "updated": "2026-07-31T21:15:34.975Z",
-      "updatedBy": "cursor-grok"
+      "updated": "2026-07-31T23:15:45.637Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-07-31T23:15:45.636Z"
     }
   ],
   "decisions": [
@@ -80836,8 +80925,114 @@
       },
       "checkInstructions": null,
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-31T21:51:20.401Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-31"
+    },
+    {
+      "id": "D-SHARED-CYCLE1",
+      "cardId": "c0uhvn0v",
+      "group": "safety",
+      "ballotMode": "full",
+      "title": "Shared-in-Shared cycles: reject or execute",
+      "gist": "Choose whether Jet rejects cyclic Shared payloads at compile time or executes them with full tier parity and a free-or-leak proof.",
+      "lesson": "Shared<T> is Jet's synchronized shared handle. A value of type Shared<T> can be passed into many places at once. Each place can read or edit the same T under the Shared contract.\n\nA cycle appears when T itself contains Shared<T>, or Shared of something that eventually points back. Example: struct Node { next: Shared<Node>? }. Two nodes can each hold the other. Reference counting alone cannot free that pair: each handle keeps the other alive.\n\nTerms: Shared-in-Shared means a Shared field whose payload type contains Shared again. A cycle is a live graph of Shared handles that points back to itself. Free means the last reachable handle ends and storage is released. Leak means storage stays after the program dropped every named handle.\n\nMental model: either the type system forbids building that cycle, or the runtime must define how cycles die (for example a weak link, or a collector that finds unreachable cycles).\n\nTiny example:\n\nstruct Node { next: Shared<Node>? }\na :: Shared(Node.{ next: Absent })\nb :: Shared(Node.{ next: Present(a) })\na.edit(n => { n.next = Present(b) })\n\nStakes: without a clear rule, beginners can build graphs that never free, and experts cannot audit ownership. #1353 proved sema accepts the type today while neither default jet run nor AOT executes the constructing function cleanly.",
+      "explainer": "",
+      "story": "Mira ships a graph editor. Each node holds Shared handles to neighbors. On Linux CI, jet run --release hits an ICE. On her laptop, default jet run says the function is unsupported. She cannot tell whether closing the last window frees the graph or leaks it. She needs either a clear compile error naming the cycle, or a working Shared cycle story with a free-or-leak measurement she can trust.",
+      "inWild": "struct Node {\n    label: String\n    next: Shared<Node>?\n}\n\nfn ring() {\n    a :: Shared(Node.{ label: \"a\", next: Absent })\n    b :: Shared(Node.{ label: \"b\", next: Present(~a) })\n    a.edit(n => { n.next = Present(~b) })\n    // Drop a and b. Does Node storage free?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reject Shared-in-Shared / cyclic Shared at sema",
+          "detail": "Sema diagnoses Shared fields whose payload can form a Shared cycle. Construction that would close a cycle is a named diagnostic with what/why/fix and a UI snapshot. Beginners never build an un-freeable graph by accident. Experts who need graphs use an explicit non-Shared edge or a later weak-handle design under a different card.",
+          "technical": "Add a structural check on type definitions and Shared constructors: if a Shared payload's type graph can reach Shared of a type that reaches back, emit a registered diagnostic (new E-code). Keep I9: every tier refuses the same programs. No interpreter/JIT special case. Docs name the rule; example shows the diagnostic.",
+          "code": "struct Node { next: Shared<Node>? }\n// error: Shared cycle in Node.next — use an explicit weak edge or a non-Shared id"
+        },
+        {
+          "key": "B",
+          "name": "Full I9 execute Shared cycles + free-or-leak measurement",
+          "detail": "Make Shared-in-Shared constructible and runnable on AOT, default jet run, and interpreter ambient with one Prelude meaning. Ship a proof that either frees the cycle when last external roots drop, or documents a deliberate leak with a measurable test. Weak references may be part of the mechanism if needed for free.",
+          "technical": "Close the Items.rs / quick-run gaps for Shared-bearing recursive types. Define cycle lifetime in Prelude (collector, weak back-edge, or owned break). Prove free vs leak with an example golden and a runtime measurement. I9 required end to end.",
+          "code": "struct Node { next: Shared<Node>? }\na :: Shared(...); b :: Shared(...)\n// mutual next wiring runs on every tier; drop roots; assert free or asserted leak"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid: reject by default, expert cycle module later",
+          "detail": "Default Jet rejects Shared cycles with a clear diagnostic (A). Expert opt-in lives behind one explicit mechanism on a follow-on card. Examples include Shared.Weak<T> or a #AllowSharedCycle attribute. That follow-on must ship with full I9 and free-or-leak proof before it is usable. This card closes on the reject path. The expert path is named and blocked until that card lands.",
+          "technical": "Implement A's diagnostic now. Record the expert surface as a blocked follow-on with acceptance that includes Prelude semantics, weak or cycle-break API, I9 proof, and free-or-leak measurement. Do not ship a partial expert API here.",
+          "code": "struct Node { next: Shared<Node>? }  // E???? today\n// later (other card): next: Shared.Weak<Node>?  // free-safe back edge"
+        },
+        {
+          "key": "D",
+          "name": "Leave constructible; document ICE/unsupported as known gap",
+          "detail": "Keep today's sema acceptance. Document that constructing Shared cycles may ICE or hit quick-run unsupported. Do not add a diagnostic or an execution path on this card.",
+          "technical": "Docs-only. Violates I2 spirit (rustc/ICE as user path) and I9 (tiers disagree). Not a product outcome.",
+          "code": "// status quo from #1353 — not recommended"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rc/Arc cycles need Weak to free. Strong-only cycles leak until the process exits.",
+          "code": "struct Node { next: Option<Rc<RefCell<Node>>> } // leaks without Weak"
+        },
+        {
+          "lang": "Swift",
+          "note": "Class cycles need weak/unowned for ARC to free.",
+          "code": "class Node { weak var next: Node? }"
+        },
+        {
+          "lang": "Go",
+          "note": "GC collects pointer cycles; no Shared handle distinction.",
+          "code": "type Node struct { next *Node }"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "C keeps beginners safe now with one clear diagnostic. It preserves I9 on the reject path. It names the expert cycle story as a full I9 follow-on. It avoids shipping a half-working Shared graph.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A is correct for safety but leaves experts without a named path to intentional graphs; C keeps A's default and schedules the expert surface."
+          },
+          {
+            "key": "B",
+            "reason": "B is the complete product story for graphs, but it must not land as a silent default while free-or-leak law is unfinished; C sequences reject-first then expert opt-in with proof."
+          },
+          {
+            "key": "D",
+            "reason": "D leaves ICE and tier disagreement as the user experience, which violates Jet's rustc-hidden and tier-parity invariants."
+          }
+        ],
+        "tradeoff": "C delays runnable Shared cycles until a follow-on ships Weak or equivalent; until then cyclic Shared types are compile errors, not runtime surprises."
+      },
+      "hybrid": {
+        "result": "C",
+        "synthesis": "C takes A's immediate reject diagnostic and B's requirement that any execute path include full I9 plus free-or-leak measurement, behind an explicit expert surface on a later card.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Named diagnostic; no accidental un-freeable graphs.",
+            "use": "Default closeout for this card."
+          },
+          {
+            "key": "B",
+            "aspect": "Full tier parity and free-or-leak proof.",
+            "use": "Acceptance law for the expert follow-on."
+          },
+          {
+            "key": "D",
+            "aspect": "Honest status from #1353.",
+            "use": "Motivation only; not an option to keep."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
       "status": "open",
-      "created": "2026-07-31T21:51:20.401Z"
+      "created": "2026-07-31T23:15:45.377Z"
     }
   ],
   "questions": [
@@ -82055,6 +82250,230 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-31T23:16:00.806Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-31T23:16:00.590Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-31T23:16:00.374Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-31T23:16:00.143Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T23:15:59.925Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T23:15:59.703Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T23:15:59.476Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T23:15:59.246Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0indi4b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T23:15:45.637Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:15:45.377Z",
+      "by": "cursor-grok",
+      "action": "decision.add",
+      "ref": "D-SHARED-CYCLE1",
+      "note": "Shared-in-Shared cycles: reject or execute"
+    },
+    {
+      "at": "2026-07-31T23:04:01.901Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:04:01.656Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:04:01.419Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:04:01.174Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:04:00.927Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0indi4b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:01:17.784Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:01:17.545Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:01:17.299Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:01:17.050Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0uhvn0v",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:01:16.823Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0gei5kr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:01:16.599Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0z784jn",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:01:16.369Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0buvo7y",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:00:08.035Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0indi4b",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T22:52:20.514Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T22:52:15.361Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T22:52:12.571Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T22:51:17.669Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WEB-CLICK-PORT1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-31T22:51:17.669Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0indi4b",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-31T22:51:17.669Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0indi4b",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-31T22:51:17.669Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0indi4b",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-31T22:51:17.669Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0indi4b",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-31T22:50:24.152Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-31T22:50:24.152Z"
+    },
     {
       "at": "2026-07-31T22:30:02.733Z",
       "by": "sol-verify",
@@ -85330,230 +85749,6 @@
       "action": "card.criteria-meet",
       "ref": "c0qxofha",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:13:11.606Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c0qxofha",
-      "note": "#4 fmt trio green: optional-return sugar, enum-dot pattern stab"
-    },
-    {
-      "at": "2026-07-31T17:09:50.290Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0qxofha",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:53:33.094Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0qxofha",
-      "note": "#3 No regression of ownership view-owner identity tests or miss"
-    },
-    {
-      "at": "2026-07-31T16:53:32.880Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0qxofha",
-      "note": "#2 mutable_view_bounds_fail_at_construction_in_every_tier green"
-    },
-    {
-      "at": "2026-07-31T16:53:27.179Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0qxofha",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:53:26.696Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0qxofha",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:53:26.464Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0qxofha",
-      "note": "#1 No regression of ownership view-owner identity tests or miss"
-    },
-    {
-      "at": "2026-07-31T16:53:17.373Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0qxofha",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:53:05.924Z",
-      "by": "grok-verify",
-      "action": "card.update",
-      "ref": "c0eypawi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:53:05.694Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0eypawi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:53:05.492Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0eypawi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:53:05.204Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0eypawi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:53:04.982Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0eypawi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:53:04.749Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0eypawi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:53:04.545Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0eypawi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:53:04.343Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0eypawi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:53:04.133Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0eypawi",
-      "note": "#3 Lone write borrow planned; every matrix row in the card body"
-    },
-    {
-      "at": "2026-07-31T16:53:03.921Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0eypawi",
-      "note": "#2 JIT/interpreter lowers one-region split-view correctly for v"
-    },
-    {
-      "at": "2026-07-31T16:52:44.214Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0eypawi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:30:07.610Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0eypawi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:29:47.050Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0eypawi",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:29:46.830Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0eypawi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:29:46.598Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0eypawi",
-      "note": "#1 Each matrix row covered in tests/ownership.rs (or dedicated "
-    },
-    {
-      "at": "2026-07-31T16:29:28.474Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0eypawi",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T16:29:21.223Z",
-      "by": "grok-verify",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:29:21.002Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0bda91w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T16:29:20.798Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0bda91w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T16:29:20.589Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0bda91w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T16:29:20.387Z",
-      "by": "grok-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0bda91w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T16:29:20.191Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0bda91w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T16:29:19.959Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bda91w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T16:29:19.758Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bda91w",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

@@ -2012,7 +2012,8 @@ pub fn core_fixed_sig(
         )),
         // D-UITREE1=A: canonical typed constructors. These are plain Core
         // functions returning the same UiNode tree consumed by each backend.
-        ("core.ui", "text" | "button") => Some((
+        // `button` is bespoke in core_call (arity 1, or 2 with `on_click:`).
+        ("core.ui", "text") => Some((
             vec![(read, string.clone())],
             Some(Type::Named("UiNode".to_string())),
         )),

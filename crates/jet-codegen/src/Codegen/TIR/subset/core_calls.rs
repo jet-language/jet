@@ -390,6 +390,17 @@ pub(crate) fn core_closure_call_in_subset(
         }
         // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(<lambda>)`.
         ("core.ui", "reactive_render") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-WEB-CLICK-PORT1=D: `ui.button(label, on_click: <lambda>)`.
+        ("core.ui", "button") => {
+            args.len() == 2
+                && lambda_arg(1)
+                && args.get(1).is_some_and(|a| {
+                    a.label
+                        .as_ref()
+                        .is_some_and(|(label, _)| label == "on_click")
+                })
+                && expr_in_subset(&args[0].expr, cx, locals)
+        }
         // D-UI-MOUNT1=A: `ui.mount(backend, tree[, constraint])` — bespoke
         // arity/types in sema (not `core_fixed_sig`); emit uses Prelude mount.
         ("core.ui", "mount") => {

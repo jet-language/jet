@@ -416,3 +416,53 @@ fn run() {{
         "a pin is a borrow into one owner's storage; it must not cross a task"
     );
 }
+
+// ── Card #1360: returned aggregates may store write windows via `from` ──────
+
+#[test]
+fn a_library_may_return_a_pin_field_from_an_owner_parameter() {
+    let src = format!(
+        r#"{NODE}
+struct Queue {{
+    label: String
+    head: Pin<Node>
+}}
+
+fn attach(label: String, node: &Node) => Queue from node {{
+    return Queue.{{label: ~label, head: mem.pin(&node)}}
+}}
+
+fn run() {{
+    node := Node.{{payload: 41, hops: 0}}
+    queue :: attach("ready", &node)
+    queue.head.hops += 1
+    queue.head.payload += 1
+    print("{{(queue.label)}} {{(queue.head.payload)}} {{(queue.head.hops)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), Vec::<String>::new());
+    assert_eq!(interpret(&src), "ready 42 1\n");
+    if let Some(out) = build_and_run("return_pin_field", &src) {
+        assert_eq!(out, "ready 42 1\n");
+    }
+}
+
+// ── Card #1361: reading the owner beside a live write window is E0220 ───────
+
+#[test]
+fn reading_the_owner_while_a_pin_is_live_is_e0220() {
+    let src = format!(
+        r#"{NODE}
+fn run() {{
+    node := Node.{{payload: 41, hops: 0}}
+    pinned :: mem.pin(&node)
+    if node.payload > 0 {{
+        pinned.hops += 1
+    }}
+    print("{{(pinned.hops)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), vec!["E0220"]);
+}

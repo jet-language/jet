@@ -1,7 +1,8 @@
 // D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): the native Linux UI
 // backend — a real, working GTK4 app. `core.ui.gtk_backend()` is a `JetBackend`
-// over libgtk-4: canonical `UiNode` trees reconcile into real widgets,
-// `on_click` wires the reconciled button, and `present` opens the window.
+// over libgtk-4: canonical `UiNode` trees reconcile into real widgets.
+// D-WEB-CLICK-PORT1=D: portable `ui.button(..., on_click:)` carries the click
+// handler on the node (same mechanism as web/TUI). `present` opens the window.
 //
 // The counter below actually counts: the button's click sets a `reactive.signal`,
 // the `ui.reactive_render` effect re-runs (it read the signal), and it updates
@@ -29,14 +30,14 @@ fn run() {
             app :: ui.gtk_backend()
             render_app :: ~app
             ui.reactive_render(() => {
-                tree :: ui.box([ui.text("Jet — native GTK4 counter"), ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"), ui.button("Increment")])
+                tree :: ui.box([
+                    ui.text("Jet — native GTK4 counter"),
+                    ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"),
+                    ui.button("Increment", on_click: () => { clicks.set(clicks.get() + 1) }),
+                ])
                 // D-UI-MOUNT1=A: Gtk default viewport is 320×240.
                 ui.mount(render_app, tree)
             })
-            // The retained event hook resolves the already-reconciled canonical
-            // Button widget by identity; it does not create a parallel tree.
-            increment :: app.button("Increment")
-            app.on_click(increment, () => clicks.set(clicks.get() + 1))
             print("native backend: gtk4")
             app.present("Jet — GTK4")
         }

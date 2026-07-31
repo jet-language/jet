@@ -3452,6 +3452,12 @@ pub enum TCoreClosureKind {
     ReactiveEffect { closure: String, executable: Box<TLambda> },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
     UiReactiveRender { closure: String, executable: Box<TLambda> },
+    /// D-WEB-CLICK-PORT1=D: `ui.button(label, on_click: <lambda>)`.
+    UiButtonOnClick {
+        label: Box<TExpr>,
+        closure: String,
+        executable: Box<TLambda>,
+    },
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).

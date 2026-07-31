@@ -202,6 +202,31 @@ extern "C" fn jet_jit_ui_button(label: i64) -> i64 {
     })
 }
 
+/// D-WEB-CLICK-PORT1=D: portable `ui.button(label, on_click:)` — same Prelude
+/// registration AOT uses (`jet_ui_button_on_click`).
+extern "C" fn jet_jit_ui_button_on_click(
+    label: i64,
+    fn_ptr: i64,
+    n_caps: i64,
+    c0: i64,
+    c1: i64,
+    c2: i64,
+    c3: i64,
+) -> i64 {
+    let cb = crate::Reactive::JitCb {
+        fn_ptr: fn_ptr as u64,
+        caps: [c0, c1, c2, c3],
+        n_caps: n_caps.clamp(0, 4) as u8,
+    };
+    with_rt(|rt| {
+        let label = rt.heap.clone_string(label).unwrap_or_default();
+        rt.ui
+            .nodes
+            .push(ui_rt::jet_ui_button_on_click(&label, move || cb.invoke_void()));
+        rt.ui.nodes.len() as i64
+    })
+}
+
 extern "C" fn jet_jit_ui_node_color(label: i64, w: f64, h: f64, color: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
@@ -615,6 +640,7 @@ pub(crate) struct UiHostFns {
     pub(crate) node: FuncId,
     pub(crate) text: FuncId,
     pub(crate) button: FuncId,
+    pub(crate) button_on_click: FuncId,
     pub(crate) node_color: FuncId,
     pub(crate) node_role: FuncId,
     pub(crate) box_node: FuncId,
@@ -648,6 +674,10 @@ pub(crate) fn register_ui_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_ui_node", jet_jit_ui_node as *const u8);
     builder.symbol("jet_jit_ui_text", jet_jit_ui_text as *const u8);
     builder.symbol("jet_jit_ui_button", jet_jit_ui_button as *const u8);
+    builder.symbol(
+        "jet_jit_ui_button_on_click",
+        jet_jit_ui_button_on_click as *const u8,
+    );
     builder.symbol("jet_jit_ui_node_color", jet_jit_ui_node_color as *const u8);
     builder.symbol("jet_jit_ui_node_role", jet_jit_ui_node_role as *const u8);
     builder.symbol("jet_jit_ui_box", jet_jit_ui_box as *const u8);
@@ -730,6 +760,11 @@ pub(crate) fn declare_ui_host_fns(module: &mut JITModule) -> Result<UiHostFns, S
     for _ in 0..6 {
         cb6.params.push(AbiParam::new(types::I64));
     }
+    let mut btn_on_click = Signature::new(cc);
+    for _ in 0..7 {
+        btn_on_click.params.push(AbiParam::new(types::I64));
+    }
+    btn_on_click.returns.push(AbiParam::new(types::I64));
     let mut gtk_click = Signature::new(cc);
     for _ in 0..8 {
         gtk_click.params.push(AbiParam::new(types::I64));
@@ -747,6 +782,7 @@ pub(crate) fn declare_ui_host_fns(module: &mut JITModule) -> Result<UiHostFns, S
         node: import("jet_jit_ui_node", &node3)?,
         text: import("jet_jit_ui_text", &unary)?,
         button: import("jet_jit_ui_button", &unary)?,
+        button_on_click: import("jet_jit_ui_button_on_click", &btn_on_click)?,
         node_color: import("jet_jit_ui_node_color", &node4)?,
         node_role: import("jet_jit_ui_node_role", &node4)?,
         box_node: import("jet_jit_ui_box", &unary)?,

@@ -2392,6 +2392,7 @@ fn run() {
 |------|---------|------|
 | `ui.text(text)` | `UiNode` | static text with a label role and accessible name |
 | `ui.button(label)` | `UiNode` | keyboard-focusable button node |
+| `ui.button(label, on_click: handler)` | `UiNode` | same button with a portable click handler (D-WEB-CLICK-PORT1=D); GTK, DOM, and TUI bind by node identity (D-UI-NODE-ID1=C / D-UI-EVT-DISP1=E). Unsupported backends may register the handler without ever firing it. |
 | `ui.box(children)` | `UiNode` | vertical container for one typed child list |
 | `ui.node(label, width, height)` | `UiNode` | low-level custom/decorative node |
 | `ui.node_role(label, width, height, role)` | `UiNode` | low-level node with an explicit role |
@@ -2417,6 +2418,14 @@ An unavailable GTK display reports `UI_UNSUPPORTED` instead of silently
 pretending to render. `JET_UI_HEADLESS=1` is the explicit CI/test opt-in. The
 other native/mobile rows are deliberately reported as unsupported until real
 backends, accessibility-tree proof, and packaging exist.
+
+**Portable click (D-WEB-CLICK-PORT1=D).** `ui.button(label, on_click: …)` stores
+a handler slot on the node. At paint/mount, each backend binds that slot to a
+stable identity: author `key` when set, otherwise the render path
+(D-UI-NODE-ID1=C). A click looks up the slot in O(1) and runs it
+(D-UI-EVT-DISP1=E). Only click/activate is portable; hover and other rich
+events require an explicit capability module (D-UI-EVT-SET1=D). GTK, DOM, and
+TUI share this mechanism — there is no second click API (I8).
 
 ---
 

@@ -2256,13 +2256,58 @@ impl<'a> Checker<'a> {
     }
 
     /// Reject moves, replacement, and storage-changing methods while any view
-    /// into the owner remains live. Reads stay legal; facts vanish on scope exit.
+    /// into the owner remains live. Exclusive-window reads of the owner are
+    /// rejected by `check_place_read` (E0220); facts vanish on scope exit.
     pub(crate) fn check_owner_change(&mut self, owner: &str, action: &str, span: Span) {
         let owner_place = ViewPlace {
             owner: self.owner_id(owner),
             projections: Vec::new(),
         };
         self.check_place_change(&owner_place, action, span);
+    }
+
+    /// Card #1361 / I2: reject a read of a place while an exclusive window into
+    /// it is live. Reading *through* that window (the pin / ViewMut binding) is
+    /// the legal path; reading the owner beside it reaches rustc E0503.
+    pub(crate) fn check_place_read(&mut self, expr: &Expr, span: Span) {
+        let Some(place) = self.place_from_expr(expr) else {
+            return;
+        };
+        if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) {
+            if self.is_write_view(root) {
+                return;
+            }
+        }
+        let Some((view, place_name, kind)) = self
+            .view_facts
+            .bindings
+            .iter()
+            .rev()
+            .find(|(name, fact)| {
+                self.view_is_live_now(name)
+                    && fact.access == ViewAccess::Write
+                    && fact.place.overlaps(&place)
+                    && fact.invalidated.is_none()
+            })
+            .map(|(name, fact)| (name.clone(), Self::place_name(&fact.place), fact.kind))
+        else {
+            return;
+        };
+        let read_name = Self::place_name(&place);
+        let window = if kind == ViewKind::Pin {
+            "pin"
+        } else {
+            "exclusive write window"
+        };
+        self.diags.push(Diagnostic::error(
+            "E0220",
+            format!("`{read_name}` cannot be read while `{view}` holds a live {window} into it"),
+            format!(
+                "`{view}` is an exclusive window into `{place_name}`; reading the owner beside that window would be rejected after lowering"
+            ),
+            format!("read or edit through `{view}` instead of `{read_name}`"),
+            Some(span),
+        ));
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
@@ -3070,7 +3115,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn view_leaf_paths(&self, ty: &Type) -> Vec<(Vec<String>, ViewAccess)> {
+    pub(crate) fn view_leaf_paths(&self, ty: &Type) -> Vec<(Vec<String>, ViewAccess)> {
         fn walk(
             checker: &Checker<'_>,
             ty: &Type,

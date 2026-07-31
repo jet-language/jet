@@ -12135,6 +12135,21 @@ impl LowerCtx<'_, '_> {
                     false,
                     "ui reactive render",
                 ),
+                TCoreClosureKind::UiButtonOnClick { label, .. } => {
+                    let label_v = self.lower_expr(label)?;
+                    let (spawn_ptr, n_caps, caps) =
+                        self.lower_spawn_site_cb("ui button on_click")?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.button_on_click, self.b.func);
+                    let call = self.b.ins().call(
+                        host,
+                        &[
+                            label_v, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
+                        ],
+                    );
+                    Ok(self.b.inst_results(call)[0])
+                }
             },
             TExprKind::HandleMethod { recv, op, args } => {
                 self.lower_handle_method(recv, op, args, &expr.ty)

@@ -1,26 +1,14 @@
-// D-WEB-CLICK-OWN1=D: Jet owns the click listener, counter signal, and render.
-// The companion HTML is only a shell. No hand-written JavaScript keeps state.
+// D-WEB-CLICK-OWN1=D / D-WEB-CLICK-PORT1=D: Jet owns the click listener, counter
+// signal, and render. The companion HTML is only a shell. Portable
+// `ui.button(..., on_click:)` carries the handler on the node — no `web.on`
+// selector bind. D-UI-NODE-ID1=C / D-UI-EVT-DISP1=E / D-UI-EVT-SET1=D.
 // D-WEBDEFAULT1/D-HTMLPAIR1 (ratified 2026-07-01, c134): explicit instead of implicit —
 // `jet dev`/`jet build`/`jet run` infer the web backend from #Target(Web)
 // (no --target=web needed), and #HTML names the companion host page instead
 // of relying on the <stem>.html filename convention.
-// c-devserver (owner-directed 2026-07-01): `fn dev()` below is this file's
-// OWN `jet dev` behavior — a real `core.web.devserver` value, configured and
-// started as ordinary Jet code. `jet dev examples/features/web/ui_web_click.jet`
-// (zero flags) now detects `dev()`, compiles this file NATIVELY with `dev()`
-// as the entry point (not `main()`), and runs it; `dev()`'s body then shells
-// out to `jet build --target=web` on every save and serves `build/` with
-// live-reload — same end result as the old `jet dev --target=web`, but
-// authored by the file itself instead of hardcoded in the CLI. `fn run()`
-// below is untouched: `jet run examples/features/web/ui_web_click.jet` still
-// prints the native demo exactly as before.
-// `devserver.app()` = "watch the file jet dev launched" (passed in via
-// JET_DEV_FILE, always absolute — works from any directory). Use
-// `devserver.for_app("path")` only to watch a DIFFERENT entry file; it
-// accepts relative (resolved against the invocation cwd) or absolute paths.
+// Exported `render(n)` remains for the FAKE_DOM harness in tests/web_build.rs.
 use core.ui as ui
 use core.reactive as reactive
-use core.web as web
 #[Target(Web), HTML("ui_web_click.html")]
 
 fn render(n: Int) {
@@ -37,6 +25,15 @@ fn render(n: Int) {
 
 fn run() {
     count :: reactive.signal(0)
-    ui.reactive_render(() => { render(count.get()) })
-    web.on("#btn", "click", ev => { count.set(count.get() + 1) })
+    backend :: ui.null_backend()
+    ui.reactive_render(() => {
+        n := count.get()
+        color := "#e8790c"
+        if n % 2 == 0 { color = "#3366ff" }
+        tree :: ui.box([
+            ui.node_color("Clicks: {n}", 160.0, 40.0, color),
+            ui.button("Click me", on_click: () => { count.set(count.get() + 1) }),
+        ])
+        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
+    })
 }

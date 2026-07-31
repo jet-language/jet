@@ -4288,6 +4288,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TCoreClosureKind::UiReactiveRender { closure, .. } => {
                 format!("{}jet_ui_reactive_render({})", cx.root_prefix, closure)
             }
+            // D-WEB-CLICK-PORT1=D: portable `ui.button(label, on_click:)`.
+            TCoreClosureKind::UiButtonOnClick {
+                label,
+                closure,
+                ..
+            } => {
+                let label = emit_tir_expr(label, cx);
+                format!(
+                    "{}jet_ui_button_on_click(&({}), {})",
+                    cx.root_prefix, label, closure
+                )
+            }
         },
         // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
         TExprKind::TaskGroupAll { tasks } => {

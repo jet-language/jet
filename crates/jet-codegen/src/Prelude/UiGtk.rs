@@ -23,9 +23,9 @@ mod jet_gtk {
     // program still runs (signals update, terminal output prints) and
     // terminates, so tests are deterministic and a display-less CI never hangs.
     use super::{
-        jet_ui_advance_focus, jet_ui_measure_tree, jet_ui_paint_tree,
-        JetAriaRole, JetBackend, JetEventResult, JetInputEvent, JetPaintCmd, JetRect, JetShow,
-        JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind,
+        jet_ui_advance_focus, jet_ui_bind_tree_clicks, jet_ui_dispatch, jet_ui_measure_tree,
+        jet_ui_paint_tree, JetAriaRole, JetBackend, JetEventResult, JetInputEvent, JetPaintCmd,
+        JetRect, JetShow, JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind,
     };
     use std::ffi::CString;
     use std::os::raw::{c_char, c_int, c_void};
@@ -307,6 +307,17 @@ mod jet_gtk {
             live.push(path.to_string());
             let widget = self.tree_widgets[index].widget;
             if created && kind == GtkWidgetKind::Button {
+                // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: one click path —
+                // portable node slots dispatch by identity; legacy
+                // `backend.on_click` bindings still attach on the same widget.
+                let identity = match &node.key {
+                    Some(key) if !key.is_empty() => format!("key:{key}"),
+                    _ => path.to_string(),
+                };
+                Self::connect_click_callback(
+                    widget,
+                    Arc::new(move || jet_ui_dispatch(&identity)),
+                );
                 self.attach_click_bindings(path, widget);
             }
             if self.display_ok && !widget.is_null() {
@@ -734,6 +745,8 @@ mod jet_gtk {
                 &mut focus_nodes,
                 &mut focus_paths,
             );
+            // D-UI-EVT-DISP1=E: refresh identity→slot bindings after reconcile.
+            jet_ui_bind_tree_clicks(node, "root");
             for index in (0..self.tree_widgets.len()).rev() {
                 if !live.contains(&self.tree_widgets[index].path) {
                     self.remove_tree_widget(index);

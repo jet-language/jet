@@ -5338,3 +5338,15 @@ In list position the fields splice into the surrounding list; elsewhere the
 result is an ordinary list. Sema desugars before inference; no TIR node.
 Reuses the `.[` sigil freed by D-VERDICT-1324-1 (call fan-out stays removed).
 Card #1341.
+
+**2026-07-31 — D-WEB-CLICK-PORT1=D / D-UI-NODE-ID1=C / D-UI-EVT-DISP1=E /
+D-UI-EVT-SET1=D**: portable `ui.button(label, on_click: handler)` carries a
+click handler on the node. Identity is the render path by default; an optional
+author `key` overrides (lists/reorders). Dispatch is O(1) slot lookup by that
+identity (`jet_ui_dispatch` / DomRuntime `jetUiDispatch`) — never CSS-selector
+identity. The portable event core is click/activate only; richer events need an
+explicit capability module (for example `ui.web.hover`). Unsupported backends
+may register the handler without firing it. Spelling uses the existing labeled
+argument surface (S61); no new Syntax.rs keyword. Flagship:
+`examples/features/web/ui_web_click.jet`. GTK folds into the same node-carried
+handler (I8). Card #1311.

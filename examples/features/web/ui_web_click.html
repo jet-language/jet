@@ -40,14 +40,11 @@
   }
   #jet-app {
     position: relative;
-    height: 80px;
-    margin-bottom: 24px;
+    height: 120px;
+    margin-bottom: 8px;
   }
-  /* The box itself is rendered by DomRuntime.js (paint()), which sets its
-     `left`/`top` from the Jet-computed layout frame — override `left` here
-     to center it in the card regardless of that frame's x, and animate the
-     color change it drives. */
-  #jet-app > div {
+  /* Jet paints the counter node and the portable on_click button into #jet-app. */
+  #jet-app > [data-jet-node] {
     left: 50% !important;
     transform: translateX(-50%);
     transition: background 160ms ease;
@@ -56,22 +53,21 @@
     border: none !important;
     box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5);
   }
-  button {
+  #jet-app > button[data-jet-node] {
     appearance: none;
-    border: none;
     padding: 12px 28px;
     border-radius: 12px;
     font: inherit;
     font-weight: 600;
     font-size: 14px;
     color: #0b0d14;
-    background: linear-gradient(160deg, #ffffff, #cdd3e6);
+    background: linear-gradient(160deg, #ffffff, #cdd3e6) !important;
     cursor: pointer;
     box-shadow: 0 8px 20px -6px rgba(255,255,255,0.25);
     transition: transform 120ms ease, box-shadow 120ms ease;
   }
-  button:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -6px rgba(255,255,255,0.35); }
-  button:active { transform: translateY(1px) scale(0.98); box-shadow: 0 4px 12px -4px rgba(255,255,255,0.2); }
+  #jet-app > button[data-jet-node]:hover { transform: translateX(-50%) translateY(-1px); }
+  #jet-app > button[data-jet-node]:active { transform: translateX(-50%) translateY(1px) scale(0.98); }
   .footer {
     margin-top: 20px;
     font-size: 12px;
@@ -85,8 +81,7 @@
   <p class="kicker">jet · compiled to js</p>
   <h1>Reactive counter, rendered live</h1>
   <div id="jet-app"></div>
-  <button id="btn">Click me</button>
-  <p class="footer">Every 5th click flips the accent color —<br><code>examples/features/web/ui_web_click.jet</code></p>
+  <p class="footer">Portable <code>ui.button(..., on_click:)</code> —<br><code>examples/features/web/ui_web_click.jet</code></p>
 </div>
 <script type="module">
 import { run } from "./app.js";

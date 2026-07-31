@@ -717,6 +717,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { .. } | TCoreClosureKind::SpawnGroup { .. } => true,
+            TCoreClosureKind::UiButtonOnClick {
+                label,
+                executable,
+                ..
+            } => {
+                resident_safe_expr(label, callees)
+                    && match &executable.executable {
+                        TIR::TLambdaBody::Expr(e) => {
+                            if resident_safe_expr(e, callees) {
+                                true
+                            } else {
+                                let _ = expr_kind_tag(e);
+                                false
+                            }
+                        }
+                        TIR::TLambdaBody::Block(stmts) => {
+                            stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                        }
+                    }
+            }
             TCoreClosureKind::ReactiveDerived { executable, .. }
             | TCoreClosureKind::ReactiveEffect { executable, .. }
             | TCoreClosureKind::UiReactiveRender { executable, .. } => {
@@ -2584,7 +2604,8 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
                     if let TExprKind::CoreClosureCall {
                         kind: TCoreClosureKind::ReactiveDerived { executable, .. }
                             | TCoreClosureKind::ReactiveEffect { executable, .. }
-                            | TCoreClosureKind::UiReactiveRender { executable, .. },
+                            | TCoreClosureKind::UiReactiveRender { executable, .. }
+                            | TCoreClosureKind::UiButtonOnClick { executable, .. },
                     } = &init.kind
                     {
                         match &executable.executable {
@@ -2634,6 +2655,7 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
             TCoreClosureKind::ReactiveDerived { .. } => "CoreClosure:Derived",
             TCoreClosureKind::ReactiveEffect { .. } => "CoreClosure:Effect",
             TCoreClosureKind::UiReactiveRender { .. } => "CoreClosure:UiRender",
+            TCoreClosureKind::UiButtonOnClick { .. } => "CoreClosure:UiButtonOnClick",
             TCoreClosureKind::Spawn { .. } => "CoreClosure:Spawn",
             _ => "CoreClosure:Other",
         },
@@ -2692,7 +2714,8 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                 if let TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::ReactiveDerived { executable, .. }
                         | TCoreClosureKind::ReactiveEffect { executable, .. }
-                        | TCoreClosureKind::UiReactiveRender { executable, .. },
+                        | TCoreClosureKind::UiReactiveRender { executable, .. }
+                        | TCoreClosureKind::UiButtonOnClick { executable, .. },
                 } = &init.kind
                 {
                     match &executable.executable {
@@ -2902,6 +2925,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
                 | TCoreClosureKind::ReactiveDerived { .. }
                 | TCoreClosureKind::ReactiveEffect { .. }
                 | TCoreClosureKind::UiReactiveRender { .. }
+                | TCoreClosureKind::UiButtonOnClick { .. }
         }
     ) {
         *n += 1;

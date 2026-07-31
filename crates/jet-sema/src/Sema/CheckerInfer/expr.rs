@@ -940,6 +940,12 @@ impl<'a> Checker<'a> {
                 // through the method-call path below, so reaching here means a
                 // plain read of the view's value.)
                 self.check_view_use(name, *span);
+                // Card #1361 / I2: reading an owner while an exclusive window
+                // into it is live must be a Jet diagnostic, not rustc E0503.
+                {
+                    let read_expr = Expr::Ident(name.clone(), *span);
+                    self.check_place_read(&read_expr, *span);
+                }
                 // D-MEM1 stage S5: E2307 — reading a string-view name anywhere
                 // other than the two positions its bare `&str` Rust place
                 // supports (`allow_string_view_read`, set only around chaining
@@ -2816,6 +2822,7 @@ impl<'a> Checker<'a> {
         if self.reject_moved_expr_use(&field_expr, span) {
             return None;
         }
+        self.check_place_read(&field_expr, span);
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.lang")

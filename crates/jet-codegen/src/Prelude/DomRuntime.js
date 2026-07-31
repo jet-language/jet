@@ -52,6 +52,26 @@ let jetDomScopeCounter = 0;
 let jetDomScopeDepth = 0;
 const jetDomBoxRegistry = new Map();
 let jetDomTouchedBackends = new Set();
+// D-UI-EVT-DISP1=E: O(1) click slots keyed by stable node identity
+// (D-UI-NODE-ID1=C: author key if present, else render path).
+const jetUiClickSlots = new Map();
+
+export function jetUiDispatch(identity) {
+  const handler = jetUiClickSlots.get(String(identity));
+  if (typeof handler === "function") handler();
+}
+
+export function jetUiBindClick(identity, handler) {
+  if (typeof handler === "function") {
+    jetUiClickSlots.set(String(identity), handler);
+  } else {
+    jetUiClickSlots.delete(String(identity));
+  }
+}
+
+export function jetUiUnbindClick(identity) {
+  jetUiClickSlots.delete(String(identity));
+}
 
 export function perfNow() {
   return globalThis.__jetPerfNow?.() ?? 0;
@@ -79,6 +99,7 @@ export function exitRenderScope() {
       if (key.startsWith(prefix) && !jetDomTouchedBackends.has(backendKey)) {
         record.element?.remove?.();
         jetDomBoxRegistry.delete(key);
+        jetUiClickSlots.delete(key);
       }
     }
   }
@@ -165,25 +186,30 @@ export function paint(backend, node) {
       });
       return;
     }
+    // D-UI-NODE-ID1=C: author key overrides render path.
+    const identity = current.key != null && String(current.key) !== ""
+      ? `key:${current.key}`
+      : path;
     const fillColor = current.color ?? "#000000";
     if (current.kind !== "text") {
       backend.commands.push(`fill({x:${currentFrame.x},y:${currentFrame.y},w:${currentFrame.width},h:${currentFrame.height}}, ${fillColor})`);
     }
     backend.commands.push(`text({x:${currentFrame.x},y:${currentFrame.y},w:${currentFrame.width},h:${currentFrame.height}}, ${current.label})`);
-    live.add(path);
+    live.add(identity);
     if (!backend.root) return;
     const tag = current.kind === "button" ? "button" : current.kind === "textInput" ? "input" : current.kind === "text" ? "span" : "div";
-    let record = jetDomBoxRegistry.get(path);
+    let record = jetDomBoxRegistry.get(identity);
     if (record && record.tag !== tag) {
       record.element?.remove?.();
-      jetDomBoxRegistry.delete(path);
+      jetDomBoxRegistry.delete(identity);
+      jetUiClickSlots.delete(identity);
       record = null;
     }
     let box = record?.element;
     if (!box) {
       box = document.createElement(tag);
       box.dataset.jetNode = "1";
-      box.dataset.jetKey = path;
+      box.dataset.jetKey = identity;
       box.style.position = "absolute";
       box.style.boxSizing = "border-box";
       box.style.border = "1px solid rgba(0,0,0,0.15)";
@@ -193,8 +219,9 @@ export function paint(backend, node) {
       box.style.alignItems = "center";
       box.style.justifyContent = "center";
       backend.root.appendChild(box);
-      jetDomBoxRegistry.set(path, { element: box, tag });
+      jetDomBoxRegistry.set(identity, { element: box, tag });
     }
+    box.dataset.jetKey = identity;
     box.style.left = `${currentFrame.x}px`;
     box.style.top = `${currentFrame.y}px`;
     box.style.width = `${currentFrame.width}px`;
@@ -213,14 +240,30 @@ export function paint(backend, node) {
     if (current.role === "button" || current.role === "textbox") {
       backend.focusNodes.push(box);
     }
+    // D-UI-EVT-DISP1=E / D-UI-EVT-SET1=D: portable click only. Rebind the slot
+    // each paint so remounts keep one listener (no stacking).
+    if (typeof current.onClick === "function") {
+      jetUiClickSlots.set(identity, current.onClick);
+      if (!box._jetClickWired) {
+        box._jetClickWired = true;
+        box.addEventListener?.("click", () => {
+          jetUiDispatch(box.dataset?.jetKey ?? identity);
+        });
+      }
+    } else {
+      jetUiClickSlots.delete(identity);
+    }
   };
   render(node, frame, backend.boxKey);
   if (backend.root) {
     const prefix = `${backend.boxKey}/`;
     for (const [key, record] of jetDomBoxRegistry) {
+      // Path-keyed nodes belong to this backend. Key-keyed nodes stay until
+      // the render scope exits (they can move across siblings in one frame).
       if ((key === backend.boxKey || key.startsWith(prefix)) && !live.has(key)) {
         record.element?.remove?.();
         jetDomBoxRegistry.delete(key);
+        jetUiClickSlots.delete(key);
       }
     }
   }
@@ -384,9 +427,18 @@ export function makeText(text) {
   return { kind: "text", label, width: Array.from(label).length, height: 1, role: "label", children: [] };
 }
 
-export function makeButton(text) {
+export function makeButton(text, onClick, key) {
   const label = String(text);
-  return { kind: "button", label, width: Array.from(label).length + 4, height: 1, role: "button", children: [] };
+  return {
+    kind: "button",
+    label,
+    width: Array.from(label).length + 4,
+    height: 1,
+    role: "button",
+    children: [],
+    onClick: typeof onClick === "function" ? onClick : null,
+    key: key != null && String(key) !== "" ? String(key) : null,
+  };
 }
 
 export function makeBox(children) {

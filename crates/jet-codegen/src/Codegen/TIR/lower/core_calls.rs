@@ -376,6 +376,25 @@ pub(crate) fn lower_core_closure_call(
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             TCoreClosureKind::UiReactiveRender { closure, executable }
         }
+        // D-WEB-CLICK-PORT1=D: portable `ui.button(label, on_click: …)`.
+        ("core.ui", "button") if args.len() == 2 => {
+            let lam = lam_at(1)?;
+            let label = Box::new(lower_expr(&args[0].expr, cx, env));
+            let closure = render_lambda_str(lam, cx, env);
+            let executable = Box::new(lower_lambda(lam, cx, env));
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            return Some(TExpr {
+                ty: Type::Named("UiNode".to_string()),
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::UiButtonOnClick {
+                        label,
+                        closure,
+                        executable,
+                    },
+                },
+            });
+        }
         _ => return None,
     };
     Some(TExpr {
