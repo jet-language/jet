@@ -524,7 +524,7 @@ impl<'a> Fmt<'a> {
     /// `#[…]` rules already account for. `Codable` expands to `Encode`+`Decode`;
     /// `Encode`/`Decode` and any user-trait marker map to themselves. The remaining
     /// `derives` came from `derive Name` lines in the body and must re-emit there.
-    fn body_derive_lines(derives: &[(String, Span)], type_markers: &[Marker]) -> Vec<String> {
+    fn body_derive_lines(derives: &[(String, Span)], type_markers: &[Marker]) -> Vec<(String, Span)> {
         let mut covered: Vec<String> = Vec::new();
         for m in type_markers {
             match m.name.as_str() {
@@ -545,11 +545,11 @@ impl<'a> Fmt<'a> {
             }
         }
         let mut out = Vec::new();
-        for (name, _) in derives {
+        for (name, span) in derives {
             if let Some(pos) = covered.iter().position(|c| c == name) {
                 covered.remove(pos);
             } else {
-                out.push(name.clone());
+                out.push((name.clone(), *span));
             }
         }
         out
@@ -939,25 +939,38 @@ impl<'a> Fmt<'a> {
             .iter()
             .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
-            for (i, field) in s.fields.iter().enumerate() {
+            // Preserve source order of fields vs body `derive` lines (lossless).
+            enum BodyPart<'a> {
+                Field(&'a Field),
+                Derive(&'a str),
+            }
+            let mut parts: Vec<(usize, BodyPart<'_>)> = s
+                .fields
+                .iter()
+                .map(|field| (field.name_span.start, BodyPart::Field(field)))
+                .collect();
+            for (name, span) in &body_derives {
+                parts.push((span.start, BodyPart::Derive(name.as_str())));
+            }
+            parts.sort_by_key(|(start, _)| *start);
+            for (i, (_, part)) in parts.iter().enumerate() {
                 if i > 0 {
                     f.newline();
                 }
-                f.emit_leading(field.name_span.start);
-                let decodes_field = derives_decode
-                    && !field.serde_markers.iter().any(|marker| {
-                        matches!(
-                            marker.name.as_str(),
-                            Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
-                        )
-                    });
-                f.fmt_field(field, decodes_field);
-            }
-            for (i, trait_name) in body_derives.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() {
-                    f.newline();
+                match part {
+                    BodyPart::Field(field) => {
+                        f.emit_leading(field.name_span.start);
+                        let decodes_field = derives_decode
+                            && !field.serde_markers.iter().any(|marker| {
+                                matches!(
+                                    marker.name.as_str(),
+                                    Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
+                                )
+                            });
+                        f.fmt_field(field, decodes_field);
+                    }
+                    BodyPart::Derive(trait_name) => f.fmt_derive_line(trait_name),
                 }
-                f.fmt_derive_line(trait_name);
             }
             for (i, block) in s.trait_impls.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() || !body_derives.is_empty() {
@@ -1033,7 +1046,7 @@ impl<'a> Fmt<'a> {
             } else {
                 f.fmt_enum_grouped(e, derives_decode);
             }
-            for (i, trait_name) in body_derives.iter().enumerate() {
+            for (i, (trait_name, _)) in body_derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
                     f.newline();
                 }

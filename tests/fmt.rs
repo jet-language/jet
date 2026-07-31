@@ -261,15 +261,26 @@ fn fmt_keeps_call_comment_outside_lambda_block() {
 }
 
 #[test]
-fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
+fn fmt_keeps_optional_return_sugar() {
+    // D-RESULT-OPTION-CANON1: bare `T?` is Optional; fallible is spaced `T ?`.
     let src = r#"fn parse_count(raw: String) => Int? {
     return Err("empty");
 }
 "#;
-    let out = jet::format_source(src).expect("fmt should parse default Error return");
+    let out = jet::format_source(src).expect("fmt should parse optional return");
     assert!(
-        out.contains("fn parse_count(raw: String) => Int ? {"),
-        "expected `Int?` return to format as `Int ?`, got:\n{out}"
+        out.contains("fn parse_count(raw: String) => Int? {"),
+        "expected `Int?` optional return to stay `Int?`, got:\n{out}"
+    );
+    let fallible = r#"fn parse_count(raw: String) => Int ? {
+    return Err("empty");
+}
+"#;
+    let fallible_out =
+        jet::format_source(fallible).expect("fmt should parse fallible return");
+    assert!(
+        fallible_out.contains("fn parse_count(raw: String) => Int ? {"),
+        "expected spaced `Int ?` fallible return to stay spaced, got:\n{fallible_out}"
     );
 }
 

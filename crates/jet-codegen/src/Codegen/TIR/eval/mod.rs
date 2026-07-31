@@ -131,14 +131,18 @@ pub(super) fn view_bounds_diagnostic(
     exclusive: bool,
     span: Span,
 ) -> Diagnostic {
+    // Same E0953 voice as the JIT trap / comptime panic path so every tier
+    // reports one code for an out-of-bounds view (I9).
+    let msg = format!(
+        "can't view {len} items from {start} to {end} ({})",
+        if exclusive { "exclusive" } else { "inclusive" }
+    );
     Diagnostic::error(
-        "E3001",
-        format!(
-            "can't view {len} items from {start} to {end} ({})",
-            if exclusive { "exclusive" } else { "inclusive" }
-        ),
-        "the requested view is outside the list at runtime".to_string(),
-        format!("use bounds between 0 and {len}, with the end after the start"),
+        "E0953",
+        "your comptime code stopped the build".to_string(),
+        format!("while computing this value at compile time, the program panicked: {msg}"),
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+            .to_string(),
         Some(span),
     )
 }

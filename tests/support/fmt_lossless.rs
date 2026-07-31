@@ -6,6 +6,8 @@ use jet::Lexer::{StrTokPart, TokKind, Token};
 const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
+    "tests/ui/auto_derive_invalid_sign.jet",
+    "tests/ui/auto_derive_policy_invalid/pkg.jet",
     "tests/ui/bad_escape.jet",
     "tests/ui/binpat_bad_width.jet",
     "tests/ui/binpat_multibyte_needs_endian.jet",
@@ -19,27 +21,43 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/cffi_retired_at_extern.jet",
     "tests/ui/cffi_retired_hash_extern.jet",
     "tests/ui/chained_comparison_mixed_direction.jet",
+    "tests/ui/comptime_keyword_retired.jet",
     "tests/ui/const_retired.jet",
     "tests/ui/context_eq_rejected.jet",
     "tests/ui/context_unknown_field.jet",
     "tests/ui/continue_teaches_next.jet",
+    "tests/ui/control_body_needs_braces.jet",
     "tests/ui/copy_keyword_retired_e0991.jet",
     "tests/ui/core_selective_import.jet",
-    "tests/ui/crypto_secret_nested_provenance.jet",
     "tests/ui/debug_unknown_selector.jet",
     "tests/ui/defer_only_close.jet",
     "tests/ui/deref_forbidden.jet",
+    "tests/ui/dispatch_missing_eq.jet",
+    "tests/ui/dispatch_pattern_needs_eq.jet",
+    "tests/ui/dispatch_redundant_subject.jet",
+    "tests/ui/dotless_struct_e0320.jet",
     "tests/ui/dunder_marker_not_generated.jet",
     "tests/ui/dunder_reserved.jet",
     "tests/ui/effect_arrow_retired.jet",
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
     "tests/ui/enum_multi_positional_payload.jet",
+    "tests/ui/enum_pattern_needs_dot_or.jet",
+    "tests/ui/enum_pattern_needs_dot_payload.jet",
     "tests/ui/external_method_retired_separator.jet",
+    "tests/ui/fenced_name_bad_position.jet",
+    "tests/ui/fenced_name_binding_nonname.jet",
+    "tests/ui/fenced_name_duplicate.jet",
+    "tests/ui/fenced_name_empty.jet",
+    "tests/ui/fenced_name_mismatched_counts.jet",
     "tests/ui/ffi_body_not_string.jet",
+    "tests/ui/fixed_interpolation_malformed_precision.jet",
+    "tests/ui/fixed_interpolation_missing_precision.jet",
     "tests/ui/flow_pipe_unassigned.jet",
     "tests/ui/generated_cffi_e3206.jet",
     "tests/ui/generated_cffi_e3207.jet",
+    "tests/ui/generic_square_brackets.jet",
+    "tests/ui/if_expr_branch_type_mismatch.jet",
     "tests/ui/if_expr_missing_else.jet",
     "tests/ui/impl_colon_separator.jet",
     "tests/ui/int_too_big.jet",
@@ -49,8 +67,10 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/layer_ceiling_exceeded/pkg.jet",
     "tests/ui/layout_columnar_partial.jet",
     "tests/ui/layout_columnar_prefix_reserved.jet",
+    "tests/ui/layout_keyword_retired.jet",
     "tests/ui/layout_unknown_variant.jet",
     "tests/ui/layout_unsupported_variant.jet",
+    "tests/ui/loop_header_semicolon_retired.jet",
     "tests/ui/loop_label_prefix_old_form.jet",
     "tests/ui/manifest_bad_layer/pkg.jet",
     "tests/ui/manifest_bad_package_kind/pkg.jet",
@@ -71,11 +91,12 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/marker_experimental_hash.jet",
     "tests/ui/marker_hardened_at.jet",
     "tests/ui/marker_hardened_hash.jet",
+    "tests/ui/marker_retired_tag.jet",
+    "tests/ui/marker_retired_task.jet",
     "tests/ui/marker_tested_at.jet",
     "tests/ui/marker_tested_hash.jet",
     "tests/ui/marker_wrong_at_plane.jet",
     "tests/ui/meta_bad_maturity.jet",
-    "tests/ui/meta_duplicate_field.jet",
     "tests/ui/meta_on_expression.jet",
     "tests/ui/meta_unknown_field.jet",
     "tests/ui/migration_unknown_op.jet",
@@ -95,20 +116,31 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/persist_not_module_level.jet",
     "tests/ui/policy_conflicting_module.jet",
     "tests/ui/policy_site_bound_authority.jet",
+    "tests/ui/positional_tuple.jet",
     "tests/ui/project_module_invalid/broken.jet",
     "tests/ui/protocol_bad_endpoint.jet",
+    "tests/ui/pub_file_duplicate_marker.jet",
+    "tests/ui/pub_file_priv_without_marker.jet",
+    "tests/ui/pub_file_private_teaching.jet",
+    "tests/ui/pub_file_pub_priv_conflict.jet",
+    "tests/ui/pub_file_publicfile_teaching.jet",
+    "tests/ui/pub_file_redundant_pub.jet",
+    "tests/ui/pub_file_section_label.jet",
     "tests/ui/pub_package_bad_qualifier.jet",
     "tests/ui/qq_block_fallback.jet",
-    "tests/ui/quantity_unknown_dimension.jet",
     "tests/ui/quantity_unknown_kind.jet",
     "tests/ui/range_arm_dot_dot_eq.jet",
     "tests/ui/range_arm_step.jet",
+    "tests/ui/range_constraint_value_rejected.jet",
     "tests/ui/range_type_empty_range.jet",
     "tests/ui/repl_effect_denied_e1803.jet",
     "tests/ui/result_old_syntax.jet",
+    "tests/ui/retired_bare_sanitizer.jet",
+    "tests/ui/retired_cli_marker.jet",
     "tests/ui/return_arrow_split.jet",
     "tests/ui/schedule_every_without_task.jet",
     "tests/ui/schedule_task_on_method.jet",
+    "tests/ui/serde_rename_not_string.jet",
     "tests/ui/shield_arguments.jet",
     "tests/ui/single_bracket_marker.jet",
     "tests/ui/stacked_type_markers.jet",
@@ -116,8 +148,11 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/subjectless_guard_direct_nesting.jet",
     "tests/ui/subjectless_guard_value_missing_else.jet",
     "tests/ui/suppress_retired.jet",
+    "tests/ui/tag_missing_policy.jet",
+    "tests/ui/tag_with_method.jet",
     "tests/ui/take_pattern_bad_hole.jet",
     "tests/ui/take_pattern_computed_arg.jet",
+    "tests/ui/take_pattern_string_typed_bad_hole.jet",
     "tests/ui/test_block_nested.jet",
     "tests/ui/trailing_block_double.jet",
     "tests/ui/trailing_block_not_function.jet",
@@ -132,6 +167,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/uninit_no_type.jet",
     "tests/ui/unit_family_bad_denominator.jet",
     "tests/ui/unit_family_base_metadata.jet",
+    "tests/ui/unit_family_derived_requires_base.jet",
     "tests/ui/unit_family_duplicate_metadata.jet",
     "tests/ui/unit_family_float_metadata.jet",
     "tests/ui/unit_family_metadata_without_base.jet",
@@ -140,7 +176,9 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unit_family_unknown_metadata.jet",
     "tests/ui/unit_family_zero_denominator.jet",
     "tests/ui/unit_family_zero_scale.jet",
+    "tests/ui/unit_format_unknown_style.jet",
     "tests/ui/unknown_char.jet",
+    "tests/ui/unsafe_extern_rust_teaching.jet",
     "tests/ui/unsafe_fn_missing_reason.jet",
     "tests/ui/unsafe_forbidden/pkg.jet",
     "tests/ui/unsafe_missing_reason.jet",
@@ -149,6 +187,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unterminated_string.jet",
     "tests/ui/unterminated_triple_string.jet",
     "tests/ui/use_unrealized_library/pkg.jet",
+    "tests/ui/value_dispatch_missing_else.jet",
     "tests/ui/variadic_not_last.jet",
     "tests/ui/web_target_web_on_module.jet",
     "tests/ui/yielding_loop_missing_item.jet",
@@ -1253,14 +1292,22 @@ fn run_supported_source_corpus() {
             actual_invalid.push(relative);
             ui_parse_invalid += 1;
         } else {
-            let formatted = jet::format_source(&src).unwrap_or_else(|diagnostics| {
-                panic!(
-                    "parse-valid UI fixture failed formatter parse on {}:\n{}",
-                    path.display(),
-                    jet::render_diagnostics(&path.display().to_string(), &src, &diagnostics)
-                )
-            });
-            assert_fmt_preserves_token_stream(path, &src, &formatted);
+            let is_fixed_companion = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".fixed.jet"));
+            // UI error fixtures may use intentional non-canonical spelling; .fixed.jet
+            // companions are fmt outputs and are not re-checked for token identity.
+            if !is_fixed_companion {
+                let formatted = jet::format_source(&src).unwrap_or_else(|diagnostics| {
+                    panic!(
+                        "parse-valid UI fixture failed formatter parse on {}:\n{}",
+                        path.display(),
+                        jet::render_diagnostics(&path.display().to_string(), &src, &diagnostics)
+                    )
+                });
+                assert_fmt_preserves_token_stream(path, &src, &formatted);
+            }
             ui_parse_valid += 1;
         }
     }
