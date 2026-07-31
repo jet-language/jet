@@ -35,44 +35,27 @@ nix shell nixpkgs#yt-dlp --command yt-dlp \
 - Retrieve comments broadly. Keep root/reply counts and note incomplete threads or API warnings.
 - Inspect linked articles, papers, repositories, or measurements. Prefer those primary sources when checking technical claims.
 
-Use `scripts/inspect_capture.py` without dumping whole captures into context. Always give ongoing work a manifest; repeated calls merge transcript ranges, sampled comment IDs, capture hashes, linked-source status, and warnings:
+Inspect captures with short ad-hoc Python (the host has no bare `python3`; run `nix shell nixpkgs#python3 --command python3 …`). Never dump a whole capture file into context: read metadata first, then transcript in bounded slices, then stratified comment samples. A convenient pattern is one pass that parses the json3 subtitles into `/tmp/jet-youtube-ID.transcript.txt` (`[mm:ss] text` lines), then reading that file in chunks.
 
-```sh
-python3 scripts/inspect_capture.py \
-  --info /tmp/jet-youtube-ID.info.json \
-  --subtitles /tmp/jet-youtube-ID.en-orig.json3 \
-  --part metadata --manifest /tmp/jet-youtube-ID.manifest.json
-
-python3 scripts/inspect_capture.py \
-  --info /tmp/jet-youtube-ID.info.json \
-  --subtitles /tmp/jet-youtube-ID.en-orig.json3 \
-  --part transcript --start 0 --end 600 --caption-source auto \
-  --manifest /tmp/jet-youtube-ID.manifest.json
-
-python3 scripts/inspect_capture.py \
-  --info /tmp/jet-youtube-ID.info.json \
-  --part comments --top-comments 100 \
-  --manifest /tmp/jet-youtube-ID.manifest.json
-```
+For long or multi-session work, keep a small progress manifest (`/tmp/jet-youtube-ID.manifest.json`) you update by hand: transcript ranges already read, caption source used (creator vs auto), comment sample IDs seen, linked-source statuses (`pending`, `retrieved`, `verified`, `unavailable`), and any retrieval warnings.
 
 - Read the manifest before resuming. Continue missing transcript ranges and pending linked sources; do not restart completed chunks.
-- Record capture/API problems with `--retrieval-warning 'text'`.
-- Update a linked source with `--source-status 'URL=verified'`; statuses are `pending`, `retrieved`, `verified`, or `unavailable`.
-- Treat `retrieval_complete` as capture coverage, not human review coverage.
+- Record capture/API problems (comment-count mismatches, missing threads, blocked downloads) in the manifest and in the final report.
+- Treat capture completion as coverage of retrieval, not of human review.
 
 ### 3. Read the full argument
 
-- Process transcript in bounded timestamp chunks until manifest reports complete coverage.
+- Process transcript in bounded timestamp chunks until the full runtime is covered.
 - Reconstruct thesis, causal chain, measurements, proposed fixes, caveats, and unresolved questions.
 - Distinguish host commentary from material being quoted or read.
 - Preserve timestamps for important claims, but paraphrase in final output unless a short quote is necessary.
-- Inspect `caption_quality`. Creator captions may score high. Auto/unknown captions are never high-confidence evidence without corroboration.
-- Use cleaned rows. The helper removes duplicate events and merges progressive auto-caption updates while retaining start/end times.
+- Note caption quality. Creator captions (`subtitles` in the info JSON) are high quality; auto/unknown captions are never high-confidence evidence without corroboration.
+- Clean rows when parsing json3: drop empty events, deduplicate, and merge progressive auto-caption updates while retaining start times.
 
 ### 4. Mine comments without polling by applause
 
-- Use the helper's round-robin sample: top-liked roots, recent roots, low-liked technical comments, substantive replies, and corrections/disagreements.
-- Comments are anonymous by default. Use `--include-authors` only when identity materially affects credibility, then explain why.
+- Sample strata yourself from the info JSON `comments` array: top-liked roots, recent roots, low-liked technical comments (keyword-filtered), substantive replies, and corrections/disagreements (`actually`, `wrong`, `missing`, `what about`, tool names).
+- Comments are anonymous by default. Surface an author only when identity materially affects credibility, then explain why.
 - Group themes only after reading representative comments.
 - Treat keyword counts and likes as discovery aids, never sentiment science.
 - Separate:
@@ -112,14 +95,7 @@ Before Jet recommendations, write a compact JSON claim list. Give semantically e
 
 Allowed source kinds: `transcript`, `comment`, `linked-source`, `local-evidence`, `inference`. Confidence: `low`, `medium`, `high`. Stance: `supports`, `disputes`, `neutral`. Classifications: `already-implemented`, `ratified-in-progress`, `real-gap`, `rejected-conflict`, `needs-measurement`, `owner-gate`. Set `source_identity` to the shared upstream source when several videos repeat one article, paper, benchmark, or speaker; this prevents false independent corroboration.
 
-Validate, deduplicate, and render it:
-
-```sh
-python3 scripts/inspect_capture.py --mode ledger \
-  --claims /tmp/ID.claims.json \
-  --output /tmp/ID.ledger.json \
-  --markdown /tmp/ID.ledger.md
-```
+Write the ledger to `/tmp/ID.claims.json` and validate it yourself before use: parse it as JSON, check every claim uses only the allowed enum values above, and check `topic` keys are unique per distinct claim (duplicates mean two claims should merge or one needs a sharper topic).
 
 ### 6. Cross-check Jet
 
@@ -156,14 +132,7 @@ Keep measurement fixes separate from product choices. Prefer internal instrument
 
 ### 8. Synthesize multiple videos
 
-Build one ledger per video, then produce a deterministic topic matrix:
-
-```sh
-python3 scripts/inspect_capture.py --mode synthesize \
-  --ledgers /tmp/one.ledger.json /tmp/two.ledger.json \
-  --output /tmp/videos.synthesis.json \
-  --markdown /tmp/videos.synthesis.md
-```
+Build one ledger per video, then group all claims by exact `topic` key (a short Python pass over the ledger files) into a topic matrix marking each topic `repeated`, `conflict`, or `single`.
 
 - `repeated` means at least two independent source identities, not two videos repeating one upstream source. Review or set `source_identity` when provenance overlaps.
 - `conflict` means a topic has both supporting and disputing claims.
