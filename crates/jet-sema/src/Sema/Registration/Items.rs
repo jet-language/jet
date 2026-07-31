@@ -501,6 +501,8 @@ pub(crate) fn register_struct(
     // entirely (so it's never required/allowed in a struct literal, E0339)
     // and resolved for reads through this side table instead.
     let mut computed_fields: HashMap<String, (Span, Type)> = HashMap::new();
+    // D-FIELDDEF1=C: stored fields with `=` defaults for omitted construction.
+    let mut field_defaults: HashMap<String, crate::AST::Expr> = HashMap::new();
     for f in &s.fields {
         if !field_names.insert(f.name.clone()) {
             diags.push(Diagnostic::error(
@@ -515,6 +517,9 @@ pub(crate) fn register_struct(
             computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
         } else {
             fields.push((f.name.clone(), f.name_span, f.ty.clone(), f.is_pub));
+            if let Some(default) = &f.default {
+                field_defaults.insert(f.name.clone(), (**default).clone());
+            }
             if declared_type_contains_cell_guard(&f.ty) {
                 diags.push(cell_guard_storage_diagnostic(
                     &format!("struct field `{}`", f.name),
@@ -564,6 +569,11 @@ pub(crate) fn register_struct(
         registry
             .computed_fields
             .insert(s.name.clone(), computed_fields);
+    }
+    if !field_defaults.is_empty() {
+        registry
+            .field_defaults
+            .insert(s.name.clone(), field_defaults);
     }
     // D-REPRC1: `#layout(c)` structs may not contain growable fields.
     if s.layout == Some(crate::AST::StructLayout::C) {

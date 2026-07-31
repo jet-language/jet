@@ -181,6 +181,8 @@ pub(crate) fn resolve_builtin_op(
         ("insert", 2) => TBuiltinOp::InsertList,
         ("add", 2) if is_map => TBuiltinOp::InsertMap,
         ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
+        ("merge", 1) if is_map => TBuiltinOp::MapMerge,
+        ("merge", 2) if is_map => TBuiltinOp::MapMergeWith,
         ("remove", 1) => {
             if is_set {
                 TBuiltinOp::SetRemove
@@ -409,6 +411,9 @@ pub(crate) fn resolve_builtin_op(
         ("to_sorted_list", 0) if is_priority_queue => TBuiltinOp::PriorityQueueToSortedList,
         ("to_list", 0) if is_iter => TBuiltinOp::IterToList,
         ("collect", 0) if is_iter => TBuiltinOp::IterCollect,
+        ("lazy", 0) if is_list || matches!(rty, Some(Type::FixedList { .. })) => {
+            TBuiltinOp::ListLazy
+        }
         ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,

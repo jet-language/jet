@@ -130,6 +130,7 @@ pub(crate) struct JitRuntime {
     pub(crate) allocators: Vec<Memory::AllocatorState>,
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
+    pub(crate) conditions: Vec<std::sync::Arc<Memory::ConditionState>>,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,

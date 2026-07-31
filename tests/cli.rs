@@ -1445,7 +1445,7 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
         r#"#CLI
 struct RunArgs {
     #Doc("person to greet") name: String
-    #Default(2) retries: Int
+    retries: Int = 2
     verbose: Bool
 }
 
@@ -1567,7 +1567,7 @@ fn typed_cli_field_markers_add_short_and_env_inputs_with_pinned_precedence() {
         r#"#CLI
 struct RunArgs {
     #[Doc("print extra detail"), Short("v")] verbose: Bool
-    #[Doc("port to listen on"), Short("p"), Env("JET_TYPED_PORT"), Default(3000)] port: Int
+    #[Doc("port to listen on"), Short("p"), Env("JET_TYPED_PORT")] port: Int = 3000
 }
 
 fn run(args: RunArgs) {
@@ -1639,7 +1639,7 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
         r#"#CLI
 pub struct RunArgs {
     #Doc("person to greet") pub name: String
-    #Default(2) pub retries: Int
+    pub retries: Int = 2
     pub verbose: Bool
 }
 "#,
@@ -1911,7 +1911,7 @@ fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
     fs::write(dir.join("commands.jet"), r#"#CLI
 struct ServeArgs {
-    #[Doc("port to listen on"), Short("p"), Env("JET_SERVE_PORT"), Default(3000)] port: Int
+    #[Doc("port to listen on"), Short("p"), Env("JET_SERVE_PORT")] port: Int = 3000
 }
 #CLI
 struct ImportArgs {

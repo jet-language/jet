@@ -1170,7 +1170,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         type_args: &[Type],
         import_ns: Option<&str>,
-        fields: &mut [(String, Span, Expr)],
+        fields: &mut Vec<(String, Span, Expr)>,
         span: Span,
     ) -> Type {
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
@@ -1429,16 +1429,53 @@ impl<'a> Checker<'a> {
             .filter(|(n, _, _, _)| !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
-        if !missing.is_empty() && !is_patch_lit {
+        // D-FIELDDEF1=C: omitted fields with `=` defaults are filled in.
+        let defaults = if owner_mod == self.module_idx {
+            self.registry
+                .field_defaults(type_name)
+                .map(|d| d.clone())
+        } else {
+            self.modules
+                .and_then(|mods| mods.get(owner_mod))
+                .and_then(|m| m.registry.field_defaults(type_name))
+                .map(|d| d.clone())
+        };
+        let mut still_missing = Vec::new();
+        for name in missing {
+            let Some(expr) = defaults.as_ref().and_then(|d| d.get(&name)).cloned() else {
+                still_missing.push(name);
+                continue;
+            };
+            let name_span = def_fields
+                .iter()
+                .find(|(n, ..)| n == &name)
+                .map(|(_, sp, ..)| *sp)
+                .unwrap_or(span);
+            let mut filled = expr;
+            let field_def = def_fields.iter().find(|(n, ..)| n == &name);
+            let saved_expected = self.expected_type.clone();
+            if let Some((_, _, fty, _)) = field_def {
+                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                self.expected_type = Some(inst);
+            }
+            let et = self.infer(&mut filled);
+            self.expected_type = saved_expected;
+            if let (Some((_, _, fty, _)), Some(et)) = (field_def, et) {
+                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                self.check_type_assignable(&inst, &et, filled.span());
+            }
+            fields.push((name, name_span, filled));
+        }
+        if !still_missing.is_empty() && !is_patch_lit {
             self.diags.push(Diagnostic::error(
                 "E0303",
                 format!(
                     "struct literal for `{}` is missing fields: {}",
                     type_name,
-                    missing.join(", ")
+                    still_missing.join(", ")
                 ),
-                "every non-`ref` field must appear exactly once".to_string(),
-                format!("add: {}", missing.join(", ")),
+                "every field without an `=` default must appear exactly once".to_string(),
+                format!("add: {}", still_missing.join(", ")),
                 Some(span),
             ));
         }

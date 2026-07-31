@@ -3913,7 +3913,7 @@ pub(crate) fn lower_method_call(
                     args: vec![key_ty, value_ty],
                 },
                 kind: TExprKind::StaticCall {
-                    owner: host_owner("JetLru"),
+                    owner: host_owner("JetCache"),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
                     args: vec![TCallArg {

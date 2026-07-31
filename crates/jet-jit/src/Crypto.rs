@@ -498,6 +498,19 @@ extern "C" fn jet_jit_crypto_password_verify(password: i64, stored: i64) -> i64 
     }
 }
 
+extern "C" fn jet_jit_crypto_password_text(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::PasswordHash(hash) => Some(runtime::jet_crypto_password_text_impl(hash)),
+        _ => None,
+    }) {
+        Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid PasswordHash handle"));
+            0
+        }
+    }
+}
+
 extern "C" fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -> i64 {
     let source = path_string(source);
     let dest = path_string(dest);
@@ -508,6 +521,80 @@ extern "C" fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -
         return error("invalid file_open recipient".to_string());
     };
     match runtime::jet_crypto_file_open_impl(&recipient, &source, &dest, || false) {
+        Ok(()) => result(true, 0),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+extern "C" fn jet_jit_crypto_secret_from_bytes(bytes: i64) -> i64 {
+    push(CryptoValue::Secret(runtime::jet_crypto_secret_from_bytes_impl(
+        clone_bytes(bytes),
+    )))
+}
+
+extern "C" fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
+    let Some(secret) = with_crypto(ikm, |value| match value {
+        CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+        _ => None,
+    }) else {
+        return error("invalid hkdf ikm secret".to_string());
+    };
+    match runtime::jet_crypto_hkdf_typed_impl(
+        &secret,
+        &clone_bytes(salt),
+        &clone_bytes(info),
+        length,
+    ) {
+        Ok(out) => result(true, push(CryptoValue::Secret(out)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+extern "C" fn jet_jit_crypto_x25519_public_bytes_raw(secret: i64) -> i64 {
+    match runtime::jet_crypto_x25519_public_impl(&clone_bytes(secret)) {
+        Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+        Err(err) => error(err),
+    }
+}
+
+extern "C" fn jet_jit_crypto_x25519_shared(secret: i64, public: i64) -> i64 {
+    match runtime::jet_crypto_x25519_shared_impl(&clone_bytes(secret), &clone_bytes(public)) {
+        Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+        Err(err) => error(err),
+    }
+}
+
+extern "C" fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
+    let left = with_crypto(a, |value| match value {
+        CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+        _ => None,
+    });
+    let right = with_crypto(b, |value| match value {
+        CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+        _ => None,
+    });
+    match (left, right) {
+        (Some(a), Some(b)) => {
+            i64::from(runtime::jet_crypto_constant_time_secret_impl(&a, &b))
+        }
+        _ => 0,
+    }
+}
+
+extern "C" fn jet_jit_crypto_constant_time_equal_bytes(a: i64, b: i64) -> i64 {
+    i64::from(runtime::jet_crypto_constant_time_equal_bytes_impl(
+        &clone_bytes(a),
+        &clone_bytes(b),
+    ))
+}
+
+extern "C" fn jet_jit_crypto_file_seal(recipients: i64, source: i64, dest: i64) -> i64 {
+    let source = path_string(source);
+    let dest = path_string(dest);
+    let Some(keys) = public_keys(recipients) else {
+        return error("invalid file_seal recipients".to_string());
+    };
+    match runtime::jet_crypto_file_seal_impl(keys, &source, &dest, || false) {
         Ok(()) => result(true, 0),
         Err(err) => error(err.to_string()),
     }
@@ -1263,7 +1350,15 @@ pub(crate) struct CryptoHostFns {
     pub open: FuncId,
     pub password_hash: FuncId,
     pub password_verify: FuncId,
+    pub password_text: FuncId,
     pub file_open: FuncId,
+    pub secret_from_bytes: FuncId,
+    pub hkdf_sha256: FuncId,
+    pub x25519_public_from_bytes: FuncId,
+    pub x25519_shared: FuncId,
+    pub constant_time_equal: FuncId,
+    pub constant_time_equal_bytes: FuncId,
+    pub file_seal: FuncId,
     pub expert_aes256gcm_seal: FuncId,
     pub expert_aes256gcm_open: FuncId,
     pub expert_open_v1: FuncId,
@@ -1326,7 +1421,15 @@ pub(crate) fn register_crypto_symbols(builder: &mut JITBuilder) {
         ("jet_jit_crypto_open", jet_jit_crypto_open as *const u8),
         ("jet_jit_crypto_password_hash", jet_jit_crypto_password_hash as *const u8),
         ("jet_jit_crypto_password_verify", jet_jit_crypto_password_verify as *const u8),
+        ("jet_jit_crypto_password_text", jet_jit_crypto_password_text as *const u8),
         ("jet_jit_crypto_file_open", jet_jit_crypto_file_open as *const u8),
+        ("jet_jit_crypto_secret_from_bytes", jet_jit_crypto_secret_from_bytes as *const u8),
+        ("jet_jit_crypto_hkdf_sha256", jet_jit_crypto_hkdf_sha256 as *const u8),
+        ("jet_jit_crypto_x25519_public_from_bytes", jet_jit_crypto_x25519_public_bytes_raw as *const u8),
+        ("jet_jit_crypto_x25519_shared", jet_jit_crypto_x25519_shared as *const u8),
+        ("jet_jit_crypto_constant_time_equal", jet_jit_crypto_constant_time_equal as *const u8),
+        ("jet_jit_crypto_constant_time_equal_bytes", jet_jit_crypto_constant_time_equal_bytes as *const u8),
+        ("jet_jit_crypto_file_seal", jet_jit_crypto_file_seal as *const u8),
         ("jet_jit_crypto_expert_aes256gcm_seal", jet_jit_crypto_expert_aes256gcm_seal as *const u8),
         ("jet_jit_crypto_expert_aes256gcm_open", jet_jit_crypto_expert_aes256gcm_open as *const u8),
         ("jet_jit_crypto_expert_open_v1", jet_jit_crypto_expert_open_v1 as *const u8),
@@ -1413,7 +1516,15 @@ pub(crate) fn declare_crypto_host_fns(module: &mut JITModule) -> Result<CryptoHo
         open: import("jet_jit_crypto_open", &ternary)?,
         password_hash: import("jet_jit_crypto_password_hash", &unary)?,
         password_verify: import("jet_jit_crypto_password_verify", &binary)?,
+        password_text: import("jet_jit_crypto_password_text", &unary)?,
         file_open: import("jet_jit_crypto_file_open", &ternary)?,
+        secret_from_bytes: import("jet_jit_crypto_secret_from_bytes", &unary)?,
+        hkdf_sha256: import("jet_jit_crypto_hkdf_sha256", &quaternary)?,
+        x25519_public_from_bytes: import("jet_jit_crypto_x25519_public_from_bytes", &unary)?,
+        x25519_shared: import("jet_jit_crypto_x25519_shared", &binary)?,
+        constant_time_equal: import("jet_jit_crypto_constant_time_equal", &binary)?,
+        constant_time_equal_bytes: import("jet_jit_crypto_constant_time_equal_bytes", &binary)?,
+        file_seal: import("jet_jit_crypto_file_seal", &ternary)?,
         expert_aes256gcm_seal: import("jet_jit_crypto_expert_aes256gcm_seal", &quaternary)?,
         expert_aes256gcm_open: import("jet_jit_crypto_expert_aes256gcm_open", &quaternary)?,
         expert_open_v1: import("jet_jit_crypto_expert_open_v1", &binary)?,

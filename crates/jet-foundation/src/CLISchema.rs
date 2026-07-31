@@ -2,7 +2,7 @@
 //! inspection. The entry parameter type remains source truth; consumers never
 //! reconstruct shell names, requiredness, defaults, or help independently.
 
-use crate::AST::{CtValue, Expr, Item, Marker, ProgramBundle, StrPart, StructDef, Type, VariantPayload};
+use crate::AST::{CtValue, Expr, Field, Item, Marker, ProgramBundle, StrPart, StructDef, Type, VariantPayload};
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
@@ -783,10 +783,10 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
                     kind: scalar_kind(ty)
                         .expect("sema permits only scalar fields on a CLI struct"),
                     optional: false,
-                    default: field_default(&field.serde_markers),
+                    default: field_default(field),
                 },
             };
-            // D-CLI-POS1=A: required value fields (no Default) fill positionally
+            // D-CLI-POS1=A: required value fields (no default) fill positionally
             // unless #[Flag] opts them out. Bool / optional / defaulted stay flags.
             let positional = match &shape {
                 CLIInputShape::Value {
@@ -845,8 +845,14 @@ fn marker_string(marker: &Marker) -> Option<String> {
     }
 }
 
-fn field_default(markers: &[Marker]) -> Option<CLIDefault> {
-    let marker = marker(markers, Syntax::ATTR_DEFAULT)?;
+fn field_default(field: &Field) -> Option<CLIDefault> {
+    if let Some(value) = &field.default_ct {
+        return Some(CLIDefault::Value(value.clone()));
+    }
+    if field.default.is_some() {
+        return Some(CLIDefault::TypeDefault);
+    }
+    let marker = marker(&field.serde_markers, Syntax::ATTR_DEFAULT)?;
     Some(match (&marker.args[..], &marker.ct) {
         ([_, ..], Some(value)) => CLIDefault::Value(value.clone()),
         _ => CLIDefault::TypeDefault,

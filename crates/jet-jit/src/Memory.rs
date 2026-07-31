@@ -2,7 +2,8 @@
 
 use super::Concurrency;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering, compiler_fence};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 static SHARED_TRANSACTION_SERIAL: Mutex<()> = Mutex::new(());
 
@@ -63,6 +64,36 @@ pub(crate) struct PoolState {
 pub(crate) struct SharedState {
     locked: AtomicBool,
     value: AtomicI64,
+}
+
+pub(crate) struct ConditionState {
+    lock: Mutex<()>,
+    wake: Condvar,
+}
+
+impl ConditionState {
+    fn new() -> Self {
+        Self {
+            lock: Mutex::new(()),
+            wake: Condvar::new(),
+        }
+    }
+
+    fn notify_one(&self) {
+        self.wake.notify_one();
+    }
+
+    fn notify_all(&self) {
+        self.wake.notify_all();
+    }
+
+    fn wait_once(&self) {
+        let guard = self.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = self
+            .wake
+            .wait_timeout(guard, Duration::from_millis(10))
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
 }
 
 pub(crate) struct ExpiringState {
@@ -138,6 +169,27 @@ fn pool(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<Mutex<PoolState>>> {
 
 fn shared(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<SharedState>> {
     rt.shareds.get((handle as usize).wrapping_sub(1)).cloned()
+}
+
+fn condition(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<ConditionState>> {
+    rt.conditions.get((handle as usize).wrapping_sub(1)).cloned()
+}
+
+const GUARD_SHARED: i64 = 0;
+const GUARD_VALUE: i64 = 1;
+const GUARD_EDITABLE: i64 = 2;
+
+fn guard_shared_handle(rt: &crate::JitRuntime, guard: i64) -> Option<i64> {
+    let handle = rt.heap.record_get_int(guard, GUARD_SHARED)?;
+    (handle != 0).then_some(handle)
+}
+
+fn pack_shared_guard(rt: &mut crate::JitRuntime, shared_handle: i64, value: i64, editable: i64) -> i64 {
+    let guard = rt.heap.alloc_record(3);
+    let _ = rt.heap.record_set_int(guard, GUARD_SHARED, shared_handle);
+    let _ = rt.heap.record_set_int(guard, GUARD_VALUE, value);
+    let _ = rt.heap.record_set_int(guard, GUARD_EDITABLE, editable);
+    guard
 }
 
 fn pack_id(index: usize, generation: u32) -> i64 {
@@ -296,6 +348,96 @@ extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
         shared.value.store(value, Ordering::Relaxed);
         shared.unlock();
     }
+}
+
+extern "C" fn jet_jit_condition_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.conditions.push(Arc::new(ConditionState::new()));
+        rt.conditions.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_condition_notify_one(handle: i64) {
+    if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
+        condition.notify_one();
+    }
+}
+
+extern "C" fn jet_jit_condition_notify_all(handle: i64) {
+    if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
+        condition.notify_all();
+    }
+}
+
+extern "C" fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    shared.lock();
+    let value = shared.value.load(Ordering::Relaxed);
+    Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, handle, value, i64::from(editable != 0)))
+}
+
+extern "C" fn jet_jit_shared_guard_value(guard: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(guard, GUARD_VALUE).unwrap_or(0))
+}
+
+extern "C" fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_int(guard, GUARD_VALUE, value);
+        let Some(shared_handle) = guard_shared_handle(rt, guard) else {
+            return;
+        };
+        if rt.heap.record_get_int(guard, GUARD_EDITABLE).unwrap_or(0) == 0 {
+            return;
+        };
+        if let Some(shared) = shared(rt, shared_handle) {
+            shared.value.store(value, Ordering::Relaxed);
+        }
+    });
+}
+
+extern "C" fn jet_jit_shared_guard_end(guard: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(shared_handle) = guard_shared_handle(rt, guard) else {
+            return;
+        };
+        let value = rt.heap.record_get_int(guard, GUARD_VALUE).unwrap_or(0);
+        let editable = rt.heap.record_get_int(guard, GUARD_EDITABLE).unwrap_or(0) != 0;
+        let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
+        if let Some(shared) = shared(rt, shared_handle) {
+            if editable {
+                shared.value.store(value, Ordering::Relaxed);
+            }
+            shared.unlock();
+        }
+    });
+}
+
+extern "C" fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) {
+    let Some((shared_handle, condition)) = Concurrency::with_runtime_mut(|rt| {
+        let shared_handle = guard_shared_handle(rt, guard)?;
+        let condition = condition(rt, condition_handle)?;
+        Some((shared_handle, condition))
+    }) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedGuard wait on an invalid or released guard");
+        });
+        return;
+    };
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, shared_handle)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedGuard wait: shared handle is closed or invalid");
+        });
+        return;
+    };
+    shared.unlock();
+    condition.wait_once();
+    shared.lock();
+    let fresh = shared.value.load(Ordering::Relaxed);
+    Concurrency::with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_int(guard, GUARD_VALUE, fresh);
+    });
 }
 
 extern "C" fn jet_jit_shared_txn_begin() {
@@ -487,6 +629,14 @@ pub(crate) struct MemoryHostFns {
     pub shared_begin: cranelift_module::FuncId,
     pub shared_end_read: cranelift_module::FuncId,
     pub shared_end_write: cranelift_module::FuncId,
+    pub condition_new: cranelift_module::FuncId,
+    pub condition_notify_one: cranelift_module::FuncId,
+    pub condition_notify_all: cranelift_module::FuncId,
+    pub shared_guard_begin: cranelift_module::FuncId,
+    pub shared_guard_value: cranelift_module::FuncId,
+    pub shared_guard_set_value: cranelift_module::FuncId,
+    pub shared_guard_end: cranelift_module::FuncId,
+    pub shared_guard_wait_once: cranelift_module::FuncId,
     pub shared_txn_begin: cranelift_module::FuncId,
     pub shared_txn_get: cranelift_module::FuncId,
     pub shared_txn_set: cranelift_module::FuncId,
@@ -521,6 +671,35 @@ pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol(
         "jet_jit_shared_end_write",
         jet_jit_shared_end_write as *const u8,
+    );
+    builder.symbol("jet_jit_condition_new", jet_jit_condition_new as *const u8);
+    builder.symbol(
+        "jet_jit_condition_notify_one",
+        jet_jit_condition_notify_one as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_condition_notify_all",
+        jet_jit_condition_notify_all as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_guard_begin",
+        jet_jit_shared_guard_begin as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_guard_value",
+        jet_jit_shared_guard_value as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_guard_set_value",
+        jet_jit_shared_guard_set_value as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_guard_end",
+        jet_jit_shared_guard_end as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_guard_wait_once",
+        jet_jit_shared_guard_wait_once as *const u8,
     );
     builder.symbol("jet_jit_shared_txn_begin", jet_jit_shared_txn_begin as *const u8);
     builder.symbol("jet_jit_shared_txn_get", jet_jit_shared_txn_get as *const u8);
@@ -587,6 +766,14 @@ pub(crate) fn declare_memory_host_fns(
         shared_begin: import("jet_jit_shared_begin", &unary)?,
         shared_end_read: import("jet_jit_shared_end_read", &unary_void)?,
         shared_end_write: import("jet_jit_shared_end_write", &binary_void)?,
+        condition_new: import("jet_jit_condition_new", &noarg_i64)?,
+        condition_notify_one: import("jet_jit_condition_notify_one", &unary_void)?,
+        condition_notify_all: import("jet_jit_condition_notify_all", &unary_void)?,
+        shared_guard_begin: import("jet_jit_shared_guard_begin", &binary)?,
+        shared_guard_value: import("jet_jit_shared_guard_value", &unary)?,
+        shared_guard_set_value: import("jet_jit_shared_guard_set_value", &binary_void)?,
+        shared_guard_end: import("jet_jit_shared_guard_end", &unary_void)?,
+        shared_guard_wait_once: import("jet_jit_shared_guard_wait_once", &binary_void)?,
         shared_txn_begin: import("jet_jit_shared_txn_begin", &Signature::new(cc))?,
         shared_txn_get: import("jet_jit_shared_txn_get", &unary)?,
         shared_txn_set: import("jet_jit_shared_txn_set", &binary_void)?,

@@ -1,7 +1,7 @@
-Error [E2414]: `#[Default(...)]` on `n` must be a compile-time constant
-  --> tests/ui/serde_default_not_const.jet:11:5
+Error [E2414]: `n`'s `=` default must be a compile-time constant
+  --> tests/ui/serde_default_not_const.jet:11:14
     |
- 11 |     #Default(live()) n: Int
-    |     ^^^^^^^^^^^^^^^^
+ 11 |     n: Int = live()
+    |              ^^^^
  Why: a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime
- Fix: use a literal or a `comptime`-evaluable expression — e.g. `#[Default(8080)]`, `#[Default(Color.Red)]`, or `#[Default([1, 2])]`
+ Fix: use a literal or a `comptime`-evaluable expression — e.g. `port: Int = 8080` or `ports: [Int] = [80, 443]`

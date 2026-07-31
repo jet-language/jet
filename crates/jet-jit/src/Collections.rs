@@ -497,6 +497,49 @@ extern "C" fn jet_jit_map_clone(map: i64) -> i64 {
     })
 }
 
+/// D-MAP-MERGE1=E: clone `left`, then overwrite/insert every entry from `right`
+/// (right wins on shared keys).
+extern "C" fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let out = {
+            let len = rt
+                .heap
+                .map_len(left)
+                .expect("jit map merge: bad left handle");
+            let out = rt.heap.alloc_empty_map();
+            for i in 0..len {
+                let key = rt.heap.map_key_at(left, i).expect("jit map merge: left key");
+                let value = rt
+                    .heap
+                    .map_value_at(left, i)
+                    .expect("jit map merge: left value");
+                rt.heap
+                    .map_insert(out, key, value)
+                    .expect("jit map merge: left insert");
+            }
+            out
+        };
+        let len = rt
+            .heap
+            .map_len(right)
+            .expect("jit map merge: bad right handle");
+        for i in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(right, i)
+                .expect("jit map merge: right key");
+            let value = rt
+                .heap
+                .map_value_at(right, i)
+                .expect("jit map merge: right value");
+            rt.heap
+                .map_insert(out, key, value)
+                .expect("jit map merge: right insert");
+        }
+        out
+    })
+}
+
 extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -540,7 +583,7 @@ extern "C" fn jet_jit_map_validate(map: i64) -> i64 {
     })
 }
 
-/// `0` = absent; otherwise `value + 1` (Option Int encoding).
+/// Result-arena Option handle (`result_is_ok` / `result_get_i64`).
 extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.map_len(map).is_none() {
@@ -1681,6 +1724,7 @@ pub(crate) struct CollectionsHostFns {
     pub loop_stride_check: cranelift_module::FuncId,
     pub map_new: cranelift_module::FuncId,
     pub map_clone: cranelift_module::FuncId,
+    pub map_merge: cranelift_module::FuncId,
     pub map_insert: cranelift_module::FuncId,
     pub map_increment: cranelift_module::FuncId,
     pub map_get: cranelift_module::FuncId,
@@ -1812,6 +1856,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
     builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
     builder.symbol("jet_jit_map_clone", jet_jit_map_clone as *const u8);
+    builder.symbol("jet_jit_map_merge", jet_jit_map_merge as *const u8);
     builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
     builder.symbol("jet_jit_map_increment", jet_jit_map_increment as *const u8);
     builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
@@ -2062,6 +2107,7 @@ pub(crate) fn declare_collections_host_fns(
         loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
         map_new: import("jet_jit_map_new", &sig_new)?,
         map_clone: import("jet_jit_map_clone", &sig_len)?,
+        map_merge: import("jet_jit_map_merge", &sig_get_opt)?,
         map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
         map_increment: import("jet_jit_map_increment", &sig_push)?,
         map_get: import("jet_jit_map_get", &sig_map_get)?,

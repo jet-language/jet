@@ -46,6 +46,8 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
                 serde_markers: Vec::new(),
                 redact: false,
                 computed: None,
+                default: None,
+            default_ct: None,
             })
             .collect();
         to_add.push(Item::Struct(StructDef {

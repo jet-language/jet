@@ -1,0 +1,17 @@
+// D-MAP-MERGE1=E: Map.merge - right wins by default; optional conflict callback.
+fn run() {
+    defaults := [String: Int].{ "a": 1, "b": 2 }
+    user := [String: Int].{ "b": 9, "c": 3 }
+    merged := defaults.merge(user)
+    print(merged.get("a") ?? 0)
+    print(merged.get("b") ?? 0)
+    print(merged.get("c") ?? 0)
+
+    left := [String: Int].{ "x": 10, "y": 1 }
+    right := [String: Int].{ "x": 4, "z": 7 }
+    // conflict callback: (key, left_value, right_value) => V
+    summed := left.merge(right, conflict: (key: String, a: Int, b: Int) => a + b)
+    print(summed.get("x") ?? 0)
+    print(summed.get("y") ?? 0)
+    print(summed.get("z") ?? 0)
+}

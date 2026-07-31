@@ -130,7 +130,7 @@ const DEQUE_DECLS: &str = r#"fn deque_view() => String {
 }"#;
 const DEQUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
 const LRU_DECLS: &str = r#"fn lru_view() => String {
-    cache := Lru.new(2)
+    cache := Cache.new(2)
     empty_before :: cache.is_empty()
     first :: cache.add("a", 1) ?? -1
     added_b :: cache.add_new("b", 2)
@@ -143,7 +143,7 @@ const LRU_DECLS: &str = r#"fn lru_view() => String {
     missing :: cache.remove("missing") ?? -1
     length :: cache.len()
     cache.clear()
-    zero := Lru.new(-2)
+    zero := Cache.new(-2)
     zero_add :: zero.add("x", 7) ?? -1
     zero_add_new :: zero.add_new("x", 7)
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"

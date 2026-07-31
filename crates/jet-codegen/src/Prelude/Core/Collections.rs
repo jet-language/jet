@@ -1,11 +1,11 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 #[derive(Clone)]
-struct JetLru<K, V> {
+struct JetCache<K, V> {
     cap: usize,
     entries: Vec<(K, V)>,
 }
 
-impl<K: Eq + Clone, V: Clone> JetLru<K, V> {
+impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn new(capacity: i64) -> Self {
         Self {
             cap: capacity.max(0) as usize,
@@ -65,7 +65,7 @@ impl<K: Eq + Clone, V: Clone> JetLru<K, V> {
     }
 }
 
-impl<K: JetShow, V: JetShow> JetShow for JetLru<K, V> {
+impl<K: JetShow, V: JetShow> JetShow for JetCache<K, V> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self
             .entries
@@ -75,7 +75,7 @@ impl<K: JetShow, V: JetShow> JetShow for JetLru<K, V> {
         format!("[:{}]", parts.join(", "))
     }
 }
-impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetLru<K, V> {
+impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetCache<K, V> {
     fn jet_display(&self) -> String {
         let parts: Vec<String> = self
             .entries
@@ -85,7 +85,7 @@ impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetLru<K, V> {
         format!("[:{}]", parts.join(", "))
     }
 }
-impl<K: JetDebug, V: JetDebug> JetDebug for JetLru<K, V> {
+impl<K: JetDebug, V: JetDebug> JetDebug for JetCache<K, V> {
     fn jet_debug(&self) -> String {
         let parts: Vec<String> = self
             .entries

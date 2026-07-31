@@ -180,7 +180,7 @@ pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<
     Some(match path {
         "JetBitSet" => Ok(bitset_struct(Vec::new())),
         "JetByteBuffer" => Ok(byte_buffer_struct(Vec::new())),
-        "JetLru" => {
+        "JetCache" => {
             let capacity = match args.into_iter().next() {
                 Some(v) => match as_int(&v, span) {
                     Ok(n) => n.max(0),
@@ -274,7 +274,7 @@ pub fn apply_mutating(
             | ("PriorityQueue", "push" | "pop" | "clear")
             | ("BitSet", "add" | "remove" | "clear")
             | ("Deque", "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
-            | ("Lru", "add" | "add_new" | "get" | "remove" | "clear")
+            | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
             | (
                 "ByteBuffer",
                 "clear"
@@ -311,7 +311,7 @@ pub fn apply_mutating(
         "PriorityQueue" => priority_queue_mutating(recv, fields, method, &args, span),
         "BitSet" => bitset_mutating(recv, fields, method, &args, span),
         "Deque" => deque_mutating(recv, fields, method, &args, span),
-        "Lru" => lru_mutating(recv, fields, method, &args, span),
+        "Cache" => lru_mutating(recv, fields, method, &args, span),
         "ByteBuffer" => byte_buffer_mutating(recv, fields, method, &args, span),
         _ => return None,
     };
@@ -736,7 +736,7 @@ fn lru_method(
                 .collect(),
         )),
         _ => Err(unsupported(
-            &format!("Lru.{} at compile time", method),
+            &format!("Cache.{} at compile time", method),
             span,
         )),
     }
@@ -779,7 +779,7 @@ fn lru_mutating(
             } else {
                 let displaced = key_position(&entries, &key).map(|index| {
                     let CtValue::List(pair) = entries.remove(index) else {
-                        unreachable!("Lru entries are pairs")
+                        unreachable!("Cache entries are pairs")
                     };
                     pair[1].clone()
                 });
@@ -794,7 +794,7 @@ fn lru_mutating(
             Some(index) => {
                 let entry = entries.remove(index);
                 let CtValue::List(pair) = &entry else {
-                    unreachable!("Lru entries are pairs")
+                    unreachable!("Cache entries are pairs")
                 };
                 let value = pair[1].clone();
                 entries.insert(0, entry);
@@ -805,7 +805,7 @@ fn lru_mutating(
         "remove" => match key_position(&entries, &key) {
             Some(index) => {
                 let CtValue::List(pair) = entries.remove(index) else {
-                    unreachable!("Lru entries are pairs")
+                    unreachable!("Cache entries are pairs")
                 };
                 CtValue::Some(Box::new(pair[1].clone()))
             }
@@ -813,7 +813,7 @@ fn lru_mutating(
         },
         _ => {
             return Err(unsupported(
-                &format!("Lru.{} at compile time", method),
+                &format!("Cache.{} at compile time", method),
                 span,
             ))
         }

@@ -402,6 +402,9 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
         ("probe", 3) => build_result(Syntax::TYPE_BUILD_PROBE),
         ("error", 5) => Some(None),
         ("plan", 0 | 1) => build_result(Syntax::TYPE_BUILD_PLAN),
+        // D-BUILDCTX-FLAGS1=A
+        ("default_profile", 1) => Some(None),
+        ("default_allow", 1) => Some(None),
         _ => None,
     }
 }
@@ -610,9 +613,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("join", 1) => Some(Some(Type::String)),
         ("sum" | "product", 0) => Some(Some(inner.clone())),
         ("min" | "max", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
-        // D-ITERTOOLS1=A: adapters return lazy `Iter` views; sema refines `map` elem.
-        ("map", 1) => Some(Some(iter_ty(Type::Int))), // placeholder; sema refines
-        ("filter", 1) => Some(Some(iter_ty(inner.clone()))),
+        // D-LOOPMAP1=B: in-memory List adapters return collections; `.lazy()` opts into Iter.
+        ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // placeholder; sema refines
+        ("filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("lazy", 0) => Some(Some(iter_ty(inner.clone()))),
         ("each", 1) => Some(None),
         ("find", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("any" | "all", 1) => Some(Some(Type::Bool)),
@@ -830,6 +834,12 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("has_key", 1) => Some(Some(Type::Bool)),
         ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
         ("values", 0) => Some(Some(Type::List(Box::new(value.clone())))),
+        // D-MAP-MERGE1=E: merge(other) / merge(other, conflict) → same map type.
+        ("merge", 1 | 2) => Some(Some(Type::Map {
+            key: Box::new(key.clone()),
+            key_span: None,
+            value: Box::new(value.clone()),
+        })),
         ("each", 1) => Some(None),
         _ => None,
     }
@@ -1329,7 +1339,7 @@ fn priority_queue_method_return(elem: &Type, method: &str, nargs: usize) -> Opti
     }
 }
 
-/// D-ITERTOOLS1=A: `Lru<K,V>` bounded cache methods.
+/// D-ITERTOOLS1=A: `Cache<K,V>` bounded cache methods.
 fn lru_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len" | "capacity", 0) => Some(Some(Type::Int)),
@@ -1685,6 +1695,12 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Map { key, value, .. } => match method {
             "add" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "has_key" => Some(vec![(**key).clone()]),
+            // D-MAP-MERGE1=E: other map; optional conflict (K, V, V) => V.
+            "merge" => Some(vec![Type::Map {
+                key: Box::new((**key).clone()),
+                key_span: None,
+                value: Box::new((**value).clone()),
+            }]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: None,

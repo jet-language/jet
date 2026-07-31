@@ -386,17 +386,75 @@ pub(crate) fn resolve_static_rule_products(
         validated.insert(marker.name_span.start, arguments);
     }
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
-    for item in &module.items {
+    // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T = expr`.
+    for item in &mut module.items {
         let Item::Struct(item) = item else { continue };
-        for field in &item.fields {
-            for marker in &field.serde_markers {
-                if marker.name == Syntax::ATTR_DEFAULT
-                    && !marker.args.is_empty()
-                    && marker.ct.is_none()
-                    && validated.contains_key(&marker.name_span.start)
-                {
-                    diags.push(crate::Sema::e2414(&field.name, marker.span));
+        for field in &mut item.fields {
+            if let Some(idx) = field
+                .serde_markers
+                .iter()
+                .position(|m| m.name == Syntax::ATTR_DEFAULT)
+            {
+                let marker = field.serde_markers.remove(idx);
+                if field.default.is_none() {
+                    if let Some(arg) = marker.args.first() {
+                        field.default = Some(Box::new(arg.clone()));
+                    }
                 }
+                if field.default_ct.is_none() {
+                    field.default_ct = marker.ct.clone();
+                }
+                diags.push(Diagnostic::error(
+                    "E0375",
+                    format!(
+                        "`#{}` on field `{}` is retired — write an `=` default on the field",
+                        Syntax::ATTR_DEFAULT,
+                        field.name
+                    ),
+                    "field defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1)"
+                        .to_string(),
+                    format!(
+                        "write `{}: … = …` instead of `#{}(…)`",
+                        field.name,
+                        Syntax::ATTR_DEFAULT
+                    ),
+                    Some(marker.span),
+                ));
+            }
+        }
+    }
+    // Evaluate `field: T = expr` defaults to compile-time values (D-SERDE5).
+    for item in &mut module.items {
+        let Item::Struct(item) = item else { continue };
+        let needs_baked_default = item.derives.iter().any(|(t, _)| {
+            matches!(
+                t.as_str(),
+                "Codable" | "Decode" | "Encode" | Syntax::CONTRACT_CLI
+            )
+        });
+        for field in &mut item.fields {
+            let Some(expr) = field.default.clone() else {
+                continue;
+            };
+            if field.default_ct.is_some() {
+                continue;
+            }
+            let mut expr = (*expr).clone();
+            match crate::Comptime::evaluate_with_imports_opts_collecting(
+                &mut expr,
+                &funcs,
+                &externs,
+                base_dir,
+                &globals,
+                core_imports,
+                false,
+                0,
+            ) {
+                Ok((value, _)) => field.default_ct = Some(value),
+                Err(_) if needs_baked_default => {
+                    diags.push(crate::Sema::e2414(&field.name, expr.span()));
+                }
+                Err(_) => {}
             }
         }
     }

@@ -854,7 +854,7 @@ shortening generic spellings only — not primitive/unit newtypes (use
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
 are dead. Named specific collection spellings stay named rather than short
 bracket forms; shipped today: `Set<T>`, `SortedSet<T>`, `Deque<T>`,
-`PriorityQueue<T>`, `Lru<K,V>`, `Bag<T>`, `BitSet`, and `ByteBuffer`.
+`PriorityQueue<T>`, `Cache<K,V>`, `Bag<T>`, `BitSet`, and `ByteBuffer`.
 `HashMap<K,V>` and `BTreeMap<K,V>` are reserved names for specialized map
 implementations.
 
@@ -923,7 +923,7 @@ driving a consumed `Iter` twice is use-after-move (E0121).
 there is no public `enumerate` adapter.
 
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
-`SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Lru<K,V>`,
+`SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
 `DataTree` is the single dynamic value
@@ -1352,6 +1352,12 @@ teaches `{value#Debug}` because `@` belongs to the location/address/source plane
 places through `core.fmt.decimal`. It uses the existing `#` selector rail.
 Unknown selectors report E0914 with the valid set. No `#Percent` sibling is
 defined.
+
+**D-FMT-INTERP2=A — Interpolation debug-label shorthand** *(ratified
+2026-07-31, card #1351)*: trailing `=` in an interpolation hole prints the
+expression's own source text, then ` = `, then the value. Example:
+`print("{count=}")` → `count = 3`. The label cannot drift from the expression.
+Composes with the `#` selector rail: `{count=#Debug}`. Empty `{=}` is an error.
 
 **D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
 card #1268)*: `print` and bare interpolation show a quantity's magnitude and
@@ -2166,10 +2172,10 @@ terminator is suppressed when the next non-blank line starts with `.` (chain)
 or a binary/logical operator. Loop header clauses use commas; the retired
 semicolon spelling is E0373. New terminal tokens must be added to `ends_statement`.
 
-**S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2, D-BRACE1=A)*: one style, zero
+**S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2, D-BRACE1=A, D-FMTCOLLAPSE1=B)*: one style, zero
 config — 4-space indent, same-line `{`, width 100, spaced binary operators.
-Every fitting, comment-free single-simple-statement control body collapses to
-one line regardless of authored layout; author grouping parens are preserved even when
+Every fitting, comment-free braced block collapses to one line (controls, arms,
+function bodies, marker regions) regardless of authored layout; author grouping parens are preserved even when
 redundant; call-site labels never added/stripped; dot-chain breaks preserved
 (**S69** — break before `.`, optional trailing comment per step). Idempotent,
 not AST-canonical. **Every new syntax needs formatter emission + a fmt
@@ -3024,7 +3030,7 @@ aliases or whole-buffer facades.
 
 **D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.
 
-**D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`SortedSet`/`BitSet` `contains` respells to `has(value)`, map/`Lru` `contains_key` respells to `has_key(key)`, `Bag.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
+**D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`SortedSet`/`BitSet` `contains` respells to `has(value)`, map/`Cache` `contains_key` respells to `has_key(key)`, `Bag.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
 
 **D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
@@ -3065,7 +3071,23 @@ alias, or priority rule.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
-**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Lru`/D-COLLBREADTH1 method lists.
+**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Cache`/D-COLLBREADTH1 method lists.
+
+**D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
+
+**D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: ((K, V, V) => V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
+
+**D-FIELDDEF1=C — field defaults use `=`** *(ratified 2026-07-31, card #1367)*: `field: T = expr` covers wire/CLI absence and omitted `Type.{ … }` construction fields (same spelling as parameter defaults, S61). `#Default(expr)` is retired (E0375); defaults must be compile-time constants (E2414). Required fields are those without `=`.
+
+**D-FMTCOLLAPSE1=B — collapse every fitting braced block** *(ratified 2026-07-31, card #1368)*: any `{ … }` whose contents fit the width budget becomes one line — control bodies, arms, function bodies, and marker regions. Comments or over-width contents stay multiline. Amends S44 / #1335.
+
+**D-LOOPMAP1=B — eager in-memory adapters; `.lazy()` for pipelines** *(ratified 2026-07-31, card #1325)*: `List`/`Set`/`Map` `.map`/`.filter` return collections. Opt into the lazy Iter plane with `.lazy()` before chaining adapters that should not build middle lists. Iterator sources (files, channels, string split) stay lazy.
+
+**D-LOOP-HEADER3=D — one three-slot header meaning** *(ratified 2026-07-31, card #1325)*: slots are binding; source; step rule. Int strides and range+step-rule share that dialect. The C-style counter form retires with a teaching diagnostic.
+
+**D-LOOPLABEL4=A — binding-as-label stays** *(ratified 2026-07-31, card #1325)*: labeled loops keep binding-as-label for both value and effect loops.
+
+**D-TASK-PAUSE-TIER1=E — wait-point pause; optional strong mode** *(ratified 2026-07-31, card #1359)*: default pause is cooperative wait-points on every engine. Experts may pass `mode: .CheckLoops` for strong pause. Trace `paused=`/`cancel=` text comes from one Prelude formatter (`jet_task_control_trace`).
 
 **D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (the DecodeError path shape). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `#Pre`/`#Post` stay call-site contracts, outside the validation story.
 

@@ -1273,7 +1273,7 @@ fn fmt_keeps_cli_doc_and_default_field_markers() {
     let src = "\
 #CLI
 struct ServeArgs {
-    #[Doc(\"port to listen on\"), Default(3000)] port: Int
+    #[Doc(\"port to listen on\")] port: Int = 3000
     #Doc(\"print extra detail\") verbose: Bool
 }
 
@@ -1284,8 +1284,8 @@ fn run(args: ServeArgs) {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Doc(\"port to listen on\"), Default(3000)]", "#CLI"],
-        "cli #Doc + #Default field markers",
+        &["#[Doc(\"port to listen on\")]", "port: Int = 3000", "#CLI"],
+        "cli #Doc + field = default",
     );
     assert_fmt_stable(src, "cli doc/default field markers");
 }

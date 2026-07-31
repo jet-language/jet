@@ -371,7 +371,7 @@ fn jit_compound_type(ty: &Type) -> bool {
                             | "ExpiringSecret"
                             | "SortedSet"
                             | "PriorityQueue"
-                            | "Lru"
+                            | "Cache"
                             | "Ptr"
                     ) || (name == "Bag" && jit_bag_raw_key_candidate(&args[0])))
         )
@@ -716,7 +716,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {
-            TCoreClosureKind::Spawn { .. } => true,
+            TCoreClosureKind::Spawn { .. } | TCoreClosureKind::SpawnGroup { .. } => true,
             TCoreClosureKind::ReactiveDerived { executable, .. }
             | TCoreClosureKind::ReactiveEffect { executable, .. }
             | TCoreClosureKind::UiReactiveRender { executable, .. } => {
@@ -1258,7 +1258,11 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         (method.as_str(), args.len()),
                         ("get", 0) | ("set" | "read" | "edit", 1)
                     ),
-                    // A Shared lock lease never enters the resident JIT.
+                    Type::Shared(_) => matches!(
+                        (method.as_str(), args.len()),
+                        ("guard_read" | "guard_edit", 0)
+                            | ("read" | "edit" | "edit_txn", 1)
+                    ),
                     _ => !matches!(method.as_str(), "guard_read" | "guard_edit"),
                 };
                 let cell_value_supported = match &recv.ty {
@@ -1365,6 +1369,24 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ExternCall { args, .. } => {
             args.iter().all(|a| resident_safe_expr(&a.value, callees))
         }
+        TExprKind::SharedGuardValue { guard, .. }
+        | TExprKind::SharedGuardMap { guard, .. } => resident_safe_expr(guard, callees),
+        TExprKind::SharedGuardSplit { guard, .. } => resident_safe_expr(guard, callees),
+        TExprKind::SharedGuardWait {
+            guard,
+            condition,
+            predicate,
+        } => {
+            resident_safe_expr(guard, callees)
+                && resident_safe_expr(condition, callees)
+                && match &predicate.executable {
+                    TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
+                    TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
+                }
+        }
+        TExprKind::ConditionNotify { condition, .. } => resident_safe_expr(condition, callees),
 
         _ => false,
     }
@@ -1742,6 +1764,19 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
+        TBuiltinOp::MapMerge => {
+            jit_map_resident_type(&recv.ty)
+                && args.len() == 1
+                && jit_map_resident_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::MapMergeWith => {
+            jit_map_resident_type(&recv.ty)
+                && args.len() == 2
+                && jit_map_resident_type(&args[0].ty)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
+        }
         TBuiltinOp::JoinSep => {
             (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
                 && args.len() == 1
@@ -1765,7 +1800,11 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
-        TBuiltinOp::Lines => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Lines => {
+            (matches!(&recv.ty, Type::String)
+                || matches!(&recv.ty, Type::Named(n) if n == "FileReader"))
+                && args.is_empty()
+        }
         TBuiltinOp::Split => {
             matches!(&recv.ty, Type::String)
                 && args.len() == 1
@@ -1780,9 +1819,10 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         // JIT ABI: Iter producers already materialize list handles.
-        TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+        TBuiltinOp::IterToList | TBuiltinOp::IterCollect | TBuiltinOp::ListLazy => {
             (jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_closure_elem_type(&recv.ty).is_some())
+                || jit_closure_elem_type(&recv.ty).is_some()
+                || jit_list_native_type(&recv.ty))
                 && args.is_empty()
         }
         TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
@@ -1906,7 +1946,9 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::BitSetToList
         | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
         TBuiltinOp::First | TBuiltinOp::Last => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
+            (matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
+                || matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
+                || jit_list_native_type(&recv.ty))
                 && args.is_empty()
         }
         TBuiltinOp::Pop => {
@@ -1916,12 +1958,12 @@ fn resident_safe_builtin_op(
                 && args.is_empty()
         }
         TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "Lru")
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache")
                 && args.len() == 2
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TBuiltinOp::LruGet | TBuiltinOp::ContainsKey => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "Lru")
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
@@ -2372,10 +2414,14 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
-            // `by_value` marks Stream/Iter/HTTPBodyChunks. Only Iter<T> is list-
-            // backed under the JIT host ABI (true lazy handles don't cross).
+            // `by_value` marks Stream/Iter/HTTPBodyChunks/moved lists. List and
+            // FixedList materialize as handles; true lazy Stream stays out.
             let by_value_ok = !*by_value
                 || jet_foundation::Collections::is_iter_type(&collection.ty)
+                || matches!(
+                    &collection.ty,
+                    Type::List(_) | Type::FixedList { .. }
+                )
                 || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
             (chars_ok || iterable_ok || stream_ok || list_ok || list_pair_ok || map_ok)
                 && !columnar
@@ -3209,8 +3255,10 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
             let cond_ok = match cond {
                 TIfCond::Plain(e) => match &e.kind {
                     TExprKind::BuiltinMethod { op, recv, args }
-                        if matches!(op, TBuiltinOp::Contains)
-                            && args.len() == 1
+                        if matches!(
+                            op,
+                            TBuiltinOp::Contains | TBuiltinOp::StartsWith | TBuiltinOp::EndsWith
+                        ) && args.len() == 1
                             && matches!(&recv.kind, TExprKind::Local(_))
                             && matches!(&args[0].ty, Type::String)
                             && resident_safe_expr(&args[0], callees) =>

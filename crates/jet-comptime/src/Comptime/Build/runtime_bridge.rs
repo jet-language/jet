@@ -298,6 +298,64 @@ fn eval_session_method(
                 default,
             ))));
         }
+        // D-BUILDCTX-FLAGS1=A
+        "default_profile" => {
+            let profile = match args.first() {
+                Some(CtValue::Str(value)) => value.clone(),
+                Some(CtValue::Enum { variant, .. }) => variant.clone(),
+                Some(CtValue::Struct { type_name, fields }) if type_name.ends_with("Profile") || type_name.contains("Build") => {
+                    fields
+                        .iter()
+                        .find_map(|(n, v)| match (n.as_str(), v) {
+                            ("name" | "tag" | "variant", CtValue::Str(s)) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "release".to_string())
+                }
+                _ => {
+                    // Leading-dot enum often arrives as enum variant name via show.
+                    return Err(build_diag(
+                        "`b.default_profile` needs a profile name or `.Release` / `.Debug`",
+                        span,
+                    ));
+                }
+            };
+            let profile = match profile.to_ascii_lowercase().as_str() {
+                "release" => "release".to_string(),
+                "debug" => "debug".to_string(),
+                "ci" => "ci".to_string(),
+                other => other.to_string(),
+            };
+            session.context.default_profile(profile);
+            return Ok(CtValue::Unit);
+        }
+        "default_allow" => {
+            let Some(CtValue::List(values)) = args.first() else {
+                return Err(build_diag("`b.default_allow` needs a list of effects", span));
+            };
+            let mut effects = Vec::new();
+            for value in values {
+                let name = match value {
+                    CtValue::Str(s) => s.clone(),
+                    CtValue::Enum { variant, .. } => variant.clone(),
+                    other => {
+                        return Err(build_diag(
+                            &format!("`b.default_allow` entry must be an effect, got {other:?}"),
+                            span,
+                        ));
+                    }
+                };
+                if crate::Comptime::Build::BuildCapability::parse(&name).is_none() {
+                    return Err(build_diag(
+                        &format!("unknown build effect `{name}` in default_allow"),
+                        span,
+                    ));
+                }
+                effects.push(name);
+            }
+            session.context.default_allow(effects);
+            return Ok(CtValue::Unit);
+        }
         _ => return None.ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span)),
     };
     Ok(match result {

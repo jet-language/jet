@@ -955,6 +955,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "match ({}).entry(({}).clone()) {{ std::collections::btree_map::Entry::Vacant(e) => {{ e.insert({}); true }}, std::collections::btree_map::Entry::Occupied(_) => false }}",
                     recv, a(0), a(1)
                 ),
+                TBuiltinOp::MapMerge => {
+                    format!("jet_map_merge(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::MapMergeWith => {
+                    // Call through so both bare closures and `Rc`/`Box` wrappers work.
+                    format!(
+                        "jet_map_merge_with(&({}), &({}), |__k, __a, __b| ({})(__k, __a, __b))",
+                        recv,
+                        a(0),
+                        a(1)
+                    )
+                }
                 TBuiltinOp::InsertList => {
                     format!("({}).insert({} as usize, {})", recv, a(0), a(1))
                 }
@@ -1246,6 +1258,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Indexes => format!("jet_iter_indexes(({recv}).len() as i64)"),
                 TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
                     format!("({recv}).to_list()")
+                }
+                TBuiltinOp::ListLazy => {
+                    // D-LOOPMAP1=B: enter the lazy pipeline plane.
+                    format!("jet_iter_from_vec(({recv}).clone())")
                 }
                 TBuiltinOp::Zip { tuple_struct } => {
                     let other_is_iter = args
@@ -2192,12 +2208,43 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::EditDisjoint => {
                     format!("jet_edit_disjoint(&mut ({}), &({}), {})", recv, a(0), a(1))
                 }
-                TClosureOp::Map => format!("jet_iter_map({as_iter}, {})", a(0)),
-                TClosureOp::MapMut => format!("jet_iter_map_mut({as_iter}, {})", a(0)),
+                TClosureOp::Map => {
+                    if recv_is_iter {
+                        format!("jet_iter_map({as_iter}, {})", a(0))
+                    } else {
+                        // D-LOOPMAP1=B: List.map is eager.
+                        let mut f = a(0);
+                        if let Some(rest) = f.strip_prefix("move ") {
+                            f = rest.to_string();
+                        }
+                        format!("jet_list_map({vec_src}, {f})")
+                    }
+                }
+                TClosureOp::MapMut => {
+                    if recv_is_iter {
+                        format!("jet_iter_map_mut({as_iter}, {})", a(0))
+                    } else {
+                        let mut f = a(0);
+                        if let Some(rest) = f.strip_prefix("move ") {
+                            f = rest.to_string();
+                        }
+                        format!("jet_list_map_mut({vec_src}, {f})")
+                    }
+                }
                 // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
                 // its plain callback instead of cloning/moving it.
                 TClosureOp::OptionMap => format!("({}).as_ref().map({})", recv, a(0)),
-                TClosureOp::Filter => format!("jet_iter_filter({as_iter}, {})", a(0)),
+                TClosureOp::Filter => {
+                    if recv_is_iter {
+                        format!("jet_iter_filter({as_iter}, {})", a(0))
+                    } else {
+                        let mut f = a(0);
+                        if let Some(rest) = f.strip_prefix("move ") {
+                            f = rest.to_string();
+                        }
+                        format!("jet_list_filter({vec_src}, {f})")
+                    }
+                }
                 TClosureOp::Each => format!("jet_list_each({vec_src}, {})", a(0)),
                 TClosureOp::EachMut => format!("jet_list_each_mut({vec_src}, {})", a(0)),
                 TClosureOp::EachRef => format!("jet_list_each_ref(&({}), {})", recv, a(0)),

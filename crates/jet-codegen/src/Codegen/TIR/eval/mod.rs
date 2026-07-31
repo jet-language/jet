@@ -972,7 +972,9 @@ impl<'a> EvalCtx<'a> {
             // is set, exactly as a dropped `JetTaskControl` would report.
             _ => (false, false),
         };
-        Ok(CtValue::Str(format!("paused={paused},cancel={cancel}")))
+        Ok(CtValue::Str(jet_foundation::StructuralDebug::jet_task_control_trace(
+            paused, cancel,
+        )))
     }
 
     /// The evaluator twin of `JetTask::detach`: drop the join handle so the

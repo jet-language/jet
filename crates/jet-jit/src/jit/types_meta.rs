@@ -195,7 +195,7 @@ pub(crate) fn clif_ty_with_distinct(
                     | "ExpiringSecret"
                     | "SortedSet"
                     | "PriorityQueue"
-                    | "Lru"
+                    | "Cache"
             ))
     {
         return Some(types::I64);
@@ -562,6 +562,20 @@ impl<'a> JitMeta<'a> {
             return match variant {
                 "Raw" => Some(0),
                 "Cooked" => Some(1),
+                _ => None,
+            };
+        }
+        // Prelude `IOError` order (Open.rs) — not always registered on JitProgram.
+        if enum_name == "IOError" {
+            return match variant {
+                "InvalidInput" => Some(0),
+                "NotFound" => Some(1),
+                "PermissionDenied" => Some(2),
+                "TimedOut" => Some(3),
+                "Cancelled" => Some(4),
+                "Closed" => Some(5),
+                "Protocol" => Some(6),
+                "Other" => Some(7),
                 _ => None,
             };
         }

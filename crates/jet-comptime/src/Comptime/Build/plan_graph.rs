@@ -16,6 +16,10 @@ pub struct BuildPlan {
     pub(super) plugins: Vec<BuildPlugin>,
     pub(super) generated_modules: Vec<BuildGeneratedModule>,
     pub(super) default: Option<TargetRef>,
+    /// D-BUILDCTX-FLAGS1=A
+    pub default_profile: Option<String>,
+    /// D-BUILDCTX-FLAGS1=A — effect names (`Exec`, `FS`, …)
+    pub default_allows: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

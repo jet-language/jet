@@ -262,16 +262,16 @@ pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E2414 (Card #131 / D-SERDE5): a `#[Default(expr)]` argument didn't evaluate
+/// E2414 (Card #131 / D-SERDE5 / D-FIELDDEF1): a field `=` default didn't evaluate
 /// to a compile-time constant. The default is baked into the program to fill a
 /// missing field during decode, so it must be known at compile time — a literal
 /// or a `comptime`-evaluable expression — not a value read from runtime state.
 pub(crate) fn e2414(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2414",
-        format!("`#[Default(...)]` on `{field}` must be a compile-time constant"),
+        format!("`{field}`'s `=` default must be a compile-time constant"),
         "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime".to_string(),
-        "use a literal or a `comptime`-evaluable expression — e.g. `#[Default(8080)]`, `#[Default(Color.Red)]`, or `#[Default([1, 2])]`".to_string(),
+        "use a literal or a `comptime`-evaluable expression — e.g. `port: Int = 8080` or `ports: [Int] = [80, 443]`".to_string(),
         Some(span),
     )
 }

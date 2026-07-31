@@ -186,6 +186,15 @@ impl CellState {
         self.guard_layouts.len() as i64
     }
 
+    /// True when compile baked schema/projection/layout handles into machine code.
+    /// Tier-cache restore starts from a fresh `CellState`, so those programs must
+    /// not publish a disk artifact (handles would dangle).
+    pub(crate) fn has_compile_handles(&self) -> bool {
+        !self.schemas.is_empty()
+            || !self.projections.is_empty()
+            || !self.guard_layouts.is_empty()
+    }
+
     fn owner(&self) -> u64 {
         self.frames.last().copied().unwrap_or(0)
     }

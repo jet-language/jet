@@ -396,7 +396,8 @@
                 .control
                 .cancelled
                 .load(std::sync::atomic::Ordering::Relaxed);
-            format!("paused={},cancel={}", paused, cancel)
+            // D-TASK-PAUSE-TIER1 / I9: same helper as TIR eval (StructuralDebug).
+            crate::jet_task_control_trace(paused, cancel)
         }
         pub fn join(self) -> T {
             if !self.state.skip_join_deadline {

@@ -10,11 +10,11 @@
 // Run with extra flags:  PORT=8080 jet run examples/features/cli/typed_entry_args.jet -- -v --config prod.toml
 // Run --help:            jet run examples/features/cli/typed_entry_args.jet -- --help
 // Golden test (no extra args) exercises every field's default: `port` via
-// `#Default(...)`, `verbose` as a plain flag (defaults false), `config` as
+// `= expr`, `verbose` as a plain flag (defaults false), `config` as
 // `String?` (defaults None) — so a bare invocation is deterministic.
 #CLI
 struct ServeArgs {
-    #[Doc("port to listen on"), Env("PORT"), Default(3000)] port: Int
+    #[Doc("port to listen on"), Env("PORT")] port: Int = 3000
     #[Doc("print extra detail"), Short("v")] verbose: Bool
     #Doc("path to a config file") config: String?
 }

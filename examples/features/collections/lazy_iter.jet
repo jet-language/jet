@@ -1,12 +1,15 @@
-// D-ITERTOOLS1=A: lazy Iter protocol — adapters return Iter; materialize explicitly.
+// D-LOOPMAP1=B: in-memory `.map`/`.filter` return lists; `.lazy()` opts into Iter pipelines.
 fn run() {
     nums :: [1, 2, 3, 4, 5]
-    // Chain of lazy views; to_list materializes.
-    ids :: nums.filter(n => n % 2 == 0).map(n => n * 10).to_list()
+    // Eager adapters — no middle Iter, no to_list.
+    ids :: nums.filter(n => n % 2 == 0).map(n => n * 10)
     print(ids)
-    // Terminal reducer materializes without to_list.
+    // Eager map + terminal reducer.
     print(nums.map(n => n * n).sum())
-    // String split joins the same lazy model.
+    // Opt into one-pass lazy pipelines when chaining many adapters.
+    hot :: nums.lazy().filter(n => n > 2).map(n => n * 10).to_list()
+    print(hot)
+    // String split stays lazy (iterator source).
     parts :: "a,b,c".split(",")
     print(parts.to_list())
     loop p, "x y z".split(" ") { print(p) }

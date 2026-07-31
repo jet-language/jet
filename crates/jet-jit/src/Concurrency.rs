@@ -547,7 +547,7 @@ extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
         let ctrl = &rt.task_controls[task as usize];
         let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
         let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-        let text = format!("paused={paused},cancel={cancel}");
+        let text = jet_foundation::StructuralDebug::jet_task_control_trace(paused, cancel);
         rt.heap.alloc_string(text)
     })
 }
@@ -561,7 +561,7 @@ extern "C" fn jet_jit_task_trace_all(task_list: i64) -> i64 {
                 let ctrl = &rt.task_controls[*id as usize];
                 let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
                 let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-                format!("paused={paused},cancel={cancel}")
+                jet_foundation::StructuralDebug::jet_task_control_trace(paused, cancel)
             })
             .collect();
         let handles: Vec<i64> = lines.into_iter().map(|t| rt.heap.alloc_string(t)).collect();

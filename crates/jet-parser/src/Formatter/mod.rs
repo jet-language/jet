@@ -823,22 +823,6 @@ impl<'a> Fmt<'a> {
         self.write("}");
     }
 
-    /// D-FMT1 (revises S44): is the brace body the author placed between `open`
-    /// (the offset just after `{`) and `close` (the offset of `}`) eligible to
-    /// stay on one line? Mirrors the S69 dot-chain author-intent mechanism
-    /// (`chain_break_between`): the author's line-count choice is preserved, fmt
-    /// only normalizes spacing within it. Gates: exactly one statement, that
-    /// statement is simple (no nested block), no comment inside the braces, and
-    /// the author wrote the whole body on one source line. The width-100 floor
-    /// is enforced after rendering (see `fmt_body`).
-    fn body_inline_eligible(&self, body: &[Stmt], open: usize, close: usize) -> bool {
-        open <= close
-            && body.len() == 1
-            && is_simple_stmt(&body[0])
-            && !self.span_has_comment(open, close)
-            && self.src.get(open..close).is_some_and(|s| !s.contains('\n'))
-    }
-
     /// True if any tracked comment falls inside `open..close` (gate c).
     fn span_has_comment(&self, open: usize, close: usize) -> bool {
         self.comments
@@ -846,21 +830,10 @@ impl<'a> Fmt<'a> {
             .any(|c| c.span.start >= open && c.span.start < close)
     }
 
-    /// D-FMT1: render one brace body, choosing inline vs expanded by author
-    /// intent. The caller has already emitted ` {`. On the inline path this emits
-    /// ` <stmt> }`; on the expand path it emits the original newline-indented form
-    /// and the closing `}` via `end_block`. The body's brace offsets are located
-    /// from the lone statement's source span (only single-statement bodies are
-    /// inline-eligible, so an empty/multi body always expands without offsets).
+    /// D-FMT1 / D-FMTCOLLAPSE1=B: render one brace body. Collapse any fitting
+    /// simple body to one line (comments and over-width stay multiline).
     fn fmt_body(&mut self, body: &[Stmt]) {
-        if body.len() == 1 {
-            if let Some((open, close)) = self.single_stmt_braces(&body[0]) {
-                if self.try_inline_body(body, open, close) {
-                    return;
-                }
-            }
-        }
-        self.fmt_body_expanded(body);
+        self.fmt_control_body(body);
     }
 
     /// The expanded brace-body shape: newline, indented statements, closing `}`.
@@ -908,30 +881,6 @@ impl<'a> Fmt<'a> {
         if self.col <= MAX_WIDTH {
             return true;
         }
-        self.out.truncate(saved_out);
-        self.col = saved_col;
-        self.at_line_start = saved_line_start;
-        false
-    }
-
-    /// Attempt the inline shape `<stmt> }`. Renders into `self.out`, then checks
-    /// the width-100 floor (gate d); if it overflows, rolls the output back and
-    /// returns `false` so the caller expands. The caller has already emitted the
-    /// opening `{` (with its leading space).
-    fn try_inline_body(&mut self, body: &[Stmt], open: usize, close: usize) -> bool {
-        if !self.body_inline_eligible(body, open, close) {
-            return false;
-        }
-        let saved_out = self.out.len();
-        let saved_col = self.col;
-        let saved_line_start = self.at_line_start;
-        self.write(" ");
-        self.fmt_stmt_inline(&body[0]);
-        self.write(" }");
-        if self.col <= MAX_WIDTH {
-            return true;
-        }
-        // Width floor failed: roll back to the state right after the `{`.
         self.out.truncate(saved_out);
         self.col = saved_col;
         self.at_line_start = saved_line_start;

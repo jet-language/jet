@@ -2059,7 +2059,7 @@ pub fn apply_core_call(
         ("core.text.unicode", "scalars") => Ok(CtValue::List(
             as_string(one(0)?, span)?
                 .chars()
-                .map(CtValue::Char)
+                .map(|c| CtValue::Str(c.to_string()))
                 .collect(),
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when

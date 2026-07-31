@@ -42,6 +42,10 @@ pub struct BuildContext {
     signing_identity_names: HashSet<String>,
     probe_names: HashSet<String>,
     default_toolchain: ToolchainHandle,
+    /// D-BUILDCTX-FLAGS1=A: project default profile name (`release`, `debug`, …).
+    default_profile: Option<String>,
+    /// D-BUILDCTX-FLAGS1=A: `--allow-*` grants applied when CLI omits them.
+    default_allows: HashSet<String>,
 }
 
 impl BuildContext {
@@ -78,6 +82,20 @@ impl BuildContext {
             signing_identity_names: HashSet::new(),
             probe_names: HashSet::new(),
             default_toolchain,
+            default_profile: None,
+            default_allows: HashSet::new(),
+        }
+    }
+
+    /// D-BUILDCTX-FLAGS1=A: set the project default profile (CLI `--profile`/`--release` wins).
+    pub fn default_profile(&mut self, profile: impl Into<String>) {
+        self.default_profile = Some(profile.into());
+    }
+
+    /// D-BUILDCTX-FLAGS1=A: declare default `--allow-*` grants when CLI omits them.
+    pub fn default_allow(&mut self, effects: impl IntoIterator<Item = impl Into<String>>) {
+        for effect in effects {
+            self.default_allows.insert(effect.into());
         }
     }
 
@@ -569,6 +587,12 @@ impl BuildContext {
             plugins: self.plugins.clone(),
             generated_modules: self.generated_modules.clone(),
             default,
+            default_profile: self.default_profile.clone(),
+            default_allows: {
+                let mut allows: Vec<String> = self.default_allows.iter().cloned().collect();
+                allows.sort();
+                allows
+            },
         })
     }
 

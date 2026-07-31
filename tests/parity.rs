@@ -1261,7 +1261,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         ("SortedSet", "new"),
         ("PriorityQueue", "from"),
         ("PriorityQueue", "new"),
-        ("Lru", "new"),
+        ("Cache", "new"),
         ("Deque", "new"),
         ("BitSet", "new"),
         ("ByteBuffer", "from"),
@@ -1384,7 +1384,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "is_empty",
         "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Lru", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Cache", method).class, Class::Covered);
     }
     for method in [
         "push_front",

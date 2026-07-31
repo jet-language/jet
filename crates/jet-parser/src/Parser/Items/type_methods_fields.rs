@@ -127,11 +127,15 @@ impl<'a> Parser<'a> {
             // single expression (no block); sibling field names inside it are
             // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
             // to `self.<field>` once every field of the struct is known.
-            let computed = if matches!(self.peek().kind, TokKind::LambdaArrow) {
+            // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
+            let (computed, default) = if matches!(self.peek().kind, TokKind::LambdaArrow) {
                 self.bump();
-                Some(Box::new(self.expr()?))
+                (Some(Box::new(self.expr()?)), None)
+            } else if matches!(self.peek().kind, TokKind::Eq) {
+                self.bump();
+                (None, Some(Box::new(self.expr()?)))
             } else {
-                None
+                (None, None)
             };
             Ok(Field {
                 is_pub,
@@ -143,6 +147,8 @@ impl<'a> Parser<'a> {
                 serde_markers: Vec::new(),
                 redact: false,
                 computed,
+                default,
+                default_ct: None,
             })
         }
     

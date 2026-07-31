@@ -27,7 +27,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // List + string: contains.
         | ("contains", 1)
         // Map-only.
-        | ("keys", 0) | ("values", 0) | ("has_key", 1)
+        | ("keys", 0) | ("values", 0) | ("has_key", 1) | ("merge", 1) | ("merge", 2)
         // String-only.
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
@@ -45,6 +45,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("indexed", 0) | ("indexes", 0) | ("zip", 1)
         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
+        // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
+        | ("lazy", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
         | ("add", 1) | ("union", 1) | ("to_list", 0)
         | ("peek", 0) | ("to_sorted_list", 0)

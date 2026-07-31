@@ -285,7 +285,7 @@ impl<'a> Checker<'a> {
                             // D-COLLBREADTH1=A: Set<T> and Deque<T>.
                             | "Set" | "Bag" | "Deque"
                             // D-ITERTOOLS1=A: expanded generic collection handles.
-                            | "SortedSet" | "PriorityQueue" | "Lru"
+                            | "SortedSet" | "PriorityQueue" | "Cache"
                             | "BigInt" | "Decimal"
                             // D-REACT1=B: reactive handle types.
                             | "Signal" | "Derived" | "Computed"

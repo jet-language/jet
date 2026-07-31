@@ -1033,6 +1033,24 @@ pub fn apply_method(
         }
         (CtValue::Map(m), "keys") => Ok(CtValue::List(m.keys().map(|k| k.to_value()).collect())),
         (CtValue::Map(m), "values") => Ok(CtValue::List(m.values().cloned().collect())),
+        // D-MAP-MERGE1=E: right wins when conflict omitted.
+        (CtValue::Map(left), "merge") => {
+            let other = args.first().cloned().unwrap_or(CtValue::Unit);
+            let CtValue::Map(right) = other else {
+                return Err(unsupported("Map.merge other must be a map", span));
+            };
+            if args.len() >= 2 {
+                return Err(unsupported(
+                    "Map.merge conflict callback at compile time",
+                    span,
+                ));
+            }
+            let mut out = left.clone();
+            for (k, v) in right {
+                out.insert(k, v);
+            }
+            Ok(CtValue::Map(out))
+        }
         // String (char-counted per S41)
         (CtValue::Str(s), "len") => Ok(CtValue::Int(s.chars().count() as i64)),
         (CtValue::Str(s), "is_empty") => Ok(CtValue::Bool(s.is_empty())),

@@ -464,6 +464,14 @@ fn serde_ordered_object_source(
 }
 
 fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
+    if let Some(expr) = &f.default {
+        if let Some(source) = serde_source_literal(expr) {
+            return Some(source);
+        }
+        if let Some(value) = f.default_ct.as_ref() {
+            return serde_ct_source(value);
+        }
+    }
     let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_DEFAULT)?;
     match (marker.args.first(), marker.ct.as_ref()) {
         (Some(_), Some(value)) => serde_ct_source(value),

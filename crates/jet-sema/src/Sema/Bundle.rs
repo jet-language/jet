@@ -862,6 +862,7 @@ fn builtin_type_registry() -> TypeRegistry {
         unit_types: HashSet::new(),
         unit_facts: HashMap::new(),
         computed_fields: HashMap::new(),
+        field_defaults: HashMap::new(),
     }
 }
 
@@ -1439,6 +1440,7 @@ fn check_bundle_opts_for_output_inner(
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
+                            field_defaults: st.registry.field_defaults.clone(),
                         }
                     });
                     let check_registry = merged_registry.as_ref().unwrap_or(&st.registry);

@@ -1634,7 +1634,7 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        if !options.inspect_only && (!options.allow_impure || !options.grants.contains(&effect)) {
+        if !options.inspect_only && (!options.allow_impure || !effective_grants(options, plan).contains(&effect)) {
             return Err(vec![Diagnostic::error(
                 "E3503",
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),
@@ -1645,6 +1645,20 @@ fn validate_build_authority(
         }
     }
     Ok(())
+}
+
+/// D-BUILDCTX-FLAGS1=A: CLI grants ∪ `fn build` default_allow (CLI cannot remove defaults by omission).
+fn effective_grants(
+    options: &BuildRunOptions,
+    plan: &crate::Comptime::Build::BuildPlan,
+) -> std::collections::BTreeSet<crate::Comptime::Build::BuildCapability> {
+    let mut grants = options.grants.clone();
+    for name in &plan.default_allows {
+        if let Some(cap) = crate::Comptime::Build::BuildCapability::parse(name) {
+            grants.insert(cap);
+        }
+    }
+    grants
 }
 
 fn program_semantic_facts(

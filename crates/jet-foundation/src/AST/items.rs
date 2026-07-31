@@ -1598,6 +1598,13 @@ pub struct Field {
     /// `self.<field>` once every field of the struct is known (see
     /// `Sema::CheckerFieldPolicy`). `None` for an ordinary stored field.
     pub computed: Option<Box<Expr>>,
+    /// D-FIELDDEF1=C: `name: T = expr` — absence default for wire/CLI and for
+    /// omitted fields in `Type.{ … }` construction. Same spelling as parameter
+    /// defaults (S61). Replaces `#Default(expr)`. Mutually exclusive with
+    /// `computed`.
+    pub default: Option<Box<Expr>>,
+    /// Compile-time value of `default`, when it evaluates (D-SERDE5 / D-FIELDDEF1).
+    pub default_ct: Option<CtValue>,
 }
 
 /// DataTree variant a derived decoder accepts at its outer wire boundary.

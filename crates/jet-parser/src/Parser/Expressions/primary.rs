@@ -593,12 +593,68 @@ impl<'a> Parser<'a> {
                             rule_facts: Vec::new(),
                             block_spans: Vec::new(),
                         };
+                        // D-FMT-INTERP2=A: trailing `=` prints expression source, then " = ", then the value.
+                        // Reject empty `{=}` before attempting to parse an expression.
+                        if matches!(sub.peek().kind, TokKind::Eq) {
+                            return Err(Diagnostic::error(
+                                "E0003",
+                                "empty debug-label interpolation `{=}`".to_string(),
+                                "`{expr=}` needs an expression before `=`".to_string(),
+                                "write `{count=}` or `{x + 1=}`".to_string(),
+                                Some(sub.peek().span),
+                            ));
+                        }
                         let e = sub.expr()?;
                         if !sub.diags.is_empty() {
                             let mut ds = sub.diags;
                             let first = ds.remove(0);
                             self.diags.extend(ds);
                             return Err(first);
+                        }
+                        let mut debug_label: Option<String> = None;
+                        if matches!(sub.peek().kind, TokKind::Eq) {
+                            let label_end = sub.pos;
+                            let mut label = String::new();
+                            for tok in &toks[..label_end] {
+                                match &tok.kind {
+                                    TokKind::Ident(name) => label.push_str(name),
+                                    TokKind::Int(n, _) => label.push_str(&n.to_string()),
+                                    TokKind::Float(n) => label.push_str(&n.to_string()),
+                                    TokKind::Dot => label.push('.'),
+                                    TokKind::LParen => label.push('('),
+                                    TokKind::RParen => label.push(')'),
+                                    TokKind::LBracket => label.push('['),
+                                    TokKind::RBracket => label.push(']'),
+                                    TokKind::Plus => label.push_str(" + "),
+                                    TokKind::Minus => label.push_str(" - "),
+                                    TokKind::Star => label.push_str(" * "),
+                                    TokKind::Slash => label.push_str(" / "),
+                                    TokKind::Percent => label.push_str(" % "),
+                                    other => {
+                                        return Err(Diagnostic::error(
+                                            "E0003",
+                                            format!(
+                                                "`{{…=}}` debug labels need a simple expression, not {}",
+                                                describe(other)
+                                            ),
+                                            "the label reprints the expression text before `=`".to_string(),
+                                            "use a name or a short expression such as `{count=}`".to_string(),
+                                            Some(tok.span),
+                                        ));
+                                    }
+                                }
+                            }
+                            if label.is_empty() {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    "empty debug-label interpolation".to_string(),
+                                    "`{expr=}` needs an expression before `=`".to_string(),
+                                    "write `{count=}`".to_string(),
+                                    Some(sub.peek().span),
+                                ));
+                            }
+                            sub.bump(); // consume `=`
+                            debug_label = Some(label);
                         }
                         let mut format = crate::AST::StrFormat::Display;
                         if matches!(sub.peek().kind, TokKind::Hash) {
@@ -678,11 +734,15 @@ impl<'a> Parser<'a> {
                                     "unexpected {} inside this interpolated `{{ }}`",
                                     describe(&sub.peek().kind)
                                 ),
-                                "the braces hold exactly one value and one optional format selector"
+                                "the braces hold exactly one value, optional trailing `=`, and one optional format selector"
                                     .to_string(),
-                                "keep one value per `{ }`, for example \"{a}\" or \"{a#Unit(bare)}\"".to_string(),
+                                "keep one value per `{ }`, for example \"{a}\", \"{a=}\", or \"{a#Unit(bare)}\"".to_string(),
                                 Some(sub.peek().span),
                             ));
+                        }
+                        if let Some(label) = debug_label {
+                            out.push(StrPart::Lit(label));
+                            out.push(StrPart::Lit(" = ".to_string()));
                         }
                         out.push(StrPart::Interp(Box::new(e), format));
                     }

@@ -1411,9 +1411,15 @@ impl<'a> Fmt<'a> {
             self.write(" => ");
             self.fmt_expr(expr, Prec::OrFallback.add_rhs());
         }
+        // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
+        if let Some(expr) = &field.default {
+            self.write(" = ");
+            self.fmt_expr(expr, Prec::OrFallback.add_rhs());
+        }
         let end = field
-            .computed
+            .default
             .as_deref()
+            .or(field.computed.as_deref())
             .map(|expr| expr.span().end)
             .unwrap_or(field.ty_span.end);
         self.emit_trailing(end);

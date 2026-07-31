@@ -282,7 +282,7 @@ pub(crate) struct Cx {
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -1933,7 +1933,7 @@ impl Cx {
             }
             Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => {
                 format!(
-                    "JetLru<{}, {}>",
+                    "JetCache<{}, {}>",
                     self.rust_type(&args[0]),
                     self.rust_type(&args[1])
                 )
@@ -3103,28 +3103,46 @@ pub(crate) fn build_cx_items(
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
                 let dimension = uf.resolved_dimension.clone();
+                let affine = uf.base.is_some()
+                    && uf
+                        .members
+                        .iter()
+                        .any(|member| member.offset != crate::AST::UnitRatio::zero());
                 for d in uf.distinct_defs() {
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                    // Mirror sema `unit_fact`: derive Point/Delta from the type
+                    // name when `quantity` is unset (affine families).
                     let kind = d
                         .quantity
                         .as_ref()
                         .map(|(_, kind)| *kind)
+                        .or_else(|| {
+                            if !affine {
+                                return Some(crate::AST::QuantityKind::Linear);
+                            }
+                            uf.members.iter().find_map(|member| {
+                                let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+                                if d.name == format!("{stem}Point") {
+                                    Some(crate::AST::QuantityKind::Point)
+                                } else if d.name == format!("{stem}Delta") {
+                                    Some(crate::AST::QuantityKind::Delta)
+                                } else {
+                                    None
+                                }
+                            })
+                        })
                         .unwrap_or(crate::AST::QuantityKind::Linear);
                     if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
                         cx.unit_labels
                             .insert(d.name.clone(), unit_label(uf, member));
                     }
-                    if let Some((_, kind)) = d
-                        .quantity
-                        .as_ref()
-                        .filter(|_| uf.base.is_some() || dimension.is_some())
-                    {
-                        if let Some(member) = unit_family_member_for_type(uf, &d.name, *kind) {
+                    if uf.base.is_some() || dimension.is_some() {
+                        if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
                             cx.unit_facts.insert(
                                 d.name.clone(),
-                                unit_fact(uf, member, dimension.clone(), *kind),
+                                unit_fact(uf, member, dimension.clone(), kind),
                             );
                         }
                     }

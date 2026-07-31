@@ -21,6 +21,9 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Pop => apply_mutating(recv, "pop", args, span),
         TBuiltinOp::InsertMap => apply_mutating(recv, "add", args, span),
         TBuiltinOp::AddNewMap => apply_mutating(recv, "add_new", args, span),
+        TBuiltinOp::MapMerge | TBuiltinOp::MapMergeWith => {
+            apply_method(recv, "merge", args, span)
+        }
         TBuiltinOp::InsertList => apply_mutating(recv, "insert", args, span),
         TBuiltinOp::RemoveMap => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::RemoveList { .. } => apply_mutating(recv, "remove", args, span),
@@ -88,6 +91,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Zip { .. } => apply_method(recv, "zip", args, span),
         TBuiltinOp::OptionZip { .. } => apply_method(recv, "zip", args, span),
         TBuiltinOp::IterToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::ListLazy => apply_method(recv, "lazy", args, span),
         TBuiltinOp::IterCollect => apply_method(recv, "collect", args, span),
         // From-ctors: recv is the source list/bytes (see method_calls.rs).
         TBuiltinOp::SetFrom => CollectionEval::from_list(Syntax::TYPE_SET, recv, span),

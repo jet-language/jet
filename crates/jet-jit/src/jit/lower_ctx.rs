@@ -99,6 +99,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) scope_guards: Vec<FuncId>,
     /// `defer close(^…)` — `(rust_place, resource_ty)`, run LIFO on exit.
     pub(crate) deferred_closes: Vec<(String, Type)>,
+    /// SharedGuard locals — `shared_guard_end` LIFO on scope exit.
+    pub(crate) deferred_shared_guards: Vec<String>,
     /// Native task-group handles active at this source point. Every non-local
     /// edge closes them in LIFO order before leaving the function.
     pub(crate) task_groups: Vec<Value>,
@@ -211,7 +213,7 @@ impl LowerCtx<'_, '_> {
                     Self::receiver_is(&recv.ty, "PriorityQueue")
                 }
                 TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
-                    Self::receiver_is(&recv.ty, "Lru")
+                    Self::receiver_is(&recv.ty, "Cache")
                 }
                 _ => false,
             },
@@ -2187,12 +2189,37 @@ impl LowerCtx<'_, '_> {
             };
             self.lower_expr(&close)?;
         }
+        let shared_guards: Vec<String> = self.deferred_shared_guards.iter().rev().cloned().collect();
+        for place in shared_guards {
+            let key = TIR::local_place(&place);
+            if let Some(var) = self.vars.get(&key).copied() {
+                let guard = self.b.use_var(var);
+                let end = self
+                    .module
+                    .declare_func_in_func(self.host.memory.shared_guard_end, self.b.func);
+                self.b.ins().call(end, &[guard]);
+            }
+        }
         let guards: Vec<FuncId> = self.scope_guards.iter().rev().copied().collect();
         for id in guards {
             let func_ref = self.module.declare_func_in_func(id, self.b.func);
             self.b.ins().call(func_ref, &[]);
         }
         Ok(())
+    }
+
+    fn is_shared_guard_ty(ty: &Type) -> bool {
+        match ty {
+            Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_GUARD => true,
+            Type::Tagged { marker, inner } => {
+                matches!(
+                    marker.as_str(),
+                    jet_foundation::AST::SHARED_GUARD_READ_MARKER
+                        | jet_foundation::AST::SHARED_GUARD_EDIT_MARKER
+                ) || Self::is_shared_guard_ty(inner)
+            }
+            _ => false,
+        }
     }
 
     fn emit_taskgroup_closes(&mut self) -> Option<Value> {
@@ -2869,6 +2896,9 @@ impl LowerCtx<'_, '_> {
                     init.ty.clone()
                 };
                 self.var_tys.insert(TIR::local_place(name), stored_ty);
+                if Self::is_shared_guard_ty(&init.ty) {
+                    self.deferred_shared_guards.push(name.clone());
+                }
             }
             TStmt::SplitViews {
                 owner,
@@ -3967,11 +3997,16 @@ impl LowerCtx<'_, '_> {
                 } else if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
-                // `by_value` is set for Stream / Iter / HTTPBodyChunks. JIT can
-                // only walk Iter<T> because producers materialize list handles
-                // (true JetIter cannot cross the host-shim ABI yet).
+                // `by_value` is set for Stream / Iter / HTTPBodyChunks / moved
+                // lists of non-Clone handles. JIT walks materialized list
+                // handles (including by-value List/FixedList); true JetIter /
+                // Stream producers that cannot materialize stay unsupported.
                 if *by_value
                     && !jet_foundation::Collections::is_iter_type(&collection.ty)
+                    && !matches!(
+                        &collection.ty,
+                        Type::List(_) | Type::FixedList { .. }
+                    )
                     && !matches!(
                         method_kind,
                         Some(
@@ -6306,6 +6341,23 @@ impl LowerCtx<'_, '_> {
             }
             THostCall::Method { recv, method, args }
                 if matches!(&recv.ty, Type::Shared(_))
+                    && matches!(method.as_str(), "guard_read" | "guard_edit")
+                    && args.is_empty() =>
+            {
+                let handle = self.lower_expr(recv)?;
+                let editable = self.b.ins().iconst(
+                    types::I64,
+                    i64::from(method == "guard_edit"),
+                );
+                let begin = self.module.declare_func_in_func(
+                    self.host.memory.shared_guard_begin,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(begin, &[handle, editable]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THostCall::Method { recv, method, args }
+                if matches!(&recv.ty, Type::Shared(_))
                     && matches!(method.as_str(), "read" | "edit" | "edit_txn")
                     && args.len() == 1 =>
             {
@@ -6937,16 +6989,89 @@ impl LowerCtx<'_, '_> {
         if !lambda.source_params.is_empty() || !lambda.param_types.is_empty() {
             return Err("jit nullary callback has parameters".to_string());
         }
-        match &lambda.executable {
+        // Cell.get_or_set / similar: bind outer captures into the inline scope
+        // (same names the body Local refs use).
+        let mut saved: Vec<(String, Option<Variable>, Option<Type>)> = Vec::new();
+        for (outer, place, ty) in &lambda.captures {
+            let outer_key = TIR::local_place(outer);
+            let outer_var = self
+                .vars
+                .get(&outer_key)
+                .copied()
+                .ok_or_else(|| format!("jit unknown capture `{outer}`"))?;
+            let val = self.b.use_var(outer_var);
+            let key = if place.is_empty() {
+                outer_key.clone()
+            } else {
+                place.clone()
+            };
+            // Prefer mangled place (`_jet_cap_…`) when present.
+            let bind_key = if self.vars.contains_key(place) || place.starts_with("_jet_cap_") {
+                place.clone()
+            } else {
+                key
+            };
+            let clif = self
+                .meta
+                .clif_ty(ty)
+                .or_else(|| clif_ty(ty))
+                .unwrap_or(types::I64);
+            let old_var = self.vars.get(&bind_key).copied();
+            let old_ty = self.var_tys.get(&bind_key).cloned();
+            let var = self.fresh_var(clif);
+            self.b.def_var(var, val);
+            self.vars.insert(bind_key.clone(), var);
+            self.var_tys.insert(bind_key.clone(), ty.clone());
+            saved.push((bind_key, old_var, old_ty));
+        }
+        let result = match &lambda.executable {
             TLambdaBody::Expr(expr) => self.lower_expr(expr),
             TLambdaBody::Block(body) => {
-                self.lower_stmts_scoped(body)?;
-                if self.dead {
-                    return Err("jit inline callback cannot transfer control".to_string());
+                // Inline callbacks may `return value` — capture that as the
+                // callback result instead of leaving the enclosing function.
+                let mut produced: Option<Value> = None;
+                for stmt in body {
+                    if self.dead {
+                        break;
+                    }
+                    match stmt {
+                        TStmt::Return(Some(expr)) => {
+                            produced = Some(self.lower_expr(expr)?);
+                            break;
+                        }
+                        TStmt::Return(None) => {
+                            produced = Some(self.b.ins().iconst(types::I64, 0));
+                            break;
+                        }
+                        other => self.lower_stmt(other)?,
+                    }
                 }
-                Ok(self.b.ins().iconst(types::I64, 0))
+                self.dead = false;
+                match produced {
+                    Some(v) => Ok(v),
+                    None => Ok(self.b.ins().iconst(types::I64, 0)),
+                }
+            }
+        };
+        for (key, old_var, old_ty) in saved {
+            match old_var {
+                Some(var) => {
+                    self.vars.insert(key.clone(), var);
+                }
+                None => {
+                    self.vars.remove(&key);
+                }
+            }
+            match old_ty {
+                Some(ty) => {
+                    self.var_tys.insert(key, ty);
+                }
+                None => {
+                    self.var_tys.remove(&key);
+                }
             }
         }
+        result
     }
 
     /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
@@ -7109,7 +7234,18 @@ impl LowerCtx<'_, '_> {
                                         .struct_field_ty(&name, field)
                                         .or_else(|| core_struct_field_type(&name, field))
                                     {
-                                        return self.erase_distinct_ty(&ty);
+                                        let erased = self.erase_distinct_ty(&ty);
+                                        // Unspecialized generic field (`Named("T")`):
+                                        // prefer the concrete expression type.
+                                        if matches!(&erased, Type::Named(n) if n.len() == 1)
+                                            && !matches!(
+                                                &e.ty,
+                                                Type::Named(n) if n.len() == 1
+                                            )
+                                        {
+                                            return self.erase_distinct_ty(&e.ty);
+                                        }
+                                        return erased;
                                     }
                                 }
                             }
@@ -7123,6 +7259,17 @@ impl LowerCtx<'_, '_> {
                     if matches!(&push_ty, Type::Named(n) if n == "Unit" || n == "Void") {
                         continue;
                     }
+                    // Generic param leftovers (`Named("T")`) — use concrete expr ty.
+                    let push_ty = if matches!(&push_ty, Type::Named(n) if n.len() == 1) {
+                        let concrete = self.erase_distinct_ty(&e.ty);
+                        if !matches!(&concrete, Type::Named(n) if n.len() == 1) {
+                            concrete
+                        } else {
+                            push_ty
+                        }
+                    } else {
+                        push_ty
+                    };
                     if let Type::Named(type_name) = &push_ty {
                         self.lower_named_str_interp(buf_id, e, type_name, *fmt)?;
                         continue;
@@ -8182,13 +8329,31 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_ct_value(&mut self, value: &jet_foundation::AST::CtValue) -> Result<Value, String> {
-        use jet_foundation::AST::CtValue;
+        use jet_foundation::AST::{CtKey, CtValue};
         match value {
             CtValue::Int(value) => Ok(self.b.ins().iconst(types::I64, *value)),
+            CtValue::Float(value) => Ok(self.b.ins().f64const(value.as_f64())),
             CtValue::Bool(value) => Ok(self.b.ins().iconst(types::I8, i64::from(*value))),
             CtValue::Char(value) => Ok(self.b.ins().iconst(types::I32, u32::from(*value) as i64)),
             CtValue::Str(value) => {
                 let handle = self.runtime.heap.alloc_string(value.clone());
+                Ok(self.b.ins().iconst(types::I64, handle))
+            }
+            CtValue::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
+            CtValue::Bytes(bytes) => {
+                let list = self.runtime.heap.alloc_empty_list();
+                for &b in bytes {
+                    let _ = self.runtime.heap.list_push_int(list, b as i64);
+                }
+                Ok(self.b.ins().iconst(types::I64, list))
+            }
+            CtValue::BigInt(b) => {
+                let text = b.to_string_rep();
+                let handle = self
+                    .runtime
+                    .heap
+                    .alloc_bigint_from_str(&text)
+                    .map_err(|e| format!("jit comptime BigInt: {e}"))?;
                 Ok(self.b.ins().iconst(types::I64, handle))
             }
             CtValue::List(values) => {
@@ -8197,17 +8362,253 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.list_new, self.b.func);
                 let new_call = self.b.ins().call(new_ref, &[]);
                 let handle = self.b.inst_results(new_call)[0];
-                let push_ref = self
+                let push_i = self
                     .module
                     .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                let push_f = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push_f64, self.b.func);
                 for value in values {
-                    let value = self.lower_ct_value(value)?;
-                    self.b.ins().call(push_ref, &[handle, value]);
+                    let is_float = matches!(value, CtValue::Float(_));
+                    let raw = self.lower_ct_value(value)?;
+                    // list_push expects i64; Char lowers to i32.
+                    let bits = match value {
+                        CtValue::Char(_) => self.b.ins().uextend(types::I64, raw),
+                        CtValue::Bool(_) => self.b.ins().uextend(types::I64, raw),
+                        _ => raw,
+                    };
+                    let push = if is_float { push_f } else { push_i };
+                    self.b.ins().call(push, &[handle, bits]);
                 }
                 Ok(handle)
             }
-            other => Err(format!("jit comptime value unsupported: {other:?}")),
+            CtValue::Map(entries) => {
+                let new_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_new, self.b.func);
+                let new_call = self.b.ins().call(new_ref, &[]);
+                let handle = self.b.inst_results(new_call)[0];
+                let insert_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                for (key, val) in entries {
+                    let key_v = match key {
+                        CtKey::Str(s) => {
+                            let sid = self.runtime.heap.alloc_string(s.clone());
+                            self.b.ins().iconst(types::I64, sid)
+                        }
+                        CtKey::Int(n) => {
+                            // Map host ABI is string-keyed; stringify ints.
+                            let sid = self.runtime.heap.alloc_string(n.to_string());
+                            self.b.ins().iconst(types::I64, sid)
+                        }
+                        CtKey::Bool(b) => {
+                            let sid = self
+                                .runtime
+                                .heap
+                                .alloc_string(if *b { "true" } else { "false" }.to_string());
+                            self.b.ins().iconst(types::I64, sid)
+                        }
+                        CtKey::Char(c) => {
+                            let sid = self.runtime.heap.alloc_string(c.to_string());
+                            self.b.ins().iconst(types::I64, sid)
+                        }
+                    };
+                    let raw = self.lower_ct_value(val)?;
+                    let packed = match val {
+                        CtValue::Float(_) => self.b.ins().bitcast(
+                            types::I64,
+                            Self::scalar_bitcast_memflags(),
+                            raw,
+                        ),
+                        CtValue::Bool(_) => self.b.ins().uextend(types::I64, raw),
+                        CtValue::Char(_) => self.b.ins().uextend(types::I64, raw),
+                        _ => raw,
+                    };
+                    self.b.ins().call(insert_ref, &[handle, key_v, packed]);
+                }
+                Ok(handle)
+            }
+            CtValue::Some(inner) => {
+                let payload = self.lower_ct_value(inner)?;
+                self.pack_option_payload(payload, &inner.jet_type())
+            }
+            CtValue::None(_) => Ok(self.b.ins().iconst(types::I64, 0)),
+            CtValue::ResOk(inner) => self.lower_ct_result(true, inner),
+            CtValue::ResErr(inner) => self.lower_ct_result(false, inner),
+            CtValue::Struct { type_name, fields } => {
+                self.lower_ct_struct(type_name, fields)
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => self.lower_ct_enum(type_name, variant, args),
+            CtValue::Closure(_) => Err("jit comptime closure unsupported".to_string()),
         }
+    }
+
+    fn lower_ct_result(
+        &mut self,
+        ok: bool,
+        inner: &jet_foundation::AST::CtValue,
+    ) -> Result<Value, String> {
+        use jet_foundation::AST::CtValue;
+        let tag = self.b.ins().iconst(types::I8, i64::from(ok));
+        if matches!(inner, CtValue::Unit) {
+            let payload = self.b.ins().iconst(types::I64, 0);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.result_new_i64, self.b.func);
+            let call = self.b.ins().call(host, &[tag, payload]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        let ty = inner.jet_type();
+        let payload = self.lower_ct_value(inner)?;
+        let host_id = match clif_ty(&ty) {
+            Some(ty) if ty == types::F64 => self.host.result_new_f64,
+            Some(ty) if ty == types::I8 => self.host.result_new_i8,
+            Some(ty) if ty == types::I32 => self.host.result_new_i32,
+            Some(ty) if ty == types::I64 => self.host.result_new_i64,
+            _ => self.host.result_new_i64,
+        };
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host, &[tag, payload]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_ct_struct(
+        &mut self,
+        type_name: &str,
+        fields: &[(String, jet_foundation::AST::CtValue)],
+    ) -> Result<Value, String> {
+        use jet_foundation::AST::CtValue;
+        let by_name: std::collections::HashMap<&str, &CtValue> = fields
+            .iter()
+            .map(|(n, v)| (n.as_str(), v))
+            .collect();
+        // Layout may list computed fields comptime omitted, and `#Patchable`
+        // optionals that were left unset. Materialize layout slots that are
+        // either present in the CtValue or Option-typed (Absent); skip other
+        // missing slots (computed fields).
+        let ordered: Vec<(Type, CtValue)> = if let Some((names, tys)) =
+            self.meta.struct_layout(type_name)
+        {
+            let mut out = Vec::with_capacity(names.len());
+            for (name, ty) in names.iter().zip(tys.iter()) {
+                let jet = name.strip_prefix("user_").unwrap_or(name.as_str());
+                if let Some(ct) = by_name.get(jet).or_else(|| by_name.get(name.as_str())) {
+                    out.push((ty.clone(), (*ct).clone()));
+                } else if let Type::Option(inner) = ty {
+                    out.push((ty.clone(), CtValue::None(inner.as_ref().clone())));
+                }
+                // else: computed / non-stored — omit
+            }
+            if out.is_empty() && !fields.is_empty() {
+                fields
+                    .iter()
+                    .map(|(n, v)| {
+                        let ty = self
+                            .meta
+                            .struct_field_ty(type_name, n)
+                            .unwrap_or_else(|| v.jet_type());
+                        (ty, v.clone())
+                    })
+                    .collect()
+            } else {
+                out
+            }
+        } else {
+            fields
+                .iter()
+                .map(|(_n, v)| (v.jet_type(), v.clone()))
+                .collect()
+        };
+        let n = self.b.ins().iconst(types::I64, ordered.len() as i64);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let new_call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(new_call)[0];
+        for (i, (field_ty, ct)) in ordered.iter().enumerate() {
+            let raw = self.lower_ct_value(ct)?;
+            let abi_ty = self.erase_distinct_ty(field_ty);
+            let host_id = match &abi_ty {
+                ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
+                Type::Int => self.host.struct_set_i64,
+                Type::Float | Type::Float32 => self.host.struct_set_f64,
+                Type::Bool => self.host.struct_set_bool,
+                Type::Char => self.host.struct_set_char,
+                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                Type::Option(_)
+                | Type::List(_)
+                | Type::Map { .. }
+                | Type::Result { .. }
+                | Type::Named(_)
+                | Type::Tuple(_)
+                | Type::Apply { .. } => self.host.struct_set_i64,
+                other => {
+                    return Err(format!(
+                        "jit comptime struct field unsupported: {other:?}"
+                    ));
+                }
+            };
+            let idx = self.b.ins().iconst(types::I64, i as i64);
+            let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            self.b.ins().call(set_ref, &[handle, idx, raw]);
+        }
+        Ok(handle)
+    }
+
+    fn lower_ct_enum(
+        &mut self,
+        type_name: &str,
+        variant: &str,
+        args: &[(Option<String>, jet_foundation::AST::CtValue)],
+    ) -> Result<Value, String> {
+        let disc = self
+            .meta
+            .enum_variant_index(type_name, variant)
+            .ok_or_else(|| format!("jit comptime enum lit `{type_name}::{variant}`"))?;
+        if args.is_empty() {
+            return Ok(self.b.ins().iconst(types::I64, disc));
+        }
+        if args.len() == 1 && args[0].0.is_none() {
+            let payload_ty = args[0].1.jet_type();
+            let payload = self.lower_ct_value(&args[0].1)?;
+            return self.pack_enum_scalar(disc, payload, &payload_ty);
+        }
+        // Named / multi-arg: heap carrier [disc, field0, …].
+        let n = self.b.ins().iconst(types::I64, (args.len() + 1) as i64);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(call)[0];
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let disc_v = self.b.ins().iconst(types::I64, disc);
+        self.b.ins().call(set_i, &[handle, zero, disc_v]);
+        for (i, (_name, arg)) in args.iter().enumerate() {
+            let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
+            let payload = self.lower_ct_value(arg)?;
+            let ty = arg.jet_type();
+            let bits = match clif_ty(&ty) {
+                Some(t) if t == types::I64 => payload,
+                Some(t) if t == types::I8 => self.b.ins().uextend(types::I64, payload),
+                Some(t) if t == types::I32 => self.b.ins().sextend(types::I64, payload),
+                Some(t) if t == types::F64 => self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    payload,
+                ),
+                _ => payload,
+            };
+            self.b.ins().call(set_i, &[handle, idx, bits]);
+        }
+        Ok(handle)
     }
 
     fn lower_list_spread(
@@ -8773,10 +9174,51 @@ impl LowerCtx<'_, '_> {
                                 self.host.crypto.password_verify,
                                 vec![self.lower_expr(password)?, self.lower_expr(stored)?],
                             ),
+                            ("__password_text", [hash]) => (
+                                self.host.crypto.password_text,
+                                vec![self.lower_expr(hash)?],
+                            ),
                             ("file_open", [recipient, source, dest]) => (
                                 self.host.crypto.file_open,
                                 vec![
                                     self.lower_expr(recipient)?,
+                                    self.lower_expr(source)?,
+                                    self.lower_expr(dest)?,
+                                ],
+                            ),
+                            ("__secret_from_bytes", [bytes]) => (
+                                self.host.crypto.secret_from_bytes,
+                                vec![self.lower_expr(bytes)?],
+                            ),
+                            ("hkdf_sha256", [ikm, salt, info, length]) => (
+                                self.host.crypto.hkdf_sha256,
+                                vec![
+                                    self.lower_expr(ikm)?,
+                                    self.lower_expr(salt)?,
+                                    self.lower_expr(info)?,
+                                    self.lower_expr(length)?,
+                                ],
+                            ),
+                            ("x25519_public", [secret]) => (
+                                self.host.crypto.x25519_public_from_bytes,
+                                vec![self.lower_expr(secret)?],
+                            ),
+                            ("x25519_shared", [secret, public]) => (
+                                self.host.crypto.x25519_shared,
+                                vec![self.lower_expr(secret)?, self.lower_expr(public)?],
+                            ),
+                            ("constant_time_equal", [a, b]) => (
+                                self.host.crypto.constant_time_equal,
+                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
+                            ),
+                            ("constant_time_equal_bytes", [a, b]) => (
+                                self.host.crypto.constant_time_equal_bytes,
+                                vec![self.lower_expr(a)?, self.lower_expr(b)?],
+                            ),
+                            ("file_seal", [recipients, source, dest]) => (
+                                self.host.crypto.file_seal,
+                                vec![
+                                    self.lower_expr(recipients)?,
                                     self.lower_expr(source)?,
                                     self.lower_expr(dest)?,
                                 ],
@@ -8839,6 +9281,13 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &arg_values);
                     let value = self.b.inst_results(call)[0];
                     self.emit_trap_check()?;
+                    if matches!(
+                        method.as_str(),
+                        "constant_time_equal" | "constant_time_equal_bytes"
+                    ) || matches!(&expr.ty, Type::Bool)
+                    {
+                        return Ok(self.b.ins().ireduce(types::I8, value));
+                    }
                     return Ok(value);
                 }
                 if module == "core.crypto.expert" {
@@ -10750,6 +11199,31 @@ impl LowerCtx<'_, '_> {
                                 vec![self.lower_expr(&args[0])?],
                             )
                         }
+                        "abs" if args.len() == 1 => {
+                            // Inline f64 abs — no separate host (Prelude uses libm).
+                            let x = self.lower_expr(&args[0])?;
+                            let neg = self.b.ins().fneg(x);
+                            let zero = self.b.ins().f64const(0.0);
+                            let neg_mask = self.b.ins().fcmp(FloatCC::LessThan, x, zero);
+                            return Ok(self.b.ins().select(neg_mask, neg, x));
+                        }
+                        "max" if args.len() == 2 => {
+                            let a = self.lower_expr(&args[0])?;
+                            let b = self.lower_expr(&args[1])?;
+                            return Ok(self.b.ins().fmax(a, b));
+                        }
+                        "min" if args.len() == 2 => {
+                            let a = self.lower_expr(&args[0])?;
+                            let b = self.lower_expr(&args[1])?;
+                            return Ok(self.b.ins().fmin(a, b));
+                        }
+                        "clamp" if args.len() == 3 => {
+                            let x = self.lower_expr(&args[0])?;
+                            let lo = self.lower_expr(&args[1])?;
+                            let hi = self.lower_expr(&args[2])?;
+                            let raised = self.b.ins().fmax(x, lo);
+                            return Ok(self.b.ins().fmin(raised, hi));
+                        }
                         "decimal" if args.len() == 1 => (
                             self.host.num.decimal_from_str,
                             vec![self.lower_expr(&args[0])?],
@@ -11493,7 +11967,11 @@ impl LowerCtx<'_, '_> {
                         ("core.web", "on") if args.len() == 2 || args.len() == 3 => {
                             let sel = self.lower_expr(&args[0])?;
                             let ev = self.lower_expr(&args[1])?;
-                            let cb = if args.len() == 3 {
+                            // Native `web.on` is a no-op (Web.rs); capturing click
+                            // lambdas are not resident-callable. Skip the body.
+                            let cb = if args.len() == 3
+                                && !matches!(&args[2].kind, TExprKind::Lambda(_))
+                            {
                                 self.lower_expr(&args[2])?
                             } else {
                                 self.b.ins().iconst(types::I64, 0)
@@ -11532,11 +12010,46 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
-                // D-VERDICT-1323-1: spawn_group is not resident-lowered yet; the
-                // safety gate below refuses it so the program deopts as a whole
-                // rather than compiling a half-built group.
-                TCoreClosureKind::SpawnGroup { .. } => {
-                    Err("jit spawn_group unsupported".to_string())
+                TCoreClosureKind::SpawnGroup { count, .. } => {
+                    // D-VERDICT-1323-1: n identical spawn sites → list of handles.
+                    let count_v = self.lower_expr(count)?;
+                    let list_new = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                    let list_call = self.b.ins().call(list_new, &[]);
+                    let list = self.b.inst_results(list_call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                    let header = self.b.create_block();
+                    let body = self.b.create_block();
+                    let done = self.b.create_block();
+                    let idx_ty = types::I64;
+                    self.b.append_block_param(header, idx_ty);
+                    let zero = self.b.ins().iconst(idx_ty, 0);
+                    self.b.ins().jump(header, &[zero]);
+
+                    self.b.switch_to_block(header);
+                    // Do not seal header yet — body jumps back.
+                    let idx = self.b.block_params(header)[0];
+                    let cont = self.b.ins().icmp(IntCC::SignedLessThan, idx, count_v);
+                    self.b.ins().brif(cont, body, &[], done, &[]);
+
+                    self.b.switch_to_block(body);
+                    self.b.seal_block(body);
+                    let saved_site = *self.spawn_site;
+                    let task = self.lower_spawn()?;
+                    *self.spawn_site = saved_site;
+                    self.b.ins().call(push, &[list, task]);
+                    let one = self.b.ins().iconst(idx_ty, 1);
+                    let next = self.b.ins().iadd(idx, one);
+                    self.b.ins().jump(header, &[next]);
+                    self.b.seal_block(header);
+
+                    self.b.switch_to_block(done);
+                    self.b.seal_block(done);
+                    *self.spawn_site = saved_site + 1;
+                    Ok(list)
                 }
                 TCoreClosureKind::Spawn { group, .. } => {
                     let group = match group {
@@ -12261,6 +12774,24 @@ impl LowerCtx<'_, '_> {
                     self.emit_trap_check()?;
                     return Ok(cell);
                 }
+                let is_condition_new = method.name == "new"
+                    && args.is_empty()
+                    && (matches!(
+                        prelude_path,
+                        Some("jet_std::JetCondition" | "jet_std::jet_condition::JetCondition")
+                    ) || matches!(
+                        owner,
+                        TStaticOwner::Prelude { path, .. }
+                            if path.contains("JetCondition")
+                    ));
+                if is_condition_new {
+                    let host = self.module.declare_func_in_func(
+                        self.host.memory.condition_new,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(host, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if method.name == "new" && args.is_empty() {
                     let host_id = match prelude_path {
                         Some(path) if path.ends_with("BTreeSet") => {
@@ -12285,7 +12816,7 @@ impl LowerCtx<'_, '_> {
                 }
                 if method.name == "new"
                     && args.len() == 1
-                    && prelude_path.is_some_and(|path| path.ends_with("JetLru"))
+                    && prelude_path.is_some_and(|path| path.ends_with("JetCache"))
                 {
                     let capacity = self.lower_call_arg(&args[0])?;
                     let host_ref = self
@@ -12615,12 +13146,93 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
-            TExprKind::SharedGuardValue { .. }
-            | TExprKind::SharedGuardMap { .. }
-            | TExprKind::SharedGuardSplit { .. }
-            | TExprKind::SharedGuardWait { .. }
-            | TExprKind::ConditionNotify { .. } => {
-                Err("SharedGuard operations deopt to the canonical evaluator".to_string())
+            TExprKind::SharedGuardValue { guard, .. } => {
+                let g = self.lower_expr(guard)?;
+                let host = self.module.declare_func_in_func(
+                    self.host.memory.shared_guard_value,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[g]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TExprKind::SharedGuardMap { guard, .. } => {
+                // Projection path is compile-time; JIT keeps the same lease handle.
+                self.lower_expr(guard)
+            }
+            TExprKind::SharedGuardSplit { guard, .. } => {
+                let g = self.lower_expr(guard)?;
+                // Two aliases of the same lease — match eval's split shape lightly.
+                let n = self.b.ins().iconst(types::I64, 2);
+                let new_ref = self
+                    .module
+                    .declare_func_in_func(self.host.struct_new, self.b.func);
+                let call = self.b.ins().call(new_ref, &[n]);
+                let tuple = self.b.inst_results(call)[0];
+                let set = self
+                    .module
+                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                let z = self.b.ins().iconst(types::I64, 0);
+                let one = self.b.ins().iconst(types::I64, 1);
+                self.b.ins().call(set, &[tuple, z, g]);
+                self.b.ins().call(set, &[tuple, one, g]);
+                Ok(tuple)
+            }
+            TExprKind::SharedGuardWait {
+                guard,
+                condition,
+                predicate,
+            } => {
+                let g = self.lower_expr(guard)?;
+                let cond = self.lower_expr(condition)?;
+                let header = self.b.create_block();
+                let body = self.b.create_block();
+                let done = self.b.create_block();
+                self.b.ins().jump(header, &[]);
+                self.b.switch_to_block(header);
+                // Seal after body re-enters (wait loop).
+                let value_host = self.module.declare_func_in_func(
+                    self.host.memory.shared_guard_value,
+                    self.b.func,
+                );
+                let vcall = self.b.ins().call(value_host, &[g]);
+                let payload = self.b.inst_results(vcall)[0];
+                let (ready, _) = self.lower_inline_lambda(predicate, payload)?;
+                let ready_i8 = if self.b.func.dfg.value_type(ready) == types::I8 {
+                    ready
+                } else {
+                    self.b.ins().ireduce(types::I8, ready)
+                };
+                self.b.ins().brif(ready_i8, done, &[], body, &[]);
+                self.b.switch_to_block(body);
+                self.b.seal_block(body);
+                let wait = self.module.declare_func_in_func(
+                    self.host.memory.shared_guard_wait_once,
+                    self.b.func,
+                );
+                self.b.ins().call(wait, &[g, cond]);
+                self.b.ins().jump(header, &[]);
+                self.b.seal_block(header);
+                self.b.switch_to_block(done);
+                self.b.seal_block(done);
+                // Result<(), String> Ok — empty ok payload.
+                let tag = self.b.ins().iconst(types::I8, 1);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.result_new_i64, self.b.func);
+                let call = self.b.ins().call(host, &[tag, zero]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TExprKind::ConditionNotify { condition, all } => {
+                let c = self.lower_expr(condition)?;
+                let host_id = if *all {
+                    self.host.memory.condition_notify_all
+                } else {
+                    self.host.memory.condition_notify_one
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                self.b.ins().call(host, &[c]);
+                Ok(self.b.ins().iconst(types::I8, 0))
             }
             TExprKind::DefaultLit => Err("jit default literal unsupported".to_string()),
             TExprKind::ConstRef(name) => {
@@ -13967,6 +14579,11 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 } else if jit_list_native_type(&recv.ty)
+                    || matches!(
+                        &recv.ty,
+                        Type::List(_)
+                            | Type::FixedList { .. }
+                    )
                     || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task"))
                 {
                     let host = self
@@ -13975,7 +14592,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 } else {
-                    Err("jit builtin method unsupported".to_string())
+                    Err(format!("jit builtin method unsupported: Pop on {:?}", recv.ty))
                 }
             }
             TBuiltinOp::InsertMap => {
@@ -14022,8 +14639,12 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
                 let prev_call = self.b.ins().call(get_ref, &[recv_val, key]);
                 let prev = self.b.inst_results(prev_call)[0];
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let occupied = self.b.ins().icmp(IntCC::NotEqual, prev, zero);
+                // map_get_opt → result-arena Option; never compare handle to 0.
+                let is_ok = self
+                    .module
+                    .declare_func_in_func(self.host.result_is_ok, self.b.func);
+                let occ_call = self.b.ins().call(is_ok, &[prev]);
+                let occupied = self.b.inst_results(occ_call)[0];
                 let vac_block = self.b.create_block();
                 let occ_block = self.b.create_block();
                 let merge = self.b.create_block();
@@ -14046,6 +14667,148 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(merge);
                 self.b.seal_block(merge);
                 Ok(self.b.block_params(merge)[0])
+            }
+            TBuiltinOp::MapMerge => {
+                let other = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_merge, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::MapMergeWith => {
+                // D-MAP-MERGE1=E: clone left, then for each right entry either insert
+                // or call conflict(key, left_v, right_v).
+                let Type::Map { key: key_ty, value: val_ty, .. } = &recv.ty else {
+                    return Err("jit Map.merge conflict: receiver not a map".to_string());
+                };
+                let TExprKind::Lambda(lam) = &args[1].kind else {
+                    return Err("jit Map.merge conflict: need a lambda".to_string());
+                };
+                if !lam.prep.is_empty() || lam.source_params.len() != 3 {
+                    return Err("jit Map.merge conflict: need (K, V, V) => V".to_string());
+                }
+                let TLambdaBody::Expr(body_expr) = &lam.executable else {
+                    return Err("jit Map.merge conflict: need expression body".to_string());
+                };
+                let key_place = TIR::local_place(&lam.source_params[0]);
+                let left_place = TIR::local_place(&lam.source_params[1]);
+                let right_place = TIR::local_place(&lam.source_params[2]);
+
+                let other = self.lower_expr(&args[0])?;
+                let clone_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_clone, self.b.func);
+                let out_call = self.b.ins().call(clone_ref, &[recv_val]);
+                let out = self.b.inst_results(out_call)[0];
+                let out_var = self.fresh_var(types::I64);
+                self.b.def_var(out_var, out);
+                let right_var = self.fresh_var(types::I64);
+                self.b.def_var(right_var, other);
+
+                let header = self.b.create_block();
+                let body = self.b.create_block();
+                let step = self.b.create_block();
+                let exit = self.b.create_block();
+                let idx_var = self.fresh_var(types::I64);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                self.b.def_var(idx_var, zero);
+                self.b.ins().jump(header, &[]);
+
+                self.b.switch_to_block(header);
+                let idx = self.b.use_var(idx_var);
+                let right = self.b.use_var(right_var);
+                let len_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_len, self.b.func);
+                let len_call = self.b.ins().call(len_ref, &[right]);
+                let len = self.b.inst_results(len_call)[0];
+                let done = self
+                    .b
+                    .ins()
+                    .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+                self.b.ins().brif(done, exit, &[], body, &[]);
+
+                self.b.switch_to_block(body);
+                self.b.seal_block(body);
+                let key_at = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_key_at, self.b.func);
+                let val_at = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_value_at, self.b.func);
+                let key_call = self.b.ins().call(key_at, &[right, idx]);
+                let key = self.b.inst_results(key_call)[0];
+                let rval_call = self.b.ins().call(val_at, &[right, idx]);
+                let right_v = self.b.inst_results(rval_call)[0];
+                let out_now = self.b.use_var(out_var);
+                let get_opt = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+                let prev_call = self.b.ins().call(get_opt, &[out_now, key]);
+                let prev = self.b.inst_results(prev_call)[0];
+                // map_get_opt returns a result-arena Option handle (never 0/value+1).
+                let is_ok = self
+                    .module
+                    .declare_func_in_func(self.host.result_is_ok, self.b.func);
+                let has_call = self.b.ins().call(is_ok, &[prev]);
+                let has = self.b.inst_results(has_call)[0];
+                let conflict_block = self.b.create_block();
+                let fresh_block = self.b.create_block();
+                let after = self.b.create_block();
+                self.b
+                    .ins()
+                    .brif(has, conflict_block, &[], fresh_block, &[]);
+
+                self.b.switch_to_block(conflict_block);
+                self.b.seal_block(conflict_block);
+                let get_payload = self
+                    .module
+                    .declare_func_in_func(self.host.result_get_i64, self.b.func);
+                let old_call = self.b.ins().call(get_payload, &[prev]);
+                let old_v = self.b.inst_results(old_call)[0];
+                let resolved = self.with_bound_local(&key_place, (**key_ty).clone(), key, |this| {
+                    this.with_bound_local(&left_place, (**val_ty).clone(), old_v, |mid| {
+                        mid.with_bound_local(
+                            &right_place,
+                            (**val_ty).clone(),
+                            right_v,
+                            |inner| inner.lower_expr(body_expr),
+                        )
+                    })
+                })?;
+                let insert_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                let out_now = self.b.use_var(out_var);
+                self.b.ins().call(insert_ref, &[out_now, key, resolved]);
+                self.b.ins().jump(after, &[]);
+
+                self.b.switch_to_block(fresh_block);
+                self.b.seal_block(fresh_block);
+                let insert_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                let out_now = self.b.use_var(out_var);
+                self.b.ins().call(insert_ref, &[out_now, key, right_v]);
+                self.b.ins().jump(after, &[]);
+
+                self.b.switch_to_block(after);
+                self.b.seal_block(after);
+                self.b.ins().jump(step, &[]);
+
+                self.b.switch_to_block(step);
+                self.b.seal_block(step);
+                let idx = self.b.use_var(idx_var);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let next = self.b.ins().iadd(idx, one);
+                self.b.def_var(idx_var, next);
+                self.b.ins().jump(header, &[]);
+
+                self.b.switch_to_block(exit);
+                self.b.seal_block(header);
+                self.b.seal_block(exit);
+                Ok(self.b.use_var(out_var))
             }
             TBuiltinOp::InsertList => {
                 let idx = self.lower_expr(&args[0])?;
@@ -14089,6 +14852,28 @@ impl LowerCtx<'_, '_> {
                     };
                     let host = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                } else if matches!(
+                    &recv.ty,
+                    Type::List(_) | Type::FixedList { .. }
+                ) || jit_list_native_type(&recv.ty)
+                {
+                    // Option-packed like GetList / list_get_opt: 0 = None, value+1 = Some.
+                    let idx = if matches!(op, TBuiltinOp::First) {
+                        self.b.ins().iconst(types::I64, 0)
+                    } else {
+                        let len_host = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+                        let call = self.b.ins().call(len_host, &[recv_val]);
+                        let len = self.b.inst_results(call)[0];
+                        let one = self.b.ins().iconst(types::I64, 1);
+                        self.b.ins().isub(len, one)
+                    };
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_get_opt, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, idx]);
                     Ok(self.b.inst_results(call)[0])
                 } else {
                     Err("jit builtin method unsupported".to_string())
@@ -14226,6 +15011,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::Lines => {
+                if matches!(&recv.ty, Type::Named(n) if n == "FileReader") {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.io.file_lines, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[recv_val]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.str_lines, self.b.func);
@@ -14243,7 +15035,11 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
-                if !matches!(&recv.ty, Type::String) {
+                // FileReader.lines() for-in vars may still be typed Unit in TIR;
+                // the host ABI is always a string handle.
+                if !matches!(&recv.ty, Type::String)
+                    && !matches!(&recv.kind, TExprKind::Local(_))
+                {
                     return Err("jit builtin method unsupported".to_string());
                 }
                 let needle = self.lower_expr(&args[0])?;
@@ -14320,7 +15116,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::ContainsKey => {
-                if matches!(&recv.ty, Type::Apply { name, .. } if name == "Lru") {
+                if matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache") {
                     let key = self.lower_expr(&args[0])?;
                     let host = self
                         .module
@@ -14757,6 +15553,9 @@ impl LowerCtx<'_, '_> {
             // (String.split, list adapters) already return list handles of the same
             // pieces AOT would yield lazily — to_list / collect is identity.
             TBuiltinOp::IterToList | TBuiltinOp::IterCollect => Ok(recv_val),
+            // D-LOOPMAP1=B: AOT wraps via jet_iter_from_vec; JIT already walks list
+            // handles as the iter plane, so `.lazy()` is identity here.
+            TBuiltinOp::ListLazy => Ok(recv_val),
         }
     }
 
@@ -14975,6 +15774,7 @@ impl LowerCtx<'_, '_> {
                     | "HTTPShutdownReport"
                     | "WsConn"
                     | "WsMessage"
+                    | "Condition"
             ) {
                 return self.lower_expr(inner);
             }
@@ -17082,7 +17882,15 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.text.regex_method, self.b.func);
                 let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
-                Ok(self.b.inst_results(call)[0])
+                let raw = self.b.inst_results(call)[0];
+                // `regex_method` returns i64; Bool methods need the i8 print ABI.
+                if matches!(ret_ty, Type::Bool)
+                    || matches!(method.as_str(), "is_match" | "is_match_at")
+                {
+                    Ok(self.b.ins().ireduce(types::I8, raw))
+                } else {
+                    Ok(raw)
+                }
             }
             THandleOp::HTTPClientMethod { kind, method } => {
                 match (kind.as_str(), method.as_str()) {
@@ -18758,6 +19566,24 @@ impl LowerCtx<'_, '_> {
                     values.push(self.b.use_var(var));
                 }
                 Ok([values[0], values[1], values[2]])
+            }
+            TExprKind::Local(local) => {
+                // By-ref Range params still use the three SSA field locals.
+                let key = Self::local_key(local);
+                let keys = Self::range_local_keys(&key);
+                let mut values = Vec::with_capacity(3);
+                for field_key in keys {
+                    let var = self
+                        .vars
+                        .get(&field_key)
+                        .copied()
+                        .ok_or_else(|| format!("jit unknown Range local `{}`", local.name))?;
+                    values.push(self.b.use_var(var));
+                }
+                Ok([values[0], values[1], values[2]])
+            }
+            TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
+                self.lower_range_expr(inner)
             }
             TExprKind::Call { name, args } => {
                 let func_id = self

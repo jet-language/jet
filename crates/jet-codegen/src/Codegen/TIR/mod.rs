@@ -3725,6 +3725,10 @@ pub enum TBuiltinOp {
     InsertMap,
     /// `add_new(k, v)` on a map → false without overwriting an existing key.
     AddNewMap,
+    /// D-MAP-MERGE1=E: `merge(other)` → right wins on shared keys.
+    MapMerge,
+    /// D-MAP-MERGE1=E: `merge(other, conflict)` → callback resolves shared keys.
+    MapMergeWith,
     /// `insert(i, v)` on a list → `(recv).insert(a0 as usize, a1)`.
     InsertList,
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
@@ -3828,6 +3832,8 @@ pub enum TBuiltinOp {
     /// D-ITERTOOLS1=A: `Iter.to_list()` / `.collect()` → owned `[T]`.
     IterToList,
     IterCollect,
+    /// D-LOOPMAP1=B: `list.lazy()` → `Iter<T>` pipeline plane.
+    ListLazy,
     /// `step_by(n)` → `jet_list_step_by((recv).clone(), a0)`.
     StepBy,
     /// `dedup()` → `jet_list_dedup((recv).clone())`.

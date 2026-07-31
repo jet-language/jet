@@ -203,8 +203,10 @@ pub(super) fn core_call_args_in_subset(
         return match args {
             [] => true,
             [arg] => {
-                arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("capacity")
-                    && expr_in_subset(&arg.expr, cx, locals)
+                matches!(
+                    arg.label.as_ref().map(|(label, _)| label.as_str()),
+                    None | Some("capacity")
+                ) && expr_in_subset(&arg.expr, cx, locals)
             }
             _ => false,
         };

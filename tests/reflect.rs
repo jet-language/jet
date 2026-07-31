@@ -21,6 +21,8 @@ fn field(name: &str, ty: &str, is_pub: bool) -> Field {
         serde_markers: Vec::new(),
         redact: false,
         computed: None,
+        default: None,
+            default_ct: None,
     }
 }
 
@@ -40,6 +42,7 @@ fn method(name: &str, is_pub: bool) -> Func {
             ty: Type::Named("Self".to_string()),
             ty_span: span(),
             default: None,
+            default_ct: None,
             variadic: false,
             variadic_bound_list: None, declared_view_from_names: None,
         }],

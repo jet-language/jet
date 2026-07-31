@@ -327,6 +327,8 @@ mod tests {
                     serde_markers: Vec::new(),
                     redact: false,
                     computed: None,
+                    default: None,
+            default_ct: None,
                 },
                 Field {
                     is_pub: false,
@@ -338,6 +340,8 @@ mod tests {
                     serde_markers: Vec::new(),
                     redact: false,
                     computed: None,
+                    default: None,
+            default_ct: None,
                 },
             ],
             methods: vec![],

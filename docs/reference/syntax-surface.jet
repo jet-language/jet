@@ -128,33 +128,33 @@ fn control() {
     }
 
     // source iteration; ranges are inclusive (S22), and optional stride is the
-    // third semicolon clause (D-LOOP-HEADER2/D-LOOP-ADVANCE2)
+    // third comma clause (D-LOOP-COMMA1 / D-LOOP-HEADER2/D-LOOP-ADVANCE2)
     sum := 0
-    loop i; 1..5 {
+    loop i, 1..5 {
         sum = sum + i
     }
-    loop i; 0..10; 2 {
+    loop i, 0..10, 2 {
         // 0, 2, 4, 6, 8, 10
     }
 
     // loop head may be any iterable expression (S79)
-    loop word; "the quick brown".split(" ") {
+    loop word, "the quick brown".split(" ") {
         print(word)
     }
 
     // state loop — mutable initializer, condition, and optional afterthought
-    // are semicolon clauses (D-LOOP-HEADER2)
+    // are comma clauses (D-LOOP-COMMA1 / D-LOOP-HEADER2)
     total := 0
-    loop i := 0; i < 5; i += 1 {
+    loop i := 0, i < 5, i += 1 {
         total += i
     }
-    loop retries := 0; retries < 3 {
+    loop retries := 0, retries < 3 {
         retries += 1                 // afterthought omitted; advance in body
     }
 
     // a compile-time loop name precedes `::`; exits take that name as an argument
-    outer :: loop row; [1, 2, 3] {
-        loop col; [1, 2, 3] {
+    outer :: loop row, [1, 2, 3] {
+        loop col, [1, 2, 3] {
             if col == 2 { next(outer) }
             break(outer)
         }
@@ -302,7 +302,7 @@ impl FileErr.Fallible {
 // Bare `?? next` is contextual loop control: skip this turn when the value is
 // failed/empty, otherwise bind the success value (S81/D-CTXWORD1).
 fn skip_bad(lines: [String]) {
-    loop raw; lines {
+    loop raw, lines {
         line :: parse_line(raw) ?? next
         print(line)
     }
@@ -368,7 +368,7 @@ fn collections() {
     got :: fruits.get("limes")                  // safe access produces V? (S39)
 
     // map entry iteration yields a named entry value (S66)
-    loop e; fruits {
+    loop e, fruits {
         print("{e.key}: {e.value}")
     }
 
@@ -385,7 +385,7 @@ fn fixed() => [Int#3] = [1, 2, 3]                            // `.len` is a comp
 fn strings() {
     parts :: "a,b,c".split(",").to_list()
     trimmed :: "  hi  ".trim()
-    loop c; "héllo".chars() { }              // Char iteration; no s[i] (S41)
+    loop c, "héllo".chars() { }              // Char iteration; no s[i] (S41)
     block :: """
         multi-line string
         with {trimmed} interpolation
@@ -402,7 +402,7 @@ fn strings() {
 fn closures() {
     nums :: [3, 1, 2]
     squares :: nums.map((n: Int) => n * n)
-    big :: squares.filter((n: Int) => n > 5).to_list()
+    big :: squares.filter((n: Int) => n > 5)
     total :: nums.reduce(0, (acc: Int, n: Int) => acc + n)
 
     // captures are implicit: copyable values copy; other owned values move

@@ -1064,7 +1064,7 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                // D-ITERTOOLS1=A: `Lru<K,V>.new(capacity)`, expected type supplies K/V.
+                // D-ITERTOOLS1=A: `Cache<K,V>.new(capacity)`, expected type supplies K/V.
                 if type_name == Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
                     self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
                     let (key_ty, value_ty) = match &self.expected_type {

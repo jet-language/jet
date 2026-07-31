@@ -777,6 +777,8 @@ mod tests {
             serde_markers: Vec::new(),
             redact: false,
             computed: None,
+            default: None,
+            default_ct: None,
         }
     }
 

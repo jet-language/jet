@@ -632,7 +632,8 @@ impl<'a> Checker<'a> {
                             {
                                 match recv_ty {
                                     Type::List(inner) => {
-                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
+                                        // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
+                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
                                         let _ = inner;
                                     }
                                     Type::Apply { name, .. }

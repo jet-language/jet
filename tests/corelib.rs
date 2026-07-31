@@ -10046,7 +10046,7 @@ struct Inner { x: Int  y: Bool }
 struct Outer {
     display_name: String
     #Flatten inner: Inner
-    #Default(4 + 5) count: Int
+    count: Int = 4 + 5
 }
 
 fn run() {
@@ -10198,7 +10198,7 @@ derive T.ConfigSchema {
     emit("""
 #Codable
 struct GeneratedConfig {{
-    #Default([80, 443]) ports: [Int]
+    ports: [Int] = [80, 443]
 }}
 """)
 }

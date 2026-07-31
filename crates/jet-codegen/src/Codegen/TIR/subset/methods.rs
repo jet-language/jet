@@ -182,7 +182,9 @@ pub(crate) fn method_call_in_subset(
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
             Syntax::SELECT_AFTER_METHOD => {
-                return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+                // `select.after(ms)` or `select.after(ms, value)` — both covered.
+                return (args.len() == 1 || args.len() == 2)
+                    && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             Syntax::SELECT_WAIT_METHOD => return args.is_empty(),
             _ => {}
@@ -453,10 +455,19 @@ pub(crate) fn method_call_in_subset(
     // in emit. Tried BEFORE the static/instance shapes (both keyed on the same
     // `recv_type`) to claim builtins first.
     if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
+        // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
+        let labels_ok = if method == "merge" && args.len() == 2 {
+            args[0].label.is_none()
+                && matches!(
+                    args[1].label.as_ref().map(|(n, _)| n.as_str()),
+                    None | Some("conflict")
+                )
+        } else {
+            args.iter().all(|a| a.label.is_none())
+        };
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+            && labels_ok
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
     // `Set.from([...])` or `Deque.new()`. The receiver is a bare type-name ident
@@ -477,7 +488,7 @@ pub(crate) fn method_call_in_subset(
                     | ("Deque", "new", 0)
                     | ("SortedSet", "new", 0)
                     | ("PriorityQueue", "new", 0)
-                    | ("Lru", "new", 1)
+                    | ("Cache", "new", 1)
                     | ("BitSet", "new", 0)
                     | ("ByteBuffer", "new", 0) => {
                         return args
@@ -1232,11 +1243,12 @@ pub(crate) fn static_method_call_in_subset(
             return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
         }
         if method.ends_with("_rounded") && args.len() == 3 {
+            // Sema may fill `type_name` on the rounding enum lit; only the
+            // variant spelling matters for the subset gate.
             let mode = matches!(
                 &args[1].expr,
-                Expr::EnumLit { type_name, variant, args, .. }
-                    if type_name.is_empty()
-                        && args.is_empty()
+                Expr::EnumLit { variant, args, .. }
+                    if args.is_empty()
                         && Syntax::unit_rounding_mode(variant).is_some()
             );
             return args[0].label.is_none()
@@ -1342,6 +1354,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
         | "to_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
+        | "merge"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
         | "sort_by" | "reduce"
         // D-ITER1: lazy iterator adapters.

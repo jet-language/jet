@@ -229,6 +229,9 @@ pub(crate) struct TypeRegistry {
     /// literal — E0339); this side table is the only place sema resolves its
     /// type for a *read* (`field_type`).
     computed_fields: HashMap<String, HashMap<String, (Span, Type)>>,
+    /// D-FIELDDEF1=C: struct name → field name → default expression for omitted
+    /// `Type.{ … }` construction and wire/CLI absence.
+    field_defaults: HashMap<String, HashMap<String, crate::AST::Expr>>,
 }
 
 impl TypeRegistry {
@@ -274,6 +277,14 @@ impl TypeRegistry {
         name: &str,
     ) -> Option<&HashMap<String, (Span, Type)>> {
         self.computed_fields.get(name)
+    }
+
+    /// D-FIELDDEF1=C: default expressions for omitted struct-literal fields.
+    pub(crate) fn field_defaults(
+        &self,
+        name: &str,
+    ) -> Option<&HashMap<String, crate::AST::Expr>> {
+        self.field_defaults.get(name)
     }
 
     /// D-SOA1: true when `name` is a `#layout(columnar)` struct (its `[name]`

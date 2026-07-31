@@ -22,7 +22,7 @@ use super::resident::{fresh_runtime, resident_invoke, resident_teardown};
 use super::runtime_host::{new_jit_module, ResidentModule};
 use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 
 thread_local! {
     static CAPTURE: RefCell<Option<Vec<CapturedFn>>> = const { RefCell::new(None) };
@@ -80,6 +80,18 @@ thread_local! {
 
 /// Move a successful capture into the process-local "last artifact" slot.
 pub(crate) fn publish_capture() {
+    // Cell schema/projection/layout handles are iconst-baked at compile time.
+    // A cache hit rebuilds a fresh CellState and would leave those handles dangling.
+    let cell_handles = RESIDENT_RUNTIME.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|rt| rt.cells.has_compile_handles())
+    });
+    if cell_handles {
+        abort_capture();
+        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
+        return;
+    }
     let fns = take_capture();
     let strings = RESIDENT_RUNTIME.with(|slot| {
         slot.borrow()

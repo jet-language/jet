@@ -344,6 +344,7 @@ renumbered, and no new `W` code may be allocated.
 | E0372 | parse | teaching: an effect `if`, `else`, or `loop` body needs braces (D-BRACE1=A) |
 | E0373 | parse | teaching: loop header clauses use commas, not semicolons (D-LOOP-COMMA1=A) |
 | E0374 | parse | teaching: retired `comptime`; use implicit folding or `#Known` (D-VERDICT-1308-1) |
+| E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1009,7 +1010,7 @@ block reserved for M6.
 | E2411 | `{Type}` can't be serialized / decoded, or a union member has no compiler-known wire shape. | Only types that opt in with `#Codable`/`#Encode`/`#Decode` (and whose fields all have a wire form) can cross the wire. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one (D-SERDE1, D-UNIONTYPE1). | Add a compiler-derived codec, use a configured tagged enum or `#CodableAsBase` distinct type for a union member, or remove the unsupported type from the encoded value (for example, with `#Skip`). |
 | E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#DenyUnknownFields` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#DenyUnknownFields` to ignore extra keys (the lenient default), add the field, or fix the producer. |
 | E2413 | retired (D-SERDE12) — generic `#Codable` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
-| E2414 | `#Default(...)` on `{field}` must be a compile-time constant. | A decode default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, Card #131). An argument that can only be computed at runtime — an impure call, a non-deterministic value — has no fixed value to bake, and both the compiled binary and `jet dev` must agree (R12). | Use a literal or a `comptime`-evaluable expression, e.g. `#Default(8080)`, `#Default(Color.Red)`, or `#Default([1, 2])`. |
+| E2414 | A field's `=` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-FIELDDEF1=C). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int = 8080`, `env: String = "prod"`, or `ports: [Int] = [80, 443]`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output. |
@@ -1334,6 +1335,7 @@ already-freed arena), these track the views themselves.
 | E0372 | This `{body}` body needs braces. | Braces make the body's boundary visible to readers, editors, and the compiler. | Wrap the body in `{ ... }`; `jet fmt` applies this fix. |
 | E0373 | This loop header uses a semicolon. | Commas separate loop clauses; semicolons separate statements. | Replace `;` with `,`; `jet fmt` applies this fix. |
 | E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build. |
+| E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

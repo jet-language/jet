@@ -1787,6 +1787,42 @@ fn jet_index_map<K: Ord + Clone, V: Clone>(
 fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: V) {
     m.insert(k, v);
 }
+
+/// D-MAP-MERGE1=E: merge `other` into a clone of `left`. Right wins on shared keys.
+fn jet_map_merge<K: Ord + Clone, V: Clone>(
+    left: &std::collections::BTreeMap<K, V>,
+    other: &std::collections::BTreeMap<K, V>,
+) -> std::collections::BTreeMap<K, V> {
+    let mut out = left.clone();
+    for (k, v) in other {
+        out.insert(k.clone(), v.clone());
+    }
+    out
+}
+
+/// D-MAP-MERGE1=E: merge with an explicit conflict callback `(key, left, right) -> V`.
+fn jet_map_merge_with<K: Ord + Clone, V: Clone, F>(
+    left: &std::collections::BTreeMap<K, V>,
+    other: &std::collections::BTreeMap<K, V>,
+    conflict: F,
+) -> std::collections::BTreeMap<K, V>
+where
+    F: Fn(&K, V, V) -> V,
+{
+    let mut out = left.clone();
+    for (k, right) in other {
+        match out.remove(k) {
+            Some(left_v) => {
+                let resolved = conflict(k, left_v, right.clone());
+                out.insert(k.clone(), resolved);
+            }
+            None => {
+                out.insert(k.clone(), right.clone());
+            }
+        }
+    }
+    out
+}
 fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> T {
     let len = xs.len() as i64;
     if i < 0 || i >= len {

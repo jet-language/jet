@@ -43,9 +43,10 @@ fn is_cli_scalar(ty: &Type) -> bool {
 /// parameters, S61, a different grammar slot; struct fields, CLI or not, use
 /// `#[Default(...)]`)?
 fn has_default_marker(f: &Field) -> bool {
-    f.serde_markers
-        .iter()
-        .any(|m| m.name == Syntax::ATTR_DEFAULT)
+    f.default.is_some()
+        || f.serde_markers
+            .iter()
+            .any(|m| m.name == Syntax::ATTR_DEFAULT)
 }
 
 /// D-CLI-POS1=A: does `f` carry `#[Flag]` (opt out of positional filling)?

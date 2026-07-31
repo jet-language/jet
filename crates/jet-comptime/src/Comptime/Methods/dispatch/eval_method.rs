@@ -1691,7 +1691,7 @@ impl<'a> Interp<'a> {
                             } else {
                                 let displaced = key_position(&entries, &argv[0]).map(|index| {
                                     let CtValue::List(pair) = entries.remove(index) else {
-                                        unreachable!("Lru entries are pairs")
+                                        unreachable!("Cache entries are pairs")
                                     };
                                     pair[1].clone()
                                 });
@@ -1712,7 +1712,7 @@ impl<'a> Interp<'a> {
                             Some(index) => {
                                 let entry = entries.remove(index);
                                 let CtValue::List(pair) = &entry else {
-                                    unreachable!("Lru entries are pairs")
+                                    unreachable!("Cache entries are pairs")
                                 };
                                 let value = pair[1].clone();
                                 entries.insert(0, entry);
@@ -1724,14 +1724,14 @@ impl<'a> Interp<'a> {
                         "remove" => match key_position(&entries, &argv[0]) {
                             Some(index) => {
                                 let CtValue::List(pair) = entries.remove(index) else {
-                                    unreachable!("Lru entries are pairs")
+                                    unreachable!("Cache entries are pairs")
                                 };
                                 changed = true;
                                 CtValue::Some(Box::new(pair[1].clone()))
                             }
                             None => option_none(),
                         },
-                        _ => unreachable!("Lru method set is closed"),
+                        _ => unreachable!("Cache method set is closed"),
                     };
                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                         self.write_back(

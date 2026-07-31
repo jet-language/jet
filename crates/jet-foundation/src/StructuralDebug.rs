@@ -28,6 +28,12 @@ pub fn jet_debug_union(payload: String) -> String {
     payload
 }
 
+/// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
+/// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
+pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
+    format!("paused={paused},cancel={cancel}")
+}
+
 /// D-RANGE-VALUE1=A: the standard structural record form for `Range`.
 pub fn jet_debug_range(start: i64, end: i64, exclusive: bool) -> String {
     jet_debug_record(

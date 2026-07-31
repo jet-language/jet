@@ -22,7 +22,7 @@ fn write_todo(dir: &std::path::Path) {
         r#"#CLI
 struct AddArgs {
     text: String
-    #Default("") due: String
+    due: String = ""
 }
 
 #CLI
