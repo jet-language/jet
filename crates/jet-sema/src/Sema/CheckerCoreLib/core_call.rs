@@ -1593,6 +1593,11 @@ impl<'a> Checker<'a> {
                         &arg.expr,
                         Expr::Place(_, crate::AST::PlaceAccess::Write, _)
                     ) || arg.convention == AccessConvention::Write;
+                    // A pin borrows the place; it never duplicates it. Without
+                    // this the auto-copy pass (D-CAP2) would wrap a field or
+                    // index place in `copy`, and the pin would then promise
+                    // address stability for a temporary instead of the owner.
+                    self.borrow_ctx = true;
                     let t = self.infer(&mut arg.expr)?;
                     if !write_place {
                         self.diags.push(Diagnostic::error(

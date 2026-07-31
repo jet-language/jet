@@ -301,6 +301,80 @@ fn run() {{
     }
 }
 
+#[test]
+fn pinning_a_field_place_records_the_field_not_a_copy() {
+    // Regression: the auto-copy pass wrapped a field argument in `copy`, so the
+    // pin silently promised address stability for a temporary and the owner
+    // field stayed replaceable.
+    let src = format!(
+        r#"{NODE}
+struct Pair {{
+    left: Node
+    right: Node
+}}
+
+fn run() {{
+    pair := Pair.{{left: Node.{{payload: 1, hops: 0}}, right: Node.{{payload: 2, hops: 0}}}}
+    first :: mem.pin(&pair.left)
+    pair.left = Node.{{payload: 9, hops: 0}}
+    print("{{(first.hops)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), vec!["E0219"]);
+}
+
+#[test]
+fn two_pins_on_sibling_fields_do_not_conflict() {
+    // Sibling places never overlap, so pinning both is one contract per field,
+    // not a double borrow. Only nesting is exempt from the overlap rule.
+    let src = format!(
+        r#"{NODE}
+struct Pair {{
+    left: Node
+    right: Node
+}}
+
+fn run() {{
+    pair := Pair.{{left: Node.{{payload: 1, hops: 0}}, right: Node.{{payload: 2, hops: 0}}}}
+    first :: mem.pin(&pair.left)
+    second :: mem.pin(&pair.right)
+    first.hops += 1
+    second.hops += 2
+    print("{{(first.hops)}} {{(second.hops)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), Vec::<String>::new());
+    assert_eq!(interpret(&src), "1 2\n");
+    if let Some(out) = build_and_run("sibling_pins", &src) {
+        assert_eq!(out, "1 2\n");
+    }
+}
+
+#[test]
+fn a_pin_taken_each_iteration_is_a_fresh_loan() {
+    // The loan ends with the loop body's scope, so the next iteration may pin
+    // the same place again without tripping the overlap rule.
+    let src = format!(
+        r#"{NODE}
+fn run() {{
+    node := Node.{{payload: 0, hops: 0}}
+    loop i, 0..2 {{
+        pinned :: mem.pin(&node)
+        pinned.hops += 1
+    }}
+    print("{{(node.hops)}}")
+}}
+"#
+    );
+    assert_eq!(error_codes(&src), Vec::<String>::new());
+    assert_eq!(interpret(&src), "3\n");
+    if let Some(out) = build_and_run("loop_pin", &src) {
+        assert_eq!(out, "3\n");
+    }
+}
+
 // ── A pin never crosses a task boundary ────────────────────────────────────
 
 #[test]
