@@ -131,12 +131,19 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 // Bare member-type tags — matches `emit_anonymous_unions` / match arms.
                 s = format!("user_{enum_name}::{tag}({s})");
             }
-            // c109 Phase 13: the Fn-typed Box-coercion, applied AFTER the clone wrapper
-            // and BEFORE the borrow wrapper — exactly `emit_call_args`' order. `Box::new`
-            // is added only when the value isn't already boxed (resolved at lowering).
+            // Fn-typed coercion: wrap to match `cx.rust_type` (Rc / Arc / Box for FnMut).
+            // Skip wrap when the value already emits Rc/Arc/Box::new (named fn / lambda).
             if let Some(fc) = &a.fn_coerce {
                 if !fc.already_boxed {
-                    s = format!("Box::new({})", s);
+                    let rust_ty = cx.rust_type(&fc.ty);
+                    let wrap = if rust_ty.starts_with("std::sync::Arc<") {
+                        "std::sync::Arc::new"
+                    } else if rust_ty.starts_with("std::rc::Rc<") {
+                        "std::rc::Rc::new"
+                    } else {
+                        "Box::new"
+                    };
+                    s = format!("{wrap}({s})");
                 }
                 s = format!("{} as {}", s, cx.rust_type(&fc.ty));
             }

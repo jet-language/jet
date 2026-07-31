@@ -4451,13 +4451,9 @@ pub struct TCallArg {
     /// `Arc::clone(&...)` once `Shared<T>` stopped being a bare `Arc<T>`).
     /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
     pub arc_clone: bool,
-    /// c109 Phase 13: the Fn-typed-parameter coercion (`emit_call_args`' fn-arg
-    /// path). When `Some(<fn-type rust string>)`, the value is wrapped
-    /// `Box::new(value) as <fn-type>` — unless it is ALREADY boxed (a bare fn-name
-    /// value emits its own `Box::new(…)`, or the value is a fn-typed local ident), in
-    /// which case only the ` as <fn-type>` suffix is applied. `already_boxed` carries
-    /// that resolved decision so emit makes none. A read callback parameter borrows the
-    /// resulting box like every other non-scalar parameter.
+    /// c109 Phase 13: Fn-typed-parameter coercion. When set, emit wraps with
+    /// `Rc`/`Arc`/`Box::new` to match `cx.rust_type(&ty)` (unless `already_boxed`),
+    /// then ` as <fn-type>`. Named-fn / escaping-lambda values already wrap.
     pub fn_coerce: Option<TFnCoerce>,
     /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
     /// copying into a growable list. When true, emit wraps with `.to_vec()`.
@@ -4471,7 +4467,7 @@ pub struct TCallArg {
 pub struct TFnCoerce {
     /// Target fn type; emit spells via `cx.rust_type`.
     pub ty: Type,
-    /// Whether the value already produces a `Box::new(…)` — emit applies only ` as <fn-type>`.
+    /// Value already emits `Rc`/`Arc`/`Box::new` — apply only ` as <fn-type>`.
     pub already_boxed: bool,
 }
 
