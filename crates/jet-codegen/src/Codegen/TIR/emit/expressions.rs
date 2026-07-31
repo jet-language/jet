@@ -3021,6 +3021,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         a(1)
                     ),
                     "paint" => format!("({}).paint_node(({}).clone())", recv, a(0)),
+                    // D-UI-MOUNT1=A
+                    "mount" if args.len() == 1 => {
+                        format!("({}).mount_node_default(({}).clone())", recv, a(0))
+                    }
+                    "mount" => format!(
+                        "({}).mount_node(({}).clone(), ({}).clone())",
+                        recv,
+                        a(0),
+                        a(1)
+                    ),
                     "on_event" => format!("({}).dispatch_event(({}).clone())", recv, a(0)),
                     "commands" => format!("({}).paint_commands()", recv),
                     "frame_lines" => format!("({}).frame_lines()", recv),

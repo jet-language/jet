@@ -673,6 +673,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend.
             "gtk_backend",
             "reactive_render",
+            // D-UI-MOUNT1=A: one-call measure→layout→paint.
+            "mount",
             "point",
             "size",
             "rect",

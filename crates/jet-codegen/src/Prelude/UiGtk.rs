@@ -483,6 +483,22 @@ mod jet_gtk {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::paint(&mut *state, &node);
         }
+        /// D-UI-MOUNT1=A: measure → layout → paint in one call.
+        pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+            {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                state.commands.clear();
+            }
+            let size = self.measure_node(node.clone(), constraint);
+            self.layout_node(
+                node.clone(),
+                jet_ui_rect(0.0, 0.0, size.width, size.height),
+            );
+            self.paint_node(node);
+        }
+        pub fn mount_node_default(&self, node: JetUiNode) {
+            self.mount_node(node, jet_ui_constraint(0.0, 0.0, 320.0, 240.0));
+        }
         pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::on_event(&mut *state, event)

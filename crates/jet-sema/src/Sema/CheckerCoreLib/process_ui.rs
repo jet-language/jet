@@ -394,6 +394,8 @@ pub(crate) fn ui_backend_method_return(
         ("NullBackend" | "TuiBackend" | "GtkBackend", "measure", 2) => Some(Some(size_ty)),
         ("NullBackend" | "TuiBackend" | "GtkBackend", "layout", 2) => Some(Some(unit)),
         ("NullBackend" | "TuiBackend" | "GtkBackend", "paint", 1) => Some(Some(unit)),
+        // D-UI-MOUNT1=A: one-call measure→layout→paint (optional constraint).
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "mount", 1 | 2) => Some(Some(unit)),
         ("NullBackend" | "TuiBackend" | "GtkBackend", "on_event", 1) => {
             Some(Some(Type::Named("EventResult".to_string())))
         }

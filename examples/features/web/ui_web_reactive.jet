@@ -1,5 +1,6 @@
 // D-WEBBACKEND1 M2 + D-RENDERTGT2=A (c133/c123 Phase 7): a reactive signal
 // drives a DOM-backend render loop, compiled to JS (and runnable natively).
+// D-UI-MOUNT1=A: one-call mount (3-arg keeps the 200×100 golden viewport).
 use core.ui as ui
 use core.reactive as reactive
 
@@ -8,11 +9,7 @@ fn run() {
     label :: reactive.signal("hello")
     ui.reactive_render(() => {
         node :: ui.node(label.get(), 100.0, 20.0)
-        constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
-        size :: backend.measure(node, constraint)
-        frame :: ui.rect(0.0, 0.0, size.width, size.height)
-        backend.layout(node, frame)
-        backend.paint(node)
+        ui.mount(backend, node, ui.constraint(0.0, 0.0, 200.0, 100.0))
     })
     loop cmd, backend.commands() { print(cmd) }
     label.set("world")

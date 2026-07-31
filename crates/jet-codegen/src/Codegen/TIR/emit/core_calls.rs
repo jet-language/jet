@@ -2650,6 +2650,21 @@ pub(crate) fn emit_tir_core_call(
         ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
         ("core.ui", "gtk_backend") => format!("{}jet_ui_gtk()", cx.root_prefix),
+        // D-UI-MOUNT1=A: free-fn spelling of the backend mount pipeline.
+        ("core.ui", "mount") => {
+            let backend = arg(0);
+            let tree = arg(1);
+            if args.len() >= 3 {
+                format!(
+                    "({}).mount_node(({}).clone(), ({}).clone())",
+                    backend,
+                    tree,
+                    arg(2)
+                )
+            } else {
+                format!("({}).mount_node_default(({}).clone())", backend, tree)
+            }
+        }
         ("core.ui", "point") => format!("{}jet_ui_point({}, {})", cx.root_prefix, arg(0), arg(1)),
         ("core.ui", "size") => format!("{}jet_ui_size({}, {})", cx.root_prefix, arg(0), arg(1)),
         ("core.ui", "rect") => format!(

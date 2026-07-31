@@ -82,6 +82,43 @@ fn tui_backend_reactive_render_loop() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-UI-MOUNT1=A: mount twice yields the same paint transcript as one mount.
+#[test]
+fn mount_twice_is_idempotent() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping ui mount idempotence test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_ui_mount_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"use core.ui as ui
+fn run() {
+    tree := ui.box([ui.text("Title"), ui.button("Save")])
+    null := ui.null_backend()
+    ui.mount(null, tree)
+    loop command, null.commands() { print(command) }
+    print("---")
+    ui.mount(null, tree)
+    loop command, null.commands() { print(command) }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "ui_mount_twice", src);
+    assert_eq!(code, 0, "mount twice failed: {stderr}");
+    let expected = "\
+text({x:0,y:0,w:8,h:1}, Title)
+fill({x:0,y:1,w:8,h:1}, #000000)
+text({x:0,y:1,w:8,h:1}, Save)
+---
+text({x:0,y:0,w:8,h:1}, Title)
+fill({x:0,y:1,w:8,h:1}, #000000)
+text({x:0,y:1,w:8,h:1}, Save)
+";
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// D-UITREE1: typed constructors form one tree consumed unchanged by null and
 /// TUI backends. Painting the tree also derives one shared focus order.
 #[test]

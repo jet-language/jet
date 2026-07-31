@@ -11441,6 +11441,26 @@ impl LowerCtx<'_, '_> {
                             let kind = self.b.ins().iconst(types::I64, 3);
                             (self.host.ui.aria_role, vec![kind])
                         }
+                        // D-UI-MOUNT1=A: void pipeline — return unit before the generic I64 path.
+                        "mount" if args.len() == 2 => {
+                            let backend = self.lower_expr(&args[0])?;
+                            let node = self.lower_expr(&args[1])?;
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.ui.mount_default, self.b.func);
+                            self.b.ins().call(host, &[backend, node]);
+                            return Ok(self.b.ins().iconst(types::I8, 0));
+                        }
+                        "mount" if args.len() == 3 => {
+                            let backend = self.lower_expr(&args[0])?;
+                            let node = self.lower_expr(&args[1])?;
+                            let constraint = self.lower_expr(&args[2])?;
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.ui.mount, self.b.func);
+                            self.b.ins().call(host, &[backend, node, constraint]);
+                            return Ok(self.b.ins().iconst(types::I8, 0));
+                        }
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
                         }
@@ -17545,6 +17565,23 @@ impl LowerCtx<'_, '_> {
                         .module
                         .declare_func_in_func(self.host.ui.paint, self.b.func);
                     self.b.ins().call(host, &[recv_val, node]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "mount" if args.len() == 1 => {
+                    let node = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.mount_default, self.b.func);
+                    self.b.ins().call(host, &[recv_val, node]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "mount" if args.len() == 2 => {
+                    let node = self.lower_expr(&args[0])?;
+                    let c = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.mount, self.b.func);
+                    self.b.ins().call(host, &[recv_val, node, c]);
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
                 "on_event" if args.len() == 1 => {

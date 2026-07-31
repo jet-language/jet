@@ -1,4 +1,5 @@
 // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M2): TUI backend + reactive render loop.
+// D-UI-MOUNT1=A: one-call mount over measure/layout/paint.
 use core.ui as ui
 use core.reactive as reactive
 
@@ -7,11 +8,7 @@ fn run() {
     label :: reactive.signal("hi")
     ui.reactive_render(() => {
         node :: ui.node(label.get(), 2.0, 1.0)
-        constraint :: ui.constraint(0.0, 0.0, 80.0, 24.0)
-        size :: backend.measure(node, constraint)
-        frame :: ui.rect(0.0, 0.0, size.width, size.height)
-        backend.layout(node, frame)
-        backend.paint(node)
+        ui.mount(backend, node)
     })
     print(backend.render_count())
     loop line, backend.frame_lines() { print(line) }

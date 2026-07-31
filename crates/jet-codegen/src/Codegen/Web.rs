@@ -911,6 +911,8 @@ fn web_js_ui_backend_method_supported(method: &str, argc: usize) -> bool {
         ("measure", 2)
             | ("layout", 2)
             | ("paint", 1)
+            | ("mount", 1)
+            | ("mount", 2)
             | ("commands", 0)
             | ("on_event", 1)
             | ("set_focus_group", 1)
@@ -4469,6 +4471,8 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                     ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
                     ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
                     ("paint", 1) => format!("jetDom.paint({recv}, {})", a[0]),
+                    ("mount", 1) => format!("jetDom.mount({recv}, {})", a[0]),
+                    ("mount", 2) => format!("jetDom.mount({recv}, {}, {})", a[0], a[1]),
                     ("commands", 0) => format!("jetDom.commands({recv})"),
                     ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", a[0]),
                     ("set_focus_group", 1) => {
@@ -4606,8 +4610,16 @@ fn tir_core_call(
     } else {
         None
     };
-    let required = web_core_arity(module, method).ok_or(())?;
-    if a.len() != required {
+    let required = web_core_arity(module, method);
+    if let Some(required) = required {
+        if a.len() != required {
+            return Err(());
+        }
+    } else if method == "mount" {
+        if a.len() != 2 && a.len() != 3 {
+            return Err(());
+        }
+    } else {
         return Err(());
     }
     let get = |i: usize| a[i].as_str();
@@ -4619,6 +4631,13 @@ fn tir_core_call(
             get(1),
             get(2)
         ));
+    }
+    if method == "mount" {
+        return Ok(if a.len() == 2 {
+            format!("jetDom.mount({}, {})", get(0), get(1))
+        } else {
+            format!("jetDom.mount({}, {}, {})", get(0), get(1), get(2))
+        });
     }
     if let Some(kind) = storage {
         return Ok(match method {

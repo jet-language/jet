@@ -211,6 +211,8 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
 pub(crate) fn is_ui_backend_method_name(backend: Option<&str>, method: &str, nargs: usize) -> bool {
     match (backend, method, nargs) {
         (_, "measure", 2) | (_, "layout", 2) | (_, "paint", 1) | (_, "on_event", 1) => true,
+        // D-UI-MOUNT1=A: measure→layout→paint; 1-arg uses the backend default viewport.
+        (_, "mount", 1 | 2) => true,
         (Some("NullBackend"), "commands", 0) => true,
         (Some("TuiBackend"), "frame_lines" | "render_count", 0) => true,
         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.

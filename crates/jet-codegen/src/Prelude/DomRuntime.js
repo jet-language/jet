@@ -115,6 +115,15 @@ export function layout(backend, node, frame) {
   return frame;
 }
 
+/** D-UI-MOUNT1=A: measure → layout → paint (optional constraint; default 80×24). */
+export function mount(backend, node, constraint) {
+  const bounds = constraint ?? { minWidth: 0, minHeight: 0, maxWidth: 80, maxHeight: 24 };
+  backend.commands = [];
+  const size = measure(node, bounds);
+  layout(backend, node, { x: 0, y: 0, width: size.width, height: size.height });
+  paint(backend, node);
+}
+
 // D-STYLESHAPE1=A wiring: pick readable text color (WCAG-style relative
 // luminance threshold) so a dark fill gets light text and vice versa,
 // instead of hardcoding one text color regardless of the node's fill.

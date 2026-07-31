@@ -2800,6 +2800,69 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
+                // D-UI-MOUNT1=A: `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`.
+                ("core.ui", "mount") => {
+                    if args.len() != 2 && args.len() != 3 {
+                        self.diags
+                            .push(wrong_core_arity("mount", 2, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    let backend_ty = self.infer(&mut args[0].expr);
+                    let tree_ty = self.infer(&mut args[1].expr);
+                    if let Some(ty) = &backend_ty {
+                        match ty.name().as_str() {
+                            "NullBackend" | "TuiBackend" | "GtkBackend" => {}
+                            _ => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!(
+                                        "`ui.mount` needs a UI backend, but the first argument is {}",
+                                        ty.show()
+                                    ),
+                                    "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`"
+                                        .to_string(),
+                                    "backend :: ui.tui_backend()\nui.mount(backend, tree)".to_string(),
+                                    Some(args[0].expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    if let Some(ty) = &tree_ty {
+                        if ty.name() != "UiNode" {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!(
+                                    "`ui.mount` needs a `UiNode` tree, but the second argument is {}",
+                                    ty.show()
+                                ),
+                                "build the tree with `ui.text` / `ui.box` / `ui.node` / …".to_string(),
+                                "ui.mount(backend, ui.box([ui.text(\"hi\")]))".to_string(),
+                                Some(args[1].expr.span()),
+                            ));
+                        }
+                    }
+                    if args.len() == 3 {
+                        if let Some(ty) = self.infer(&mut args[2].expr) {
+                            if ty.name() != "SizeConstraint" {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!(
+                                        "`ui.mount` optional third argument is a `SizeConstraint`, but got {}",
+                                        ty.show()
+                                    ),
+                                    "use `ui.constraint(min_w, min_h, max_w, max_h)`".to_string(),
+                                    "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"
+                                        .to_string(),
+                                    Some(args[2].expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    return Some(unit_ty());
+                }
                 // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
                 // whenever a signal it read changes. The body is a zero-parameter,
                 // unit-returning closure; the call returns a retained Effect.

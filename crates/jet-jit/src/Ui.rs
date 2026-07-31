@@ -46,6 +46,14 @@ pub(crate) mod ui_rt {
         pub fn paint_node(&self, node: JetUiNode) {
             self.inner.paint_node(node)
         }
+        pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+            self.inner.mount_node(node, constraint)
+        }
+        pub fn mount_node_default(&self, node: JetUiNode) {
+            // Match AOT GtkBackend default viewport (320×240).
+            self.inner
+                .mount_node(node, jet_ui_constraint(0.0, 0.0, 320.0, 240.0))
+        }
         pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
             self.inner.dispatch_event(event)
         }
@@ -354,6 +362,54 @@ extern "C" fn jet_jit_ui_paint(backend: i64, node: i64) {
     });
 }
 
+/// D-UI-MOUNT1=A: measure → layout → paint (I9: same Prelude methods AOT uses).
+extern "C" fn jet_jit_ui_mount(backend: i64, node: i64, constraint: i64) {
+    with_rt(|rt| {
+        let node = rt
+            .ui
+            .nodes
+            .get(node.saturating_sub(1) as usize)
+            .expect("jit ui mount: bad node")
+            .clone();
+        let constraint = *rt
+            .ui
+            .constraints
+            .get(constraint.saturating_sub(1) as usize)
+            .expect("jit ui mount: bad constraint");
+        match rt
+            .ui
+            .backends
+            .get(backend.saturating_sub(1) as usize)
+            .expect("jit ui mount: bad backend")
+        {
+            UiBackendSlot::Null(b) => b.mount_node(node, constraint),
+            UiBackendSlot::Tui(b) => b.mount_node(node, constraint),
+            UiBackendSlot::Gtk(b) => b.mount_node(node, constraint),
+        }
+    });
+}
+
+extern "C" fn jet_jit_ui_mount_default(backend: i64, node: i64) {
+    with_rt(|rt| {
+        let node = rt
+            .ui
+            .nodes
+            .get(node.saturating_sub(1) as usize)
+            .expect("jit ui mount_default: bad node")
+            .clone();
+        match rt
+            .ui
+            .backends
+            .get(backend.saturating_sub(1) as usize)
+            .expect("jit ui mount_default: bad backend")
+        {
+            UiBackendSlot::Null(b) => b.mount_node_default(node),
+            UiBackendSlot::Tui(b) => b.mount_node_default(node),
+            UiBackendSlot::Gtk(b) => b.mount_node_default(node),
+        }
+    });
+}
+
 extern "C" fn jet_jit_ui_on_event(backend: i64, event: i64) -> i64 {
     with_rt(|rt| {
         let event = rt
@@ -571,6 +627,8 @@ pub(crate) struct UiHostFns {
     pub(crate) measure: FuncId,
     pub(crate) layout: FuncId,
     pub(crate) paint: FuncId,
+    pub(crate) mount: FuncId,
+    pub(crate) mount_default: FuncId,
     pub(crate) on_event: FuncId,
     pub(crate) commands: FuncId,
     pub(crate) frame_lines: FuncId,
@@ -602,6 +660,8 @@ pub(crate) fn register_ui_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_ui_measure", jet_jit_ui_measure as *const u8);
     builder.symbol("jet_jit_ui_layout", jet_jit_ui_layout as *const u8);
     builder.symbol("jet_jit_ui_paint", jet_jit_ui_paint as *const u8);
+    builder.symbol("jet_jit_ui_mount", jet_jit_ui_mount as *const u8);
+    builder.symbol("jet_jit_ui_mount_default", jet_jit_ui_mount_default as *const u8);
     builder.symbol("jet_jit_ui_on_event", jet_jit_ui_on_event as *const u8);
     builder.symbol("jet_jit_ui_commands", jet_jit_ui_commands as *const u8);
     builder.symbol("jet_jit_ui_frame_lines", jet_jit_ui_frame_lines as *const u8);
@@ -699,6 +759,8 @@ pub(crate) fn declare_ui_host_fns(module: &mut JITModule) -> Result<UiHostFns, S
         measure: import("jet_jit_ui_measure", &measure)?,
         layout: import("jet_jit_ui_layout", &layout)?,
         paint: import("jet_jit_ui_paint", &paint)?,
+        mount: import("jet_jit_ui_mount", &layout)?,
+        mount_default: import("jet_jit_ui_mount_default", &paint)?,
         on_event: import("jet_jit_ui_on_event", &binary)?,
         commands: import("jet_jit_ui_commands", &unary)?,
         frame_lines: import("jet_jit_ui_frame_lines", &unary)?,

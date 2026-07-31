@@ -2382,10 +2382,7 @@ fn run() {
         ui.button("Boost fuel"),
     ])
     backend :: ui.tui_backend()
-    bounds :: ui.constraint(0.0, 0.0, 80.0, 24.0)
-    size :: backend.measure(tree, bounds)
-    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
-    backend.paint(tree)
+    ui.mount(backend, tree)
 }
 ```
 
@@ -2399,7 +2396,8 @@ fn run() {
 | `ui.node_color(label, width, height, color)` | `UiNode` | styled text node with a `#RRGGBB` fill and accessible name |
 | `ui.null_backend()` / `ui.tui_backend()` | backend | in-memory/DOM-selected or terminal renderer |
 | `ui.gtk_backend()` | `GtkBackend` | Linux GTK4 renderer; needs a real display unless `JET_UI_HEADLESS=1` |
-| `backend.measure/layout/paint(...)` | mixed | run the shared tree through the selected renderer |
+| `ui.mount(backend, tree[, constraint])` | — | one-call measure → layout → paint (D-UI-MOUNT1=A); default viewport is backend-sized |
+| `backend.measure/layout/paint(...)` | mixed | expert stages behind the mount pipeline |
 | `backend.on_event(ui.key_event("Tab"))` | `EventResult` | advance the backend's interactive focus order |
 | `ui.reactive_render(() => { ... })` | — | repaint from signals read by the body |
 

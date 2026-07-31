@@ -175,6 +175,10 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
+    // D-UI-MOUNT1=A: bespoke arity (2|3) + backend union; Unit return from sema.
+    if module == "core.ui" && method == "mount" {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -377,6 +381,13 @@ pub(crate) fn core_closure_call_in_subset(
         }
         // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(<lambda>)`.
         ("core.ui", "reactive_render") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-UI-MOUNT1=A: `ui.mount(backend, tree[, constraint])` — bespoke
+        // arity/types in sema (not `core_fixed_sig`); emit uses Prelude mount.
+        ("core.ui", "mount") => {
+            (args.len() == 2 || args.len() == 3)
+                && no_labels
+                && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
+        }
         _ => false,
     }
 }
