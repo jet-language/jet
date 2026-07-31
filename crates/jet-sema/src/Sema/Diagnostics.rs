@@ -277,6 +277,9 @@ fn is_cloneable_rec(
             visiting.remove(name);
             result
         }
+        // A task handle owns one running child and its join slot. Copying the
+        // handle would hand two owners the same join, so the runtime `JetTask`
+        // implements no `Clone` and neither does the language type.
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
@@ -285,6 +288,7 @@ fn is_cloneable_rec(
                     | "ViewMut"
                     | "CellReadGuard"
                     | "CellEditGuard"
+                    | "Task"
                     | Syntax::TYPE_SHARED_GUARD
             ) =>
         {

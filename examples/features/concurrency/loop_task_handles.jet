@@ -1,0 +1,16 @@
+// A task handle owns one running child and its join slot, so it cannot be
+// copied. Looping over a list of handles therefore takes the list: each step
+// hands you the handle itself, and waiting on it consumes it. Using the list
+// again after the loop is ordinary use-after-move (E0121), not a compiler crash.
+use core.tasks as tasks
+
+fn run() {
+    handles :: [
+        tasks.spawn(() => 1),
+        tasks.spawn(() => 2),
+        tasks.spawn(() => 3)
+    ]
+    total := 0
+    loop handle, handles { total += handle.wait() }
+    print(total)
+}

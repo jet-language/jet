@@ -1335,9 +1335,34 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }
                     _ => None,
                 };
+                // A list whose elements cannot be cloned is iterated by value: the
+                // loop consumes the collection instead of asking rustc for a
+                // `.cloned()` that does not exist (I2 — that reaches the user as
+                // an internal compiler error, never a diagnostic).
+                // A `ViewMut` element is not cloneable either, but a list of them
+                // already has its own iteration form below; leave it alone.
+                let elem_is_view_mut = matches!(
+                    coll_elem_ty.as_ref(),
+                    Some(Type::Apply { name, .. }) if name == "ViewMut"
+                );
+                let elem_is_cloneable = coll_elem_ty.as_ref().is_none_or(|elem| {
+                    crate::Codegen::field_type_cloneable(
+                        elem,
+                        &cx.type_names,
+                        &std::collections::HashSet::new(),
+                    )
+                });
                 let by_value = matches!(&lowered_coll.ty,
                     Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
-                ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks");
+                ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")
+                    || (var2.is_none()
+                        && method_kind.is_none()
+                        && !elem_is_cloneable
+                        && !elem_is_view_mut
+                        && matches!(
+                            &lowered_coll.ty,
+                            Type::List(_) | Type::FixedList { .. }
+                        ));
                 if method_kind.is_none() {
                     if let Type::Named(n) = &lowered_coll.ty {
                         if let Some(hook) = cx.iterable_hooks.get(n) {

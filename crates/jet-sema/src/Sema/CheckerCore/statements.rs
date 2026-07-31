@@ -1,6 +1,7 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
+use crate::Sema::Diagnostics::is_cloneable;
 use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
@@ -1978,10 +1979,33 @@ impl<'a> Checker<'a> {
                                 self.lending_view_loop_vars.remove(name);
                             }
                             self.pop_scope();
-                            if let Some(n) = borrowed {
+                            if let Some(n) = borrowed.clone() {
                                 self.iter_borrowed.remove(&n);
                             }
                             self.loop_depth -= 1;
+                            // A list of non-cloneable elements cannot be iterated by
+                            // copy, so the loop takes the collection. Record the move
+                            // after leaving the loop: the collection is consumed by
+                            // this loop, not inside it, so a later use is ordinary
+                            // use-after-move (E0121) instead of a rustc rejection (I2).
+                            if var2.is_none() {
+                                if let Some(
+                                    Type::List(inner) | Type::FixedList { elem: inner, .. },
+                                ) = &coll_ty
+                                {
+                                    // A `ViewMut` element list keeps its own
+                                    // borrow-through iteration; it is not consumed.
+                                    let view_mut = matches!(
+                                        inner.as_ref(),
+                                        Type::Apply { name, .. } if name == "ViewMut"
+                                    );
+                                    if !view_mut && !is_cloneable(inner, self.registry) {
+                                        if let Some(name) = borrowed {
+                                            self.mark_moved(name, collection.span());
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     self.pop_loop_value_frame();

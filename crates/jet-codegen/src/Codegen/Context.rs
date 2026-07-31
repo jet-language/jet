@@ -3574,8 +3574,9 @@ pub(crate) fn field_type_cloneable(
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
+        // `JetTask` implements no `Clone`: a handle owns one join slot.
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "ViewMut") || name == Syntax::TYPE_SHARED_GUARD =>
+            if matches!(name.as_str(), "ViewMut" | "Task") || name == Syntax::TYPE_SHARED_GUARD =>
         {
             false
         }
