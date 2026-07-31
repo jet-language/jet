@@ -1,0 +1,19 @@
+// D-MEMPROVENANCE3=A: a trait method may declare `from self` so the owner
+// contract is explicit. Static dispatch through the impl is proven here;
+// open (dyn) dispatch is the same declaration and is covered by check tests.
+trait Slice {
+    fn head(self) => View<Int> from self
+}
+
+struct Packet {
+    data: [Int]
+}
+
+impl Packet.Slice {
+    fn head(self) => View<Int> from self = self.data[0..1]
+}
+
+fn run() {
+    p :: Packet.{ data: [9, 8, 7] }
+    print(p.head()[0])
+}

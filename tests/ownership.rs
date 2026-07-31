@@ -5643,3 +5643,54 @@ fn run() {
     }
 }
 
+
+#[test]
+fn declared_trait_from_allows_dyn_view_return_on_jit() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_view_from_trait_dyn_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    std::fs::write(
+        &path,
+        r#"
+trait Slice {
+    fn head(self) => View<Int> from self
+}
+
+struct Packet {
+    data: [Int]
+}
+
+impl Packet.Slice {
+    fn head(self) => View<Int> from self = self.data[0..1]
+}
+
+fn first(s: Slice) => View<Int> from s {
+    return s.head()
+}
+
+fn run() {
+    boxed :: [Slice].{Packet.{ data: [9, 8, 7] }}
+    print(first(boxed[0])[0])
+}
+"#,
+    )
+    .unwrap();
+    let (code, stdout, stderr) = {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("run")
+            .arg(&path)
+            .output()
+            .expect("jet run");
+        (
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "9\n", "{stderr}");
+}
