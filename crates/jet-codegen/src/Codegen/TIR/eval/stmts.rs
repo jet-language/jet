@@ -231,6 +231,21 @@ impl<'a> EvalCtx<'a> {
         self.burn()?;
         match stmt {
             TStmt::Let { name, init, .. } => {
+                // D-MEM1 S9 / D-PIN1=A: a whole-place write window (`p :: &node`,
+                // `pinned :: mem.pin(&node)`) is an alias in AOT and Cranelift,
+                // so bind an alias handle here instead of a copy — otherwise
+                // edits through the window vanish on this tier alone (I9).
+                if let TExprKind::Borrow { place, mutable: true } = &init.kind {
+                    if let Some((base, path)) = owner_list_place(place) {
+                        if scope.contains_key(&base) {
+                            scope.insert(
+                                name.clone(),
+                                super::place_mut_handle(&base, &path),
+                            );
+                            return Ok(Flow::Normal);
+                        }
+                    }
+                }
                 let v = self.eval_expr(init, scope)?;
                 if let Some(ret) = self.pending_return.take() {
                     return Ok(Flow::Return(ret));

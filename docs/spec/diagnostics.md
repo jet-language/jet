@@ -260,6 +260,8 @@ renumbered, and no new `W` code may be allocated.
 | E0215 | sema  | `SharedGuard.map` projection is not a stable stored field place (D-SHAREDGUARD1) |
 | E0216 | sema  | `SharedGuard.split` projections overlap or are not stable stored field places (D-SHAREDGUARD1) |
 | E0217 | sema  | a Cell guard is stored in an unsupported aggregate or captured by a lambda (D-LOCALCELL1=A) |
+| E0218 | sema  | `mem.pin` was given a value instead of a write window into a place (D-PIN1=A) |
+| E0219 | sema  | a pinned place is moved, replaced, or resized while a pin is still live (D-PIN1=A) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
@@ -981,6 +983,8 @@ named cell.
 | E0213 | A read or write window starts from something that is not a place. | Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying. | Bind the call or temporary to a name first, then take the window from that name. |
 | E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access has one rule: `value[a..b]` reads, `&value[a..b]` edits, and `~value[a..b]` copies. | Replace `value.view(a..b)` with `value[a..b]`. |
 | E0217 | A Cell guard is stored inside an unsupported value or captured by a lambda. | A Cell guard is a temporary loan handle. Storing it inside another value could keep the loan after its local scope ends. | Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections. |
+| E0218 | `mem.pin` needs a write window into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with write access instead of a copied value. | Write `mem.pin(&place)`. |
+| E0219 | A pinned place is moved, replaced, or resized while a pin is still live. | The pin promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place. | Finish using the pin before changing the place, or narrow the pin's scope. |
 
 ## Library authoring diagnostics (E2-M6)
 

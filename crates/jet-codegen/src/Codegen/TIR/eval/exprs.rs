@@ -1324,6 +1324,11 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| {
                         unsupported(&format!("unbound `{}`", local.name), self.span())
                     })?;
+                // D-MEM1 S9 / D-PIN1=A: a whole-place window local reads the
+                // owner's current storage, never the value it held at binding.
+                if let Some(read) = super::read_place_mut(&value, scope, self.span()) {
+                    return read;
+                }
                 if local.uninit_fixed {
                     if matches!(value, CtValue::List(_)) {
                         Ok(value)
@@ -4128,6 +4133,15 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<(), Diagnostic> {
         match &place.kind {
             TExprKind::Local(local) => {
+                // D-MEM1 S9 / D-PIN1=A: writing a whole-place window writes the
+                // owner's storage, not the window binding.
+                if let Some(handle) = scope.get(&local.name).cloned() {
+                    if let Some(written) =
+                        super::write_place_mut(&handle, value.clone(), scope, self.span())
+                    {
+                        return written;
+                    }
+                }
                 scope.insert(local.name.clone(), value);
                 Ok(())
             }

@@ -296,6 +296,69 @@ pub(super) fn uninit_fixed_write(
     true
 }
 
+/// D-MEM1 S9 / D-PIN1=A: marker for a whole-place write window (`p :: &node`,
+/// `pinned :: mem.pin(&node)`). AOT and Cranelift both give the local a real
+/// exclusive reference to the owner's storage, so the interpreter has to alias
+/// too — storing the copied value would silently drop every edit made through
+/// the window (I9). The handle carries the owner local plus the field/index
+/// path, exactly like `__JetViewMut` does for range windows.
+pub(super) const PLACE_MUT_TYPE: &str = "__JetPlaceMut";
+
+pub(super) fn place_mut_handle(base: &str, path: &[ViewMutPathStep]) -> CtValue {
+    CtValue::Struct {
+        type_name: PLACE_MUT_TYPE.into(),
+        fields: vec![
+            ("base".into(), CtValue::Str(base.to_string())),
+            ("path".into(), encode_view_mut_path(path)),
+        ],
+    }
+}
+
+pub(super) fn place_mut_parts(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != PLACE_MUT_TYPE {
+        return None;
+    }
+    let base = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("base", CtValue::Str(base)) => Some(base.clone()),
+        _ => None,
+    })?;
+    Some((base, parse_view_mut_path(fields)))
+}
+
+/// Read the value the handle windows into, or `None` when the owner is gone.
+pub(super) fn read_place_mut(
+    value: &CtValue,
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let (base, path) = place_mut_parts(value)?;
+    let Some(root) = scope.get(&base) else {
+        return Some(Err(unsupported("place window owner", span)));
+    };
+    Some(project_list_place(root, &path, span).cloned())
+}
+
+/// Write through the handle into the owner's storage.
+pub(super) fn write_place_mut(
+    handle: &CtValue,
+    replacement: CtValue,
+    scope: &mut HashMap<String, CtValue>,
+    span: Span,
+) -> Option<Result<(), Diagnostic>> {
+    let (base, path) = place_mut_parts(handle)?;
+    let Some(root) = scope.get(&base).cloned() else {
+        return Some(Err(unsupported("place window owner", span)));
+    };
+    Some(
+        replace_list_place(root, &path, replacement, span).map(|updated| {
+            scope.insert(base, updated);
+        }),
+    )
+}
+
 /// One step from a root local to the list a `__JetViewMut` windows into.
 #[derive(Clone, Debug)]
 pub(super) enum ViewMutPathStep {
