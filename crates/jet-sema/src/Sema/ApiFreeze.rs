@@ -747,7 +747,7 @@ mod tests {
             ty_span: zero(),
             default: None,
             variadic: false,
-            variadic_bound_list: None,
+            variadic_bound_list: None, declared_view_from_names: None,
         }
     }
 

@@ -161,7 +161,7 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
             ty_span: last.ty_span,
             default: None,
             variadic: false,
-            variadic_bound_list: None,
+            variadic_bound_list: None, declared_view_from_names: None,
         });
     }
     let body = match unroll_variadic_body(&f.body, &last.name, arity) {

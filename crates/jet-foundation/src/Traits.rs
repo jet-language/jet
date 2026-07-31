@@ -1326,7 +1326,7 @@ impl TraitRegistry {
                 convention: AccessConvention::Read,
                 default: None,
                 variadic: false,
-                variadic_bound_list: None,
+                variadic_bound_list: None, declared_view_from_names: None,
             }],
             return_type: Some(Type::Named("Snapshot".to_string())),
             span: dummy,
@@ -1349,7 +1349,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Write,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None,
+                    variadic_bound_list: None, declared_view_from_names: None,
                 },
                 crate::AST::Param {
                     name: "snap".to_string(),
@@ -1359,7 +1359,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Move,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None,
+                    variadic_bound_list: None, declared_view_from_names: None,
                 },
             ],
             return_type: None,
@@ -1618,7 +1618,7 @@ impl TraitRegistry {
             convention: AccessConvention::Write,
             default: None,
             variadic: false,
-            variadic_bound_list: None,
+            variadic_bound_list: None, declared_view_from_names: None,
         };
         if !self.traits.contains_key(Syntax::TRAIT_IO_READER) {
             let mut methods = HashMap::new();
@@ -1627,7 +1627,7 @@ impl TraitRegistry {
                 params: vec![write_self.clone(), crate::AST::Param {
                     name: "limit".to_string(), name_span: dummy, ty: Type::Int,
                     ty_span: dummy, convention: AccessConvention::Move,
-                    default: None, variadic: false, variadic_bound_list: None,
+                    default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None,
                 }],
                 return_type: Some(Type::Result { ok: Box::new(bytes.clone()), err: Box::new(io_error.clone()) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
@@ -1641,7 +1641,7 @@ impl TraitRegistry {
             let bytes_param = crate::AST::Param {
                 name: "bytes".to_string(), name_span: dummy, ty: bytes,
                 ty_span: dummy, convention: AccessConvention::Read,
-                default: None, variadic: false, variadic_bound_list: None,
+                default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None,
             };
             let mut methods = HashMap::new();
             methods.insert("write".to_string(), TraitMethodSig {
@@ -1686,7 +1686,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Write,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None,
+                    variadic_bound_list: None, declared_view_from_names: None,
                 }],
                 return_type: Some(Type::Option(Box::new(Type::Named("Item".to_string())))),
                 span: dummy,
@@ -1721,7 +1721,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Move,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None,
+                    variadic_bound_list: None, declared_view_from_names: None,
                 }],
                 return_type: Some(Type::Named("Iter".to_string())),
                 span: dummy,
@@ -1757,7 +1757,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Read,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None,
+                        variadic_bound_list: None, declared_view_from_names: None,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -1767,7 +1767,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None,
+                        variadic_bound_list: None, declared_view_from_names: None,
                     },
                 ],
                 return_type: Some(Type::Option(Box::new(Type::Named("Value".to_string())))),
@@ -1804,7 +1804,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Write,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None,
+                        variadic_bound_list: None, declared_view_from_names: None,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -1814,7 +1814,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None,
+                        variadic_bound_list: None, declared_view_from_names: None,
                     },
                     crate::AST::Param {
                         name: "v".to_string(),
@@ -1824,7 +1824,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None,
+                        variadic_bound_list: None, declared_view_from_names: None,
                     },
                 ],
                 return_type: None,
@@ -1928,7 +1928,7 @@ impl TraitRegistry {
                 convention: self_conv,
                 default: None,
                 variadic: false,
-                variadic_bound_list: None,
+                variadic_bound_list: None, declared_view_from_names: None,
             }],
             return_type: ret,
             span: dummy,
@@ -1957,7 +1957,7 @@ impl TraitRegistry {
         let param = |name: &str| crate::AST::Param {
             name: name.to_string(), name_span: dummy, ty: Type::Named(String::new()),
             ty_span: dummy, convention: AccessConvention::Read, default: None,
-            variadic: false, variadic_bound_list: None,
+            variadic: false, variadic_bound_list: None, declared_view_from_names: None,
         };
         let sig = TraitMethodSig {
             name: method.to_string(), name_span: dummy,

@@ -354,7 +354,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None,
+        variadic_bound_list: None, declared_view_from_names: None,
     };
 
     Func {

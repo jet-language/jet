@@ -238,7 +238,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
             convention: AccessConvention::Move,
             default: None,
             variadic: false,
-            variadic_bound_list: None,
+            variadic_bound_list: None, declared_view_from_names: None,
         }],
         return_type: Some(new_ty.clone()),
         return_type_span: Some(span),

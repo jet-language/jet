@@ -1678,8 +1678,8 @@ for that resolution and are not part of type identity. Inference
 (D-MEMPROVENANCE2=A) remains the beginner default; undeclared APIs behave as
 today. Sema requires every return path's inferred owners ⊆ the declaration (a
 bare source covers its field/index/range projections) and publishes the
-declared set to callers. Parameter-requirement and aggregate per-slot clauses
-are part of the same ruling; this card ships them as remaining vertical slices.
+declared set to callers. Parameter-requirement clauses (`View<T> from corpus`)
+and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling.
 
 **D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower

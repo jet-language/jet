@@ -1,0 +1,15 @@
+struct Token {
+    text: View<str>
+}
+
+fn tokenize(primary: String, fallback: String) => Token from (text: primary) {
+    text :: fallback.before(":")
+    return Token.{ text: text }
+}
+
+fn run() {
+    a := "hello:x"
+    b := "world:y"
+    t :: tokenize(a, b)
+    print(t.text)
+}

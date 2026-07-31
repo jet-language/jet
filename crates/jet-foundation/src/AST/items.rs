@@ -1097,6 +1097,11 @@ pub struct Param {
     /// When `Some`, `ty`/`ty_span` are an unused placeholder (`Type::Named("")`
     /// spanning the bracket list).
     pub variadic_bound_list: Option<Vec<String>>,
+    /// D-MEMPROVENANCE3=A: optional `from src (| src)*` after a parameter type.
+    /// Names are resolved against the full parameter list after parsing (so a
+    /// later `corpus` param may be named by an earlier view param). Empty/`None`
+    /// means no requirement.
+    pub declared_view_from_names: Option<Vec<String>>,
 }
 
 impl Param {

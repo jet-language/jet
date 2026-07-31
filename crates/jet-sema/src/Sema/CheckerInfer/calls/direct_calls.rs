@@ -1462,6 +1462,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            self.check_param_view_from_requirements(&sig, &call.args);
             // D-ANY-JAI1: put the (already fully checked) trait-bounded variadic
             // tail back so codegen sees the real call shape.
             if let Some(tail) = bound_variadic_tail {

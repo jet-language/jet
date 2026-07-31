@@ -41,7 +41,7 @@ fn method(name: &str, is_pub: bool) -> Func {
             ty_span: span(),
             default: None,
             variadic: false,
-            variadic_bound_list: None,
+            variadic_bound_list: None, declared_view_from_names: None,
         }],
         return_type: Some(Type::Named("String".to_string())),
         return_type_span: Some(span()),

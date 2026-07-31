@@ -522,6 +522,11 @@ fn func_to_sig(f: &Func) -> FuncSig {
         is_foreign_thread_safe: foreign_thread_safe_func(f),
         is_sanitizer: f.is_sanitizer,
         is_must_use: f.is_must_use,
+        param_view_from_names: f
+            .params
+            .iter()
+            .map(|p| p.declared_view_from_names.clone())
+            .collect(),
     }
 }
 
@@ -560,6 +565,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         is_foreign_thread_safe: false,
         is_sanitizer: false, // extern functions can't be sanitizers
         is_must_use: false,
+        param_view_from_names: ef.params.iter().map(|_| None).collect(),
     }
 }
 

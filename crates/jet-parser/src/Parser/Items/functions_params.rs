@@ -457,6 +457,8 @@ impl<'a> Parser<'a> {
                         Some(name_span),
                     ));
                 };
+            // D-MEMPROVENANCE3=A: optional `from src (| src)*` after the parameter type.
+            let declared_view_from_names = self.parse_opt_param_view_from_names();
             // S61: optional trailing `= expr` default value.
             let default = if matches!(self.peek().kind, TokKind::Eq) {
                 self.bump();
@@ -483,6 +485,7 @@ impl<'a> Parser<'a> {
                 default,
                 variadic,
                 variadic_bound_list,
+                declared_view_from_names,
             })
         }
     

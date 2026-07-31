@@ -782,7 +782,7 @@ impl<'a> Parser<'a> {
                 ty_span: crate::Diagnostics::Span::new(0, 0),
                 default: None,
                 variadic: false,
-                variadic_bound_list: None,
+                variadic_bound_list: None, declared_view_from_names: None,
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);

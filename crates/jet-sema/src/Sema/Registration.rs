@@ -1284,7 +1284,7 @@ pub(crate) fn synthesize_delegation_method(
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None,
+        variadic_bound_list: None, declared_view_from_names: None,
     };
 
     let mut params = vec![self_param];
@@ -1360,7 +1360,7 @@ pub(crate) fn synthesize_default_method(
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None,
+        variadic_bound_list: None, declared_view_from_names: None,
     };
     let mut params = vec![self_param];
     params.extend(

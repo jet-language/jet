@@ -4733,6 +4733,74 @@ impl<'a> Checker<'a> {
         Diagnostic::error("E0209", what, why, fix, Some(span))
     }
 
+    /// D-MEMPROVENANCE3=A: `word: View<str> from corpus` — the argument's view
+    /// owners must stay inside the places of the named sibling parameters.
+    pub(crate) fn check_param_view_from_requirements(
+        &mut self,
+        sig: &crate::AST::FuncSig,
+        args: &[crate::AST::CallArg],
+    ) {
+        if sig.param_view_from_names.iter().all(|n| n.is_none()) {
+            return;
+        }
+        for (index, required_names) in sig.param_view_from_names.iter().enumerate() {
+            let Some(required_names) = required_names else {
+                continue;
+            };
+            let Some(arg) = args.get(index) else {
+                continue;
+            };
+            let actual_places = self.compose_view_source_places(&arg.expr, &[], arg.expr.span());
+            if actual_places.is_empty() {
+                continue;
+            }
+            let mut allowed: Vec<ViewPlace> = Vec::new();
+            for name in required_names {
+                let Some(src_index) = sig.param_info.iter().position(|(n, _)| n == name) else {
+                    self.diags.push(Diagnostic::error(
+                        "E2305",
+                        format!("`from {name}` does not name a parameter"),
+                        "a parameter `from` clause names sibling parameters (or `self`) that own the view".to_string(),
+                        "use a parameter name from this function's signature".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                    continue;
+                };
+                let Some(src_arg) = args.get(src_index) else {
+                    continue;
+                };
+                allowed.extend(self.compose_view_source_places(
+                    &src_arg.expr,
+                    &[],
+                    src_arg.expr.span(),
+                ));
+            }
+            if allowed.is_empty() {
+                continue;
+            }
+            let ok = actual_places.iter().all(|actual| {
+                allowed.iter().any(|req| {
+                    actual.owner == req.owner
+                        && actual.projections.starts_with(req.projections.as_slice())
+                })
+            });
+            if !ok {
+                let param_label = sig
+                    .param_info
+                    .get(index)
+                    .map(|(n, _)| n.as_str())
+                    .unwrap_or("argument");
+                self.diags.push(Diagnostic::error(
+                    "E2305",
+                    format!("`{param_label}` must borrow from its declared `from` sources"),
+                    "this argument's view owners are outside the sources named after `from`".to_string(),
+                    "pass a view derived from those sources, or widen the `from` clause".to_string(),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+    }
+
     pub(crate) fn check_take_arg_ownership(
         &mut self,
         call_name: &str,

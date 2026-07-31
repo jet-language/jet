@@ -147,6 +147,49 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse optional `from src (| src)*` after a parameter type. Names stay
+    /// unresolved so a later parameter may be referenced (Rust `'b: 'a`).
+    pub(crate) fn parse_opt_param_view_from_names(&mut self) -> Option<Vec<String>> {
+        if !self.peek_is_ident(Syntax::VIEW_FROM) {
+            return None;
+        }
+        if !matches!(
+            self.peek2().kind,
+            TokKind::Ident(_) | TokKind::KwSelf
+        ) {
+            return None;
+        }
+        self.bump(); // `from`
+        let mut names = Vec::new();
+        loop {
+            if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF)
+            {
+                self.bump();
+                names.push(Syntax::KW_SELF.to_string());
+            } else if let Some(name) = self.bump_ident() {
+                names.push(name);
+            } else {
+                break;
+            }
+            // Projections are allowed in the grammar; param requirements key on
+            // the owner name only for this slice.
+            while matches!(self.peek().kind, TokKind::Dot) {
+                self.bump();
+                let _ = self.bump_ident();
+            }
+            if matches!(self.peek().kind, TokKind::Pipe) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        if names.is_empty() {
+            None
+        } else {
+            Some(names)
+        }
+    }
+
     fn bump_ident(&mut self) -> Option<String> {
         match &self.peek().kind {
             TokKind::Ident(name) => {

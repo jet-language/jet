@@ -1,0 +1,24 @@
+// D-MEMPROVENANCE3=A: per-slot `from (field: sources)` on an aggregate result.
+
+struct Token {
+    text: View<str>
+}
+
+fn from_primary(primary: String, _fallback: String) => Token from (text: primary | fallback) {
+    text :: primary.before(":")
+    return Token.{ text: text }
+}
+
+fn from_fallback(primary: String, fallback: String) => Token from (text: primary | fallback) {
+    text :: fallback.before(":")
+    return Token.{ text: text }
+}
+
+fn run() {
+    main := "alpha:1"
+    spare := "beta:2"
+    a :: from_primary(main, spare)
+    b :: from_fallback(main, spare)
+    print(a.text)
+    print(b.text)
+}

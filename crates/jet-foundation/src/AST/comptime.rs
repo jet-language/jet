@@ -166,6 +166,9 @@ pub struct FuncSig {
     /// variadic. Call-site checking (E1313) and codegen's per-arity
     /// monomorphization both key off this.
     pub variadic_bounds: Option<Vec<String>>,
+    /// D-MEMPROVENANCE3=A: parallel to `params` — optional `from` source names
+    /// on each parameter (call-boundary requirement).
+    pub param_view_from_names: Vec<Option<Vec<String>>>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

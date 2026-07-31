@@ -2274,6 +2274,11 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .params
                             .last()
                             .and_then(|p| p.variadic_bound_list.clone()),
+                        param_view_from_names: f
+                            .params
+                            .iter()
+                            .map(|p| p.declared_view_from_names.clone())
+                            .collect(),
                     },
                 );
                 ast_funcs.insert(f.name.clone(), f);
