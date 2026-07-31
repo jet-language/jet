@@ -308,6 +308,7 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Expr::Spread(inner, _) => self.scan_expr(inner),
+            Expr::MemberSpread { base, .. } => self.scan_expr(base),
             Expr::MapLit(entries, _) => {
                 for (k, v) in entries {
                     self.scan_expr(k);

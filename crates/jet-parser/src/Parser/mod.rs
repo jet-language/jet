@@ -1264,4 +1264,25 @@ fn notify(ready: Bool) =[Net]=> Void {
             "parenthesized `(Int?)` stays Optional"
         );
     }
+
+    /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.
+    #[test]
+    fn member_spread_parses() {
+        let p = program("fn run() { x :: a.[b, c] }");
+        let func = p.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) => Some(f),
+            _ => None,
+        });
+        let func = func.expect("run");
+        let val = func.body.iter().find_map(|s| match s {
+            Stmt::Val(b) => Some(b),
+            _ => None,
+        });
+        let val = val.expect("val");
+        assert!(
+            matches!(val.init, Expr::MemberSpread { .. }),
+            "expected MemberSpread, got {:?}",
+            val.init
+        );
+    }
 }

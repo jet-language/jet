@@ -1832,6 +1832,7 @@ mod Diagnostics;
 mod Edition;
 mod Effects;
 mod MemoryFacts;
+mod MemberSpread;
 pub mod UnsafeObligations;
 mod FFI;
 pub mod HotSwap;
@@ -1886,6 +1887,7 @@ pub(crate) use State::{check_items_state, StateTable};
 pub use WebApp::extract_web_app_graph;
 pub(crate) use WebPartition::check_web_partition;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
+pub(crate) use MemberSpread::desugar_member_spreads;
 pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).

@@ -469,6 +469,10 @@ pub const VIEW_FROM: &str = "from";
 /// D-MEMPROVENANCE3=A: `static.<path>` source in a view `from` clause.
 pub const VIEW_FROM_STATIC: &str = "static";
 
+/// D-SPREAD1=A: `prefix.[a, b, c]` member-spread sigil (reuses the `.[` slot
+/// freed by removing S75 call fan-out). Entries are bare member names only.
+pub const OP_MEMBER_SPREAD: &str = ".[";
+
 /// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
 pub const MEM_VOLATILE_READ: &str = "volatile_read";
 

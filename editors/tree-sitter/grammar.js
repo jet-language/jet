@@ -765,7 +765,7 @@ module.exports = grammar({
         $.method_call_expr,
         $.field_expr,
         $.deref_expr,
-        $.fan_out_expr,
+        $.member_spread_expr,
         $.lambda_expr,
         $.binary_expr,
         $.unary_expr,
@@ -1028,15 +1028,15 @@ module.exports = grammar({
     // Postfix deref `p.*` (D-CAP7).
     deref_expr: ($) => prec.left(4, seq($._expr, ".", "*")),
 
-    // Fan-out `f.[a, b, c]` (S75) — `.[` is adjacency-detected (no space).
-    fan_out_expr: ($) =>
+    // D-SPREAD1=A: member spread `prefix.[a, b, c]` — bare (dashed) names only.
+    member_spread_expr: ($) =>
       prec.left(
         4,
         seq(
-          field("fn", $._expr),
+          field("base", $._expr),
           ".",
           token.immediate("["),
-          commaSep1($._expr),
+          commaSep1($.identifier),
           "]",
         ),
       ),

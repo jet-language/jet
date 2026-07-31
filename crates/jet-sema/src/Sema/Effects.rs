@@ -1497,6 +1497,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
         | Expr::Try(inner, _, _) | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
+        Expr::MemberSpread { base, .. } => expr_handle_escape(base, handle),
         Expr::OptField { base, .. } => expr_handle_escape(base, handle),
         Expr::Binary(_, l, r, _) => {
             expr_handle_escape(l, handle).or_else(|| expr_handle_escape(r, handle))

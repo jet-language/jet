@@ -521,10 +521,14 @@ fallback for both `T?` and `T ? E`: `x ?? default`, `x ?? return`,
 `x ?? panic("…")`. `or` is not an operator.
 
 **S75 — Fan-out: REMOVED** (D-VERDICT-1324-1, owner ruling 2026-07-30).
-`f.[a, b, c]` is gone, not deprecated: the operator, its `.[` sigil, and its
-E0961/E0962 diagnostics are deleted, with no retired-spelling notice and no
-compatibility alias. `f.[…]` is now an ordinary parse error. S76 `[T#N]`
-fixed-size lists are unaffected. **D-FANOUT2** (no `s.{…}` second axis) is moot.
+Call fan-out `f.[a, b, c]` → `[f(a), f(b), f(c)]` is gone. The `.[` sigil is
+reused by **D-SPREAD1=A** (card #1341, ratified 2026-07-31) for **member
+spread**: `prefix.[a, b, c]` means `[prefix.a, prefix.b, prefix.c]`. Entries
+are bare member names only (E0961 if not — E0963 remains S76 fixed-list
+destructure). In list position the fields splice into the surrounding list;
+elsewhere the result is an ordinary list of that length. Sema desugars before
+inference; no TIR node. S76 `[T#N]` fixed-size lists are unaffected.
+**D-FANOUT2** (no `s.{…}` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = .{…}` on
 lane/vector types; overlapping writes diagnosed (E3110/E3111).
@@ -5303,3 +5307,10 @@ composition stays explicit via string interpolation or concatenation in one
 argument. Lowering joins the arguments into one newline-separated value, so all
 execution tiers (AOT, JIT/dev, interpreter, comptime sink) render identically.
 No new syntax is minted. Card #1321.
+
+**2026-07-31 — D-SPREAD1=A**: `prefix.[a, b, c]` is member spread —
+`[prefix.a, prefix.b, prefix.c]`. Entries are bare identifiers only (E0961).
+In list position the fields splice into the surrounding list; elsewhere the
+result is an ordinary list. Sema desugars before inference; no TIR node.
+Reuses the `.[` sigil freed by D-VERDICT-1324-1 (call fan-out stays removed).
+Card #1341.

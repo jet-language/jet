@@ -66,10 +66,20 @@ fn parse_package_item(item: &str) -> Vec<Pkg> {
         }
         return vec![Pkg::new("", inner)];
     }
-    // Dotted single: `source.name`.
-    if let Some((source, name)) = item.split_once('.') {
-        if !name.is_empty() {
-            return vec![Pkg::new(source, name)];
+    // D-SPREAD1=A: `source.[a, b, c]` → one Pkg per member.
+    if let Some((source, rest)) = item.split_once('.') {
+        let rest = rest.trim();
+        if rest.starts_with('[') && rest.ends_with(']') {
+            let inner = &rest[1..rest.len() - 1];
+            return inner
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(|name| Pkg::new(source, name))
+                .collect();
+        }
+        if !rest.is_empty() {
+            return vec![Pkg::new(source, rest)];
         }
     }
     // Bare name: source resolved from the default later.
@@ -267,6 +277,18 @@ mod tests {
     }
 
     // ── Pkg sugar (U6 / D-JPK19) ──
+
+    #[test]
+    fn sugar_member_spread() {
+        assert_eq!(
+            parse_package_list("default.[cargo, ripgrep, fd]"),
+            vec![
+                Pkg::new("default", "cargo"),
+                Pkg::new("default", "ripgrep"),
+                Pkg::new("default", "fd"),
+            ]
+        );
+    }
 
     #[test]
     fn sugar_dotted_single() {

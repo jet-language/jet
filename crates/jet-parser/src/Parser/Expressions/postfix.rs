@@ -18,6 +18,12 @@ impl<'a> Parser<'a> {
                             expr = Expr::Deref(Box::new(expr), full);
                             continue;
                         }
+                        // D-SPREAD1=A: `prefix.[a, b, c]` member spread.
+                        if matches!(self.peek().kind, TokKind::LBracket) {
+                            let start = expr.span().start;
+                            expr = self.parse_member_spread(expr, start)?;
+                            continue;
+                        }
                         // D-DOTCTOR1: `alias.Type.{ … }` — named construction through
                         // an import namespace, or `Protocol.Client.{ … }` for a dotted
                         // local type when the base name is PascalCase (D-PROTO1/D-PROTO2).
@@ -376,6 +382,94 @@ impl<'a> Parser<'a> {
                 }
             }
             Ok(expr)
+        }
+
+        /// D-SPREAD1=A: after consuming `.`, parse `[a, b, c]` into `MemberSpread`.
+        /// `spread_start` is the base expression's start (or the leading ident span).
+        pub(super) fn parse_member_spread(
+            &mut self,
+            base: Expr,
+            spread_start: usize,
+        ) -> Result<Expr, Diagnostic> {
+            self.bump(); // `[`
+            let mut members = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RBracket) {
+                loop {
+                    // S84: package/member names may be dashed (`util-linux`).
+                    if matches!(self.peek().kind, TokKind::Ident(_)) {
+                        match self.expect_dashed_name("in a member spread `.[…]`") {
+                            Ok((name, span)) => {
+                                if !matches!(
+                                    self.peek().kind,
+                                    TokKind::Comma | TokKind::RBracket
+                                ) {
+                                    let bad = self.peek().span;
+                                    self.diags.push(Diagnostic::error(
+                                        "E0961",
+                                        "`.[ ]` lists member names, not calls or expressions"
+                                            .to_string(),
+                                        "member spread names fields or package names that hang off the prefix"
+                                            .to_string(),
+                                        "write bare names like `default.[cargo, ripgrep]`"
+                                            .to_string(),
+                                        Some(bad),
+                                    ));
+                                    while !matches!(
+                                        self.peek().kind,
+                                        TokKind::Comma | TokKind::RBracket | TokKind::Eof
+                                    ) {
+                                        self.bump();
+                                    }
+                                } else {
+                                    members.push((name, span));
+                                }
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                while !matches!(
+                                    self.peek().kind,
+                                    TokKind::Comma | TokKind::RBracket | TokKind::Eof
+                                ) {
+                                    self.bump();
+                                }
+                            }
+                        }
+                    } else {
+                        let bad = self.peek().span;
+                        self.diags.push(Diagnostic::error(
+                            "E0961",
+                            "`.[ ]` lists member names, not calls or expressions"
+                                .to_string(),
+                            "member spread names fields or package names that hang off the prefix"
+                                .to_string(),
+                            "write bare names like `default.[cargo, ripgrep]`"
+                                .to_string(),
+                            Some(bad),
+                        ));
+                        while !matches!(
+                            self.peek().kind,
+                            TokKind::Comma | TokKind::RBracket | TokKind::Eof
+                        ) {
+                            self.bump();
+                        }
+                    }
+                    if matches!(self.peek().kind, TokKind::Comma) {
+                        self.bump();
+                        if matches!(self.peek().kind, TokKind::RBracket) {
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.expect(TokKind::RBracket, "to close a member spread `.[…]`")?;
+            let end = self.toks[self.pos - 1].span.end;
+            Ok(Expr::MemberSpread {
+                base: Box::new(base),
+                members,
+                span: Span::new(spread_start, end),
+            })
         }
     
         /// Reinterpret an already-parsed expression as an assignment target.

@@ -208,6 +208,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::Bool(..) => "Bool",
         Expr::Char(..) => "Char",
         Expr::ListLit(..) => "ListLit",
+        Expr::MemberSpread { .. } => "MemberSpread",
         Expr::Spread(..) => "Spread",
         Expr::MapLit(..) => "MapLit",
         Expr::Index { .. } => "Index",

@@ -559,6 +559,7 @@ renumbered, and no new `W` code may be allocated.
 | E0957 | sema  | `embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..` |
 | E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
+| E0961 | parse | member spread `.[…]` entry is not a bare identifier (D-SPREAD1) |
 | E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
 | E0965 | sema  | compile-time or refinement-proven index out of range on `[T#N]` (S76, D-REFINE1) |
@@ -888,10 +889,11 @@ parse error.
 | E0318 | `` `..=` `` is not a Jet operator — Jet's `..` is already inclusive. | In Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` always includes both ends, so there is no `..=`. | Write `lo..hi` — it already means "lo through hi inclusive." |
 | E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | A stride modifies a loop range to skip values (`loop i, 0..10, 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove the stride; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
 
-## Fan-out and fixed-size list diagnostics
+## Member spread and fixed-size list diagnostics
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
+| E0961 | A member-spread list entry is not a bare name. | `prefix.[a, b]` only expands field or package names off the prefix — calls and expressions are not members. | Write bare names like `default.[cargo, ripgrep]`. |
 | E0963 | A positional destructure pattern has a different count than the fixed-size list's known length. | `[T#N]` has exactly N elements at compile time; the pattern must name exactly N bindings or the binding would leave elements unnamed. | Match the number of names in the pattern to the size N shown in the error. |
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change. |
 | E0965 | An index is out of range for a `[T#N]` at compile time. | Literal indexes and `#Invariant`-refined distinct indexes must fit 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, widen to `[T]` for runtime checking, or tighten the refinement invariant. |

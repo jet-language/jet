@@ -1011,6 +1011,26 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
+            // D-SPREAD1=A: should already be desugared in Bundle::desugar_member_spreads.
+            // Defensive: expand and re-enter so a missed walker cannot ICE.
+            Expr::MemberSpread {
+                base,
+                members,
+                span,
+            } => {
+                let fields: Vec<Expr> = members
+                    .iter()
+                    .map(|(name, member_span)| {
+                        Expr::Field(
+                            Box::new(base.as_ref().clone()),
+                            name.clone(),
+                            Span::new(span.start, member_span.end),
+                        )
+                    })
+                    .collect();
+                *e = Expr::ListLit(fields, *span);
+                self.infer_inner(e)
+            }
             Expr::ListLit(elems, span) => {
                 // Rewrite before typing so the list sees call results, not nested `[T#N]`.
                 // #779 demo: surface-only change; engines never learn a new construct.

@@ -991,6 +991,7 @@ pub(crate) fn collect_core_expr(
         | Expr::BinMatchLit(_, _) => {}
         Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
         Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
+        Expr::MemberSpread { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
     }
 }
 

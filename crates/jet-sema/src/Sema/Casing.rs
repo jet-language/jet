@@ -343,6 +343,7 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
         | Expr::Try(inner, _, _) | Expr::Paren(inner, _) | Expr::Spread(inner, _) =>
             expr_names(inner, out),
+        Expr::MemberSpread { base, .. } => expr_names(base, out),
         Expr::OptField { base, .. } => expr_names(base, out),
         Expr::MethodCall { receiver, args, .. } => {
             expr_names(receiver, out);
