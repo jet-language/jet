@@ -2099,16 +2099,28 @@ impl Cx {
             })
             .unwrap_or_else(|| "()".to_string());
         let trait_name = if mut_capture { "FnMut" } else { "Fn" };
+        // D-SPREAD/#1357: `Fn` values use Rc/Arc so collection `.cloned()` works.
+        // `FnMut` stays `Box` (shared Rc cannot call_mut).
         if thread_safe {
-            format!("Box<dyn {}({}) -> {} + Send + Sync>", trait_name, ps, r)
+            format!("std::sync::Arc<dyn {trait_name}({ps}) -> {r} + Send + Sync>")
+        } else if mut_capture {
+            if has_view_return {
+                let lifetimes = std::iter::once(FN_VIEW.to_string())
+                    .chain(independent_lifetimes)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
+            } else {
+                format!("Box<dyn {trait_name}({ps}) -> {r}>")
+            }
         } else if has_view_return {
             let lifetimes = std::iter::once(FN_VIEW.to_string())
                 .chain(independent_lifetimes)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
+            format!("std::rc::Rc<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
         } else {
-            format!("Box<dyn {}({}) -> {}>", trait_name, ps, r)
+            format!("std::rc::Rc<dyn {trait_name}({ps}) -> {r}>")
         }
     }
 

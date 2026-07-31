@@ -136,8 +136,8 @@ pub(crate) fn lower_method_args(
 /// resolved param `(convention, type)` for this position (`None` when the callee has
 /// no known signature, e.g. a `CallValue`). The emit order is exactly the AST path's:
 ///   1. the implicit-clone / Arc-clone wrapper (`(…).clone()` / `Arc::clone(&…)`);
-///   2. the Fn-typed Box-coercion (`Box::new(…) as <fn-type>`, or just ` as <fn-type>`
-///      when already boxed);
+///   2. the Fn-typed coercion (`Rc`/`Arc`/`Box::new(…) as <fn-type>`, or just
+///      ` as <fn-type>` when already wrapped);
 ///   3. the borrow wrapper (`&(…)` for a `Read` non-scalar non-Fn, `&mut (…)` for a
 ///      `Mutate`).
 pub(crate) fn lower_one_call_arg(

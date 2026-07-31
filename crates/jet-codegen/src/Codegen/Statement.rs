@@ -329,12 +329,17 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let middleware = params.len() == 1
         && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
         && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HTTPHandler");
+    let wrap = if middleware {
+        "std::sync::Arc::new"
+    } else {
+        "std::rc::Rc::new"
+    };
     if !middleware
         && ret
             .as_deref()
             .is_some_and(|ret| cx.type_contains_view(ret))
     {
-        return format!("Box::new({rust_name}) as {}", cx.rust_type(ft));
+        return format!("{wrap}({rust_name}) as {}", cx.rust_type(ft));
     }
     let arg_decls: Vec<String> = params
         .iter()
@@ -364,7 +369,7 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         .collect();
     let _ = ret;
     format!(
-        "Box::new(move |{}| {}({})) as {}",
+        "{wrap}(move |{}| {}({})) as {}",
         arg_decls.join(", "),
         rust_name,
         arg_calls.join(", "),

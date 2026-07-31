@@ -289,6 +289,7 @@ fn lower_lambda_expecting_with_host_borrow(
             .then_some(body_ty),
         is_move,
         boxed: lam.meta.escapes,
+        rc: lam.meta.escapes && !lam.meta.needs_fn_mut && !http_handler,
         arc: http_handler,
         captures,
     }
@@ -508,6 +509,25 @@ fn render_spawn_block_body(stmts: &[Stmt], cx: &Cx, lam_env: &mut LowerEnv) -> S
     format!("{{ {} }}", inner)
 }
 
+fn wrap_lowered_lambda(tl: &TLambda) -> String {
+    let move_kw = if tl.is_move { "move " } else { "" };
+    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
+    let wrapped = if tl.arc {
+        format!("std::sync::Arc::new({closure})")
+    } else if tl.rc {
+        format!("std::rc::Rc::new({closure})")
+    } else if tl.boxed {
+        format!("Box::new({closure})")
+    } else {
+        closure
+    };
+    if tl.prep.is_empty() {
+        wrapped
+    } else {
+        format!("{{ {} {} }}", tl.prep, wrapped)
+    }
+}
+
 /// c109 Phase 13: render a lambda via the plain `emit_lambda` form (used by
 /// `http.serve`'s lambda handler and `scope.guard`). Returns the full closure string.
 pub(crate) fn render_lambda_str(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
@@ -524,19 +544,7 @@ pub(crate) fn render_lambda_str_expecting(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
 ) -> String {
-    let tl = lower_lambda_expecting(lam, cx, env, expected_params);
-    let move_kw = if tl.is_move { "move " } else { "" };
-    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
-    let wrapped = if tl.boxed {
-        format!("Box::new({})", closure)
-    } else {
-        closure
-    };
-    if tl.prep.is_empty() {
-        wrapped
-    } else {
-        format!("{{ {} {} }}", tl.prep, wrapped)
-    }
+    wrap_lowered_lambda(&lower_lambda_expecting(lam, cx, env, expected_params))
 }
 
 pub(crate) fn render_lambda_str_expecting_value(
@@ -545,19 +553,7 @@ pub(crate) fn render_lambda_str_expecting_value(
     env: &LowerEnv,
     expected_params: &[Type],
 ) -> String {
-    let tl = lower_lambda_expecting_value(lam, cx, env, expected_params);
-    let move_kw = if tl.is_move { "move " } else { "" };
-    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
-    let wrapped = if tl.boxed {
-        format!("Box::new({})", closure)
-    } else {
-        closure
-    };
-    if tl.prep.is_empty() {
-        wrapped
-    } else {
-        format!("{{ {} {} }}", tl.prep, wrapped)
-    }
+    wrap_lowered_lambda(&lower_lambda_expecting_value(lam, cx, env, expected_params))
 }
 
 // ---------------------------------------------------------------------------
