@@ -1,0 +1,18 @@
+// Composed flagship: file → pattern → aggregate (D-EXAMPLES-SHORTPATH1=A).
+use core.files as fs
+use core.files as files
+use core.path as path
+
+fn run() {
+    log_path :: path.join("/tmp", "jet_log_job.txt")
+    _ :: fs.write(log_path, "INFO boot\nERROR disk full\nWARN retry\nERROR timeout\nINFO done\n")
+    handle :: files.open(~log_path) ?? panic("open log")
+    errors := 0
+    loop line, handle.lines() {
+        if line.starts_with("ERROR") {
+            errors += 1
+            print(line)
+        }
+    }
+    print("error_count {errors}")
+}

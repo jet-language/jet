@@ -1,0 +1,15 @@
+// MMIO-style board write (D-EXAMPLES-SHORTPATH1=A).
+// Stack cell stands in for a mapped register so the example runs without a
+// board profile; real firmware ranges are declared on the target profile
+// (see tests/target_profiles.rs).
+use core.mem as mem
+
+fn run() {
+    cell := 0
+    #Unsafe("stand-in MMIO cell stays on this stack frame") {
+        p :: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.volatile_write(p, 42)
+        seen :: mem.volatile_read(p)
+        print("mmio wrote {seen}")
+    }
+}

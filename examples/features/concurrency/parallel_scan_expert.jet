@@ -1,8 +1,8 @@
-// 34 — Parallel file scan (D-EXAMPLES-SHORTPATH1=A).
-// Short path: `para_map`. Expert channel+spawn+join → parallel_scan_expert.jet.
+// Expert variant of parallel_scan.jet (D-EXAMPLES-SHORTPATH1=A).
+// Manual channels + spawn + join. Prefer `para_map` in the flagship.
+use core.tasks as tasks
 use core.files as fs
 use core.io as io
-use core.env as env
 use core.path as path
 
 fn count_lines(text: String) => Int = text.lines().len()
@@ -14,7 +14,6 @@ fn scan_one(file_path: String) => String {
 }
 
 fn default_paths() => [String] {
-    // Self-contained fixtures under /tmp so the golden does not depend on CWD.
     a :: path.join("/tmp", "jet_parallel_scan_a.txt")
     b :: path.join("/tmp", "jet_parallel_scan_b.txt")
     _ :: fs.write(a, "one\ntwo\n")
@@ -27,14 +26,30 @@ fn paths_from_args() => [String] = io.args().skip(1).to_list()
 fn gather_paths() => [String] {
     from_args :: paths_from_args()
     if from_args.len() > 0 { return from_args }
-    if (env.get("INTERACTIVE") ?? "") == "1" {
-        print("(interactive paths omitted in short-path demo — pass files on the CLI)")
-    }
     return default_paths()
 }
 
 fn scan_parallel(paths: [String]) => [String] {
-    results := paths.para_map((file_path: String) => scan_one(file_path))
+    expected :: paths.len()
+    (sender, ch) :: tasks.channel<String>()
+    workers := [Task<Unit>].{}
+    loop file_path, paths {
+        tx :: ~sender
+        file :: ~file_path
+        workers.push(tasks.spawn(() => {
+            tx.send(scan_one(file))
+        }))
+    }
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing worker")
+        worker.join()
+    }
+    results := [String].{}
+    got := 0
+    loop got < expected {
+        results.push(ch.receive() ?? panic("channel closed early"))
+        got += 1
+    }
     results.sort()
     return results
 }

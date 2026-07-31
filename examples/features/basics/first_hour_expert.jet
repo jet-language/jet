@@ -1,0 +1,13 @@
+// Expert variant of first_hour.jet (D-EXAMPLES-SHORTPATH1=A).
+// Hand-walks raw `io.args()` instead of the `#CLI` typed entry the flagship teaches.
+use core.io as io
+
+fn run() {
+    args :: io.args()
+    project :: if args.len() > 1 -> args.get(1) ?? "first-hour" else -> "first-hour"
+    steps :: ["check source", "build binary", "run smoke test"]
+    print("Shipping {project}")
+    loop step, steps {
+        print("[ok] {step}")
+    }
+}

@@ -1,12 +1,17 @@
 // First-hour tour: one small command-line tool that also builds as a native binary.
-use core.io as io
+// D-EXAMPLES-SHORTPATH1=A: teach `#CLI` first (raw `io.args()` → first_hour_expert.jet).
+#CLI
+struct TourArgs {
+    #[Doc("print extra detail"), Short("v")] verbose: Bool
+}
 
-fn run() {
-    args :: io.args()
-    project :: if args.len() > 1 -> args.get(1) ?? "first-hour" else -> "first-hour"
+fn run(args: TourArgs) {
     steps :: ["check source", "build binary", "run smoke test"]
-    print("Shipping {project}")
+    print("Shipping first-hour")
     loop step, steps {
         print("[ok] {step}")
+    }
+    if args.verbose {
+        print("verbose")
     }
 }
