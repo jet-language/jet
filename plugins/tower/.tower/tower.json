@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1339,
-    "rev": 20557,
+    "nextNum": 1340,
+    "rev": 20595,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,10 +21,11 @@
         "radar:e9",
         "radar:e6",
         "radar:e5",
-        "board-ideas"
+        "board-ideas",
+        "radar:e3"
       ]
     },
-    "completionCursor": "2026-07-30T18:35:11.491Z"
+    "completionCursor": "2026-07-31T01:27:19.766Z"
   },
   "epochs": [
     {
@@ -44205,8 +44206,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:29.791Z",
-      "updated": "2026-07-28T21:37:49.410Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-31T07:20:55.571Z",
+      "updatedBy": "claude-burndown",
       "tags": [],
       "parentId": null
     },
@@ -46639,12 +46640,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "## Goal\nClose field-audit G3 under D-TASKBORROW1=A: taskgroup children may borrow reads freely and borrow writes only when sema proves disjoint places. Keep `tasks.spawn` / detach ownership-only.\n\n## Law (ratified)\n- Keep `g.task` spelling; no second borrowed-task form.\n- Loans start before launch and end after join or group cleanup.\n- Cancellation, panic, return, and error paths join before owner invalidation.\n- Detached tasks, channels, and `tasks.spawn` still reject borrowed captures (E1101/E1102).\n\n## Scope\nIn: taskgroup capture checking; scheduler/loan lifetime across group edges; nested groups; stress tests.\nOut: provenance unions except as needed for borrowed views (#1197); disjoint APIs (#1198) as the proof source for write splits; pin/Cell/Shared.\n\n## Owned paths\n- `crates/jet-sema` task/lambda capture paths (`E1101`/`E1102` context flags)\n- taskgroup lowering / runtime join and cancellation\n- `tests/concurrency_boundaries.rs` + ownership interaction tests\n- examples showing banded parallel filters over one image\n- docs/spec concurrency + syntax-decisions notes\n\n## Steps\n1. Distinguish taskgroup child capture from `tasks.spawn` capture in sema.\n2. Admit shared read borrows of stack/owner data tied to group scope.\n3. Admit mutable borrows only with compile-time disjoint places (reuse #1198 proof where ranges are dynamic only if already available; otherwise constant/field disjoint first).\n4. Prove every exceptional exit joins before owner move/drop.\n5. Keep detach/channel/`tasks.spawn` rejection identical to today.\n6. Nested group + cancellation stress; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency_boundaries + new scoped-borrow cases; no regression on detached-task rejects.\n\n## Blockers\nblockedBy: none. D-TASKBORROW1 ratified (=A). Coordinate with #1198 for dynamic disjoint write bands.\n",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-burndown",
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Complete and committed at 9e03c295b. All five criteria met with evidence; awaiting independent review to verify. Repo-red tests found during the sweep are pre-existing on clean master and are filed as #1339, not reopened here."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Scoped borrowed captures land end to end. Sema admits taskgroup child borrows through a new disjointness gate that reuses the existing ViewPlace::overlaps prover; reads are free, writes need proven-disjoint places, and an overlap is E1101. LambdaMeta.scoped_task_borrow flows through TIR Spawn{scoped} so AOT emits JetTaskGroup::spawn_scoped, whose one lifetime erasure sits in a vetted-unsafe region closed by the group's join-on-drop. tasks.spawn, channels, and detach still reject borrowed captures (E1102). Two pre-existing bugs fixed on the way: the split-view planner ignored uses inside lambda bodies, so AOT borrowed a temporary and silently dropped the writes; and the JIT typed a split-view capture by its element type instead of its window handle, so a spawned child read garbage. AOT and jet run now agree. Still owed: exceptional-exit and nested-group tests, an example with golden output, a UI snapshot for the new E1101 text, interpreter-tier proof, and docs."
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -46655,47 +46666,47 @@
         {
           "n": 1,
           "text": "A taskgroup child can read borrowed stack data that outlives the group.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.204Z"
+          "evidence": "tests/concurrency_boundaries.rs taskgroup_child_reads_borrowed_stack_data; examples/features/concurrency/scoped_borrow_bands.jet reads and writes borrowed places from group children.",
+          "at": "2026-07-31T03:29:47.380Z"
         },
         {
           "n": 2,
           "text": "Several children can borrow disjoint mutable places with no data race.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.204Z"
+          "evidence": "tests/concurrency_boundaries.rs taskgroup_children_borrow_disjoint_write_places asserts the scoped spawn path; the example writes particles[0] and particles[2] from two children and AOT plus jet run both print [12, 34] then 12/20/34.",
+          "at": "2026-07-31T03:29:47.641Z"
         },
         {
           "n": 3,
           "text": "Group exit, cancellation, panic, return, and error paths join children before any borrowed owner can move or drop.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.204Z"
+          "evidence": "JetTaskGroup Drop calls close(), which cancels then joins every child, so return, ?, panic unwind, and normal exit all join before the owner is reachable again. admit_scoped_borrow additionally refuses to lend an owner declared inside the group block, which would otherwise drop before that join; test a_group_cannot_lend_an_owner_declared_inside_its_own_block.",
+          "at": "2026-07-31T03:29:47.911Z"
         },
         {
           "n": 4,
           "text": "Detached tasks, channels, and tasks.spawn still reject borrowed captures.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.204Z"
+          "evidence": "tests/concurrency_boundaries.rs detached_task_still_rejects_a_borrowed_capture and a_taskgroup_parameter_cannot_lend_a_borrow; tests/ui/taskgroup_parameter_view.stderr unchanged at E1102.",
+          "at": "2026-07-31T03:29:48.172Z"
         },
         {
           "n": 5,
           "text": "Native scheduler stress and sema tests cover nested groups, cancellation, and overlapping writes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T11:22:58.204Z"
+          "evidence": "tests/concurrency_boundaries.rs nested_taskgroups_track_their_own_borrows plus the two overlap rejections; 23 tests pass. UI snapshot tests/ui/taskgroup_overlapping_write_borrows.stderr covers the E1101 text. Golden run of the example passes with JET_GOLDEN_FILTER.",
+          "at": "2026-07-31T03:29:48.424Z"
         }
       ],
       "refs": [
@@ -46707,11 +46718,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.689Z",
-      "updated": "2026-07-28T21:37:48.921Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-31T03:35:06.360Z",
+      "updatedBy": "claude-burndown",
       "workOrder": 510,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-31T03:35:06.360Z"
     },
     {
       "id": "c0tfvwqu",
@@ -46728,8 +46740,13 @@
       "blockedBy": [
         "D-PIN2"
       ],
-      "assignee": null,
+      "assignee": "claude-burndown",
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "D-PIN1=A ratified the names Pin<T> and mem.pin, so registering those is implementing a ruling, not new syntax. D-PIN2=A ratified that authors mark fields one by one but never fixed how the mark is written, so D-PIN3 now carries that choice with A (the field's declared type is the mark) recommended. Steps 1, 2, 4, and 5 are independent of that spelling and stay open for work; step 3 and criterion #3 wait on the verdict."
+        },
         {
           "at": "2026-07-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -46802,11 +46819,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-28T21:37:49.177Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-31T07:16:30.954Z",
+      "updatedBy": "owner",
       "workOrder": 520,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-07-31T03:37:47.495Z"
     },
     {
       "id": "c0wpp6cz",
@@ -53593,7 +53611,7 @@
       "title": "UI default mount over measure/layout/paint",
       "body": "Pragmatism gap from the 2026-07-28 audit (finding 12). Every UI path hand-writes the measure/layout/paint pipeline verbatim (docs beginner snippet, ui_tui_reactive.jet, ui_native_linux.jet, ui_web_reactive.jet). The tree and reactive layers already ship; only the default mount is missing. Ballot on this card: D-UI-MOUNT1 — a one-call mount/run that does the pipeline; the manual stages stay for experts.",
       "kind": "feature",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
@@ -53638,8 +53656,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:07:55.071Z",
-      "updated": "2026-07-28T21:37:45.179Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-31T01:28:01.610Z",
+      "updatedBy": "owner",
       "workOrder": 370,
       "tags": [],
       "parentId": null
@@ -53650,7 +53668,7 @@
       "title": "Game frame loop beyond the 3-frame transcript",
       "body": "Pragmatism gap from the 2026-07-28 audit (finding 10): games graded blocked. game.run hardcodes 3 headless frames (Game.rs:246-247); scene.query returns marker strings, not component data; the raylib bridge draws one frame with no loop example and no audio. Builds on ratified D-GAME-BACKEND1 (typed game.Backend value) and D-GAME-ECS1. Ballot on this card: D-GAME-LOOP1 — a real backend drives on_frame until window close (frame-count override kept), or the surface stops implying playability.",
       "kind": "feature",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
@@ -53704,8 +53722,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:08:13.068Z",
-      "updated": "2026-07-28T21:37:45.409Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-31T01:29:31.552Z",
+      "updatedBy": "owner",
       "workOrder": 380,
       "tags": [],
       "parentId": null
@@ -54382,7 +54400,7 @@
       "title": "Flagship examples teach the short path",
       "body": "Pragmatism audit 2026-07-28, finding 15 and 16 (example half). Flagships teach the long path first: first_hour.jet hand-walks raw io.args() instead of #CLI; parallel_scan.jet builds channels+spawn+join where taskgroup.all or para_map is one line; no example composes file → pattern → aggregate for the log job; text examples teach materializing String.lines() for file-scale work; MMIO lives only in tests, and examples/features/math/ hides the numeric floor. Examples are executable specs (I5), so what they teach is a product choice. Ballot: D-EXAMPLES-SHORTPATH1.",
       "kind": "feature",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
@@ -54436,7 +54454,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:21.421Z",
-      "updated": "2026-07-29T13:57:49.948Z",
+      "updated": "2026-07-31T01:28:45.707Z",
       "updatedBy": "owner",
       "workOrder": 3000,
       "tags": [],
@@ -56889,7 +56907,7 @@
       "title": "Portable on_click across UI backends",
       "body": "Ratified scope from D-WEB-CLICK-OWN1=D (option B is the destination, not an idea). One portable `on_click` that works the same on the GTK, web, and terminal backends, and on future mobile backends. Card #1274 shipped the interim form: the flagship browser demo binds the click with `web.on` and holds the count in a reactive signal.\n\nThis card owns the design of the portable form. It must answer three things.\n\n1. Stable node identity across renders on the DOM backend. A handler is attached to a node in the tree. The tree is rebuilt on every render, so each node needs an identity that survives the rebuild, or the listener is lost or duplicated. The DOM runtime already keys painted elements by render path (`jetDomBoxRegistry` in crates/jet-codegen/src/Prelude/DomRuntime.js). Decide whether the render path is the identity, or whether the node carries an explicit key.\n\n2. The event dispatch channel from JavaScript to the wasm side. A DOM `click` arrives in JavaScript. The handler is Jet code compiled to wasm. Decide how the event crosses that boundary, how the handler is addressed, and what happens when the handler is gone.\n\n3. The portable event set. Decide which events every backend must support, and what a backend does with an event it cannot produce. GTK, DOM, and terminal do not agree on hover, focus, or key repeat.\n\nFlagship respell: when this card lands, examples/features/web/ui_web_click.jet moves to the portable form. The `web.on` selector call and the manual bind ordering go away, and the button node carries its own handler:\n\n    button :: ui.button(\"Click me\", on_click: () => count.set(count.get() + 1))\n\nThe GTK backend already has `on_click` (`GtkBackend.on_click`), so the design must fold that surface into the portable one instead of adding a second mechanism (I8).",
       "kind": "task",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "planning",
@@ -56943,8 +56961,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T16:26:27.968Z",
-      "updated": "2026-07-29T16:26:38.275Z",
-      "updatedBy": "bd-1274",
+      "updated": "2026-07-31T01:28:18.985Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -57653,15 +57671,20 @@
       "title": "Loop over non-copyable list elements: ICE via .cloned() lowering",
       "body": "ICE (I2 violation): looping over a list of non-clonable elements makes codegen emit .cloned()/.clone() on the element type; JetTask implements no Clone, so rustc rejects the generated Rust and the compiler exits 101. Owner ruling in chat (2026-07-30): 'Ok we must fix this issue.'\n\nRepro:\n  use core.tasks as tasks\n  fn run() {\n      handles :: [tasks.spawn(() => 1), tasks.spawn(() => 2)]\n      loop t; handles { t.wait() }\n  }\njet run --release → internal compiler error, rustc E0277 JetTask<()>: Clone.\n\nDirection: sema/TIR loop lowering must not insert implicit clones for non-Copy/non-Clone element types. A loop over such a list should borrow (if the body only borrows) or consume the list with move-out iteration (t.wait() consumes the handle — same semantics tasks.join_all already has). If neither is provable, emit a real sema diagnostic (registered code + UI snapshot, I4) instead of reaching rustc.\n\nAcceptance: repro runs on AOT, jet run, and interpreter with identical output (I9); an example under examples/features/concurrency or memory with golden; no jit_gaps entry; existing loop goldens stay green. Related: #1323 (*_all helpers) reduces how often users write this loop but does not replace the fix.",
       "kind": "task",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-burndown",
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Fixed at 4d30ce20a. Root cause: both cloneability predicates claimed Task<T> was cloneable, so loop lowering emitted .iter().cloned() and rustc rejected it. Task now sits in the non-cloneable list in sema is_cloneable and codegen field_type_cloneable; a single-binding loop over a non-cloneable element list iterates by value and sema records the move after the loop, so later use is E0121 rather than a rustc rejection. ViewMut element lists keep their existing borrow-through form and are excluded from both paths. Example examples/features/concurrency/loop_task_handles.jet with golden; AOT and jet run both print 6; no jit_gaps entry. Awaiting independent review."
+        },
         {
           "at": "2026-07-30",
           "by": "fable",
@@ -57674,8 +57697,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:43.967Z",
-      "updated": "2026-07-30T14:35:00.360Z",
-      "updatedBy": "fable"
+      "updated": "2026-07-31T07:37:34.675Z",
+      "updatedBy": "claude-burndown",
+      "claimedAt": "2026-07-31T07:37:34.675Z"
     },
     {
       "id": "c0r8y9ik",
@@ -57683,15 +57707,25 @@
       "title": "Task list helpers: spawn_group + full *_all parity set",
       "body": "Owner ruling in chat (2026-07-30): 'WE WANT BEGINNER MAGIC AND EXPERT CONTROL… I personally would prefer a language that let me just write handles.cancel_all() than creating a new loop. REMEMBER WE WANT TO BEAT PYTHON.'\n\nScope: count/list-based task helpers with full parity against the single-handle API.\n1. tasks.spawn_group(n, fn) → [Task] — spawn n tasks from one callable (index-aware form is a design point: fn() vs fn(i)).\n2. List methods on [Task]: wait_all (consumes, returns [T] — reconcile with existing tasks.join_all so there is ONE mechanism, I8; join_all may become the impl or get respelled), cancel_all, detach_all, pause_all, resume_all, trace_all — each the exact list twin of the single-task method.\n\nSemantics live in crates/jet-codegen/src/Prelude (jet_* symbols); engines marshal only (I9). Sema: method table entries for List<Task> receivers with the same effect/ownership rules as the single methods (wait_all/cancel_all consume; pause/resume borrow). Docs: spec surface section + syntax-decisions if any new user-typeable name is minted (I7 — method names on core types may still need a decision record; check precedent). Example with golden proving spawn_group + wait_all + cancel_all on all tiers.\n\nWatch: #1322 (loop-over-task-list ICE) is the underlying footgun these helpers route around; both must land. Duplicate-mechanism check against taskgroup combinators (structured ownership surface, see D-EACH1 verdict notes in syntax-decisions.md).",
       "kind": "task",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-burndown",
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Complete at 76724e6dc. spawn_group plus all seven list twins land on every tier. join_all/wait_all lower to the existing TaskGroupAll node so there is one mechanism with two spellings, not two mechanisms. JIT gained host functions for the borrowing twins; spawn_group is not resident-lowered so the JIT refuses it and the program deopts whole to the interpreter, which runs it — no jit_gaps entry. Example examples/features/concurrency/task_group_helpers.jet with golden prints [7, 7, 7] and [1, 2] identically under jet build and jet run. Spec surface section added. concurrency_boundaries 23 green; ownership unchanged at its one pre-existing failure."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Partial at 84a03712f, NOT closeable. Landed: Syntax registration for spawn_group and the seven *_all names; sema types them only on a [Task<T>] receiver and routes wait_all/join_all/detach_all through the same consume path as the single-handle methods; Prelude jet_task_*_all symbols; TIR THandleOp variants through lower and emit; interpreter arms; JIT host functions, lowering, and safety whitelist. AOT proven end to end (handles.wait_all() prints [1, 2, 3]); concurrency_boundaries still 23 green. Blocked: under jet run the group ops still deopt and the interpreter cannot evaluate them, so I9 parity is not met. Next step is to find why resident_safe still rejects a [Task<T>] receiver even though resident_safe_handle_op now accepts it — check the expression-level list-of-handle gate, not just the handle-op gate. Single-handle .wait() under jet run works, so it is specific to the list receiver. Also still owed once green: example with golden, and the spec surface section."
+        },
         {
           "at": "2026-07-30",
           "by": "fable",
@@ -57709,8 +57743,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.166Z",
-      "updated": "2026-07-30T14:35:13.225Z",
-      "updatedBy": "fable"
+      "updated": "2026-07-31T11:22:11.299Z",
+      "updatedBy": "claude-burndown",
+      "claimedAt": "2026-07-31T11:22:11.299Z"
     },
     {
       "id": "c0ursuly",
@@ -57718,15 +57753,20 @@
       "title": "Remove S75 fan-out operator f.[...]; keep [T#N]",
       "body": "Owner ruling in chat (2026-07-30): 'yes, remove, dont retire, the old operator. Keep the [T#N]'.\n\nRemove the S75 fan-out call operator f.[a, b, c] (apply one callable across an argument list, producing a fixed-size list) completely: no retired-spelling diagnostic, no compatibility alias — delete the surface. Keep S76 [T#N] fixed-size list types untouched (they are used by other features).\n\nInventory to touch: crates/jet-foundation/src/Syntax.rs S75 registration; lexer/parser paths that recognize f.[…]; sema + TIR lowering for the operator; examples/features/basics/fan_out.jet and fan_out_flatten.jet plus their expected/*.out goldens (delete or rewrite on the D-EACH1 fence, which is the surviving mechanism); any UI snapshots and docs/spec sections (spec.md, syntax-decisions.md needs a removal entry recording the owner ruling; philosophy/architecture mentions if any). rg for 'S75', 'fan_out', 'fan-out', '\\.\\[' to sweep.\n\nAcceptance: grammar no longer parses f.[…] (plain parse error, not a retirement notice); [T#N] tests stay green; formatter/grammar snapshots updated; full sweep shows no dead S75 machinery left (garbage-collection pass); verify-full at the batch boundary.",
       "kind": "task",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Removed at dffe457b8 under D-VERDICT-1324-1. f.[...] is now a plain parse error; [T#N] verified still working. Deleted the parse, the Expr::FanOut node and every arm across sema/comptime/codegen/semindex/Canvas, the sema flatten+infer pair, comptime eval_fan_out, the codegen subset helper, OP_FAN_OUT and its highlight entry, both examples with goldens, and the doc rows. Fixtures that used fan-out only to build a fixed-size list now write the list literal directly. One coupling to flag: jetpack/jetos generates and re-parses 'nixpkgs.[git, ripgrep]' in config.jet, but through its own string parser (parse_package_ref_names), never the Jet parser, so it is unaffected. If that text is ever meant to be real Jet source it now needs a different spelling."
+        },
         {
           "at": "2026-07-30",
           "by": "fable",
@@ -57744,8 +57784,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.379Z",
-      "updated": "2026-07-30T14:35:29.085Z",
-      "updatedBy": "fable"
+      "updated": "2026-07-31T10:53:23.729Z",
+      "updatedBy": "claude-burndown"
     },
     {
       "id": "c0yclhqo",
@@ -57753,7 +57793,7 @@
       "title": "Comprehension surface coherence: loop-header split, labels, map duality",
       "body": "Comprehension-surface coherence analysis (owner-requested). Three wobbles found; each has a ballot drafted and waiting in the decide lane: D-LOOP-HEADER3 (loop-header split), D-LOOPLABEL4 (label placement), D-LOOPMAP1 (map/comprehension duality). Implementation is owner-gated: do NOT start until the owner ratifies the ballots in the Tower UI. After ratification, implement the full ruling + acceptance terms (verify skill owns syntax chores). Background: analysis of composition/surface/structure coherence versus Python comprehensions; goals are versatility, flexibility, simplicity, expressiveness, power.",
       "kind": "task",
-      "track": "epoch",
+      "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "planning",
@@ -57805,7 +57845,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-30T12:41:44.595Z",
-      "updated": "2026-07-30T15:46:51.171Z",
+      "updated": "2026-07-31T01:27:52.858Z",
       "updatedBy": "owner"
     },
     {
@@ -58504,6 +58544,46 @@
       "updated": "2026-07-31T00:13:52.707Z",
       "updatedBy": "codex-root",
       "completedAt": "2026-07-31T00:13:52.707Z"
+    },
+    {
+      "id": "c0qxofha",
+      "num": 1339,
+      "title": "Repo red: fmt Int? return, enum dot patterns, and view owner identity ICE",
+      "body": "",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Six targeted tests fail on a clean master, independent of any card in flight. tests/fmt.rs: fmt_canonicalizes_bare_question_return_to_fallible_return formats an 'Int ?' return as 'Int?'; fmt_enum_dot_pattern_stability re-emits bare variant patterns that then fail E0367; fmt_is_lossless_on_supported_source_corpus reorders a token in tests/ui/E0922_body_debug_derive.jet. tests/ownership.rs: lambdas_keep_exact_view_owner_identity and function_values_keep_exact_view_owner_identity emit 'user___JetTirCallable' with no such type in scope, which rustc rejects and I2 counts as an internal compiler error; mutable_view_bounds_fail_at_construction_in_every_tier fails alongside them. tests/diagnostic_snapshots.rs: tests/ui/missing_return.stderr expects no errors but E0114 now fires. Fix each, or split per family if the causes differ.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Root cause found and fixed at 8b8e70cd3. CtValue::serialize renders every CtValue::Struct as user_<Name> { … }, but the comptime evaluator models ~40 builtins as structs with an internal field encoding, and a closure has no literal form. Sema now declines to record a folded value it cannot write back out, and also checks the literal form against the binding's declared type. Three of four instances clear: loop_values builds and matches its golden, and both ownership user___JetTirCallable tests pass. Remaining on this card: the fmt trio, and mutable_view_bounds_fail_at_construction_in_every_tier, which is a separate tier mismatch (interpreter reports E3001 in 'what' where the test expects E0953 in 'why')."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Fourth instance, and the pattern is now clear enough to name: generated Rust references a 'user_<Type>' struct that was never emitted, for types the language treats as builtin. Seen with user_Duration (Duration.seconds), user_Set (Set literal in examples/features/basics/loop_values.jet, which fails the golden suite on clean master), and user___JetTirCallable (tests/ownership.rs). One constructor-lowering path is mangling a builtin type name as if it were user-declared. Fixing that root should clear all four reports."
+        },
+        {
+          "at": "2026-07-31",
+          "by": "claude-burndown",
+          "text": "Third instance of the same family, found while running agent_workloads: the jet adapter tests/agent_workloads/adapters/git_diff_review.jet ICEs with 'cannot find struct, variant or union type user_Duration in this scope' on 'timeout :: Duration.seconds(5)'. Same shape as user___JetTirCallable in tests/ownership.rs — a user_ type referenced in generated Rust that was never emitted. This keeps tests/agent_workloads.rs red on clean master and blocks #1165."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-07-31T03:34:28.230Z",
+      "updated": "2026-07-31T10:40:35.498Z",
+      "updatedBy": "claude-burndown"
     }
   ],
   "decisions": [
@@ -76479,6 +76559,75 @@
       "created": "2026-07-30T15:35:56.221Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-30"
+    },
+    {
+      "id": "D-PIN3",
+      "cardId": "c0tfvwqu",
+      "group": "memory",
+      "title": "How a pinned field is marked",
+      "gist": "How an author marks the fields of a type that must keep their address.",
+      "lesson": "Most values in a program can be moved. Copying a value to a new place and forgetting the old one is normal and cheap. A few values cannot survive that. A node in a linked list may hold the address of its neighbour. A parser may hold the address of a byte inside its own buffer. If the value moves, those stored addresses now point at the old place, which no longer holds what they expect. Reading through one is a bug that no test reliably catches.\n\nJet's answer is a pin. Pinning a value promises that it will not move while the pin is alive. D-PIN1=A ratified the entry point: mem.pin(&place) hands back a Pin<T>, a tracked write view, and the promise ends when the last pin goes away.\n\nA whole-value promise is not enough on its own. An intrusive list needs to reach a node's next link and get a pin back, not an ordinary view, because that link is itself address-sensitive. Handing out an ordinary view would let a caller move the thing the promise was protecting. Reaching a field of a pinned value and keeping the promise is called projection.\n\nD-PIN2=A ratified that the author decides, field by field, which fields carry the promise. Unmarked fields are ordinary. This ballot settles the one thing that ruling left open: what the mark looks like when you type it.",
+      "explainer": "",
+      "story": "Priya is writing a scheduler. Each task is a node in an intrusive list, so every task holds a link to the next one. She marks that link field, so reaching it through a pin gives her another pin. The task name and priority stay ordinary data. When a colleague reads the type later, the difference has to be obvious. Getting it wrong is the difference between a working scheduler and a crash under load.",
+      "inWild": "struct Task {\n    name: String\n    priority: Int\n    next: Node\n}\n\nfn schedule(tasks: &TaskList) {\n    head :: mem.pin(&tasks.head)\n    link :: head.next\n    run(link)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The field's type carries the mark",
+          "detail": "The field is declared as Pin<T>. There is no separate marker. A reader sees the promise in the type, in the same place every other fact about the field already lives, and the name is the one D-PIN1=A already ratified. A field that is not address-sensitive stays an ordinary type and needs no thought.",
+          "technical": "Projection is decided by the declared field type. Reaching a Pin<T> field through a pinned value yields Pin<T>; reaching any other field yields an ordinary view under the existing rules. Nothing new enters Syntax.rs beyond the Pin type name.",
+          "code": "struct Task {\n    name: String\n    priority: Int\n    next: Pin<Node>\n}"
+        },
+        {
+          "key": "B",
+          "name": "A field attribute",
+          "detail": "The field keeps its ordinary type and gains a marker. The promise reads as something the containing type says about the field, not as something the field is. The same Node type can then be pinned in one struct and ordinary in another.",
+          "technical": "Adds one user-typeable marker to Syntax.rs. Projection consults the marker list on the struct rather than the field type, so a type used in both pinned and unpinned positions needs no wrapper.",
+          "code": "struct Task {\n    name: String\n    priority: Int\n    #Pin next: Node\n}"
+        },
+        {
+          "key": "C",
+          "name": "One pinned block in the type",
+          "detail": "Every address-sensitive field is named together in one place. A reader learns the whole contract of the type from a single short block. That matters most when a type has many fields and only two are links.",
+          "technical": "Adds one user-typeable keyword to Syntax.rs and a second place a reader must consult to know what a field means. Field declarations no longer carry the fact themselves.",
+          "code": "struct Task {\n    name: String\n    priority: Int\n    next: Node\n\n    pinned { next }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust has no field mark at all. Projection is hand-written per field, usually behind a macro, and forgetting one silently blocks callers.",
+          "code": "fn next(self: Pin<&mut Task>) -> Pin<&mut Node> {\n    unsafe { self.map_unchecked_mut(|t| &mut t.next) }\n}"
+        },
+        {
+          "lang": "C++",
+          "note": "No contract exists. Address stability is a comment, and every container documents its own invalidation rules.",
+          "code": "// callers must not move Task while queued"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The fact lives where a reader already looks for facts about a field, and it costs no new syntax. Jet already ratified Pin<T> as the name for this promise, so a Pin<Node> field reads as the same idea in a second position rather than a second idea. It also fails safe: an author who forgets the mark gets an ordinary field and a diagnostic at the projection site, not a silent ordinary view where a pin was needed.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Splits one promise across two spellings. The same fact would be a type in one position and a marker in another, and it adds a marker to a surface the beginner pass wants to keep small."
+          },
+          {
+            "key": "C",
+            "reason": "Moves the fact away from the field it describes. A reader scanning the fields learns nothing, and the block drifts out of date as fields are added."
+          }
+        ],
+        "tradeoff": "A type used both pinned and unpinned needs the wrapper at each pinned position rather than one marker. That is the honest cost of putting the promise in the type, and it is the cost that keeps one name for one idea."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-31T03:37:37.548Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-31"
     }
   ],
   "questions": [
@@ -77658,6 +77807,265 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-31T11:22:11.299Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0r8y9ik",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T11:07:53.690Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0r8y9ik",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T10:57:11.460Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0r8y9ik",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T10:53:23.729Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0ursuly",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T10:40:35.498Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0qxofha",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T07:37:59.702Z",
+      "by": "claude-burndown",
+      "action": "card.release",
+      "ref": "c0ursuly",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-31T07:37:34.982Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0ursuly",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T07:37:34.675Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0nyir87",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T07:37:12.741Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0qxofha",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T07:20:59.288Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0nyir87",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T07:20:55.882Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0qxofha",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T07:20:55.571Z",
+      "by": "claude-burndown",
+      "action": "card.release",
+      "ref": "c0xha49b",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-31T07:16:30.954Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PIN3",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-31T07:15:26.329Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0xha49b",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T03:37:47.496Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T03:37:37.548Z",
+      "by": "claude-burndown",
+      "action": "decision.add",
+      "ref": "D-PIN3",
+      "note": "How a pinned field is marked"
+    },
+    {
+      "at": "2026-07-31T03:35:06.631Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0tfvwqu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T03:35:06.360Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0q59qu0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T03:34:28.230Z",
+      "by": "claude-burndown",
+      "action": "card.add",
+      "ref": "c0qxofha",
+      "note": "Repo red: fmt Int? return, enum dot patterns, and view owner identity ICE"
+    },
+    {
+      "at": "2026-07-31T03:29:48.425Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0q59qu0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-31T03:29:48.172Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0q59qu0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-31T03:29:47.911Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0q59qu0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-31T03:29:47.641Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0q59qu0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-31T03:29:47.380Z",
+      "by": "claude-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0q59qu0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-31T01:58:46.472Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0q59qu0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-31T01:40:03.848Z",
+      "by": "claude-burndown",
+      "action": "card.update",
+      "ref": "c0q59qu0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-31T01:38:02.610Z",
+      "by": "claude-burndown",
+      "action": "card.claim",
+      "ref": "c0q59qu0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T01:29:41.256Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:29:31.552Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0kix3zi",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:45.707Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:26.098Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0r8y9ik",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:18.985Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0indi4b",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:10.566Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0ursuly",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:06.794Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0nyir87",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:28:01.610Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0avjyq6",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:27:52.859Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0yclhqo",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-31T01:27:19.766Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-07-31T01:27:19.766Z"
+    },
     {
       "at": "2026-07-31T00:13:52.707Z",
       "by": "codex-root",
@@ -80898,265 +81306,6 @@
       "action": "message.add",
       "ref": "q0xrj127",
       "note": "#1304"
-    },
-    {
-      "at": "2026-07-30T02:48:55.149Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c0b0tifp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-30T02:47:50.343Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c0q4t3oj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T02:47:50.053Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c0325rmi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T02:47:49.776Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c05p1lv8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T02:47:49.474Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c0t0lsh7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T02:47:49.187Z",
-      "by": "codex-core-five",
-      "action": "card.update",
-      "ref": "c06wg4vc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-30T02:47:36.317Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-30T02:47:36.046Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-30T02:47:35.787Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-30T02:47:35.526Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-30T02:47:35.269Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T02:47:35.009Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:47:34.751Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q4t3oj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:47:34.484Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0325rmi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T02:47:34.227Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0325rmi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T02:47:33.963Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0325rmi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:47:33.699Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0325rmi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:47:33.443Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c05p1lv8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:47:33.175Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0t0lsh7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:47:32.926Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c0t0lsh7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:47:32.667Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c06wg4vc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:47:32.408Z",
-      "by": "core-five-review",
-      "action": "card.criteria-verify",
-      "ref": "c06wg4vc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:46:26.771Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-30T02:46:26.519Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-30T02:46:26.242Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-30T02:46:25.975Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-30T02:46:25.712Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T02:46:25.440Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:46:25.183Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0q4t3oj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:46:24.925Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0325rmi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-30T02:46:24.661Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0325rmi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-30T02:46:24.399Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0325rmi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:46:24.147Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0325rmi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:46:23.892Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c05p1lv8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:46:23.640Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0t0lsh7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-30T02:46:23.379Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c0t0lsh7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-30T02:46:23.123Z",
-      "by": "codex-core-five",
-      "action": "card.criteria-meet",
-      "ref": "c06wg4vc",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
