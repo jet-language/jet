@@ -2221,6 +2221,36 @@ impl<'a> EvalCtx<'a> {
                 match r {
                     // TupleLit stores Rust-mangled `user_<f>` names (emit needs them);
                     // Field TIR keeps Jet names. Accept either so named-tuple reads work.
+                    CtValue::Struct {
+                        type_name,
+                        fields,
+                    } if type_name == "__JetViewMut" => {
+                        let window =
+                            materialize_view_mut_window(&fields, scope, self.span())?;
+                        let CtValue::List(xs) = window else {
+                            return Err(unsupported("view-mut window", self.span()));
+                        };
+                        if xs.len() != 1 {
+                            return Err(unsupported("field on multi-element view", self.span()));
+                        }
+                        match &xs[0] {
+                            CtValue::Struct { fields, .. } => {
+                                let mangled = crate::Codegen::mangle(field);
+                                fields
+                                    .iter()
+                                    .find(|(n, _)| {
+                                        n == field
+                                            || n == &mangled
+                                            || n.strip_prefix("user_") == Some(field.as_str())
+                                    })
+                                    .map(|(_, v)| v.clone())
+                                    .ok_or_else(|| {
+                                        unsupported(&format!("field `{field}`"), self.span())
+                                    })
+                            }
+                            _ => Err(unsupported("field recv", self.span())),
+                        }
+                    }
                     CtValue::Struct { fields, .. } => {
                         let mangled = crate::Codegen::mangle(field);
                         fields
@@ -4143,8 +4173,77 @@ impl<'a> EvalCtx<'a> {
                 Ok(())
             }
             TExprKind::Field { recv, field, .. } => {
+                // Single-element `__JetViewMut` write-through (`a.position = v`
+                // when `a :: &xs[i]`).
+                if let TExprKind::Local(local) = &recv.kind {
+                    if let Some(CtValue::Struct {
+                        type_name,
+                        fields: vm_fields,
+                    }) = scope.get(&local.name).cloned()
+                    {
+                        if type_name == "__JetViewMut" {
+                            let mut start = None;
+                            let mut end = None;
+                            for (n, v) in &vm_fields {
+                                match (n.as_str(), v) {
+                                    ("start", CtValue::Int(n)) => start = Some(*n),
+                                    ("end", CtValue::Int(n)) => end = Some(*n),
+                                    _ => {}
+                                }
+                            }
+                            if let (Some(start), Some(end)) = (start, end) {
+                                if start == end {
+                                    let mut items = super::load_view_mut_owner_list(
+                                        &vm_fields,
+                                        scope,
+                                        self.span(),
+                                    )?;
+                                    let i = start as usize;
+                                    if i >= items.len() {
+                                        return Err(unsupported("view-mut OOB", self.span()));
+                                    }
+                                    let mut elem = items[i].clone();
+                                    match &mut elem {
+                                        CtValue::Struct { fields, .. } => {
+                                            let mangled = crate::Codegen::mangle(field);
+                                            if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
+                                                n == field
+                                                    || n == &mangled
+                                                    || n.strip_prefix("user_")
+                                                        == Some(field.as_str())
+                                            }) {
+                                                *slot = value;
+                                            } else {
+                                                fields.push((field.clone(), value));
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(unsupported(
+                                                "field write-back on a non-struct",
+                                                self.span(),
+                                            ));
+                                        }
+                                    }
+                                    items[i] = elem;
+                                    return super::store_view_mut_owner_list(
+                                        &vm_fields,
+                                        scope,
+                                        items,
+                                        self.span(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 let mut base_val = self.eval_expr(recv, scope)?;
                 match &mut base_val {
+                    CtValue::Struct {
+                        type_name,
+                        fields,
+                    } if type_name == "__JetViewMut" => {
+                        return Err(unsupported("field write-back on view-mut", self.span()));
+                    }
                     CtValue::Struct { fields, .. } => {
                         let mangled = crate::Codegen::mangle(field);
                         if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {

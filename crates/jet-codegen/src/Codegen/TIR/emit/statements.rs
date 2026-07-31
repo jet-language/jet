@@ -148,6 +148,36 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
     )
 }
 
+/// Mutable list place for `SplitViews` owners. Nested `grid[i]` must use
+/// `jet_index_vec_mut` so the window is the live inner list, not a clone.
+fn emit_mut_list_place(
+    e: &crate::Codegen::TIR::TExpr,
+    cx: &Cx,
+    cleanups: &[ActiveCleanup],
+) -> String {
+    use crate::Codegen::TIR::TExprKind;
+    match &e.kind {
+        TExprKind::Index {
+            base,
+            index,
+            is_map: false,
+            line,
+            ..
+        } => {
+            let b = emit_mut_list_place(base, cx, cleanups);
+            let i = emit_expr_with_cleanups(index, cx, cleanups);
+            format!(
+                "(*jet_index_vec_mut(&mut ({b}), {i}, {:?}, {line}))",
+                cx.file
+            )
+        }
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+            emit_mut_list_place(place, cx, cleanups)
+        }
+        _ => emit_expr_with_cleanups(e, cx, cleanups),
+    }
+}
+
 /// Emit a closure block while preserving Jet's final-expression return rule.
 /// Ordinary statement blocks terminate expression statements with `;`; a lambda's
 /// final expression is its value and must remain a Rust tail expression. A final
@@ -476,7 +506,9 @@ fn emit_tir_stmt(
             line,
         } => {
             if let Some(owner) = owner {
-                let owner = emit_expr_with_cleanups(owner, cx, active_deferred_closes);
+                // Nested / field owners must be mutable places (`jet_index_vec_mut`),
+                // not value clones (`jet_index_vec`) — otherwise writes hit a temporary.
+                let owner = emit_mut_list_place(owner, cx, active_deferred_closes);
                 out.push_str(&format!(
                     "{}let {} = &mut ({})[..];\n{}let {} = ({}).len() as i64;\n",
                     pad, root, owner, pad, len, root

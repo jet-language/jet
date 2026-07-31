@@ -5535,3 +5535,111 @@ fn run() {
     let diags = jet::compile(src).expect_err("Stream is consumed by the first loop");
     assert!(diags.iter().any(|d| d.code == "E0121"), "{diags:?}");
 }
+
+/// #1350: a lone write borrow must print the same value on default `jet run`
+/// and AOT. Covers the measured matrix (local += / field assign / through
+/// parameter / nested index).
+#[test]
+fn lone_write_borrow_matches_on_jit_and_aot() {
+    let cases = [
+        (
+            "local_add",
+            r#"
+struct P { position: Int }
+fn run() {
+  ps := [P.{ position: 10 }, P.{ position: 20 }]
+  a :: &ps[0]
+  a.position += 2
+  print(ps[0].position)
+}
+"#,
+            "12\n",
+        ),
+        (
+            "local_field",
+            r#"
+struct P { position: Int }
+fn run() {
+  ps := [P.{ position: 1 }, P.{ position: 2 }]
+  a :: &ps[0]
+  a.position = 42
+  print(ps[0].position)
+}
+"#,
+            "42\n",
+        ),
+        (
+            "through_param",
+            r#"
+struct P { position: Int }
+struct W { ps: [P] }
+fn bump(w: &W) {
+  a :: &w.ps[0]
+  a.position = 42
+}
+fn run() {
+  w := W.{ ps: [P.{ position: 1 }] }
+  bump(&w)
+  print(w.ps[0].position)
+}
+"#,
+            "42\n",
+        ),
+        (
+            "nested_index",
+            r#"
+fn run() {
+  grid := [[1, 2], [3, 4]]
+  a :: &grid[0][1]
+  a = 42
+  print(grid[0][1])
+}
+"#,
+            "42\n",
+        ),
+    ];
+    for (name, source, expected) in cases {
+        let out = jet::compile(source).unwrap_or_else(|diags| {
+            panic!("{name} must compile for AOT emit: {diags:?}")
+        });
+        if name == "nested_index" {
+            assert!(
+                out.rust.contains("jet_index_vec_mut"),
+                "{name} must borrow the live inner list, not a clone: {}",
+                out.rust
+            );
+            assert!(
+                out.rust
+                    .contains("let __jet_place_plan_0_root = &mut ((*jet_index_vec_mut("),
+                "{name} split-view root must use jet_index_vec_mut: {}",
+                out.rust
+            );
+        }
+        let root = common::unique_tmp(&format!("jet_lone_write_{name}"));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        fs::write(&path, source).unwrap();
+        for release in [false, true] {
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+            cmd.arg("run");
+            if release {
+                cmd.arg("--release");
+            }
+            cmd.arg(path.to_str().unwrap()).current_dir(&root);
+            let output = cmd.output().unwrap_or_else(|err| {
+                panic!("jet run failed to spawn for {name}: {err}")
+            });
+            assert!(
+                output.status.success(),
+                "{name} release={release} failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "{name} release={release}"
+            );
+        }
+    }
+}
+

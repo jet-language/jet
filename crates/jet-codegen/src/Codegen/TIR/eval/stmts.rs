@@ -5,23 +5,31 @@ use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
-use super::{raw_place_local, unsupported, EvalCtx, Flow};
+use super::{
+    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, raw_place_local,
+    store_view_mut_owner_list, unsupported, EvalCtx, Flow, ViewMutPathStep,
+};
+use crate::Codegen::TIR::{TExpr, TExprKind};
 
 /// Inclusive place-region handle used while evaluating `TStmt::SplitViews`.
 /// Reuses the `__JetViewMut` field shape so later splits can resolve absolute
-/// windows into the original owner list.
-fn place_region(base: &str, start: i64, end: i64) -> CtValue {
+/// windows into the original owner list (local, field, or nested index).
+fn place_region(base: &str, path: &[ViewMutPathStep], start: i64, end: i64) -> CtValue {
+    let mut fields = vec![
+        ("base".into(), CtValue::Str(base.to_string())),
+        ("start".into(), CtValue::Int(start)),
+        ("end".into(), CtValue::Int(end)),
+    ];
+    if !path.is_empty() {
+        fields.push(("path".into(), encode_view_mut_path(path)));
+    }
     CtValue::Struct {
         type_name: "__JetViewMut".into(),
-        fields: vec![
-            ("base".into(), CtValue::Str(base.to_string())),
-            ("start".into(), CtValue::Int(start)),
-            ("end".into(), CtValue::Int(end)),
-        ],
+        fields,
     }
 }
 
-fn parse_place_region(value: &CtValue) -> Option<(String, i64, i64)> {
+fn parse_place_region(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
     let CtValue::Struct {
         type_name,
         fields,
@@ -43,7 +51,33 @@ fn parse_place_region(value: &CtValue) -> Option<(String, i64, i64)> {
             _ => {}
         }
     }
-    Some((base?, start?, end?))
+    Some((base?, parse_view_mut_path(fields), start?, end?))
+}
+
+fn owner_list_place(expr: &TExpr) -> Option<(String, Vec<ViewMutPathStep>)> {
+    match &expr.kind {
+        TExprKind::Local(local) => Some((local.name.clone(), Vec::new())),
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => owner_list_place(place),
+        TExprKind::Field { recv, field, .. } => {
+            let (base, mut path) = owner_list_place(recv)?;
+            path.push(ViewMutPathStep::Field(field.clone()));
+            Some((base, path))
+        }
+        TExprKind::Index {
+            base,
+            index,
+            is_map: false,
+            ..
+        } => {
+            let (root, mut path) = owner_list_place(base)?;
+            let TExprKind::IntLit(idx, _) = &index.kind else {
+                return None;
+            };
+            path.push(ViewMutPathStep::Index(*idx));
+            Some((root, path))
+        }
+        _ => raw_place_local(expr).map(|local| (local.name.clone(), Vec::new())),
+    }
 }
 
 impl<'a> EvalCtx<'a> {
@@ -220,6 +254,57 @@ impl<'a> EvalCtx<'a> {
                 match place {
                     TPlace::Local(local) => {
                         let key = local.name.clone();
+                        if let Some(CtValue::Struct {
+                            type_name,
+                            fields,
+                        }) = scope.get(&key).cloned()
+                        {
+                            if type_name == "__JetViewMut" {
+                                let mut start = None;
+                                let mut end = None;
+                                for (n, v) in &fields {
+                                    match (n.as_str(), v) {
+                                        ("start", CtValue::Int(n)) => start = Some(*n),
+                                        ("end", CtValue::Int(n)) => end = Some(*n),
+                                        _ => {}
+                                    }
+                                }
+                                if let (Some(start), Some(end)) = (start, end) {
+                                    if start == end {
+                                        let mut items = load_view_mut_owner_list(
+                                            &fields,
+                                            scope,
+                                            self.span(),
+                                        )?;
+                                        let i = start as usize;
+                                        if i >= items.len() {
+                                            return Err(unsupported(
+                                                "view-mut OOB",
+                                                self.span(),
+                                            ));
+                                        }
+                                        let mut rhs = rhs;
+                                        if let Some(binop) = op {
+                                            rhs = eval_binop(
+                                                *binop,
+                                                items[i].clone(),
+                                                rhs,
+                                                self.span(),
+                                            )?;
+                                        }
+                                        items[i] = rhs;
+                                        store_view_mut_owner_list(
+                                            &fields,
+                                            scope,
+                                            items,
+                                            self.span(),
+                                        )?;
+                                        return Ok(Flow::Normal);
+                                    }
+                                }
+                            }
+                        }
+                        let mut rhs = rhs;
                         if let Some(binop) = op {
                             let cur = scope.get(&key).cloned().unwrap_or(CtValue::Unit);
                             rhs = eval_binop(*binop, cur, rhs, self.span())?;
@@ -766,35 +851,29 @@ impl<'a> EvalCtx<'a> {
                 if let CtValue::Struct {
                     type_name,
                     fields,
-                } = base_value
+                } = &base_value
                 {
                     if type_name == "__JetViewMut" {
-                        let mut base_s = None;
                         let mut start = None;
-                        for (n, v) in &fields {
-                            match (n.as_str(), v) {
-                                ("base", CtValue::Str(s)) => base_s = Some(s.clone()),
-                                ("start", CtValue::Int(n)) => start = Some(*n),
-                                _ => {}
+                        for (n, v) in fields {
+                            if let ("start", CtValue::Int(n)) = (n.as_str(), v) {
+                                start = Some(*n);
                             }
                         }
-                        let (owner, start) = match (base_s, start) {
-                            (Some(b), Some(s)) => (b, s),
-                            _ => return Err(unsupported("view-mut fields", self.span())),
-                        };
+                        let start = start
+                            .ok_or_else(|| unsupported("view-mut fields", self.span()))?;
                         let idx = as_int(&idx_v, self.span())?;
                         if idx < 0 {
                             return Err(unsupported("negative view index", self.span()));
                         }
-                        let Some(CtValue::List(mut items)) = scope.get(&owner).cloned() else {
-                            return Err(unsupported("view-mut owner", self.span()));
-                        };
+                        let mut items =
+                            load_view_mut_owner_list(fields, scope, self.span())?;
                         let i = (start + idx) as usize;
                         if i >= items.len() {
                             return Err(unsupported("view-mut OOB", self.span()));
                         }
                         items[i] = rhs;
-                        scope.insert(owner, CtValue::List(items));
+                        store_view_mut_owner_list(fields, scope, items, self.span())?;
                         return Ok(Flow::Normal);
                     }
                 }
@@ -927,27 +1006,35 @@ impl<'a> EvalCtx<'a> {
             } => {
                 // D-SHAPE-PLACE1=A: mirror AOT `split_at_mut` planning with absolute
                 // region handles. Mutable user windows stay as `__JetViewMut` so
-                // IndexAssign writes through to the owner (AOT emits real slices).
-                // Read-only / single-element user bindings still materialize.
-                if let Some(owner_expr) = owner {
-                    let base_name = raw_place_local(owner_expr)
-                        .map(|local| local.name.clone())
+                // IndexAssign / field writes reach the owner (AOT emits real slices).
+                // Read-only windows still materialize.
+                let owner_path = if let Some(owner_expr) = owner {
+                    let (base_name, path) = owner_list_place(owner_expr)
                         .ok_or_else(|| unsupported("split views owner", self.span()))?;
-                    let CtValue::List(items) = scope
-                        .get(&base_name)
-                        .cloned()
-                        .ok_or_else(|| unsupported("split views owner list", self.span()))?
-                    else {
-                        return Err(unsupported("split views owner list", self.span()));
+                    let items = {
+                        let probe = place_region(&base_name, &path, 0, 0);
+                        let CtValue::Struct { fields, .. } = &probe else {
+                            return Err(unsupported("split views owner", self.span()));
+                        };
+                        load_view_mut_owner_list(fields, scope, self.span())?
                     };
                     let len_i = items.len() as i64;
                     if *start < 0 || *end < *start || *end >= len_i {
                         return Err(unsupported("split views bounds", self.span()));
                     }
                     let root_end = len_i - 1;
-                    scope.insert(root.clone(), place_region(&base_name, 0, root_end));
+                    scope.insert(root.clone(), place_region(&base_name, &path, 0, root_end));
                     scope.insert(len.clone(), CtValue::Int(len_i));
-                }
+                    path
+                } else {
+                    let source_region = scope
+                        .get(source)
+                        .cloned()
+                        .ok_or_else(|| unsupported("split views source", self.span()))?;
+                    let (_, path, _, _) = parse_place_region(&source_region)
+                        .ok_or_else(|| unsupported("split views source region", self.span()))?;
+                    path
+                };
                 let len_i = match scope.get(len) {
                     Some(CtValue::Int(n)) => *n,
                     _ => return Err(unsupported("split views len", self.span())),
@@ -959,8 +1046,14 @@ impl<'a> EvalCtx<'a> {
                     .get(source)
                     .cloned()
                     .ok_or_else(|| unsupported("split views source", self.span()))?;
-                let (base_name, _src_abs_start, src_abs_end) = parse_place_region(&source_region)
-                    .ok_or_else(|| unsupported("split views source region", self.span()))?;
+                let (base_name, path, _src_abs_start, src_abs_end) =
+                    parse_place_region(&source_region)
+                        .ok_or_else(|| unsupported("split views source region", self.span()))?;
+                let path = if owner.is_some() {
+                    owner_path
+                } else {
+                    path
+                };
                 let relative_start = *start - *source_start;
                 let width = *end - *start + 1;
                 if relative_start < 0 || width <= 0 {
@@ -970,42 +1063,46 @@ impl<'a> EvalCtx<'a> {
                 if relative_start > 0 {
                     scope.insert(
                         before.clone(),
-                        place_region(&base_name, *source_start, *start - 1),
+                        place_region(&base_name, &path, *source_start, *start - 1),
                     );
                 } else {
                     scope.insert(
                         before.clone(),
-                        place_region(&base_name, *source_start, *source_start - 1),
+                        place_region(&base_name, &path, *source_start, *source_start - 1),
                     );
                 }
                 scope.insert(
                     split_tail.clone(),
-                    place_region(&base_name, *start, src_abs_end),
+                    place_region(&base_name, &path, *start, src_abs_end),
                 );
                 // `(segment, after) = split_tail.split_at(width)`
-                scope.insert(segment.clone(), place_region(&base_name, *start, *end));
+                scope.insert(
+                    segment.clone(),
+                    place_region(&base_name, &path, *start, *end),
+                );
                 let after_start = *end + 1;
                 if after_start <= src_abs_end {
                     scope.insert(
                         after.clone(),
-                        place_region(&base_name, after_start, src_abs_end),
+                        place_region(&base_name, &path, after_start, src_abs_end),
                     );
                 } else {
                     scope.insert(
                         after.clone(),
-                        place_region(&base_name, after_start, *end),
+                        place_region(&base_name, &path, after_start, *end),
                     );
                 }
-                if *write && !*single {
-                    // Write-through handle — same shape as plan temps / ViewNew.
-                    scope.insert(name.clone(), place_region(&base_name, *start, *end));
+                if *write {
+                    // Write-through handle — including single-element `&xs[i]` so
+                    // `view.field = v` / `view = v` match AOT `&mut` semantics.
+                    scope.insert(name.clone(), place_region(&base_name, &path, *start, *end));
                 } else {
-                    let CtValue::List(items) = scope
-                        .get(&base_name)
-                        .cloned()
-                        .ok_or_else(|| unsupported("split views owner", self.span()))?
-                    else {
-                        return Err(unsupported("split views owner", self.span()));
+                    let items = {
+                        let probe = place_region(&base_name, &path, *start, *end);
+                        let CtValue::Struct { fields, .. } = &probe else {
+                            return Err(unsupported("split views owner", self.span()));
+                        };
+                        load_view_mut_owner_list(fields, scope, self.span())?
                     };
                     let window = items[*start as usize..=*end as usize].to_vec();
                     if *single {

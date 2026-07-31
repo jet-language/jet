@@ -292,12 +292,50 @@ pub(super) fn uninit_fixed_write(
     true
 }
 
-/// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
-pub(super) fn materialize_view_mut_window(
+/// One step from a root local to the list a `__JetViewMut` windows into.
+#[derive(Clone, Debug)]
+pub(super) enum ViewMutPathStep {
+    Field(String),
+    Index(i64),
+}
+
+pub(super) fn parse_view_mut_path(fields: &[(String, CtValue)]) -> Vec<ViewMutPathStep> {
+    let Some((_, CtValue::List(steps))) = fields.iter().find(|(name, _)| name == "path") else {
+        return Vec::new();
+    };
+    steps
+        .iter()
+        .filter_map(|step| {
+            let CtValue::Str(s) = step else {
+                return None;
+            };
+            if let Some(field) = s.strip_prefix("f:") {
+                Some(ViewMutPathStep::Field(field.to_string()))
+            } else if let Some(index) = s.strip_prefix("i:") {
+                index.parse().ok().map(ViewMutPathStep::Index)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub(super) fn encode_view_mut_path(path: &[ViewMutPathStep]) -> CtValue {
+    CtValue::List(
+        path.iter()
+            .map(|step| {
+                CtValue::Str(match step {
+                    ViewMutPathStep::Field(field) => format!("f:{field}"),
+                    ViewMutPathStep::Index(index) => format!("i:{index}"),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn view_mut_parts(
     fields: &[(String, CtValue)],
-    scope: &HashMap<String, CtValue>,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
     let mut base = None;
     let mut start = None;
     let mut end = None;
@@ -309,13 +347,117 @@ pub(super) fn materialize_view_mut_window(
             _ => {}
         }
     }
-    let (base, start, end) = match (base, start, end) {
-        (Some(b), Some(s), Some(e)) => (b, s, e),
-        _ => return Err(unsupported("view-mut fields", span)),
-    };
-    let Some(CtValue::List(items)) = scope.get(&base) else {
-        return Err(unsupported("view-mut owner", span));
-    };
+    Some((base?, parse_view_mut_path(fields), start?, end?))
+}
+
+fn project_list_place<'a>(
+    root: &'a CtValue,
+    path: &[ViewMutPathStep],
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    let mut cur = root;
+    for step in path {
+        cur = match (step, cur) {
+            (ViewMutPathStep::Field(field), CtValue::Struct { fields, .. }) => fields
+                .iter()
+                .find(|(name, _)| {
+                    name == field
+                        || name.strip_prefix("user_") == Some(field.as_str())
+                        || name == &crate::Codegen::mangle(field)
+                })
+                .map(|(_, value)| value)
+                .ok_or_else(|| unsupported("view-mut path field", span))?,
+            (ViewMutPathStep::Index(index), CtValue::List(items)) => {
+                if *index < 0 || *index as usize >= items.len() {
+                    return Err(unsupported("view-mut path index", span));
+                }
+                &items[*index as usize]
+            }
+            _ => return Err(unsupported("view-mut path", span)),
+        };
+    }
+    Ok(cur)
+}
+
+fn replace_list_place(
+    root: CtValue,
+    path: &[ViewMutPathStep],
+    replacement: CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if path.is_empty() {
+        return Ok(replacement);
+    }
+    let step = &path[0];
+    let rest = &path[1..];
+    match (step, root) {
+        (ViewMutPathStep::Field(field), CtValue::Struct { type_name, mut fields }) => {
+            let mangled = crate::Codegen::mangle(field);
+            let slot = fields.iter_mut().find(|(name, _)| {
+                name == field
+                    || name.strip_prefix("user_") == Some(field.as_str())
+                    || name == &mangled
+            });
+            let Some((_, value)) = slot else {
+                return Err(unsupported("view-mut path field", span));
+            };
+            *value = replace_list_place(value.clone(), rest, replacement, span)?;
+            Ok(CtValue::Struct { type_name, fields })
+        }
+        (ViewMutPathStep::Index(index), CtValue::List(mut items)) => {
+            if *index < 0 || *index as usize >= items.len() {
+                return Err(unsupported("view-mut path index", span));
+            }
+            let i = *index as usize;
+            items[i] = replace_list_place(items[i].clone(), rest, replacement, span)?;
+            Ok(CtValue::List(items))
+        }
+        _ => Err(unsupported("view-mut path", span)),
+    }
+}
+
+pub(super) fn load_view_mut_owner_list(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    match project_list_place(root, &path, span)? {
+        CtValue::List(items) => Ok(items.clone()),
+        _ => Err(unsupported("view-mut owner list", span)),
+    }
+}
+
+pub(super) fn store_view_mut_owner_list(
+    fields: &[(String, CtValue)],
+    scope: &mut HashMap<String, CtValue>,
+    items: Vec<CtValue>,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let (base, path, _, _) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let root = scope
+        .get(&base)
+        .cloned()
+        .ok_or_else(|| unsupported("view-mut owner", span))?;
+    let updated = replace_list_place(root, &path, CtValue::List(items), span)?;
+    scope.insert(base, updated);
+    Ok(())
+}
+
+/// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
+pub(super) fn materialize_view_mut_window(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let (_, _, start, end) =
+        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+    let items = load_view_mut_owner_list(fields, scope, span)?;
     if start < 0
         || end < start - 1
         || (end >= start && end as usize >= items.len())
