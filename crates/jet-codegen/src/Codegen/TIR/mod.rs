@@ -3624,6 +3624,8 @@ pub struct TLambda {
     pub ret: Option<Type>,
     pub is_move: bool,
     pub boxed: bool,
+    /// Escaping non-mut Fn value: wrap with `std::rc::Rc::new` so collections can `.cloned()`.
+    pub rc: bool,
     pub arc: bool,
     /// JIT capture pack: (enclosing Jet name, body place, type). Empty = non-capturing.
     pub captures: Vec<(String, String, Type)>,

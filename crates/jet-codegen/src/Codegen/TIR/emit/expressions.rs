@@ -46,8 +46,11 @@ use crate::Codegen::TIR::struct_field_type;
 fn emit_tir_lambda(lam: &TLambda) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
     let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
+    // Prefer Arc (HTTP) / Rc (cloneable Fn values) over Box (FnMut escape only).
     let wrapped = if lam.arc {
         format!("std::sync::Arc::new({closure})")
+    } else if lam.rc {
+        format!("std::rc::Rc::new({closure})")
     } else if lam.boxed {
         format!("Box::new({closure})")
     } else {
