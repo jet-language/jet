@@ -656,6 +656,7 @@ impl<'a> StateCtx<'a> {
             | Expr::BinMatchLit(_, _) => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),
+            Expr::MemberSpread { base, .. } => self.check_expr(base),
         }
     }
 

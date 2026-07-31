@@ -717,6 +717,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             StrPart::Lit(_) => false,
         }),
         Expr::ListLit(values, _) => values.iter().any(expr_has_comptime_evaluation),
+        Expr::MemberSpread { base, .. } => expr_has_comptime_evaluation(base),
         Expr::Spread(value, _)
         | Expr::Unary(_, value, _)
         | Expr::Deref(value, _)
@@ -1039,6 +1040,9 @@ fn check_bundle_opts_for_output_inner(
     // registration/checking so those synthetic functions are type-checked and
     // lowered through the normal pipeline. Sets `conv_fn` on the `change` op.
     super::desugar_migrations(bundle);
+    // D-SPREAD1=A: expand `prefix.[a, b]` to field lists (spliced in list
+    // position) before inference sees bodies.
+    super::desugar_member_spreads(bundle);
     // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
     // sibling-call mangling or registration sees the items.
     expand_generic_module_aliases(bundle, &mut diags);

@@ -563,6 +563,22 @@ impl<'a> Fmt<'a> {
                 }
                 self.write("]");
             }
+            // D-SPREAD1=A: re-emit member spread sugar.
+            Expr::MemberSpread {
+                base,
+                members,
+                ..
+            } => {
+                self.fmt_expr(base, Prec::Postfix);
+                self.write(".[");
+                for (i, (name, _)) in members.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(name);
+                }
+                self.write("]");
+            }
             Expr::TupleLit(fields, span, _) => {
                 self.write("(");
                 if self.source_span_multiline(*span) {

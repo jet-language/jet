@@ -232,6 +232,7 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
                 walk_expr_nodes(item, include_suppressed, f);
             }
         }
+        Expr::MemberSpread { base, .. } => walk_expr_nodes(base, include_suppressed, f),
         Expr::Spread(inner, _)
         | Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)

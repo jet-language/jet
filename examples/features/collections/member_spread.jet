@@ -1,0 +1,14 @@
+// D-SPREAD1=A: member spread expands a shared prefix into field reads.
+struct Validators {
+    length: Int
+    charset: Int
+    entropy: Int
+}
+
+fn run() {
+    v :: Validators.{ length: 1, charset: 2, entropy: 3 }
+    checks :: v.[length, charset, entropy]
+    print("{checks[0]} {checks[1]} {checks[2]}")
+    mixed :: [v.[length, charset], v.entropy]
+    print("{mixed[0]} {mixed[1]} {mixed[2]}")
+}

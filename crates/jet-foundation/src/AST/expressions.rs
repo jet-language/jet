@@ -326,6 +326,13 @@ pub enum Expr {
     Char(char, Span),
     /// S37: `[a, b, c]` or `[]`.
     ListLit(Vec<Expr>, Span),
+    /// D-SPREAD1=A: `prefix.[a, b, c]` — member spread. Sema desugars to
+    /// `[prefix.a, prefix.b, prefix.c]` (spliced when nested in a list).
+    MemberSpread {
+        base: Box<Expr>,
+        members: Vec<(String, Span)>,
+        span: Span,
+    },
     /// D-VARIADIC1: `...expr` inside a list literal — flatten the list's elements in place.
     Spread(Box<Expr>, Span),
     /// S38: `["k": v]` or `[:]`.
@@ -590,6 +597,7 @@ impl Expr {
             | Expr::Bool(_, s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)
+            | Expr::MemberSpread { span: s, .. }
             | Expr::Spread(_, s)
             | Expr::TupleLit(_, s, _)
             | Expr::MapLit(_, s)

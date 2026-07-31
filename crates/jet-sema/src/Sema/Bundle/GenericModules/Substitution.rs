@@ -93,6 +93,7 @@ pub(super) fn substitute_expr(
         | Expr::Try(inner, _, _)
         | Expr::Paren(inner, _)
         | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
+        Expr::MemberSpread { base, .. } => substitute_expr(base, types, values),
         Expr::OptField { base, .. } => substitute_expr(base, types, values),
         Expr::Range { start, end, .. } => {
             substitute_expr(start, types, values);

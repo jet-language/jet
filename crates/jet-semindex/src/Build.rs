@@ -2016,6 +2016,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 for i in items { collect_expr(i, mp, ctx); }
             });
         }
+        AST::Expr::MemberSpread { base, .. } => {
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+        }
         AST::Expr::Spread(inner, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
         AST::Expr::MapLit(pairs, _) => {
             structural_slot(ctx, "keys", StructuralSlotKind::List, |ctx| {

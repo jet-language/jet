@@ -419,6 +419,12 @@ impl<'a> Parser<'a> {
                             let full = Span::new(span.start, star.end);
                             return Ok(Expr::Deref(Box::new(Expr::Ident(type_name, span)), full));
                         }
+                        // D-SPREAD1=A: `prefix.[a, b, c]` member spread (primary path —
+                        // bare idents consume `.` here before postfix sees them).
+                        if matches!(self.peek().kind, TokKind::LBracket) {
+                            let base = Expr::Ident(type_name, span);
+                            return self.parse_member_spread(base, span.start);
+                        }
                         // D-DOTCTOR1: `Type.{ … }` named construction.
                         if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
                             return self.struct_lit_after_name(type_name, type_args, span);

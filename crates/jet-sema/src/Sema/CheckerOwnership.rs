@@ -1133,6 +1133,9 @@ impl<'a> Checker<'a> {
             Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
             }
+            Expr::MemberSpread { base, .. } => {
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+            }
             Expr::Index { base, index, .. } => {
                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
                 self.collect_evaluated_expr_accesses(index, mode, bound, out);

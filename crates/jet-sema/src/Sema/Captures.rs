@@ -160,6 +160,9 @@ pub(crate) fn walk_expr_for_const_refs(
         | Expr::Field(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken)
         }
+        Expr::MemberSpread { base, .. } => {
+            walk_expr_for_const_refs(base, const_names, taken)
+        }
         Expr::OptField { base, .. } => walk_expr_for_const_refs(base, const_names, taken),
         Expr::Range { start, end, .. } => {
             walk_expr_for_const_refs(start, const_names, taken);
@@ -330,6 +333,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _) => expr_refs_name(inner, name),
+        Expr::MemberSpread { base, .. } => expr_refs_name(base, name),
         Expr::OptField { base, .. } => expr_refs_name(base, name),
         Expr::MethodCall { receiver, args, .. } => {
             expr_refs_name(receiver, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))

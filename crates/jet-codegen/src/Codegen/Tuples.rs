@@ -100,6 +100,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_expr(e, out);
             }
         }
+        Expr::MemberSpread { base, .. } => collect_tuple_shapes_from_expr(base, out),
         Expr::TupleLit(fields, _, _) => {
             for (_, e) in fields {
                 collect_tuple_shapes_from_expr(e, out);

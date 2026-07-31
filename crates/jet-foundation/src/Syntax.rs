@@ -40,6 +40,9 @@
 // D-MEMPROVENANCE3=A adds contextual `from` after a return type (VIEW_FROM),
 // with optional `static.<path>` sources (VIEW_FROM_STATIC). Inference stays
 // the beginner default; the clause is opt-in expert declaration.
+// D-SPREAD1=A reuses `.[` (OP_MEMBER_SPREAD) for member spread
+// `prefix.[a, b, c]` → `[prefix.a, prefix.b, prefix.c]`. Call fan-out stays
+// removed (D-VERDICT-1324-1).
 // D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW

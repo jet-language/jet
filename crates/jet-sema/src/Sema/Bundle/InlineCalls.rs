@@ -304,5 +304,6 @@ pub(crate) fn rewrite_inline_calls_expr(
         }
         Expr::Paren(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
         Expr::Spread(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+        Expr::MemberSpread { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
     }
 }

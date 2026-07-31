@@ -225,6 +225,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Try(inner, _, _)
             | Expr::Paren(inner, _)
             | Expr::Spread(inner, _) => self.tags_of(inner),
+            Expr::MemberSpread { base, .. } => self.tags_of(base),
             Expr::OptField { base, member, .. } => {
                 let mut tags = self.tags_of(base);
                 if let Some(owner) = self.type_of(base) {
@@ -485,6 +486,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::BinMatchLit(_, _) => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),
+            Expr::MemberSpread { base, .. } => self.check_expr(base),
         }
     }
 
