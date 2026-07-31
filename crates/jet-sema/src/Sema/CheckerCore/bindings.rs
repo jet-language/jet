@@ -673,7 +673,11 @@ impl<'a> Checker<'a> {
                     self.ct_impure_depth,
                 ) {
                     Ok((v, inputs)) => {
-                        b.ct = Some(v.clone());
+                        // Same guard as the implicit path below: a value codegen
+                        // cannot write back out must not become literal data.
+                        if self.ct_value_fits_binding(&v, &final_ty) {
+                            b.ct = Some(v.clone());
+                        }
                         self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
                         // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
                         self.ct_embed_inputs.extend(inputs);

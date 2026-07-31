@@ -1,7 +1,6 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
-use crate::Sema::Diagnostics::is_cloneable;
 use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
@@ -1993,13 +1992,13 @@ impl<'a> Checker<'a> {
                                     Type::List(inner) | Type::FixedList { elem: inner, .. },
                                 ) = &coll_ty
                                 {
-                                    // A `ViewMut` element list keeps its own
-                                    // borrow-through iteration; it is not consumed.
-                                    let view_mut = matches!(
+                                    // Must match the codegen predicate exactly:
+                                    // only a task-handle list is consumed.
+                                    let consumed = matches!(
                                         inner.as_ref(),
-                                        Type::Apply { name, .. } if name == "ViewMut"
+                                        Type::Apply { name, .. } if name == "Task"
                                     );
-                                    if !view_mut && !is_cloneable(inner, self.registry) {
+                                    if consumed {
                                         if let Some(name) = borrowed {
                                             self.mark_moved(name, collection.span());
                                         }

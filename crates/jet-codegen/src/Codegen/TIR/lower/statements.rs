@@ -1345,13 +1345,16 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     coll_elem_ty.as_ref(),
                     Some(Type::Apply { name, .. }) if name == "ViewMut"
                 );
-                let elem_is_cloneable = coll_elem_ty.as_ref().is_none_or(|elem| {
-                    crate::Codegen::field_type_cloneable(
-                        elem,
-                        &cx.type_names,
-                        &std::collections::HashSet::new(),
-                    )
-                });
+                // Only a handle type is consumed here. codegen's
+                // `field_type_cloneable` answers a narrower question than sema's
+                // `is_cloneable` (it treats every core `Named` type as
+                // non-cloneable because no derive is emitted for one), so using
+                // it directly would consume ordinary `[BigInt]` / `[Duration]`
+                // lists that sema still believes are copied — an ICE, not a fix.
+                let elem_is_cloneable = !matches!(
+                    coll_elem_ty.as_ref(),
+                    Some(Type::Apply { name, .. }) if name == "Task"
+                );
                 let by_value = matches!(&lowered_coll.ty,
                     Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
                 ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")
