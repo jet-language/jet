@@ -620,6 +620,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "key_down",
             "set_target_fps",
             "color",
+            "load_sound",
+            "play_sound",
         ],
         // D-CORE-COMPRESS1=A / D-CODECS1: canonical stream codecs.
         "core.compress.gzip" => &["compress", "decompress"],

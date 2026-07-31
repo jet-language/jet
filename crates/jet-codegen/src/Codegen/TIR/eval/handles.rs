@@ -458,6 +458,10 @@ pub(super) fn eval_handle(
         THandleOp::GameSceneNew => Err(unsupported("handle `GameSceneNew`", span)),
         THandleOp::GameReplayRecord => Err(unsupported("handle `GameReplayRecord`", span)),
         THandleOp::GameBackendHeadless => Err(unsupported("handle `GameBackendHeadless`", span)),
+        THandleOp::GameBackendShouldContinue => {
+            Err(unsupported("handle `GameBackendShouldContinue`", span))
+        }
+        THandleOp::GameBackendPresent => Err(unsupported("handle `GameBackendPresent`", span)),
         THandleOp::GameSceneOnFrame => Err(unsupported("handle `GameSceneOnFrame`", span)),
         THandleOp::GameSceneComponent => Err(unsupported("handle `GameSceneComponent`", span)),
         THandleOp::GameSceneQuery => Err(unsupported("handle `GameSceneQuery`", span)),

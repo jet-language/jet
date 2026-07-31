@@ -1826,6 +1826,14 @@ pub fn core_fixed_sig(
             ],
             Some(Type::Named("RaylibColor".to_string())),
         )),
+        ("core.raylib", "load_sound") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("RaylibSound".to_string())),
+        )),
+        ("core.raylib", "play_sound") => Some((
+            vec![(read, Type::Named("RaylibSound".to_string()))],
+            Some(Type::Bool),
+        )),
         // D-CORE-COMPRESS1=A / D-CODECS1: core.compress.gzip / zstd are the
         // only public stream-codec APIs. `compress` takes `[U8]` and is infallible;
         // `decompress` is fallible (malformed compressed stream → `Err(String)`),

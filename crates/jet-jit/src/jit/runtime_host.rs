@@ -143,6 +143,7 @@ pub(crate) struct JitRuntime {
     /// `core.raylib` window / color handles (#1218).
     pub(crate) raylib_windows: Vec<crate::Raylib::RaylibWindowState>,
     pub(crate) raylib_colors: Vec<crate::Raylib::RaylibColorState>,
+    pub(crate) raylib_sounds: Vec<crate::Raylib::RaylibSoundState>,
     pub(crate) time_values: Vec<Option<Time::TimeValue>>,
     /// Regex / Match handles for jet.regex (#1219).
     pub(crate) regex_values: Vec<Option<Text::RegexValue>>,

@@ -257,6 +257,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("GameAssets", "sound", 1) => THandleOp::GameAssetsSound,
         ("GameInputMap", "bind", 2) => THandleOp::GameInputBind,
         ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
+        ("GameBackend", "should_continue", 0) => THandleOp::GameBackendShouldContinue,
+        ("GameBackend", "present", 0) => THandleOp::GameBackendPresent,
         ("Duration", "in", 1) => THandleOp::DurationIn { unit: None },
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
@@ -647,6 +649,8 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             })),
             ("GameScene", "query", 1) => Some(Some(Type::List(Box::new(Type::String)))),
             ("GameInputSnapshot", "pressed", 1) => Some(Some(Type::Bool)),
+            ("GameBackend", "should_continue", 0) => Some(Some(Type::Bool)),
+            ("GameBackend", "present", 0) => Some(None),
             ("GameScene", "on_frame" | "component", 1)
             | ("GameInputMap", "bind", 2) => Some(None),
             _ => None,

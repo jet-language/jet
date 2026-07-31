@@ -180,6 +180,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
+        | "RaylibWindow" | "RaylibColor" | "RaylibSound"
         // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
         | "BigInt" | "Decimal"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its

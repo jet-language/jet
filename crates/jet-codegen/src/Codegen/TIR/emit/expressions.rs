@@ -2475,6 +2475,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_game_replay_record(&({}))", root, recv)
                 }
                 THandleOp::GameBackendHeadless => format!("{}jet_game_backend_headless()", root),
+                THandleOp::GameBackendShouldContinue => {
+                    format!("{}jet_game_backend_should_continue(&({}))", root, recv)
+                }
+                THandleOp::GameBackendPresent => {
+                    format!("{}jet_game_backend_present(&mut ({}))", root, recv)
+                }
                 THandleOp::TLSClientConfigDefault => {
                     format!("{}jet_tls_client_config_default()", root)
                 }

@@ -1973,6 +1973,33 @@ impl<'a> Checker<'a> {
                         *recv_type_out = Some(handle_ty.clone());
                         return Some(Type::Bool);
                     }
+                    ("GameBackend", "should_continue") => {
+                        if !args.is_empty() {
+                            self.diags.push(wrong_core_arity(
+                                "should_continue",
+                                0,
+                                args.len(),
+                                span,
+                            ));
+                            for a in args.iter_mut() {
+                                self.infer(&mut a.expr);
+                            }
+                        }
+                        *recv_type_out = Some(handle_ty.clone());
+                        return Some(Type::Bool);
+                    }
+                    ("GameBackend", "present") => {
+                        needs_edit(self, "present");
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity("present", 0, args.len(), span));
+                            for a in args.iter_mut() {
+                                self.infer(&mut a.expr);
+                            }
+                        }
+                        *recv_type_out = Some(handle_ty.clone());
+                        return None;
+                    }
                     _ => {}
                 }
             }

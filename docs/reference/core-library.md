@@ -1477,10 +1477,12 @@ fn run() {
 | `scene.on_frame((frame) => { ... })` | nothing | Attach frame logic to the scene |
 | `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
 | `scene.component<T>()` | nothing | Register a struct-marker component type on the scene |
-| `scene.query<T...>()` | `[String]` | Query registered component markers as a deterministic scene view |
+| `scene.query<T...>()` | `[String]` | Return entity rows of component data for the registered types |
 | `game.Replay.record(path)` | `GameReplay` | Name a `.jetreplay` game-input artifact for transcript recording; proof replays use `.jetproof-replay` |
-| `game.Backend.headless()` | `GameBackend` | Explicit no-renderer/no-audio/no-editor backend value |
-| `game.run(scene, replay: replay)` | `String` | Run three deterministic headless frames and return a transcript |
+| `game.Backend.headless()` | `GameBackend` | Explicit no-renderer/no-audio/no-editor backend with a 3-frame budget |
+| `backend.should_continue()` | `Bool` | Whether `game.run` should execute another frame |
+| `backend.present()` | nothing | End-of-frame present (headless ticks the budget) |
+| `game.run(scene, replay: replay)` | `String` | Loop on `should_continue` / `present` and return a transcript |
 
 Renderer, audio, editor, and native asset backends are replaceable packages on
 top of this surface. Gameplay code keeps the same scene/data/replay API when a

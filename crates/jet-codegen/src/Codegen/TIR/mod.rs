@@ -4034,6 +4034,10 @@ pub enum THandleOp {
     GameSceneNew,
     GameReplayRecord,
     GameBackendHeadless,
+    /// D-GAME-LOOP1=A: `backend.should_continue()` → Bool.
+    GameBackendShouldContinue,
+    /// D-GAME-LOOP1=A: `backend.present()` → Unit.
+    GameBackendPresent,
     GameSceneOnFrame,
     GameSceneComponent,
     GameSceneQuery,

@@ -11545,7 +11545,17 @@ fn run() {
     scene.input.bind("jump", "Space")
     scene.component<Position>()
     scene.component<Velocity>()
-    print("query {scene.query<Position, Velocity>().len()}")
+    hits :: scene.query<Position, Velocity>()
+    print("query {hits.len()}")
+    print("row {hits[0]}")
+    backend := game.Backend.headless()
+    n := 0
+    loop {
+        if !backend.should_continue() { break }
+        backend.present()
+        n += 1
+    }
+    print("budget {n}")
     scene.on_frame((frame) => {
         if frame.input.pressed("jump") {
             print("hook jump {frame.index}")
@@ -11561,7 +11571,7 @@ fn run() {
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jetreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
+        "query 1\nrow Position{x:0},Velocity{dx:0}\nbudget 3\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jetreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
     );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);

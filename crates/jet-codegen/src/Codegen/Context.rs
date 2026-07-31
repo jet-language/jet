@@ -436,6 +436,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
+        "RaylibSound" => Some("RaylibSound"),
         // D-TYPEDTEXT1=D: `SQL`/`HTML` — this table's `.is_some()` is only a
         // "known core value type" gate for the TIR subset check; the actual Rust
         // spelling for these two comes from the earlier explicit `rust_type` arms
@@ -558,6 +559,7 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
+        "RaylibSound" => Some("RaylibSound"),
         _ => None,
     }
 }

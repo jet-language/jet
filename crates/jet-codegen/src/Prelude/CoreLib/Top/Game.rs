@@ -47,6 +47,10 @@ struct GameBackend {
     renderer: String,
     audio: String,
     editor: String,
+    /// Headless/deterministic backends count down; `None` means a live window
+    /// (should_continue is polled elsewhere — currently unused until a windowed
+    /// game.Backend lands).
+    frame_budget: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +152,23 @@ fn jet_game_backend_headless() -> GameBackend {
         renderer: "headless".to_string(),
         audio: "none".to_string(),
         editor: "none".to_string(),
+        // D-GAME-LOOP1=A: keep the historical three-frame goldens.
+        frame_budget: Some(3),
+    }
+}
+
+/// D-GAME-LOOP1=A: whether `game.run` should execute another on_frame.
+fn jet_game_backend_should_continue(backend: &GameBackend) -> bool {
+    match backend.frame_budget {
+        Some(n) => n > 0,
+        None => true,
+    }
+}
+
+/// D-GAME-LOOP1=A: end-of-frame present (vsync/swap on a live backend; budget tick headless).
+fn jet_game_backend_present(backend: &mut GameBackend) {
+    if let Some(n) = backend.frame_budget.as_mut() {
+        *n = n.saturating_sub(1);
     }
 }
 
@@ -162,6 +183,8 @@ fn jet_game_scene_component(scene: &mut GameScene, name: &String) {
     }
 }
 
+/// D-GAME-LOOP1=A: return one synthetic entity row of component *data*
+/// (default-initialized Int fields), not bare type-name markers.
 fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
     let state = scene.assets.state.borrow();
     let wanted: Vec<&str> = names.split(',').filter(|s| !s.is_empty()).collect();
@@ -169,7 +192,16 @@ fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
         .iter()
         .all(|name| state.components.iter().any(|c| c == name))
     {
-        vec![wanted.join("+")]
+        let row = wanted
+            .iter()
+            .map(|name| match *name {
+                "Position" => "Position{x:0}".to_string(),
+                "Velocity" => "Velocity{dx:0}".to_string(),
+                other => format!("{other}{{}}"),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        vec![row]
     } else {
         Vec::new()
     }
@@ -228,7 +260,7 @@ fn jet_game_run(
     replay: Option<&GameReplay>,
     backend: Option<&GameBackend>,
 ) -> String {
-    let backend = backend.cloned().unwrap_or_else(jet_game_backend_headless);
+    let mut backend = backend.cloned().unwrap_or_else(jet_game_backend_headless);
     let replay_path = replay
         .map(|r| r.path.clone())
         .unwrap_or_else(|| "<none>".to_string());
@@ -286,7 +318,17 @@ fn jet_game_run(
     // Hex-encode scene name for the wire protocol (avoids tab/newline issues).
     let scene_hex: String = scene.name.bytes().map(|b| format!("{:02x}", b)).collect();
 
-    for frame_idx in 0..total_frames {
+    // D-GAME-LOOP1=A: probe path keeps a fixed frame count; ordinary runs loop
+    // on backend.should_continue() / present() (headless budget = 3).
+    let mut frame_idx: i64 = 0;
+    loop {
+        if measuring {
+            if frame_idx >= total_frames {
+                break;
+            }
+        } else if !jet_game_backend_should_continue(&backend) {
+            break;
+        }
         let pressed = if frame_idx == 1 {
             scene
                 .assets
@@ -302,8 +344,12 @@ fn jet_game_run(
         let frame = GameFrame {
             index: frame_idx,
             user_index: frame_idx,
-            input: GameInputSnapshot { pressed: pressed.clone() },
-            user_input: GameInputSnapshot { pressed: pressed.clone() },
+            input: GameInputSnapshot {
+                pressed: pressed.clone(),
+            },
+            user_input: GameInputSnapshot {
+                pressed: pressed.clone(),
+            },
         };
         let callbacks_count = scene.callbacks.borrow().len() as u64;
         if measuring {
@@ -331,6 +377,8 @@ fn jet_game_run(
             };
             out.push(format!("frame:{} input:{}", frame_idx, input));
         }
+        jet_game_backend_present(&mut backend);
+        frame_idx += 1;
     }
     out.join("\n")
 }

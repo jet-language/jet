@@ -36,6 +36,8 @@ pub(crate) struct GameBackendState {
     pub(crate) renderer: String,
     pub(crate) audio: String,
     pub(crate) editor: String,
+    /// D-GAME-LOOP1=A: headless frame budget (None = live/unlimited).
+    pub(crate) frame_budget: Option<i64>,
 }
 
 fn with_rt<F, R>(f: F) -> R
@@ -71,9 +73,35 @@ extern "C" fn jet_jit_game_backend_headless() -> i64 {
             renderer: "headless".into(),
             audio: "none".into(),
             editor: "none".into(),
+            frame_budget: Some(3),
         });
         rt.game_backends.len() as i64
     })
+}
+
+extern "C" fn jet_jit_game_backend_should_continue(backend: i64) -> i64 {
+    with_rt(|rt| {
+        let backend = rt
+            .game_backends
+            .get(backend.saturating_sub(1) as usize)
+            .expect("jit game should_continue: bad backend");
+        match backend.frame_budget {
+            Some(n) => i64::from(n > 0),
+            None => 1,
+        }
+    })
+}
+
+extern "C" fn jet_jit_game_backend_present(backend: i64) {
+    with_rt(|rt| {
+        let backend = rt
+            .game_backends
+            .get_mut(backend.saturating_sub(1) as usize)
+            .expect("jit game present: bad backend");
+        if let Some(n) = backend.frame_budget.as_mut() {
+            *n = n.saturating_sub(1);
+        }
+    });
 }
 
 /// Register `on_frame` callback: `fn_ptr` with `n_caps` captures then frame handle.
@@ -125,7 +153,16 @@ extern "C" fn jet_jit_game_scene_query(scene: i64, names: i64) -> i64 {
             .iter()
             .all(|name| scene.components.iter().any(|c| c == name));
         let out = if ok {
-            vec![rt.heap.alloc_string(wanted.join("+"))]
+            let row = wanted
+                .iter()
+                .map(|name| match *name {
+                    "Position" => "Position{x:0}".to_string(),
+                    "Velocity" => "Velocity{dx:0}".to_string(),
+                    other => format!("{other}{{}}"),
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            vec![rt.heap.alloc_string(row)]
         } else {
             Vec::new()
         };
@@ -268,12 +305,14 @@ extern "C" fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
                     renderer: "headless".into(),
                     audio: "none".into(),
                     editor: "none".into(),
+                    frame_budget: Some(3),
                 })
         } else {
             GameBackendState {
                 renderer: "headless".into(),
                 audio: "none".into(),
                 editor: "none".into(),
+                frame_budget: Some(3),
             }
         };
         let replay_path = if replay > 0 {
@@ -338,7 +377,16 @@ extern "C" fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
             }
         ));
 
-        for frame_idx in 0..3i64 {
+        let mut backend_s = backend_s;
+        let mut frame_idx = 0i64;
+        loop {
+            let cont = match backend_s.frame_budget {
+                Some(n) => n > 0,
+                None => true,
+            };
+            if !cont {
+                break;
+            }
             let pressed = if frame_idx == 1 {
                 binding_actions.clone()
             } else {
@@ -358,6 +406,10 @@ extern "C" fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
                 pressed.join("+")
             };
             out.push(format!("frame:{frame_idx} input:{input}"));
+            if let Some(n) = backend_s.frame_budget.as_mut() {
+                *n = n.saturating_sub(1);
+            }
+            frame_idx += 1;
         }
         rt.heap.alloc_string(out.join("\n"))
     })
@@ -367,6 +419,8 @@ pub(crate) struct GameHostFns {
     pub(crate) scene_new: cranelift_module::FuncId,
     pub(crate) replay_record: cranelift_module::FuncId,
     pub(crate) backend_headless: cranelift_module::FuncId,
+    pub(crate) backend_should_continue: cranelift_module::FuncId,
+    pub(crate) backend_present: cranelift_module::FuncId,
     pub(crate) on_frame: cranelift_module::FuncId,
     pub(crate) component: cranelift_module::FuncId,
     pub(crate) query: cranelift_module::FuncId,
@@ -388,6 +442,14 @@ pub(crate) fn register_game_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol(
         "jet_jit_game_backend_headless",
         jet_jit_game_backend_headless as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_game_backend_should_continue",
+        jet_jit_game_backend_should_continue as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_game_backend_present",
+        jet_jit_game_backend_present as *const u8,
     );
     builder.symbol(
         "jet_jit_game_scene_on_frame",
@@ -469,6 +531,8 @@ pub(crate) fn declare_game_host_fns(
         scene_new: import("jet_jit_game_scene_new", &sig_i64)?,
         replay_record: import("jet_jit_game_replay_record", &sig_i64)?,
         backend_headless: import("jet_jit_game_backend_headless", &sig_new0)?,
+        backend_should_continue: import("jet_jit_game_backend_should_continue", &sig_i64)?,
+        backend_present: import("jet_jit_game_backend_present", &sig_void)?,
         on_frame: import("jet_jit_game_scene_on_frame", &sig_on_frame)?,
         component: import("jet_jit_game_scene_component", &sig_ii)?,
         query: import("jet_jit_game_scene_query", &sig_ii_ret)?,

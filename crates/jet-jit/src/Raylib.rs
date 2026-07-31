@@ -21,6 +21,11 @@ pub(crate) struct RaylibColorState {
     pub(crate) a: i64,
 }
 
+#[derive(Clone)]
+pub(crate) struct RaylibSoundState {
+    pub(crate) path: String,
+}
+
 fn with_rt<F, R>(f: F) -> R
 where
     F: FnOnce(&mut JitRuntime) -> R,
@@ -88,6 +93,48 @@ extern "C" fn jet_jit_raylib_draw_text(
 extern "C" fn jet_jit_raylib_end_drawing() {}
 extern "C" fn jet_jit_raylib_close_window(_window: i64) {}
 
+extern "C" fn jet_jit_raylib_window_should_close(window: i64) -> i8 {
+    with_rt(|rt| {
+        let native = rt
+            .raylib_windows
+            .get(window.saturating_sub(1) as usize)
+            .map(|w| w.native)
+            .unwrap_or(false);
+        // Headless windows always report closed after open (matches Prelude).
+        i8::from(!native)
+    })
+}
+
+extern "C" fn jet_jit_raylib_window_ready(window: i64) -> i8 {
+    with_rt(|rt| {
+        let native = rt
+            .raylib_windows
+            .get(window.saturating_sub(1) as usize)
+            .map(|w| w.native)
+            .unwrap_or(false);
+        i8::from(native)
+    })
+}
+
+extern "C" fn jet_jit_raylib_load_sound(path: i64) -> i64 {
+    with_rt(|rt| {
+        let path_s = rt.heap.clone_string(path).unwrap_or_default();
+        rt.raylib_sounds.push(RaylibSoundState { path: path_s });
+        rt.raylib_sounds.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
+    with_rt(|rt| {
+        let ok = rt
+            .raylib_sounds
+            .get(sound.saturating_sub(1) as usize)
+            .map(|s| !s.path.is_empty())
+            .unwrap_or(false);
+        i8::from(ok)
+    })
+}
+
 pub(crate) struct RaylibHostFns {
     pub(crate) window_open: cranelift_module::FuncId,
     pub(crate) color: cranelift_module::FuncId,
@@ -99,6 +146,10 @@ pub(crate) struct RaylibHostFns {
     pub(crate) draw_text: cranelift_module::FuncId,
     pub(crate) end_drawing: cranelift_module::FuncId,
     pub(crate) close_window: cranelift_module::FuncId,
+    pub(crate) window_should_close: cranelift_module::FuncId,
+    pub(crate) window_ready: cranelift_module::FuncId,
+    pub(crate) load_sound: cranelift_module::FuncId,
+    pub(crate) play_sound: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_raylib_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -139,6 +190,22 @@ pub(crate) fn register_raylib_symbols(builder: &mut cranelift_jit::JITBuilder) {
         "jet_jit_raylib_close_window",
         jet_jit_raylib_close_window as *const u8,
     );
+    builder.symbol(
+        "jet_jit_raylib_window_should_close",
+        jet_jit_raylib_window_should_close as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_raylib_window_ready",
+        jet_jit_raylib_window_ready as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_raylib_load_sound",
+        jet_jit_raylib_load_sound as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_raylib_play_sound",
+        jet_jit_raylib_play_sound as *const u8,
+    );
 }
 
 pub(crate) fn declare_raylib_host_fns(
@@ -174,5 +241,9 @@ pub(crate) fn declare_raylib_host_fns(
         draw_text: import("jet_jit_raylib_draw_text", &sig(5, None))?,
         end_drawing: import("jet_jit_raylib_end_drawing", &sig(0, None))?,
         close_window: import("jet_jit_raylib_close_window", &sig(1, None))?,
+        window_should_close: import("jet_jit_raylib_window_should_close", &sig(1, Some(types::I8)))?,
+        window_ready: import("jet_jit_raylib_window_ready", &sig(1, Some(types::I8)))?,
+        load_sound: import("jet_jit_raylib_load_sound", &sig(1, Some(types::I64)))?,
+        play_sound: import("jet_jit_raylib_play_sound", &sig(1, Some(types::I8)))?,
     })
 }

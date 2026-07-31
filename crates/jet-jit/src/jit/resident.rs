@@ -66,6 +66,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         game_backends: Vec::new(),
         raylib_windows: Vec::new(),
         raylib_colors: Vec::new(),
+        raylib_sounds: Vec::new(),
         time_values: Vec::new(),
         regex_values: Vec::new(),
         decimal_values: Vec::new(),

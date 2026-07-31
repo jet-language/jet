@@ -2468,6 +2468,12 @@ pub(crate) fn emit_tir_core_call(
         ("core.raylib", "set_target_fps") => {
             format!("{}jet_raylib_set_target_fps({})", cx.root_prefix, arg(0))
         }
+        ("core.raylib", "load_sound") => {
+            format!("{}jet_raylib_load_sound(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib", "play_sound") => {
+            format!("{}jet_raylib_play_sound(&({}))", cx.root_prefix, arg(0))
+        }
         ("core.raylib", "color") => {
             format!(
                 "{}jet_raylib_color({}, {}, {}, {})",

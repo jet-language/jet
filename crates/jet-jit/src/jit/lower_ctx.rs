@@ -10266,6 +10266,19 @@ impl LowerCtx<'_, '_> {
                         "close_window" if args.len() == 1 => {
                             (self.host.raylib.close_window, vec![self.lower_expr(&args[0])?])
                         }
+                        "window_should_close" if args.len() == 1 => (
+                            self.host.raylib.window_should_close,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "window_ready" if args.len() == 1 => {
+                            (self.host.raylib.window_ready, vec![self.lower_expr(&args[0])?])
+                        }
+                        "load_sound" if args.len() == 1 => {
+                            (self.host.raylib.load_sound, vec![self.lower_expr(&args[0])?])
+                        }
+                        "play_sound" if args.len() == 1 => {
+                            (self.host.raylib.play_sound, vec![self.lower_expr(&args[0])?])
+                        }
                         _ => {
                             return Err(format!(
                                 "jit core call unsupported: core.raylib.{method}"
@@ -10275,7 +10288,13 @@ impl LowerCtx<'_, '_> {
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(match method.as_str() {
-                        "window_open" | "color" | "key_down" => self.b.inst_results(call)[0],
+                        "window_open"
+                        | "color"
+                        | "key_down"
+                        | "window_should_close"
+                        | "window_ready"
+                        | "load_sound"
+                        | "play_sound" => self.b.inst_results(call)[0],
                         _ => self.b.ins().iconst(types::I8, 0),
                     });
                 }
@@ -16096,6 +16115,20 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.game.backend_headless, self.b.func);
                 let call = self.b.ins().call(host, &[]);
                 Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameBackendShouldContinue => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.backend_should_continue, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameBackendPresent => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.backend_present, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
             }
             THandleOp::GameSceneOnFrame => self.lower_game_on_frame(recv_val),
             THandleOp::GameSceneComponent => {

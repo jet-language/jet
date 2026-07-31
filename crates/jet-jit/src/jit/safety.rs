@@ -691,7 +691,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     "window_open" => args.len() == 3,
                     "color" => args.len() == 4,
                     "set_target_fps" | "key_down" | "begin_drawing" | "clear_background"
-                    | "close_window" => args.len() == 1,
+                    | "close_window" | "window_should_close" | "window_ready" | "load_sound"
+                    | "play_sound" => args.len() == 1,
                     "draw_rectangle" | "draw_text" => args.len() == 5,
                     "end_drawing" => args.is_empty(),
                     _ => false,
@@ -3091,6 +3092,8 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "GameFrame"
                 | "GameBackend"
                 | "RaylibWindow"
+                | "RaylibColor"
+                | "RaylibSound"
                 | "TcpListener"
                 | "TcpStream"
                 | "SocketAddr"
@@ -3501,6 +3504,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::GameSceneNew => args.is_empty() && matches!(&recv.ty, Type::String),
         THandleOp::GameReplayRecord => args.is_empty() && matches!(&recv.ty, Type::String),
         THandleOp::GameBackendHeadless => args.is_empty(),
+        THandleOp::GameBackendShouldContinue | THandleOp::GameBackendPresent => args.is_empty(),
         THandleOp::GameSceneOnFrame => {
             // AOT keeps the frame lambda in TIR args; JIT registers via spawn-site.
             args.len() <= 1
