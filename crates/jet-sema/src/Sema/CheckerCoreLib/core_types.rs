@@ -314,7 +314,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DecodeResult" | "MigrationStatus"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
+        | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
+        | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo"
     ) || is_json_type_name(name)
@@ -417,6 +420,70 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
         return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
+    }
+    if type_name == "CompilerToken" {
+        return match field {
+            "kind" | "text" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if matches!(type_name, "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked")
+        && field == "source"
+    {
+        return Some(Type::String);
+    }
+    if type_name == "CompilerNode" {
+        return match field {
+            "kind" => Some(Type::String),
+            "name" => Some(Type::Option(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerDiagnostic" {
+        return match field {
+            "code" | "severity" | "message" | "why" | "fix" => Some(Type::String),
+            "span" => Some(Type::Option(Box::new(Type::Named(
+                Syntax::TYPE_SOURCE_SPAN.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerGeneratedLine" {
+        return match field {
+            "generated_line" | "source_line" => Some(Type::Int),
+            "source" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    match type_name {
+        "CompilerLexed" => return match field {
+            "tokens" => Some(Type::List(Box::new(Type::Named("CompilerToken".to_string())))),
+            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
+            _ => None,
+        },
+        "CompilerSyntaxTree" => return match field {
+            "items" => Some(Type::List(Box::new(Type::Named("CompilerNode".to_string())))),
+            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
+            _ => None,
+        },
+        "CompilerChecked" => return match field {
+            "syntax" => Some(Type::Named("CompilerSyntaxTree".to_string())),
+            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
+            "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
+            "effects" => Some(Type::List(Box::new(Type::Named("EffectInfo".to_string())))),
+            "semantic_index" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        },
+        _ => {}
+    }
+    if type_name == "CompilerSourceMap" {
+        return match field {
+            "sources" => Some(Type::List(Box::new(Type::String))),
+            "generated_lines" => Some(Type::List(Box::new(Type::Named("CompilerGeneratedLine".to_string())))),
+            _ => None,
+        };
     }
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {

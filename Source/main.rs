@@ -41,7 +41,7 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
+    run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
     run_fuzz, run_new, run_task_entry, run_tasks, run_test, run_test_opts,
     run_web_app_dev_entry, FuzzRunOpts, TestRunOpts,
 };
@@ -936,6 +936,7 @@ fn main() {
 
     // D-CLI-EMIT1=A: generated Rust has one spelling: `jet emit --rust`.
     let emit_rust = false;
+    let emit_generated = jet_argv.iter().any(|a| a == "--emit-generated");
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
@@ -1133,6 +1134,7 @@ fn main() {
                 "run",
                 &resolved,
                 emit_rust,
+                emit_generated,
                 small,
                 freestanding,
                 allow_impure,
@@ -1482,6 +1484,18 @@ fn main() {
         "graph" | "query" | "explain-build" => {
             let query_args: Vec<&String> = args.iter().skip(1).copied().collect();
             run_build_query(cmd, &query_args, mode);
+            return;
+        }
+        "compiler" => {
+            let operation = args.get(1).map(|value| value.as_str()).unwrap_or("");
+            let file = args.get(2).map(|value| value.as_str()).unwrap_or("");
+            if file.is_empty() {
+                eprintln!(
+                    "usage: jet inspect compiler <lex|parse|check|source-map> <file>"
+                );
+                exit(ExitCodes::USAGE);
+            }
+            run_compiler_api(operation, file, mode);
             return;
         }
         "codemod" => {
@@ -1990,6 +2004,7 @@ fn main() {
                                     cmd,
                                     &entry_str,
                                     emit_rust,
+                                    emit_generated,
                                     small,
                                     freestanding,
                                     allow_impure,
@@ -2236,6 +2251,7 @@ fn main() {
                 cmd,
                 &resolved,
                 emit_rust,
+                emit_generated,
                 small,
                 freestanding,
                 allow_impure,
@@ -2466,6 +2482,17 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
 /// caller keeps today's "no file given" usage error verbatim.
 fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
+    // D-BUILDSCOPE1: an explicit workspace build entry is the workspace
+    // authority. Member selection (`-p`) remains an explicit escape to one
+    // package and therefore bypasses this root orchestration path.
+    if cmd == "build" && member_flag.is_none() {
+        let workspace = cwd.join(jet::Syntax::WORKSPACE_FILE);
+        if let Ok(source) = std::fs::read_to_string(&workspace) {
+            if jetpack::WorkspaceFile::has_build_entry(&source) {
+                return Some(workspace);
+            }
+        }
+    }
     if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(cwd) {
         let runnable: Vec<(String, PathBuf)> = plan
             .members

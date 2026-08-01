@@ -425,14 +425,25 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
     let needs_files = core_usage_matches(
         used_core,
-        &["core.files", "core.path", "core.watcher", "core.io", "core.env", "core.os"],
+        &[
+            "core.files",
+            "core.path",
+            "core.watcher",
+            "core.io",
+            "core.env",
+            "core.os",
+            "core.process",
+        ],
     );
     let needs_text = core_usage_matches(
         used_core,
         &["core.text", "core.text.unicode", "core.fmt", "core.term"],
     );
     let needs_fs_runtime = needs_files
-        || core_usage_matches(used_core, &["core.testing", "core.perf", "core.scope"]);
+        || core_usage_matches(
+            used_core,
+            &["core.process", "core.testing", "core.perf", "core.scope"],
+        );
     let needs_crypto = core_usage_matches(
         used_core,
         &[

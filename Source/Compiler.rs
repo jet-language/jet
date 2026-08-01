@@ -1,10 +1,358 @@
 //! Public read-only front-end toolkit API (D-FRONTENDAPI1=A).
 
 use crate::Diagnostics::{span_line_col, Diagnostic, Severity, Span};
+use crate::AST::{CtValue, Type};
 use crate::Lexer::{TokKind, Token};
 use crate::{Lexer, Parser, AST};
 
 pub const API_VERSION: u32 = 1;
+
+/// D-FRONTENDAPI1=A: comptime bridge for the same read-only compiler values
+/// exposed by this Rust module. The callback is installed at the compiler
+/// entry seam; it deliberately declines every other Core module so the normal
+/// interpreter/AOT paths remain unchanged.
+pub fn eval_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.compiler" {
+        return None;
+    }
+    let source = match args.first() {
+        Some(CtValue::Str(source)) if args.len() == 1 && method != "check" => source.clone(),
+        Some(CtValue::Struct { type_name, fields })
+            if args.len() == 1 && method == "check" && type_name == "CompilerSyntaxTree" =>
+        {
+            match fields.iter().find_map(|(name, value)| {
+                (name == "source").then(|| match value {
+                    CtValue::Str(source) => Some(source.clone()),
+                    _ => None,
+                })
+            }).flatten() {
+                Some(source) => source,
+                None => {
+                    return Some(Err(Diagnostic::error(
+                        "E0956",
+                        "`core.compiler.check` needs a parsed syntax tree with its source".to_string(),
+                        "checking a parsed compiler value preserves the exact source that produced it".to_string(),
+                        "pass the result of `core.compiler.parse(source)`".to_string(),
+                        Some(span),
+                    )))
+                }
+            }
+        }
+        _ => {
+            return Some(Err(Diagnostic::error(
+                "E0956",
+                if method == "check" {
+                    "`core.compiler.check` expects one CompilerSyntaxTree".to_string()
+                } else {
+                    format!("`core.compiler.{method}` expects one source String")
+                },
+                "the compiler API accepts immutable front-end values and never mutates an AST".to_string(),
+                if method == "check" {
+                    "pass the result of `core.compiler.parse(source)`".to_string()
+                } else {
+                    "pass exactly one String containing the source to inspect".to_string()
+                },
+                Some(span),
+            )))
+        }
+    };
+    let value = match method {
+        "lex" => lexed_value(&lex_source(&source)),
+        "parse" => syntax_tree_value(&parse_source(&source)),
+        "check" => checked_value(&source),
+        "source_map" => source_map_value(&source_map_from_generated_rust(&source)),
+        _ => {
+            return Some(Err(Diagnostic::error(
+                "E0956",
+                format!("unknown `core.compiler` operation `{method}`"),
+                "the stable compiler surface is limited to lex, parse, check, and source_map".to_string(),
+                "choose one of the listed read-only operations".to_string(),
+                Some(span),
+            )))
+        }
+    };
+    Some(Ok(CtValue::ResOk(Box::new(value))))
+}
+
+fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: fields
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    }
+}
+
+fn span_value(range: TextRange) -> CtValue {
+    ct_struct(
+        crate::Syntax::TYPE_SOURCE_SPAN,
+        vec![
+            ("start", CtValue::Int(range.start as i64)),
+            ("end", CtValue::Int(range.end as i64)),
+        ],
+    )
+}
+
+fn optional_span(range: Option<TextRange>) -> CtValue {
+    range.map_or(
+        CtValue::None(Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())),
+        |range| CtValue::Some(Box::new(span_value(range))),
+    )
+}
+
+fn diagnostic_value(diagnostic: &DiagnosticView) -> CtValue {
+    ct_struct(
+        "CompilerDiagnostic",
+        vec![
+            ("code", CtValue::Str(diagnostic.code.clone())),
+            (
+                "severity",
+                CtValue::Str(match diagnostic.severity {
+                    DiagnosticSeverity::Error => "error".to_string(),
+                    DiagnosticSeverity::Lint => "lint".to_string(),
+                }),
+            ),
+            ("message", CtValue::Str(diagnostic.message.clone())),
+            ("why", CtValue::Str(diagnostic.why.clone())),
+            ("fix", CtValue::Str(diagnostic.fix.clone())),
+            ("span", optional_span(diagnostic.span)),
+        ],
+    )
+}
+
+fn lexed_value(lexed: &LexedSource) -> CtValue {
+    ct_struct(
+        "CompilerLexed",
+        vec![
+            ("source", CtValue::Str(lexed.source.clone())),
+            (
+                "tokens",
+                CtValue::List(
+                    lexed
+                        .tokens
+                        .iter()
+                        .map(|token| {
+                            ct_struct(
+                                "CompilerToken",
+                                vec![
+                                    ("kind", CtValue::Str(token.kind.to_string())),
+                                    ("text", CtValue::Str(token.text.clone())),
+                                    ("span", span_value(token.span)),
+                                ],
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "diagnostics",
+                CtValue::List(lexed.diagnostics.iter().map(diagnostic_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn syntax_node_value(node: &SyntaxNode) -> CtValue {
+    let kind = match node.kind {
+        SyntaxNodeKind::Function => "function",
+        SyntaxNodeKind::Struct => "struct",
+        SyntaxNodeKind::Enum => "enum",
+        SyntaxNodeKind::Trait => "trait",
+        SyntaxNodeKind::Tag => "tag",
+        SyntaxNodeKind::Effect => "effect",
+        SyntaxNodeKind::Impl => "impl",
+        SyntaxNodeKind::Const => "const",
+        SyntaxNodeKind::Test => "test",
+        SyntaxNodeKind::Bench => "bench",
+        SyntaxNodeKind::ExternRust => "extern_rust",
+        SyntaxNodeKind::Module => "module",
+        SyntaxNodeKind::CModule => "c_module",
+        SyntaxNodeKind::CodeModule => "code_module",
+        SyntaxNodeKind::ErrorConversion => "error_conversion",
+        SyntaxNodeKind::Migration => "migration",
+        SyntaxNodeKind::State => "state",
+        SyntaxNodeKind::Protocol => "protocol",
+        SyntaxNodeKind::Derive => "derive",
+        SyntaxNodeKind::GenericModule => "generic_module",
+        SyntaxNodeKind::ModuleAlias => "module_alias",
+        SyntaxNodeKind::Distinct => "distinct",
+        SyntaxNodeKind::TypeAlias => "type_alias",
+        SyntaxNodeKind::UnitFamily => "unit_family",
+    };
+    ct_struct(
+        "CompilerNode",
+        vec![
+            ("kind", CtValue::Str(kind.to_string())),
+            (
+                "name",
+                node.name.clone().map_or(
+                    CtValue::None(Type::String),
+                    |name| CtValue::Some(Box::new(CtValue::Str(name))),
+                ),
+            ),
+            ("span", span_value(node.span)),
+        ],
+    )
+}
+
+fn syntax_tree_value(tree: &SyntaxTree) -> CtValue {
+    ct_struct(
+        "CompilerSyntaxTree",
+        vec![
+            ("source", CtValue::Str(tree.source.clone())),
+            (
+                "items",
+                CtValue::List(tree.items.iter().map(syntax_node_value).collect()),
+            ),
+            (
+                "diagnostics",
+                CtValue::List(tree.diagnostics.iter().map(diagnostic_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn compiler_function_value(node: &SyntaxNode) -> CtValue {
+    let name = node.name.clone().unwrap_or_default();
+    ct_struct(
+        "FunctionInfo",
+        vec![
+            ("name", CtValue::Str(name.clone())),
+            ("module", CtValue::Str("core.compiler".to_string())),
+            (
+                "identity",
+                CtValue::Str(format!("core.compiler::{name}")),
+            ),
+            ("params", CtValue::List(Vec::new())),
+            ("span", span_value(node.span)),
+            (
+                "effects",
+                ct_struct("EffectInfo", vec![("values", CtValue::List(Vec::new()))]),
+            ),
+            ("reaches_panic", CtValue::Bool(false)),
+        ],
+    )
+}
+
+fn field_value(value: &CtValue, name: &str) -> Option<CtValue> {
+    match value {
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.clone()),
+        _ => None,
+    }
+}
+
+fn effect_info_value(values: impl IntoIterator<Item = String>) -> CtValue {
+    ct_struct(
+        "EffectInfo",
+        vec![
+            (
+                "values",
+                CtValue::List(values.into_iter().map(CtValue::Str).collect()),
+            ),
+        ],
+    )
+}
+
+fn checked_value(source: &str) -> CtValue {
+    let syntax = parse_source(source);
+    let (checked_diagnostics, bundle, effect_facts) =
+        crate::Driver::check_eval_with_effect_facts(source, "core.compiler.jet");
+    let diagnostics = checked_diagnostics
+        .iter()
+        .map(diagnostic_view)
+        .collect::<Vec<_>>();
+    let syntax_value = syntax_tree_value(&syntax);
+    let (functions, effects, semantic_index) = if let Some(bundle) = bundle.as_ref() {
+        let semantic_facts = crate::Driver::program_semantic_facts(bundle, &effect_facts);
+        let program = crate::Comptime::build_program_info(bundle, &semantic_facts);
+        let functions = field_value(&program, "functions")
+            .unwrap_or_else(|| CtValue::List(Vec::new()));
+        let index = jet_semindex::from_checked(bundle, &effect_facts);
+        let effects = CtValue::List(
+            index
+                .effects()
+                .iter()
+                .map(|effect| effect_info_value(effect.inferred.clone()))
+                .collect(),
+        );
+        // The Jet surface currently types this field as a list of strings. A
+        // single canonical JSON row preserves the complete semindex without
+        // inventing a second, partial semantic model for comptime values.
+        let semantic_index = CtValue::List(vec![CtValue::Str(index.to_json())]);
+        (functions, effects, semantic_index)
+    } else {
+        let functions = syntax
+            .items
+            .iter()
+            .filter(|node| node.kind == SyntaxNodeKind::Function)
+            .map(compiler_function_value)
+            .collect::<Vec<_>>();
+        (
+            CtValue::List(functions),
+            CtValue::List(Vec::new()),
+            CtValue::List(Vec::new()),
+        )
+    };
+    ct_struct(
+        "CompilerChecked",
+        vec![
+            ("source", CtValue::Str(source.to_string())),
+            ("syntax", syntax_value),
+            (
+                "diagnostics",
+                CtValue::List(diagnostics.iter().map(diagnostic_value).collect()),
+            ),
+            ("functions", functions),
+            ("effects", effects),
+            ("semantic_index", semantic_index),
+        ],
+    )
+}
+
+fn source_map_value(map: &SourceMap) -> CtValue {
+    ct_struct(
+        "CompilerSourceMap",
+        vec![
+            (
+                "sources",
+                CtValue::List(map.sources.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "generated_lines",
+                CtValue::List(
+                    map.generated_lines
+                        .iter()
+                        .map(|line| {
+                            ct_struct(
+                                "CompilerGeneratedLine",
+                                vec![
+                                    ("generated_line", CtValue::Int(line.generated_line as i64)),
+                                    (
+                                        "source",
+                                        line.source.clone().map_or(
+                                            CtValue::None(Type::String),
+                                            |source| CtValue::Some(Box::new(CtValue::Str(source))),
+                                        ),
+                                    ),
+                                    ("source_line", CtValue::Int(line.source_line as i64)),
+                                ],
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
@@ -90,6 +438,7 @@ pub struct SyntaxNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxTree {
     pub api_version: u32,
+    pub source: String,
     pub items: Vec<SyntaxNode>,
     pub diagnostics: Vec<DiagnosticView>,
 }
@@ -97,6 +446,7 @@ pub struct SyntaxTree {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexedSource {
     pub api_version: u32,
+    pub source: String,
     pub tokens: Vec<TokenView>,
     pub diagnostics: Vec<DiagnosticView>,
 }
@@ -137,6 +487,7 @@ pub fn lex_source(src: &str) -> LexedSource {
     let (tokens, diagnostics) = Lexer::lex(src);
     LexedSource {
         api_version: API_VERSION,
+        source: src.to_string(),
         tokens: tokens.iter().map(|token| token_view(src, token)).collect(),
         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
     }
@@ -147,6 +498,7 @@ pub fn parse_source(src: &str) -> SyntaxTree {
     if !lexed.diagnostics.is_empty() {
         return SyntaxTree {
             api_version: API_VERSION,
+            source: src.to_string(),
             items: Vec::new(),
             diagnostics: lexed.diagnostics,
         };
@@ -156,11 +508,13 @@ pub fn parse_source(src: &str) -> SyntaxTree {
     match Parser::parse_for_check(&tokens) {
         Ok((program, parse_teaching)) => SyntaxTree {
             api_version: API_VERSION,
+            source: src.to_string(),
             items: program.items.iter().map(item_node).collect(),
             diagnostics: parse_teaching.iter().map(diagnostic_view).collect(),
         },
         Err(diagnostics) => SyntaxTree {
             api_version: API_VERSION,
+            source: src.to_string(),
             items: Vec::new(),
             diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
         },
@@ -172,7 +526,8 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
     let (diagnostics, bundle, facts) =
         crate::Driver::check_file_with_effect_facts(&file, None, true);
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
-    let syntax = bundle.as_ref().map(bundle_syntax_tree);
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let syntax = bundle.as_ref().map(|bundle| bundle_syntax_tree(bundle, &source));
     let semantic_index = if has_errors {
         None
     } else {
@@ -186,6 +541,220 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
         syntax,
         semantic_index,
     }
+}
+
+/// Stable JSON envelope shared by the CLI mirror and callers that need to
+/// persist compiler facts. This is deliberately hand-written: the compiler
+/// seam has no serialization dependency, and the field order is part of the
+/// schema's deterministic output.
+pub const JSON_SCHEMA_VERSION: u32 = 1;
+
+pub fn lex_source_json(source: &str) -> String {
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"lex\",\"value\":{}}}",
+        JSON_SCHEMA_VERSION,
+        API_VERSION,
+        json_lexed(&lex_source(source)),
+    )
+}
+
+pub fn parse_source_json(source: &str) -> String {
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"parse\",\"value\":{}}}",
+        JSON_SCHEMA_VERSION,
+        API_VERSION,
+        json_syntax_tree(&parse_source(source)),
+    )
+}
+
+pub fn check_file_json(path: &std::path::Path) -> String {
+    let file = path.to_string_lossy();
+    let (diagnostics, bundle, facts) =
+        crate::Driver::check_file_with_effect_facts(&file, None, true);
+    let diagnostic_views = diagnostics.iter().map(diagnostic_view).collect::<Vec<_>>();
+    let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let syntax = bundle.as_ref().map(|bundle| bundle_syntax_tree(bundle, &source));
+    let semantic_index = if has_errors {
+        "null".to_string()
+    } else {
+        bundle
+            .as_ref()
+            .map(|bundle| jet_semindex::from_checked(bundle, &facts).to_json())
+            .unwrap_or_else(|| "null".to_string())
+    };
+    let value = format!(
+        "{{\"api_version\":{},\"diagnostics\":{},\"syntax\":{},\"semantic_index\":{}}}",
+        API_VERSION,
+        json_diagnostics(&diagnostic_views),
+        syntax
+            .as_ref()
+            .map(json_syntax_tree)
+            .unwrap_or_else(|| "null".to_string()),
+        semantic_index,
+    );
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"check\",\"file\":{},\"value\":{}}}",
+        JSON_SCHEMA_VERSION,
+        API_VERSION,
+        json_string(&file),
+        value,
+    )
+}
+
+pub fn source_map_json(rust_source: &str) -> String {
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"source_map\",\"value\":{}}}",
+        JSON_SCHEMA_VERSION,
+        API_VERSION,
+        json_source_map(&source_map_from_generated_rust(rust_source)),
+    )
+}
+
+fn json_string(value: &str) -> String {
+    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
+}
+
+fn json_span(span: Option<TextRange>) -> String {
+    span.map_or_else(
+        || "null".to_string(),
+        |range| format!("{{\"start\":{},\"end\":{}}}", range.start, range.end),
+    )
+}
+
+fn json_diagnostic(diagnostic: &DiagnosticView) -> String {
+    format!(
+        "{{\"code\":{},\"severity\":{},\"message\":{},\"why\":{},\"fix\":{},\"span\":{}}}",
+        json_string(&diagnostic.code),
+        json_string(match diagnostic.severity {
+            DiagnosticSeverity::Error => "error",
+            DiagnosticSeverity::Lint => "lint",
+        }),
+        json_string(&diagnostic.message),
+        json_string(&diagnostic.why),
+        json_string(&diagnostic.fix),
+        json_span(diagnostic.span),
+    )
+}
+
+fn json_diagnostics(diagnostics: &[DiagnosticView]) -> String {
+    format!(
+        "[{}]",
+        diagnostics
+            .iter()
+            .map(json_diagnostic)
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn json_lexed(lexed: &LexedSource) -> String {
+    let tokens = lexed
+        .tokens
+        .iter()
+        .map(|token| {
+            format!(
+                "{{\"kind\":{},\"text\":{},\"span\":{{\"start\":{},\"end\":{}}},\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}}",
+                json_string(token.kind),
+                json_string(&token.text),
+                token.span.start,
+                token.span.end,
+                token.start.line,
+                token.start.column,
+                token.end.line,
+                token.end.column,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"api_version\":{},\"source\":{},\"tokens\":[{}],\"diagnostics\":{}}}",
+        lexed.api_version,
+        json_string(&lexed.source),
+        tokens,
+        json_diagnostics(&lexed.diagnostics),
+    )
+}
+
+fn json_syntax_tree(tree: &SyntaxTree) -> String {
+    let items = tree
+        .items
+        .iter()
+        .map(|node| {
+            format!(
+                "{{\"kind\":{},\"name\":{},\"span\":{{\"start\":{},\"end\":{}}}}}",
+                json_string(match node.kind {
+                    SyntaxNodeKind::Function => "function",
+                    SyntaxNodeKind::Struct => "struct",
+                    SyntaxNodeKind::Enum => "enum",
+                    SyntaxNodeKind::Trait => "trait",
+                    SyntaxNodeKind::Tag => "tag",
+                    SyntaxNodeKind::Effect => "effect",
+                    SyntaxNodeKind::Impl => "impl",
+                    SyntaxNodeKind::Const => "const",
+                    SyntaxNodeKind::Test => "test",
+                    SyntaxNodeKind::Bench => "bench",
+                    SyntaxNodeKind::ExternRust => "extern_rust",
+                    SyntaxNodeKind::Module => "module",
+                    SyntaxNodeKind::CModule => "c_module",
+                    SyntaxNodeKind::CodeModule => "code_module",
+                    SyntaxNodeKind::ErrorConversion => "error_conversion",
+                    SyntaxNodeKind::Migration => "migration",
+                    SyntaxNodeKind::State => "state",
+                    SyntaxNodeKind::Protocol => "protocol",
+                    SyntaxNodeKind::Derive => "derive",
+                    SyntaxNodeKind::GenericModule => "generic_module",
+                    SyntaxNodeKind::ModuleAlias => "module_alias",
+                    SyntaxNodeKind::Distinct => "distinct",
+                    SyntaxNodeKind::TypeAlias => "type_alias",
+                    SyntaxNodeKind::UnitFamily => "unit_family",
+                }),
+                node.name
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+                node.span.start,
+                node.span.end,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"api_version\":{},\"source\":{},\"items\":[{}],\"diagnostics\":{}}}",
+        tree.api_version,
+        json_string(&tree.source),
+        items,
+        json_diagnostics(&tree.diagnostics),
+    )
+}
+
+fn json_source_map(map: &SourceMap) -> String {
+    let sources = map
+        .sources
+        .iter()
+        .map(|source| json_string(source))
+        .collect::<Vec<_>>()
+        .join(",");
+    let lines = map
+        .generated_lines
+        .iter()
+        .map(|line| {
+            format!(
+                "{{\"generated_line\":{},\"source\":{},\"source_line\":{}}}",
+                line.generated_line,
+                line.source
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+                line.source_line,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"api_version\":{},\"sources\":[{}],\"generated_lines\":[{}]}}",
+        map.api_version, sources, lines
+    )
 }
 
 pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {
@@ -258,13 +827,14 @@ fn diagnostic_view(diagnostic: &Diagnostic) -> DiagnosticView {
     }
 }
 
-fn bundle_syntax_tree(bundle: &AST::ProgramBundle) -> SyntaxTree {
+fn bundle_syntax_tree(bundle: &AST::ProgramBundle, source: &str) -> SyntaxTree {
     let mut items = Vec::new();
     for module in &bundle.modules {
         items.extend(module.items.iter().map(item_node));
     }
     SyntaxTree {
         api_version: API_VERSION,
+        source: source.to_string(),
         items,
         diagnostics: Vec::new(),
     }

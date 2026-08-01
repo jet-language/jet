@@ -2089,6 +2089,7 @@ pub(crate) fn check_func_body_bundle(
         no_prelude,
         in_pre_clause: false,
         in_comptime: false,
+        compiler_api_allowed: st.allow_compiler_api && f.name == "build",
         ret: f.return_type.clone(),
         fn_name: f.name.clone(),
         current_param_names: f

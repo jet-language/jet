@@ -1134,6 +1134,9 @@ pub enum CompileMode {
 pub(crate) struct ModuleState {
     module_path: String,
     module_alias: String,
+    /// True only for the explicitly selected package/workspace build entry.
+    /// Ordinary `fn build` names do not grant compiler-host capabilities.
+    allow_compiler_api: bool,
     func_spans: HashMap<String, Span>,
     const_spans: HashMap<String, Span>,
     import_spans: HashMap<String, Span>,
@@ -1295,6 +1298,10 @@ pub(crate) struct Checker<'a> {
     /// True while inferring a comptime binding's RHS or inside a comptime
     /// context — suppresses E2712 for `$name` comptime splice expressions.
     in_comptime: bool,
+    /// True only while checking the selected package/workspace `fn build`.
+    /// This is passed by the Driver's build authority, never inferred from a
+    /// user-chosen function name.
+    compiler_api_allowed: bool,
     ret: Option<Type>,
     fn_name: String,
     /// Canonical caller-visible parameter order; excludes `self`.
@@ -1905,7 +1912,8 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 pub use Bundle::{
     bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
-    check_bundle_with_effect_facts_incremental, specialize_function_types,
+    check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
+    specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};

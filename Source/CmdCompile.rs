@@ -75,6 +75,51 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
     }
 }
 
+/// D-FRONTENDAPI1=A / #1049: expose the Rust and Jet compiler value API
+/// through one schema-versioned, deterministic JSON command. The operation
+/// names map directly to the read-only `core.compiler` surface; no second
+/// parser or checker is introduced here.
+pub(crate) fn run_compiler_api(operation: &str, file: &str, _mode: OutputMode) {
+    let path = Path::new(file);
+    let document = match operation {
+        "lex" => match fs::read_to_string(path) {
+            Ok(source) => jet::Compiler::lex_source_json(&source),
+            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+        },
+        "parse" => match fs::read_to_string(path) {
+            Ok(source) => jet::Compiler::parse_source_json(&source),
+            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+        },
+        "check" => jet::Compiler::check_file_json(path),
+        "source-map" | "source_map" => match fs::read_to_string(path) {
+            Ok(source) => jet::Compiler::source_map_json(&source),
+            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+        },
+        _ => {
+            eprintln!(
+                "usage: jet inspect compiler <lex|parse|check|source-map> <file>"
+            );
+            exit(ExitCodes::USAGE);
+        }
+    };
+    println!("{document}");
+}
+
+fn compiler_api_error(operation: &str, file: &str, message: &str) -> String {
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":{},\"file\":{},\"error\":{}}}",
+        jet::Compiler::JSON_SCHEMA_VERSION,
+        jet::Compiler::API_VERSION,
+        json_string(operation),
+        json_string(file),
+        json_string(message),
+    )
+}
+
+fn json_string(value: &str) -> String {
+    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
+}
+
 fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, json: bool) {
     if json {
         println!("{{\"schema_version\":1,\"label\":\"{}\",\"provenance\":{}}}", json_escape(&explanation.label), json_strings(&explanation.provenance));
@@ -140,6 +185,7 @@ pub(crate) fn run_compile_cmd(
     cmd: &str,
     file: &str,
     emit_rust: bool,
+    emit_generated: bool,
     small: bool,
     freestanding: bool,
     allow_impure: bool,
@@ -331,6 +377,17 @@ pub(crate) fn run_compile_cmd(
             output,
             freestanding,
             allow_impure,
+            is_web,
+            is_plugin,
+            cross_target,
+        )
+    } else if cmd == "build" && emit_generated {
+        jet::compile_programmable_build_emit_generated_opts(
+            file,
+            build_grants,
+            freestanding,
+            allow_impure || !build_grants.is_empty(),
+            locked,
             is_web,
             is_plugin,
             cross_target,

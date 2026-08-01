@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[test]
 fn lexer_api_returns_stable_value_tokens() {
@@ -129,6 +130,71 @@ fn source_map_api_reads_generated_rust_markers() {
     assert_eq!(map.generated_lines[0].generated_line, 3);
     assert_eq!(map.generated_lines[0].source.as_deref(), Some("input.jet"));
     assert_eq!(map.generated_lines[0].source_line, 7);
+}
+
+#[test]
+fn compiler_api_json_mirrors_are_schema_versioned() {
+    let source = "fn run() { print(\"ok\") }\n";
+    let lex = jet::Compiler::lex_source_json(source);
+    assert!(lex.starts_with("{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\""));
+    assert!(lex.contains("\"tokens\":["));
+    let parse = jet::Compiler::parse_source_json(source);
+    assert!(parse.contains("\"operation\":\"parse\""));
+    assert!(parse.contains("\"kind\":\"function\""));
+
+    let path = fixture_file("compiler_api_json.jet", source);
+    let check = jet::Compiler::check_file_json(&path);
+    assert!(check.contains("\"operation\":\"check\""));
+    assert!(check.contains("\"semantic_index\":"));
+    let map = jet::Compiler::source_map_json(
+        "// jet:source-map source=input.jet\n// jet:line 3\n",
+    );
+    assert!(map.contains("\"operation\":\"source_map\""));
+    assert!(map.contains("\"generated_line\":2"));
+}
+
+#[test]
+fn compiler_api_cli_returns_the_same_json_envelope() {
+    let path = fixture_file("compiler_api_cli.jet", "fn run() { print(\"cli\") }\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "compiler", "parse", path.to_str().unwrap()])
+        .output()
+        .expect("run compiler inspection command");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"schema_version\":1"));
+    assert!(stdout.contains("\"operation\":\"parse\""));
+    assert!(stdout.contains("\"name\":\"run\""));
+}
+
+#[test]
+fn compiler_api_is_compile_time_only() {
+    let diagnostics = jet::compile(
+        "use core.compiler as compiler\nfn run() { compiler.lex(\"fn run() {{}}\") }\n",
+    )
+    .expect_err("the compiler API must not become a runtime capability");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+        "expected compile-time-only diagnostic, got {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("compile-time only")),
+        "diagnostic must teach the phase boundary: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn an_unselected_runtime_named_build_cannot_use_the_compiler_api() {
+    let diagnostics = jet::compile(
+        "use core.compiler as compiler\nfn build() { print(compiler.lex(\"fn run() {{}}\")) }\nfn run() {}\n",
+    )
+    .expect_err("an ordinary runtime function named build must not gain build authority");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+        "expected compile-time-only diagnostic, got {diagnostics:?}"
+    );
 }
 
 fn fixture_file(name: &str, src: &str) -> PathBuf {

@@ -1,0 +1,25 @@
+// D-FRONTENDAPI1 / #696: the read-only compiler value API runs in the build
+// entry and feeds the normal generated-source path.
+use core.compiler as jc
+
+fn build(b: BuildContext) => BuildPlan ? {
+    source :: "fn generated_compiler_api() => String {{ return \"compiler API\" }}"
+    lexed :: jc.lex(source) ?? panic("compiler API lex failed")
+    if lexed.tokens().len() == 0 {
+        panic("compiler API lost tokens")
+    }
+    parsed :: jc.parse(source) ?? panic("compiler API parse failed")
+    checked :: jc.check(parsed) ?? panic("compiler API check failed")
+    if checked.functions().len() != 1 {
+        panic("compiler API lost a function")
+    }
+    map :: jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("compiler API source map failed")
+    if map.generated_lines().len() != 1 {
+        panic("compiler API lost source mapping")
+    }
+    b.generate("compiler_api", source)?
+    app :: b.add_executable("compiler_api", ["compiler_api.jet", ".jet/generated/compiler_api/compiler_api.jet"], [])?
+    return b.plan(app)
+}
+
+fn run() { print(generated_compiler_api()) }

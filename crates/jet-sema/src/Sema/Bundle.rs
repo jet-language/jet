@@ -979,6 +979,26 @@ pub fn check_bundle_with_effect_facts(
     check_bundle_opts_for_output(bundle, mode, false, false, None, None)
 }
 
+/// Check the compiler-host build entry with the read-only compiler API enabled.
+///
+/// This is a separate authority from ordinary runtime/check sema. The caller
+/// must have selected the package/workspace `fn build`; the checker still
+/// limits the exception to that entry function in the entry module.
+pub fn check_bundle_with_effect_facts_for_build(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    check_bundle_opts_for_output_with_context(
+        bundle,
+        mode,
+        false,
+        false,
+        None,
+        None,
+        true,
+    )
+}
+
 pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
@@ -1005,6 +1025,26 @@ fn check_bundle_opts_for_output(
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    check_bundle_opts_for_output_with_context(
+        bundle,
+        mode,
+        freestanding,
+        allow_impure,
+        explicit_output,
+        incremental,
+        false,
+    )
+}
+
+fn check_bundle_opts_for_output_with_context(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+    explicit_output: Option<&str>,
+    incremental: Option<&mut IncrementalSemaCache>,
+    allow_compiler_api: bool,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let edition = bundle.edition.clone();
     super::Edition::with_package_edition(&edition, || {
         check_bundle_opts_for_output_inner(
@@ -1014,6 +1054,7 @@ fn check_bundle_opts_for_output(
             allow_impure,
             explicit_output,
             incremental,
+            allow_compiler_api,
         )
     })
 }
@@ -1025,6 +1066,7 @@ fn check_bundle_opts_for_output_inner(
     allow_impure: bool,
     explicit_output: Option<&str>,
     mut incremental: Option<&mut IncrementalSemaCache>,
+    allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
     diags.extend(inject_units_prelude(bundle));
@@ -1057,13 +1099,15 @@ fn check_bundle_opts_for_output_inner(
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
-        .map(|m| ModuleState {
+        .enumerate()
+        .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
             module_alias: m.alias.clone(),
             func_spans: HashMap::new(),
             const_spans: HashMap::new(),
             import_spans: HashMap::new(),
             package_scope: package_scope_for(&m.path, &bundle.project_root),
+            allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
             funcs: HashMap::new(),
             func_pub: HashMap::new(),
             func_pkg_pub: HashMap::new(),

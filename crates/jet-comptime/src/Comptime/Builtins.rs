@@ -1157,6 +1157,21 @@ pub fn apply_method(
         {
             Ok(fields.iter().find(|(name, _)| name == method).map(|(_, value)| value.clone()).unwrap_or_else(|| CtValue::List(Vec::new())))
         }
+        // D-FRONTENDAPI1=A: compiler result methods are projections over the
+        // immutable value returned by `core.compiler`; they never re-run or
+        // mutate a front-end query.
+        (CtValue::Struct { type_name, fields }, method)
+            if matches!(
+                type_name.as_str(),
+                "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap"
+            ) =>
+        {
+            Ok(fields
+                .iter()
+                .find(|(name, _)| name == method)
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| CtValue::List(Vec::new())))
+        }
         (CtValue::Struct { type_name, fields }, "has_method") if type_name == "TypeInfo" => {
             let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`has_method` requires a string", span)) };
             let found = fields.iter().find(|(name, _)| name == "methods").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "name" && matches!(value, CtValue::Str(actual) if actual == needle)))));

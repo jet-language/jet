@@ -267,6 +267,70 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
+    /// D-DSLBLOCK1=A: recognize one fixed-whitelist stdlib DSL block without
+    /// giving third-party code a grammar hook.
+    pub(in super::super) fn at_stdlib_dsl_block(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        let TokKind::Ident(name) = &self.peek2().kind else {
+            return false;
+        };
+        if !Syntax::is_stdlib_dsl_block_marker(name) {
+            return false;
+        }
+        matches!(self.peek3().kind, TokKind::LBrace)
+            || (name == Syntax::DSL_BLOCK_SQL
+                && matches!(self.peek3().kind, TokKind::Lt)
+                && matches!(self.peek4().kind, TokKind::Ident(_))
+                && matches!(self.peek5().kind, TokKind::Gt)
+                && matches!(self.toks.get(self.pos + 5).map(|token| &token.kind), Some(TokKind::LBrace)))
+    }
+
+    pub(in super::super) fn at_stdlib_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "before a stdlib DSL block")?;
+        let marker = self.bump();
+        let (name, name_span) = match marker.kind {
+            TokKind::Ident(name) => (name, marker.span),
+            _ => unreachable!("DSL marker lookahead already validated"),
+        };
+        let mut args = Vec::new();
+        let mut args_span = None;
+        if matches!(self.peek().kind, TokKind::Lt) {
+            let type_start = self.bump().span;
+            let type_token = self.bump();
+            let (type_name, type_span) = match type_token.kind {
+                TokKind::Ident(name) => (name, type_token.span),
+                _ => {
+                    return Err(Diagnostic::error(
+                        "E0617",
+                        format!("`#{name}` needs one type name between `<` and `>`"),
+                        "the SQL DSL's optional row type is a single compile-time type name".to_string(),
+                        "write `#SQL<Row> { … }`".to_string(),
+                        Some(type_token.span),
+                    ))
+                }
+            };
+            let end = self.peek().span;
+            self.expect(TokKind::Gt, "after the DSL type name")?;
+            args_span = Some(Span::new(type_start.start, end.end));
+            args.push(Expr::Ident(type_name, type_span));
+        }
+        self.expect(TokKind::LBrace, "after a stdlib DSL marker")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ScopeMember {
+            name,
+            name_span,
+            args,
+            args_span,
+            body,
+            dot_span: start,
+            span: Span::new(start.start, end),
+        })
+    }
+
     pub(in super::super) fn meta_attr_next_kind(&self) -> Option<&TokKind> {
         self.meta_attr_next_index()
             .and_then(|i| self.toks.get(i).map(|t| &t.kind))
@@ -1413,6 +1477,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
+            TokKind::Hash if self.at_stdlib_dsl_block() => self.at_stdlib_dsl_block_stmt(),
             // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>

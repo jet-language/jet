@@ -1,0 +1,13 @@
+// D-DSLBLOCK1 / #698: SQL and HTML blocks are fixed stdlib syntax islands.
+// Their bodies remain ordinary checked Jet statements; third-party markers
+// cannot extend the grammar.
+fn run() {
+    #SQL<User> {
+        query :: SQL.{"select id, name from users"}
+        print(query.template())
+    }
+    #HTML {
+        page :: HTML.{"<p>ready</p>"}
+        print(page.text())
+    }
+}

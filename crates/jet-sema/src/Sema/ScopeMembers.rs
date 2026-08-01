@@ -30,6 +30,7 @@ use crate::AST::{Expr, Item, Stmt, TraitImplBlock};
 /// under `jet test`. The check needs no type information.
 pub fn check(items: &[Item]) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
+    check_dsl_items(items, &mut diags);
     for item in items {
         match item {
             Item::Test(t) => check_marker_body(Syntax::KW_TEST, &t.body, &mut diags),
@@ -81,6 +82,9 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 span,
                 ..
             } => {
+                if Syntax::is_stdlib_dsl_block_marker(name) {
+                    continue;
+                }
                 validate_member(
                     marker,
                     name,
@@ -108,6 +112,9 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
 /// interior of a marker block, where members must stay flat at the top level).
 fn reject_nested(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
     walk_members(body, &mut |name, dot_span| {
+        if Syntax::is_stdlib_dsl_block_marker(name) {
+            return;
+        }
         diags.push(Diagnostic::error(
             "E0618",
             "scope members can't be nested".to_string(),
@@ -125,6 +132,9 @@ fn reject_nested(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
 /// function bodies, where a member statement is out of place entirely).
 fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
     walk_members(body, &mut |name, dot_span| {
+        if Syntax::is_stdlib_dsl_block_marker(name) {
+            return;
+        }
         diags.push(Diagnostic::error(
             "E0615",
             format!(
@@ -139,6 +149,96 @@ fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
             Some(dot_span),
         ));
     });
+}
+
+fn check_dsl_items(items: &[Item], diags: &mut Vec<Diagnostic>) {
+    for item in items {
+        match item {
+            Item::Test(test) => check_dsl_body(&test.body, diags),
+            Item::Bench(bench) => check_dsl_body(&bench.body, diags),
+            Item::Func(func) => check_dsl_body(&func.body, diags),
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    check_dsl_body(&method.body, diags);
+                }
+            }
+            Item::Struct(def) => {
+                for method in &def.methods {
+                    check_dsl_body(&method.body, diags);
+                }
+                for implementation in &def.trait_impls {
+                    for method in &implementation.methods {
+                        check_dsl_body(&method.body, diags);
+                    }
+                }
+            }
+            Item::Enum(def) => {
+                for method in &def.methods {
+                    check_dsl_body(&method.body, diags);
+                }
+                for implementation in &def.trait_impls {
+                    for method in &implementation.methods {
+                        check_dsl_body(&method.body, diags);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_dsl_body(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
+    for statement in body {
+        match statement {
+            Stmt::ScopeMember {
+                name,
+                args,
+                args_span,
+                body,
+                span,
+                ..
+            } if Syntax::is_stdlib_dsl_block_marker(name) => {
+                validate_dsl_args(name, args, args_span, *span, diags);
+                check_dsl_body(body, diags);
+            }
+            _ => {
+                for child in child_bodies(statement) {
+                    check_dsl_body(child, diags);
+                }
+            }
+        }
+    }
+}
+
+fn validate_dsl_args(
+    name: &str,
+    args: &[Expr],
+    args_span: &Option<Span>,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let valid = match name {
+        Syntax::DSL_BLOCK_SQL => {
+            args.is_empty() || (args.len() == 1 && matches!(args[0], Expr::Ident(..)))
+        }
+        Syntax::ATTR_HTML => args.is_empty(),
+        _ => false,
+    };
+    if !valid {
+        let at = args_span.unwrap_or(span);
+        let expected = if name == Syntax::DSL_BLOCK_SQL {
+            "`#SQL { … }` or `#SQL<Row> { … }`"
+        } else {
+            "`#HTML { … }`"
+        };
+        diags.push(Diagnostic::error(
+            "E0617",
+            format!("`#{name}` has an invalid DSL header"),
+            "stdlib DSL headers are fixed compiler-owned syntax; user code cannot add grammar parameters".to_string(),
+            format!("write {expected}"),
+            Some(at),
+        ));
+    }
 }
 
 /// Validate a single direct-child member against `marker`'s vocabulary.

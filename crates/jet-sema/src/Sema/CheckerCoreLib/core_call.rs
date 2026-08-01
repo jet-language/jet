@@ -337,6 +337,20 @@ fn resolved_core_fixed_sig(
     }
 }
 
+fn core_compiler_return(name: &str) -> Type {
+    let value = match name {
+        "lex" => "CompilerLexed",
+        "parse" => "CompilerSyntaxTree",
+        "check" => "CompilerChecked",
+        "source_map" => "CompilerSourceMap",
+        _ => "CompilerError",
+    };
+    Type::Result {
+        ok: Box::new(Type::Named(value.to_string())),
+        err: Box::new(Type::Named("CompilerError".to_string())),
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_call(
             &mut self,
@@ -347,6 +361,40 @@ impl<'a> Checker<'a> {
             type_args: &[Type],
             args: &mut [crate::AST::CallArg],
         ) -> Option<Type> {
+            // D-FRONTENDAPI1=A: the compiler surface is a read-only
+            // compile-time value API. It is intentionally handled before the
+            // ordinary Core effect/fixed-signature tables so it cannot become
+            // a runtime or ambient fallback by accident.
+            if module == "core.compiler" {
+                if !matches!(name, "lex" | "parse" | "check" | "source_map") {
+                    self.diags.push(unknown_core_item(module, name, span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(core_compiler_return("unknown"));
+                }
+                if !self.in_comptime && !self.compiler_api_allowed {
+                    self.diags.push(Diagnostic::error(
+                        "E0956",
+                        format!("`core.compiler.{name}` is compile-time only"),
+                        "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service".to_string(),
+                        "move this call into `fn build` or a `comptime` binding".to_string(),
+                        Some(span),
+                    ));
+                }
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    let input_type = if name == "check" {
+                        Type::Named("CompilerSyntaxTree".to_string())
+                    } else {
+                        Type::String
+                    };
+                    self.expect_core_arg(name, 0, &input_type, arg);
+                }
+                return Some(core_compiler_return(name));
+            }
             // D-EFF1: record the effect this Core call contributes to the enclosing
             // function's inferred set (erased in codegen; purely a sema fact).
             if let Some(e) = core_effect(module, name) {

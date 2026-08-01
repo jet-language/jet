@@ -72,7 +72,7 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Unsafe, Schema, Codemod, Audit, Sbom, Bind, Live,
+    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Semindex, Expand, Unsafe, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
     GcReport,
@@ -87,7 +87,7 @@ impl HandlerKey {
         match self {
             Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
             Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
-            Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Impact => "impact",
+            Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Compiler => "compiler", Self::Impact => "impact",
             Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
             Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
@@ -120,6 +120,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph },
     NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query },
     NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild },
+    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler },
     NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact },
     NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex },
@@ -595,6 +596,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
     FlagSpec { long: "--coverage", help: "with test: show function and line coverage" },
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
+    FlagSpec { long: "--emit-generated", help: "with build: copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
     FlagSpec { long: "--release", help: "with build/run: optimize for release" },
@@ -1207,6 +1209,7 @@ mod tests {
             ("registry", "keygen", Keygen, "keygen", false), ("registry", "key", Key, "key", false),
             ("registry", "vendor", Vendor, "vendor", false), ("inspect", "graph", Graph, "graph", false),
             ("inspect", "query", Query, "query", false), ("inspect", "explain-build", ExplainBuild, "explain-build", false),
+            ("inspect", "compiler", Compiler, "compiler", false),
             ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
             ("inspect", "unsafe", Unsafe, "unsafe", false),

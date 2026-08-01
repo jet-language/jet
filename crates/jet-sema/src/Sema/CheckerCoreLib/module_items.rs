@@ -480,6 +480,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.args" => &["spec"],
         // D-ANY-JAI1 (c7jaiany §6): the runtime reflection floor.
         "core.reflect" => &["of"],
+        // D-FRONTENDAPI1=A: stable read-only front-end values. The calls are
+        // compile-time-only; their value methods are listed in core_types and
+        // dispatched by the comptime evaluator.
+        "core.compiler" => &["lex", "parse", "check", "source_map"],
         // D-SHIFT1 (c7shift): `Reader.over(bytes)`/`Cursor.over(s)` are bare
         // static constructors (no import needed, D-PATHFS1's `Path.from`
         // shape) — these module entries exist for discoverability/docs only.
