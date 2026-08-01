@@ -15835,6 +15835,12 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
+        // Receiver is an i64 index into `rt.channels` (Arc-backed under AOT).
+        // Cloning the handle shares the same channel entry — same semantics as
+        // Prelude `JetReceiver::clone` (D-TUPLE-DESTRUCT1).
+        if matches!(&inner.ty, Type::Apply { name, .. } if name == "Receiver") {
+            return self.lower_expr(inner);
+        }
         // Shared<T> is a copyable door: cloning duplicates the handle, not T.
         if matches!(&inner.ty, Type::Shared(_)) {
             return self.lower_expr(inner);

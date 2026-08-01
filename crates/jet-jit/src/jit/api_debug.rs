@@ -11,9 +11,10 @@ use super::runtime_host::catch_jit_panic;
 use super::tiers::{plan_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::safety::{
-    collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, resident_safe_expr,
-    resident_safe_func, resident_safe_func_detail, resident_safe_program,
-    resident_safe_spawn_lambda, resident_safe_stmt,
+    collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, jit_value_type,
+    resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
+    resident_safe_func_detail, resident_safe_program, resident_safe_spawn_lambda,
+    resident_safe_stmt,
 };
 use super::RESIDENT_RUNTIME;
 
@@ -736,7 +737,48 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
     }
     for (i, lam) in program.spawn_lambdas.iter().enumerate() {
         if !resident_safe_spawn_lambda(lam, &names) {
-            return format!("spawn lambda {i} not resident-safe");
+            let mut why = Vec::new();
+            if lam.captures.len() > 4 {
+                why.push(format!("too many captures ({})", lam.captures.len()));
+            }
+            for (ci, c) in lam.captures.iter().enumerate() {
+                if !jit_value_type(&c.ty) {
+                    why.push(format!("cap{ci} ty not jit_value: {:?}", c.ty));
+                } else if !resident_safe_capture_policy(c) {
+                    why.push(format!(
+                        "cap{ci} clone_at_spawn={} ty={:?}",
+                        c.clone_at_spawn, c.ty
+                    ));
+                }
+            }
+            for (pi, (_, ty)) in lam.params.iter().enumerate() {
+                if !jit_value_type(ty) {
+                    why.push(format!("param{pi} not jit_value: {ty:?}"));
+                }
+            }
+            if !jit_value_type(&lam.ret) {
+                why.push(format!("ret not jit_value: {:?}", lam.ret));
+            }
+            match &lam.body {
+                jet_codegen::Codegen::TIR::TJitSpawnBody::Expr(e) => {
+                    if !resident_safe_expr(e, &names) {
+                        why.push("expr body unsafe".into());
+                    }
+                }
+                jet_codegen::Codegen::TIR::TJitSpawnBody::Block { prefix, tail } => {
+                    for (si, s) in prefix.iter().enumerate() {
+                        if !resident_safe_stmt(s, &names) {
+                            why.push(format!("stmt{si} unsafe"));
+                        }
+                    }
+                    if let Some(t) = tail {
+                        if !resident_safe_expr(t, &names) {
+                            why.push("tail unsafe".into());
+                        }
+                    }
+                }
+            }
+            return format!("spawn lambda {i} not resident-safe: {}", why.join("; "));
         }
     }
     String::new()

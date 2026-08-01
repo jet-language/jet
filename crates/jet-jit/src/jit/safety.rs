@@ -3122,9 +3122,12 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
     }
 }
 
-fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
+pub(crate) fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     if c.clone_at_spawn {
-        matches!(&c.ty, Type::Apply { name, .. } if name == "Sender")
+        // Sender and Receiver are Arc-backed handles (Prelude Clone); spawn
+        // capture clones the handle id the same way AOT clones JetSender /
+        // JetReceiver (D-TUPLE-DESTRUCT1).
+        matches!(&c.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Sender" | "Receiver"))
             || matches!(&c.ty, Type::Shared(_))
             || matches!(
                 &c.ty,
