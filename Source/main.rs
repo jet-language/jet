@@ -29,6 +29,7 @@ mod CmdImport;
 mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
+mod ProveReplay;
 mod CmdReport;
 mod CmdSchema;
 mod CmdSemIndex;

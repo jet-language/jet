@@ -64,11 +64,39 @@ enum ChildOutcome {
 pub(crate) fn run_prove(args: &[String], json: bool) {
     let mut positional = Vec::new();
     let mut _lenses = Vec::new();
+    let mut capture: Option<crate::ProveReplay::CaptureOpts> = None;
+    let mut replay: Option<String> = None;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
         if arg == "--json" {
             i += 1;
+            continue;
+        }
+        if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
+            if capture.is_some() || replay.is_some() {
+                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                exit(ExitCodes::USAGE);
+            }
+            capture = Some(opts);
+            i += 1;
+            continue;
+        }
+        if let Some(parsed) = crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str)) {
+            if capture.is_some() || replay.is_some() {
+                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                exit(ExitCodes::USAGE);
+            }
+            match parsed {
+                Ok(path) => {
+                    replay = Some(path);
+                    i += if arg == "--replay" { 2 } else { 1 };
+                }
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    exit(ExitCodes::USAGE);
+                }
+            }
             continue;
         }
         if let Some(value) = arg.strip_prefix("--lens=") {
@@ -103,6 +131,19 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+
+    let identity = crate::ProveReplay::ReplayIdentity {
+        entry: target.root.clone(),
+        source_digest: target.input_sha256.clone(),
+        execution_adapter: "dev-tir-v1".to_string(),
+        target_triple: "x86_64-linux".to_string(),
+    };
+    if let Some(opts) = capture {
+        exit(crate::ProveReplay::run_safe_capture(&identity, &opts, json));
+    }
+    if let Some(path) = replay {
+        exit(crate::ProveReplay::run_replay(&identity, &path, json));
+    }
 
     let mut items = Vec::new();
     for member in &target.members {
