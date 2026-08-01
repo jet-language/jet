@@ -1856,6 +1856,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     };
                 }
+                // Core net unit enums reach codegen as Field (`NetReadyInterest.Write`).
+                if env.ty_of(enum_name).is_none()
+                    && ((resolved_enum == "NetReadyInterest"
+                        && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
+                        || (resolved_enum == "NetShutdown"
+                            && matches!(member.as_str(), "Read" | "Write" | "Both")))
+                {
+                    return TExpr {
+                        ty: Type::Named(resolved_enum.to_string()),
+                        kind: TExprKind::EnumLit {
+                            enum_type: resolved_enum.to_string(),
+                            variant: member.clone(),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
                 if env.ty_of(enum_name).is_none()
                     && (cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
                         // Fragment eval (#722): REPL/comptime often lacks `variant_owner`
