@@ -3638,10 +3638,14 @@ shape) — see docs/spec/diagnostics.md.
 
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
-`jet build` checks the root program, then runs one optional root
+`jet build` checks the root program, then runs one optional unit-local
 `fn build(b: BuildContext) => BuildPlan ?` through the same interpreter used by
-comptime. Imported `fn build` declarations are checked but never run. With no
-root entry, the existing zero-configuration pipeline is unchanged.
+comptime. The entry may live in the source file, in a managed package's
+`pkg.jet`, or in `workspace.jet`. For a workspace entry, member entries run in
+deterministic dependency order with separate read-only plans; the workspace
+entry runs last with a fresh `BuildContext` and can add only workspace-owned
+targets. Imported dependency entries are checked but never run. With no
+unit-local entry, the existing zero-configuration pipeline is unchanged.
 
 Build code registers ordinary typed values. Targets are declared once with
 `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,
@@ -3701,6 +3705,35 @@ Action outputs ending in `.jet` follow the same path. Both re-enter lexer,
 parser, and sema before runtime codegen; malformed generated source is a Jet
 diagnostic with generator provenance. The build-only entry and imported build
 entries are removed before codegen, so rustc never sees build handles.
+
+Generation is additive and has one owner per managed path. Generated modules
+are ordered in deterministic dependency rounds using ordinary quoted-file
+imports; a later round may observe an earlier round, the number of rounds is
+bounded by the number of generated modules, and a cycle is E3511 before any
+generated file is written. A selected action may not also own a generated
+`.jet` path. Existing source collisions are E3510. `--locked` checks the
+generated input and output hashes before materialization and records the same
+provenance after the complete runtime bundle is checked.
+
+The remote cache/execution seam is transport-only. Cache reads, writes, and
+remote execution require an explicit policy grant plus a complete sandbox
+proof whose action key, toolchain digest, output paths, and provenance are
+checked for parity. A missing worker or remote record is a miss/error; Jet
+never falls back to ambient local execution under the remote surface.
+
+WASM build plugins enter through the packaged manifest/component loader or the
+typed in-memory test seam. The loader verifies a regular non-symlink file, the
+Component Model binary envelope, the fixed API version, and its SHA-256 digest
+before application. Capability grants are checked per plugin and the graph is
+rolled back on every rejected contribution, so a hostile plugin cannot leave
+partial actions, targets, or generated modules behind.
+
+`core.compiler` is the typed read-only compiler API. `lex`, `parse`, `check`,
+and `source_map` are compile-time-only and preserve source, spans, diagnostics,
+semantic facts, and generated-line mappings. `jet inspect compiler` mirrors
+these operations in deterministic JSON with `schema_version: 1` and
+`api_version: 1`; runtime calls are E0956.
+
 The selected target source/dependency closure plus generated modules becomes a
 fresh runtime bundle. Native, cross, web, plugin, and freestanding lowering all
 consume that same checked bundle. `--locked` compares generated input/output

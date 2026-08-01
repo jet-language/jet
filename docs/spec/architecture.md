@@ -69,6 +69,21 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
+### Read-only compiler API
+
+`core.compiler` is the one typed, compile-time-only front-end surface
+(D-FRONTENDAPI1=A). `lex(source)`, `parse(source)`, `check(parsed)`, and
+`source_map(rust)` return immutable compiler values. The values preserve the
+source text, spans, diagnostics, checked functions/effects, and the semantic
+index produced by the same lexer, parser, sema, and `jet-semindex` paths used
+by the compiler. Build code may inspect them; runtime code receives E0956.
+
+The CLI mirror (`jet inspect compiler lex|parse|check|source-map`) uses the
+same versioned JSON envelope (`schema_version: 1`, `api_version: 1`). The
+root compiler owns the small deterministic encoder so the compiler seam does
+not acquire a serialization dependency. No API method mutates or executes a
+source tree, and no backend reimplements these facts.
+
 ### Concurrency boundary safety status
 
 A data race is two tasks that access the same memory at the same time when at
@@ -364,6 +379,24 @@ total, pure `String` result to return inference. Inference rejects that result,
 and the function-extract helper returns no action. Other non-scalar parameters
 and results stay unsupported until sema supplies a complete ownership contract
 for reads, writes, takes, and returned values.
+
+### Read-only compiler API (D-FRONTENDAPI1)
+
+`core.compiler` is the public, read-only seam for tooling and programmable
+builds. It exposes versioned values for lexing, parsing, checking, semantic
+index facts, and generated-Rust source maps. The callback enters the same
+front-end stack used by the driver, so parser, sema, diagnostics, and index
+facts are not reimplemented in a second API layer. The API returns structured
+values and `Result` errors; it never exposes compiler crates or rustc internals
+to Jet code.
+
+The CLI mirror, `jet inspect compiler <lex|parse|check|source-map>`, uses the
+same schema version and a `value` envelope for every operation. The `check`
+value is the file-addressed `CheckedFile` shape (`api_version`, `diagnostics`,
+`syntax`, `semantic_index`); the other values are the corresponding
+`CompilerLexed`, `CompilerSyntaxTree`, or `CompilerSourceMap` shape. JSON is a
+boundary format only. The Rust and Jet surfaces call the same compiler
+operations, and the CLI performs no additional checking or policy decisions.
 
 ## Compiler-extension plugins (D-DX5-HOOK1=A)
 
