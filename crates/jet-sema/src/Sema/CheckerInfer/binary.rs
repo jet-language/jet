@@ -20,6 +20,11 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: a bare numeral adopts a *fixed-width*
+    /// peer that contains its value. With no sized peer (or an `Int` peer), it
+    /// stays `Int` — peerless `1000000 * 1000000` and `0 - 17` must not invent a
+    /// U32/U8 and trap. Destination width still arrives through `expected_type`
+    /// on `Expr::Int` (e.g. `take_u8(1 + 2)`).
     fn minimal_integer_literal_type(expr: &mut Expr, peer: Option<&Type>) -> Option<Type> {
         match expr {
             Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
@@ -31,56 +36,53 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let negated = -(*value as i128);
-                if peer == Some(&Type::Int) {
-                    *width = None;
-                    return Some(Type::Int);
-                }
-                if let Some(Type::IntN { signed, bits }) = peer {
-                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                    if negated >= lower && negated <= upper {
-                        *width = Some((*signed, *bits));
-                        return Some(Type::IntN {
-                            signed: *signed,
-                            bits: *bits,
-                        });
+                match peer {
+                    Some(Type::IntN { signed, bits }) => {
+                        let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                        if negated >= lower && negated <= upper {
+                            *width = Some((*signed, *bits));
+                            Some(Type::IntN {
+                                signed: *signed,
+                                bits: *bits,
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    Some(Type::Int) | None => {
+                        *width = None;
+                        Some(Type::Int)
+                    }
+                    Some(_) => {
+                        *width = None;
+                        Some(Type::Int)
                     }
                 }
-                let bits = [8, 16, 32, 64]
-                    .into_iter()
-                    .find(|bits| {
-                        let (lower, upper) = crate::AST::int_range(true, *bits);
-                        negated >= lower && negated <= upper
-                    })?;
-                *width = Some((true, bits));
-                Some(Type::IntN { signed: true, bits })
             }
             Expr::Int(value, _, width, _) if *value >= 0 && width.is_none() => {
                 let value = *value as i128;
-                if peer == Some(&Type::Int) {
-                    *width = None;
-                    return Some(Type::Int);
-                }
-                if let Some(Type::IntN { signed, bits }) = peer {
-                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                    if value >= lower && value <= upper {
-                        *width = Some((*signed, *bits));
-                        return Some(Type::IntN {
-                            signed: *signed,
-                            bits: *bits,
-                        });
+                match peer {
+                    Some(Type::IntN { signed, bits }) => {
+                        let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                        if value >= lower && value <= upper {
+                            *width = Some((*signed, *bits));
+                            Some(Type::IntN {
+                                signed: *signed,
+                                bits: *bits,
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    Some(Type::Int) | None => {
+                        *width = None;
+                        Some(Type::Int)
+                    }
+                    Some(_) => {
+                        *width = None;
+                        Some(Type::Int)
                     }
                 }
-                let bits = [8, 16, 32, 64]
-                    .into_iter()
-                    .find(|bits| {
-                        let (_, upper) = crate::AST::int_range(false, *bits);
-                        value <= upper
-                    })?;
-                *width = Some((false, bits));
-                Some(Type::IntN {
-                    signed: false,
-                    bits,
-                })
             }
             _ => None,
         }
@@ -504,10 +506,10 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
 
-        // D-INTLIT-WIDTH1=F: an unowned whole literal adopts a typed peer
-        // that contains its singleton value; without one, it takes the
-        // narrowest integer type that contains the value. The ordinary
-        // value-set law then decides whether one operand widens to the other.
+        // D-INTLIT-WIDTH1=F / D-NUMLIT-PEER1=A: an unowned whole literal adopts a
+        // fixed-width peer that contains its singleton value; without a sized
+        // peer it stays `Int`. The ordinary value-set law then decides whether
+        // one operand widens to the other.
         let lhs_is_literal = Self::is_bare_integer_literal(lhs);
         let rhs_is_literal = Self::is_bare_integer_literal(rhs);
         if let Some(minimal) =

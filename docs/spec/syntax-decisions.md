@@ -560,6 +560,11 @@ freely to `Float` from `I8 I16 I32 U8 U16 U32`, and to `F32` from
 `I8 I16 U8 U16`. Other integer-to-float crossings use a runtime exactness
 check and trap before rounding. A numeral is checked exactly at compile time.
 Experts accept possible precision loss for one crossing with `approx(value)`.
+**D-NUMLIT-PEER1=A** *(ratified 2026-07-30)*: a bare numeral adopts a
+fixed-width peer only when a sized neighbour asks for it; with no sized peer
+the numeral stays `Int`. Peerless `1000000 * 1000000` and `0 - 17` are therefore
+`Int` arithmetic. Destination annotations and parameters still push width
+through the expected-type channel (`take_u8(1 + 2)`).
 
 **D-SHAPE-CONVERT1=A — destination type owns explicit conversion** *(ratified
 2026-07-14, card #566)*: typed conversion is always

@@ -2826,10 +2826,10 @@ fn run() {
 `Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
 `F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
 available for expert and FFI/binary work. `I64` and `F64` are the explicit
-names for `Int` and `Float`. A bare whole-number literal adopts a typed peer
-that contains its value. Without one, it uses the narrowest integer type that
-contains the value. A destination-owned literal is range-checked at compile
-time; a value that does not fit is **E1003**.
+names for `Int` and `Float`. A bare whole-number literal adopts a fixed-width
+peer that contains its value (D-INTLIT-WIDTH1=F). Without a sized peer it stays
+`Int` (D-NUMLIT-PEER1=A). A destination-owned literal is range-checked at
+compile time; a value that does not fit is **E1003**.
 
 One numeric widening law applies to operators, arguments, returns, and
 assignments. One value can widen to the other type when that type contains

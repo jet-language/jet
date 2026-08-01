@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1375,
-    "rev": 21318,
+    "rev": 21333,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61432,7 +61432,7 @@
       "priority": "P1",
       "plan": "## Goal\nMake Shield+channel cancel run under default `jet run` (resident or silent deopt) without E0956.\n\n## Repro\ncargo test --test dev cranelift_shield_defers -- --exact\n\n## Out\nNo new syntax.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "cursor-grok",
       "log": [],
       "criteria": [],
       "refs": [
@@ -61443,8 +61443,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-01T00:39:43.922Z",
-      "updated": "2026-08-01T00:39:43.922Z",
-      "updatedBy": "cursor-grok"
+      "updated": "2026-08-01T00:46:02.789Z",
+      "updatedBy": "cursor-grok",
+      "claimedAt": "2026-08-01T00:46:02.789Z"
     },
     {
       "id": "c0162gi7",
@@ -61455,13 +61456,41 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nGreen `cargo test --test comptime_diff comptime_matches_runtime`.\n\n## Repro\ncargo test --test comptime_diff comptime_matches_runtime -- --exact\n\n## Note\ngzip/zstd differentials were fixed on #1362 (U8 list emit); do not reopen those.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Peerless Int arithmetic (1<<10, 1e6*1e6, (0-17)/5, (0-17)%5) matches comptime vs AOT without panic",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "Independent check: test green; emit is 1i64.jet_shl(10i64); AOT/JIT agree",
+          "at": "2026-08-01T00:50:34.769Z"
+        },
+        {
+          "n": 2,
+          "text": "Sized-peer ergonomics preserved: byte+1 and take_u8(1+2) still work",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "Independent check: byte_plus smoke 201/3",
+          "at": "2026-08-01T00:50:35.078Z"
+        },
+        {
+          "n": 3,
+          "text": "D-NUMLIT-PEER1=A reflected in sema + spec/syntax-decisions/core-library",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "Independent check: D-NUMLIT-PEER1 ratified A; code+docs match technical clause",
+          "at": "2026-08-01T00:50:35.393Z"
+        }
+      ],
       "refs": [
         "tests/comptime_diff.rs"
       ],
@@ -61469,8 +61498,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-01T00:39:44.132Z",
-      "updated": "2026-08-01T00:39:44.132Z",
-      "updatedBy": "cursor-grok"
+      "updated": "2026-08-01T00:50:35.708Z",
+      "updatedBy": "cursor-grok",
+      "completedAt": "2026-08-01T00:50:35.708Z"
     }
   ],
   "decisions": [
@@ -82505,6 +82535,111 @@
   ],
   "events": [
     {
+      "at": "2026-08-01T00:50:35.708Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0162gi7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-01T00:50:35.393Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0162gi7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:50:35.079Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0162gi7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:50:34.769Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0162gi7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:50:34.447Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0162gi7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:50:34.226Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0162gi7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:50:34.003Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0162gi7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:50:33.782Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0162gi7",
+      "note": "#3 D-NUMLIT-PEER1=A reflected in sema + spec/syntax-decisions/c"
+    },
+    {
+      "at": "2026-08-01T00:50:33.563Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0162gi7",
+      "note": "#2 Sized-peer ergonomics preserved: byte+1 and take_u8(1+2) sti"
+    },
+    {
+      "at": "2026-08-01T00:50:33.348Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0162gi7",
+      "note": "#1 Peerless Int arithmetic (1<<10, 1e6*1e6, (0-17)/5, (0-17)%5)"
+    },
+    {
+      "at": "2026-08-01T00:47:16.283Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0162gi7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-01T00:46:02.789Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0xoocid",
+      "note": ""
+    },
+    {
+      "at": "2026-08-01T00:46:02.549Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0162gi7",
+      "note": ""
+    },
+    {
+      "at": "2026-08-01T00:41:06.033Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0162gi7",
+      "note": ""
+    },
+    {
+      "at": "2026-08-01T00:41:05.784Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0xoocid",
+      "note": ""
+    },
+    {
       "at": "2026-08-01T00:40:42.505Z",
       "by": "cursor-review",
       "action": "card.update",
@@ -85898,111 +86033,6 @@
       "action": "card.criteria-meet",
       "ref": "c0tfvwqu",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-31T19:03:15.199Z",
-      "by": "claude-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0tfvwqu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T19:03:07.268Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c00707ob",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T18:57:59.220Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-07-31T18:57:59.220Z"
-    },
-    {
-      "at": "2026-07-31T18:56:31.756Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c00707ob",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T18:56:31.548Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c00707ob",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T18:56:31.340Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c00707ob",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T18:56:31.130Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c00707ob",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T18:56:06.958Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c00707ob",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T18:50:02.183Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c00707ob",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T18:49:44.976Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c00707ob",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T18:49:44.777Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c00707ob",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T18:49:44.569Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c00707ob",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T18:49:44.348Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c00707ob",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T18:26:39.828Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c00707ob",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T18:26:13.091Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c00707ob",
-      "note": "phase,plan,logEntry"
     }
   ],
   "nextNum": 368,

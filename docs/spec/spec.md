@@ -37,11 +37,11 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
   E0001. Unary minus is an operator, not part of the literal. In an operator
-  expression, a bare whole-number literal adopts a typed peer when that type
-  contains its exact value; otherwise it takes the narrowest integer type that
-  contains the value. The operands then follow the ordinary numeric widening
-  law. A typed or destination-owned literal keeps that destination's range
-  check.
+  expression, a bare whole-number literal adopts a fixed-width peer when that
+  type contains its exact value (D-INTLIT-WIDTH1=F); with no sized peer it stays
+  `Int` (D-NUMLIT-PEER1=A). The operands then follow the ordinary numeric
+  widening law. A typed or destination-owned literal keeps that destination's
+  range check.
 - Explicit conversion (D-SHAPE-CONVERT1=A) is destination-owned:
   `Target.from_source(value)`. Numeric narrowing returns a fallible result.
   Safe widening is implicit under D-INTLIT-WIDTH1, D-VERDICT-1304-1, and
