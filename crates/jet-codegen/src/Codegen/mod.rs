@@ -617,6 +617,7 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-WEBAPP1=D: `core.web.app` full-stack application builder.
 const WEBAPP_PRELUDE: &str = include_str!("../Prelude/WebApp.rs");
+const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
@@ -2402,6 +2403,7 @@ pub fn emit_bundle_dbg(
         }
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
+        out.push_str(LIVEQUERY_PRELUDE);
     }
     out.push('\n');
 
@@ -2582,6 +2584,7 @@ pub fn emit_bundle_tests_cov(
         }
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
+        out.push_str(LIVEQUERY_PRELUDE);
     }
     out.push('\n');
 
@@ -2784,6 +2787,7 @@ pub fn emit_bundle_fuzz(
         }
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
+        out.push_str(LIVEQUERY_PRELUDE);
     }
     out.push('\n');
 
@@ -3039,6 +3043,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         }
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
+        out.push_str(LIVEQUERY_PRELUDE);
     }
     out.push('\n');
 

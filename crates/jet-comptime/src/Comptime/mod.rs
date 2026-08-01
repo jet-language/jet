@@ -29,6 +29,7 @@ mod ArchiveLite;
 mod ZstdEntropy;
 pub mod ComputeLite;
 pub mod ServicesLite;
+pub mod AppLite;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;

@@ -2583,6 +2583,23 @@ pub fn core_fixed_sig(
             vec![(read, string.clone()), (read, string)],
             Some(Type::Named("WebPage".to_string())),
         )),
+        ("app" | "core.web", "live") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Named("LiveQuery".to_string())),
+        )),
+        ("app" | "core.web", "subscribe") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("LiveQuery".to_string())),
+        )),
+        ("app" | "core.web", "invalidate") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Int),
+        )),
+        ("app" | "core.web", "live_get" | "live_show") => Some((
+            vec![(read, Type::Named("LiveQuery".to_string()))],
+            Some(Type::String),
+        )),
+        ("app" | "core.web", "live_stats") => Some((vec![], Some(Type::String))),
         ("core.web.storage.local" | "core.web.storage.session", "get") => Some((
             vec![(read, string.clone())],
             Some(Type::Option(Box::new(Type::String))),

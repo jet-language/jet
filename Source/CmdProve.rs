@@ -149,6 +149,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         ExitCodes::OK
     };
     let report = render_report(&target, &items, &tests, &budgets, proved, failed, exit_code);
+    // D-JPROOF1=A (#1127): persist the exact ProofReport under the canonical
+    // `.jetproof` envelope. `--json` still prints only the ProofReport object.
+    if let Err(message) = write_jetproof(&target, &report) {
+        eprintln!("error: failed to write .jetproof: {message}");
+        exit(ExitCodes::ICE);
+    }
     if json {
         println!("{report}");
     } else {
@@ -647,4 +653,50 @@ fn json(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
+/// Identical existing bytes are left unchanged; differing bytes refuse.
+fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
+    let report_id = jet::SHA256::sha256_hex(proof_report.as_bytes());
+    let kind = target.kind;
+    let name = {
+        let root = Path::new(&target.root);
+        let stem = root
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(kind)
+            .replace('.', "_");
+        if stem.is_empty() { kind.to_string() } else { stem }
+    };
+    let rel = format!(
+        ".jet/proofs/{kind}/{name}/{}.jetproof",
+        &report_id[..16.min(report_id.len())]
+    );
+    let path = PathBuf::from(&rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let envelope = format!(
+        "{{\"schema\":\"jet.jproof\",\"version\":1,\"report_id\":{},\"artifact\":{{\"path\":{}}},\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"proofReport\":{proof_report}}}\n",
+        json(&report_id),
+        json(&rel)
+    );
+    if path.exists() {
+        let existing = fs::read(&path).map_err(|e| e.to_string())?;
+        if existing == envelope.as_bytes() {
+            return Ok(());
+        }
+        return Err(format!(
+            "refusing to overwrite differing .jetproof at {rel}"
+        ));
+    }
+    let tmp = path.with_extension(format!(
+        "jetproof.tmp.{}.{}",
+        std::process::id(),
+        &report_id[..8]
+    ));
+    fs::write(&tmp, envelope.as_bytes()).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(())
 }

@@ -1,0 +1,14 @@
+// D-LIVEQUERY1=A (#505): app.live footprint tracking + invalidate → Signal payload.
+use app
+
+fn run() {
+    q :: app.live("users", "[alice,bob]")
+    print(app.live_show(q))
+    print("value:{app.live_get(q)}")
+    hit :: app.invalidate("users")
+    print("hit:{hit}")
+    print("value:{app.live_get(q)}")
+    print(app.live_stats())
+    expert :: app.subscribe("metrics")
+    print(app.live_show(expert))
+}

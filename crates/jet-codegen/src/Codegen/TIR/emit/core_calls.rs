@@ -3148,6 +3148,32 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         },
+        // D-LIVEQUERY1=A (#505): live query registry + invalidation.
+        ("app" | "core.web", "live") => format!(
+            "{}jet_app_live(({}).clone(), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
+        ("app" | "core.web", "subscribe") => format!(
+            "{}jet_app_subscribe(({}).clone())",
+            cx.root_prefix,
+            arg(0)
+        ),
+        ("app" | "core.web", "invalidate") => format!(
+            "{}jet_app_invalidate(({}).clone())",
+            cx.root_prefix,
+            arg(0)
+        ),
+        ("app" | "core.web", "live_get") => {
+            format!("{}jet_app_live_get(&({}))", cx.root_prefix, arg(0))
+        }
+        ("app" | "core.web", "live_show") => {
+            format!("{}jet_app_live_show(&({}))", cx.root_prefix, arg(0))
+        }
+        ("app" | "core.web", "live_stats") => {
+            format!("{}jet_app_live_stats()", cx.root_prefix)
+        }
         ("core.web.storage.local" | "core.web.storage.session", "get") => {
             "None::<String>".to_string()
         }

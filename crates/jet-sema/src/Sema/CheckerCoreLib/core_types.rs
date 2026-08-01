@@ -277,6 +277,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebPage"
         | "WebContext"
         | "WebMount"
+        | "LiveQuery"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.

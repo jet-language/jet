@@ -168,6 +168,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.ui",
     // D-FLAGSHIP-WEBAPI1=A: browser events, element reads, and storage for web slices.
     "core.web",
+    // D-LIVEQUERY1=A: application live-query surface (`app.live` / subscribe /
+    // invalidate). Shares the web/app graph Prelude.
+    "app",
     "core.web.storage",
     "core.web.storage.local",
     "core.web.storage.session",
@@ -233,6 +236,10 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     }
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
+    }
+    // D-LIVEQUERY1=A: `app` is a first-class Core surface for live queries.
+    if name == "app" {
+        return Some("app".to_string());
     }
     // Some ring modules still use internal `jet.<ring>` keys until their
     // package cleanup lands. Canonicalized modules stay `core.*` end to end.

@@ -1469,6 +1469,9 @@ impl Cx {
             Type::Named(name) if name == "WebPage" && !self.type_names.contains(name) => {
                 format!("{}JetWebPage", self.root_prefix)
             }
+            Type::Named(name) if name == "LiveQuery" && !self.type_names.contains(name) => {
+                format!("{}JetLiveQuery", self.root_prefix)
+            }
             Type::Named(name)
                 if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) =>
             {

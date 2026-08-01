@@ -827,6 +827,13 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-WEBAPP1=D / D-WEBAUTHOR1=D: full-stack application builder + browser APIs.
         "core.web" => &[
             "on", "value", "storage", "app", "page", "App", "Page", "Context", "Mount",
+            "live", "subscribe", "invalidate", "live_get", "live_show", "live_stats",
+            "LiveQuery",
+        ],
+        // D-LIVEQUERY1=A: application live-query surface (same Prelude as core.web).
+        "app" => &[
+            "live", "subscribe", "invalidate", "live_get", "live_show", "live_stats",
+            "LiveQuery",
         ],
         "core.web.storage" => &["local", "session"],
         "core.web.storage.local" | "core.web.storage.session" => &["get", "set", "remove", "clear"],
