@@ -29,3 +29,15 @@ differentially conform to these facts against the CPU/oracle path.
 Pinned toolchains and content-addressed Core builds remain the delivery path.
 `core.archive` proves the package boundary: one source tree consumed by
 CoreProvider without a copied fallback template (architecture R10).
+
+Hostile closure checks:
+
+- Missing or mismatched R10 fingerprint → rebuild (no silent reuse of a
+  narrower Top-module set).
+- A package Core module must resolve through CoreProvider; a second embedded
+  copy of the same source is forbidden.
+- Offline builds use the pinned Jet toolchain identity recorded in the store;
+  host drift that changes that identity invalidates the cache.
+
+AOT and default `jet run` (Cranelift / deopt) share the same Prelude symbols for
+every module in the table above (I9).
