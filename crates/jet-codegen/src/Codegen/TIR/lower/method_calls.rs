@@ -3481,6 +3481,26 @@ pub(crate) fn lower_method_call(
                             };
                         }
                     }
+                    // D-GAME*: `on_frame` is `Box<dyn FnMut(GameFrame)>` — typed
+                    // by-value param + Box wrap (not Rc), or rustc E0282 / type mismatch (I2).
+                    if matches!(op, THandleOp::GameSceneOnFrame) && i == 0 {
+                        if let Expr::Lambda(lam) = &a.expr {
+                            let params = vec![Type::Named("GameFrame".to_string())];
+                            let mut lowered = lower_lambda_expecting_value(lam, cx, env, &params);
+                            lowered.boxed = true;
+                            lowered.rc = false;
+                            lowered.arc = false;
+                            return TExpr {
+                                ty: Type::Fn {
+                                    params: params.clone(),
+                                    ret: Some(Box::new(Type::Named("Unit".to_string()))),
+                                    effect_bound: None,
+                                    return_view_provenance: None,
+                                },
+                                kind: TExprKind::Lambda(Box::new(lowered)),
+                            };
+                        }
+                    }
                     // `Rng.shuffle(&list)` must keep a writable place for TirBridge
                     // write-back (CallArg Write + Ident is not Expr::Borrow).
                     if handle == "Rng" && method == "shuffle" && i == 0 {

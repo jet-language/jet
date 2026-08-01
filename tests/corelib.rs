@@ -4316,16 +4316,16 @@ use core.net as net
 
 fn run() {{
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        Ok(_) -> panic("reserved DNS header accepted")
-        Err(_) -> print("rejected")
+        .Ok(_) -> panic("reserved DNS header accepted")
+        .Err(_) -> print("rejected")
     }}
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        Ok(_) -> panic("forward DNS pointer accepted")
-        Err(_) -> print("rejected")
+        .Ok(_) -> panic("forward DNS pointer accepted")
+        .Err(_) -> print("rejected")
     }}
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        Ok(_) -> panic("impossible DNS counts accepted")
-        Err(_) -> print("rejected")
+        .Ok(_) -> panic("impossible DNS counts accepted")
+        .Err(_) -> print("rejected")
     }}
 }}
 "#,
@@ -4357,8 +4357,8 @@ fn run() {{
     lookup :: tasks.spawn(() => {{
         ready_tx.send(1)
         if net.dns_a_at("{}", "service.example.test", 5000) == {{
-            Ok(_) -> print("unexpected DNS response")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> print("unexpected DNS response")
+            .Err(error) -> print(net.error_message(error))
         }}
     }})
     _ready :: ready_rx.receive() ?? panic("ready")
@@ -4482,8 +4482,8 @@ fn run() {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
         if stream.read(1) == {
-            Ok(_) -> print("unexpected read")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> print("unexpected read")
+            .Err(error) -> print(net.error_message(error))
         }
     })
     _client :: net.tcp_connect(address) ?? panic("connect")
@@ -4524,8 +4524,8 @@ fn run() {
     cancelled_accept :: tasks.spawn(() => {
         accept_tx.send(1)
         if cancelled_listener.accept() == {
-            Ok(_) -> print("accept unexpectedly succeeded")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> print("accept unexpectedly succeeded")
+            .Err(error) -> print(net.error_message(error))
         }
     })
     _accept_ready :: accept_rx.receive() ?? panic("accept ready")
@@ -4549,8 +4549,8 @@ fn run() {
     ready_wait :: tasks.spawn(() => {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
-            Ok(_) -> print("ready unexpectedly succeeded")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> print("ready unexpectedly succeeded")
+            .Err(error) -> print(net.error_message(error))
         }
     })
     _wait_ready :: wait_rx.receive() ?? panic("wait ready")
@@ -4624,8 +4624,8 @@ fn run() {
     waiter :: tasks.spawn(() => {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
-            Ok(_) -> panic("udp unexpectedly ready")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> panic("udp unexpectedly ready")
+            .Err(error) -> print(net.error_message(error))
         }
     })
     _ready :: ready_rx.receive() ?? panic("ready")
@@ -4637,8 +4637,8 @@ fn run() {
     closed.close() ?? panic("close")
     closed.close() ?? panic("second close")
     if net.udp_receive(closed, 1) == {
-        Ok(_) -> panic("closed receive succeeded")
-        Err(error) -> print(net.error_message(error))
+        .Ok(_) -> panic("closed receive succeeded")
+        .Err(error) -> print(net.error_message(error))
     }
 }
 "#,
@@ -4668,8 +4668,8 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.listener_local_socket_addr(listener) ?? panic("address")
     if net.tcp_connect_timeout(address, 0) == {
-        Ok(_) -> panic("expired connect succeeded")
-        Err(error) -> print(net.error_operation(error))
+        .Ok(_) -> panic("expired connect succeeded")
+        .Err(error) -> print(net.error_operation(error))
     }
     client :: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
     server := listener.accept() ?? panic("accept")
@@ -4703,20 +4703,20 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     expired :: Duration.milliseconds(0) ?? panic("duration")
     if listener.accept(deadline: expired) == {
-        Ok(_) -> panic("expired accept succeeded")
-        Err(error) -> print(net.error_operation(error))
+        .Ok(_) -> panic("expired accept succeeded")
+        .Err(error) -> print(net.error_operation(error))
     }
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     server := listener.accept() ?? panic("accept")
     if server.read(1, deadline: expired) == {
-        Ok(_) -> panic("expired read succeeded")
-        Err(error) -> print(net.error_operation(error))
+        .Ok(_) -> panic("expired read succeeded")
+        .Err(error) -> print(net.error_operation(error))
     }
     byte :: [U8].{ 1 }
     if client.write(byte, deadline: expired) == {
-        Ok(_) -> panic("expired write succeeded")
-        Err(error) -> print(net.error_operation(error))
+        .Ok(_) -> panic("expired write succeeded")
+        .Err(error) -> print(net.error_operation(error))
     }
 }
 "#,
@@ -4749,7 +4749,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
 
 fn send_four<T: Writer>(&stream: T) => Int ? IOError {
     stream.write_all([1, 2, 3, 4])?
-    return Ok(4)
+    return .Ok(4)
 }
 
 fn run() {
@@ -4759,8 +4759,8 @@ fn run() {
     server :: tasks.spawn(() => {
         stream := net.tcp_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {
-            Ok(_) -> panic("zero limit looked like EOF")
-            Err(_) -> print("invalid")
+            .Ok(_) -> panic("zero limit looked like EOF")
+            .Err(_) -> print("invalid")
         }
         bytes :: receive(&stream, 4) ?? panic("read")
         print("read:{bytes.len()}")
@@ -4803,7 +4803,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {{
 fn send_four<T: Writer>(&stream: T) => Int ? IOError {{
     first :: stream.write([1, 2])?
     stream.write_all([3, 4])?
-    return Ok(first)
+    return .Ok(first)
 }}
 
 fn run() {{
@@ -4811,8 +4811,8 @@ fn run() {{
     server :: tasks.spawn(() => {{
         stream := net.unix_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {{
-            Ok(_) -> panic("zero limit looked like EOF")
-            Err(error) -> {{
+            .Ok(_) -> panic("zero limit looked like EOF")
+            .Err(error) -> {{
                 if error == {{
                     .InvalidInput(context) -> print(if context.operation == .Read {{ "invalid" }} else {{ "wrong-operation" }})
                     else -> {{ print("wrong-error") }}
@@ -4834,14 +4834,14 @@ fn run() {{
     reply :: receive(&client, 1) ?? panic("reply")
     print("reply:{{reply.len()}}")
     if net.unix_write_all_bytes(&client, [5]) == {{
-        Ok(_) -> panic("write after half-close succeeded")
-        Err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
+        .Ok(_) -> panic("write after half-close succeeded")
+        .Err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
     }}
     net.unix_close(&client) ?? panic("close")
     net.unix_close(&client) ?? panic("second close")
     if receive(&client, 1) == {{
-        Ok(_) -> panic("closed read succeeded")
-        Err(error) -> {{
+        .Ok(_) -> panic("closed read succeeded")
+        .Err(error) -> {{
             if error == {{
                 .Closed(context) -> print(if context.operation == .Read {{ "closed" }} else {{ "wrong-close-operation" }})
                 else -> {{ print("wrong-close-error") }}
@@ -4887,8 +4887,8 @@ fn run() {{
     interest :: NetReadyInterest.Read
     expired :: Duration.milliseconds(0) ?? panic("expired")
     if client.ready(interest, deadline: expired) == {{
-        Ok(_) -> panic("expired readiness succeeded")
-        Err(error) -> print(net.error_operation(error))
+        .Ok(_) -> panic("expired readiness succeeded")
+        .Err(error) -> print(net.error_operation(error))
     }}
     payload :: [U8].{{ 7 }}
     client.write_all(payload, deadline: budget) ?? panic("write")
@@ -4923,8 +4923,8 @@ fn run() {{
     udp_timeout :: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
     net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
     if net.udp_receive(udp_timeout, 8) == {{
-        Ok(_) -> panic("udp timeout returned data")
-        Err(error) -> print(net.error_message(error))
+        .Ok(_) -> panic("udp timeout returned data")
+        .Err(error) -> print(net.error_message(error))
     }}
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
@@ -4932,8 +4932,8 @@ fn run() {{
     udp_wait :: tasks.spawn(() => {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
-            Ok(_) -> panic("udp cancel returned data")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> panic("udp cancel returned data")
+            .Err(error) -> print(net.error_message(error))
         }}
     }})
     _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
@@ -4945,8 +4945,8 @@ fn run() {{
     unix_wait :: tasks.spawn(() => {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{
-            Ok(_) -> panic("unix cancel accepted stream")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> panic("unix cancel accepted stream")
+            .Err(error) -> print(net.error_message(error))
         }}
     }})
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
@@ -5002,8 +5002,8 @@ fn run() {
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     if receive(&client, 0) == {
-        Ok(_) -> panic("zero read succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("zero read succeeded")
+        .Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if operation_name(context.operation) == "read" -> "invalid-read" else -> "invalid-other")
                 else -> { print("other") }
@@ -5011,8 +5011,8 @@ fn run() {
         }
     }
     if fs.read("definitely-missing/ioerror-tree") == {
-        Ok(_) -> panic("missing file read succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("missing file read succeeded")
+        .Err(error) -> {
             if error == {
                 .NotFound(context) -> print(context.resource ?? "missing-resource")
                 else -> { print("other") }
@@ -5020,8 +5020,8 @@ fn run() {
         }
     }
     if fs.write(".", "cannot replace directory") == {
-        Ok(_) -> panic("directory write succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("directory write succeeded")
+        .Err(error) -> {
             if error == {
                 .Other(context) -> print(if operation_name(context.operation) == "write" -> "write" else -> "wrong-write-operation")
                 else -> { print("wrong-write-kind") }
@@ -5029,8 +5029,8 @@ fn run() {
         }
     }
     if process.cmd([]).run() == {
-        Ok(_) -> panic("empty command succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("empty command succeeded")
+        .Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-command" else -> "wrong-command-operation")
                 else -> { print("wrong-command-kind") }
@@ -5038,8 +5038,8 @@ fn run() {
         }
     }
     if process.pipeline([]) == {
-        Ok(_) -> panic("empty pipeline succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("empty pipeline succeeded")
+        .Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-pipeline" else -> "wrong-pipeline-operation")
                 else -> { print("wrong-pipeline-kind") }
@@ -5047,8 +5047,8 @@ fn run() {
         }
     }
     if process.cmd(["unused"]).env("BAD=NAME", "value").run() == {
-        Ok(_) -> panic("invalid environment succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("invalid environment succeeded")
+        .Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> context.resource ?? "missing-env-resource" else -> "wrong-env-operation")
                 else -> { print("wrong-env-kind") }
@@ -5093,7 +5093,7 @@ fn activate_core() => String {
 }
 
 fn fail() => Int ? IOError {
-    return Err(IOError.InvalidInput(IOContext.{
+    return .Err(IOError.InvalidInput(IOContext.{
         operation: .Resolve,
         resource: None,
         os_code: None,
@@ -5102,7 +5102,7 @@ fn fail() => Int ? IOError {
 }
 
 fn fail_other() => Int ? IOError {
-    return Err(IOError.Other(IOContext.{
+    return .Err(IOError.Other(IOContext.{
         cause: Val("denied"),
         os_code: Val(13),
         resource: Val("out.txt"),
@@ -5112,12 +5112,12 @@ fn fail_other() => Int ? IOError {
 
 fn run() {
     if fail() == {
-        Ok(_) -> panic("failure succeeded")
-        Err(error) -> print("{error#Debug}")
+        .Ok(_) -> panic("failure succeeded")
+        .Err(error) -> print("{error#Debug}")
     }
     if fail_other() == {
-        Ok(_) -> panic("other failure succeeded")
-        Err(error) -> print("{error#Debug}")
+        .Ok(_) -> panic("other failure succeeded")
+        .Err(error) -> print("{error#Debug}")
     }
 }
 "#;
@@ -5165,8 +5165,8 @@ fn run() {
     output := files.create("/dev/full") ?? panic("open")
     output.write_line("buffered") ?? panic("buffer")
     if output.flush() == {
-        Ok(_) -> panic("flush succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("flush succeeded")
+        .Err(error) -> {
             if error == {
                 .Other(context) -> print(if context.operation == .Flush { "flush" } else { "wrong-flush-operation" })
                 else -> { print("wrong-flush-kind") }
@@ -5211,8 +5211,8 @@ fn run() {
     stream := net.tcp_accept(listener) ?? panic("accept")
     net.set_read_timeout(&stream, 20) ?? panic("timeout")
     if stream.read(1) == {
-        Ok(_) -> print("unexpected read")
-        Err(error) -> print(net.error_message(error))
+        .Ok(_) -> print("unexpected read")
+        .Err(error) -> print(net.error_message(error))
     }
     client.join()
 }
@@ -5257,16 +5257,16 @@ fn run() {
     first := net.tcp_connect(address) ?? panic("first connect")
     net.set_read_timeout(&first, 0) ?? panic("zero timeout")
     if first.read(1) == {
-        Ok(_) -> print("unexpected first read")
-        Err(error) -> print(net.error_message(error))
+        .Ok(_) -> print("unexpected first read")
+        .Err(error) -> print(net.error_message(error))
     }
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
     #Context(deadline: time.now() - 1) {
         if second.read(1) == {
-            Ok(_) -> print("unexpected second read")
-            Err(error) -> print(net.error_message(error))
+            .Ok(_) -> print("unexpected second read")
+            .Err(error) -> print(net.error_message(error))
         }
     }
     second.close() ?? panic("second close")
@@ -5319,8 +5319,8 @@ fn run() {
     net.set_write_timeout(&client, 80) ?? panic("timeout")
     started := time.now()
     if client.write_text("x".repeat(16000000)) == {
-        Ok(_) -> print("unexpected write")
-        Err(error) -> print(net.error_message(error))
+        .Ok(_) -> print("unexpected write")
+        .Err(error) -> print(net.error_message(error))
     }
     elapsed := time.now() - started
     print(elapsed < 300)
@@ -5380,13 +5380,13 @@ fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
 fn send<T: Writer>(&stream: T, bytes: [U8]) => Int ? IOError {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
-    return Ok(empty_count)
+    return .Ok(empty_count)
 }
 
 fn zero_rejected<T: Reader>(&stream: T) => Bool {
     if stream.read(0) == {
-        Ok(_) -> return false
-        Err(error) -> {
+        .Ok(_) -> return false
+        .Err(error) -> {
             if error == {
                 .InvalidInput(context) -> return context.operation == .Read
                 else -> { return false }
@@ -5419,8 +5419,8 @@ fn run() {
     secure.close() ?? panic("close notify")
     secure.close() ?? panic("idempotent close")
     if receive(&secure, 1) == {
-        Ok(_) -> panic("closed read succeeded")
-        Err(error) -> {
+        .Ok(_) -> panic("closed read succeeded")
+        .Err(error) -> {
             if error == {
                 .Closed(context) -> print(if context.operation == .Read { "closed" } else { "wrong-operation" })
                 else -> { print("wrong-error") }
@@ -5515,12 +5515,12 @@ fn run() {{
     roots :: tls.RootCertificates.from_pem(ca) ?? panic("root validation")
     identity :: tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: client_key) ?? panic("identity validation")
     if tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: wrong_key) == {{
-        Ok(_) -> panic("mismatched identity accepted")
-        Err(_) -> print("mismatch-rejected")
+        .Ok(_) -> panic("mismatched identity accepted")
+        .Err(_) -> print("mismatch-rejected")
     }}
     if tls.ClientConfig.default().with_version_bounds(min: .Tls13, max: .Tls12) == {{
-        Ok(_) -> panic("reversed TLS versions accepted")
-        Err(_) -> print("bounds-rejected")
+        .Ok(_) -> panic("reversed TLS versions accepted")
+        .Err(_) -> print("bounds-rejected")
     }}
     _plus :: tls.ClientConfig.default().with_trust(.SystemPlus(roots)) ?? panic("system plus")
     cfg0 :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("custom trust")
@@ -5528,8 +5528,8 @@ fn run() {{
     cfg2 :: cfg1.with_version_bounds(min: .Tls12, max: .Tls13) ?? panic("version bounds")
     tcp :: net.tcp_connect("127.0.0.1:{}") ?? panic("tcp")
     if cfg2.with_alpn(invalid_alpn()) == {{
-        Ok(_) -> panic("empty dynamic ALPN accepted")
-        Err(error) -> if error == {{
+        .Ok(_) -> panic("empty dynamic ALPN accepted")
+        .Err(error) -> if error == {{
             .InvalidInput(context) -> print(if context.operation == .Connect {{ "alpn-rejected" }} else {{ "wrong-alpn-operation" }})
             else -> {{ panic("wrong ALPN error") }}
         }}
@@ -5554,8 +5554,8 @@ fn run() {{
     secure.close_write(deadline: budget) ?? panic("repeat close write")
     one :: [U8].{{ 1 }}
     if secure.write_all(one, deadline: budget) == {{
-        Ok(_) -> panic("write after close_write succeeded")
-        Err(error) -> if error == {{
+        .Ok(_) -> panic("write after close_write succeeded")
+        .Err(error) -> if error == {{
             .Closed(context) -> print(if context.operation == .Write {{ "write-closed" }} else {{ "wrong-write-operation" }})
             else -> {{ panic("wrong post-close error") }}
         }}
@@ -5625,7 +5625,7 @@ fn main() {
     assert_eq!(&*zeroized.borrow(), &vec![vec![0; 7], vec![0; 7]]);
 
     let cause = "TLS protocol truncation: peer closed without close-notify".to_string();
-    match jet_net_tls_io_result::<()>(Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
+    match jet_net_tls_io_result::<()>(.Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
         jet_std::IOError::Protocol(context) => {
             assert_eq!(context.operation, jet_std::IOOperation::Read);
             assert_eq!(context.cause, Some(cause));
@@ -5680,8 +5680,8 @@ fn run() {{
     timed := net.tcp_connect("{address}") ?? panic("timeout tcp")
     net.set_timeout(&timed, 30) ?? panic("timeout budget")
     if net.tls_connect(^timed, "localhost") == {{
-        Ok(_) -> panic("stalled handshake succeeded")
-        Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+        .Ok(_) -> panic("stalled handshake succeeded")
+        .Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
     }}
 
     (ready_tx, ready_rx) :: tasks.channel<Int>()
@@ -5689,8 +5689,8 @@ fn run() {{
         tcp := net.tcp_connect("{address}") ?? panic("cancel tcp")
         ready_tx.send(1)
         if tls.client(^tcp, "localhost") == {{
-            Ok(_) -> panic("cancelled handshake succeeded")
-            Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+            .Ok(_) -> panic("cancelled handshake succeeded")
+            .Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
         }}
     }})
     _ready :: ready_rx.receive() ?? panic("ready")
@@ -6225,26 +6225,26 @@ fn run() {
     recipient :: email.address("Ada <ada@example.net>") ?? panic("recipient")
     hidden :: email.address("audit@example.org") ?? panic("bcc")
     if email.address("attacker@example.com\nBcc: stolen@example.com") == {
-        Ok(_) -> panic("address injection accepted")
-        Err(_) -> print("address-rejected")
+        .Ok(_) -> panic("address injection accepted")
+        .Err(_) -> print("address-rejected")
     }
     if email.message(~sender, [~recipient], [], "hello\nBcc := stolen@example.com", "text", "", []) == {
-        Ok(_) -> panic("header injection accepted")
-        Err(_) -> print("header-rejected")
+        .Ok(_) -> panic("header injection accepted")
+        .Err(_) -> print("header-rejected")
     }
     recipients.{ [~recipient]
     count := 1
     loop count < 101 { recipients.push(~recipient); count++ }
     if email.message(~sender, recipients, [], "subject", "text", "", []) == {
-        Ok(_) -> panic("recipient bound ignored")
-        Err(_) -> print("recipient-bound")
+        .Ok(_) -> panic("recipient bound ignored")
+        .Err(_) -> print("recipient-bound")
     }
     too_large := [U8].{ 0 }
     count = 1
     loop count < 26214401 { too_large.push(0); count++ }
     if email.attachment("large.bin", "application/octet-stream", too_large) == {
-        Ok(_) -> panic("attachment bound ignored")
-        Err(_) -> print("attachment-bound")
+        .Ok(_) -> panic("attachment bound ignored")
+        .Err(_) -> print("attachment-bound")
     }
     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
     message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", "<b>html</b>", [attachment]) ?? panic("message")
@@ -6495,8 +6495,8 @@ fn run() {{
     print(bytes[1])
     second :: body.bytes(8)
     if second == {{
-        Ok(_) -> {{ print("reused") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("reused") }}
+        .Err(error) -> {{
             if error == {{
                 .BodyConsumed -> {{ print("consumed") }}
                 else -> {{ print("wrong-error") }}
@@ -7106,93 +7106,93 @@ use core.http.client as client
 fn run() {
     first :: client.get("http://__ADDR__/")
     if first == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().bytes(8388608) == {
-                Ok(bytes) -> { print(bytes.len()) }
-                Err(error) -> { print(error) }
+                .Ok(bytes) -> { print(bytes.len()) }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     second :: client.get("http://__ADDR__/")
     if second == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().text(8388608) == {
-                Ok(text) -> { print("unexpected utf8 success: {text}") }
-                Err(error) -> { print(error) }
+                .Ok(text) -> { print("unexpected utf8 success: {text}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     third :: client.get("http://__ADDR__/")
     if third == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().text(8388608) == {
-                Ok(text) -> { print("{response.status()}:{text}") }
-                Err(error) -> { print(error) }
+                .Ok(text) -> { print("{response.status()}:{text}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     fourth :: client.get("http://__ADDR__/")
     if fourth == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().bytes(8388608) == {
-                Ok(bytes) -> { print("unexpected oversized success: {bytes.len()}") }
-                Err(error) -> { print(error) }
+                .Ok(bytes) -> { print("unexpected oversized success: {bytes.len()}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     fifth :: client.get("http://__ADDR__/")
     if fifth == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().bytes(8388608) == {
-                Ok(bytes) -> { print(bytes.len()) }
-                Err(error) -> { print(error) }
+                .Ok(bytes) -> { print(bytes.len()) }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     sixth :: client.get("http://__ADDR__/")
     if sixth == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().bytes(8388608) == {
-                Ok(bytes) -> { print("unexpected chunked oversized success: {bytes.len()}") }
-                Err(error) -> { print(error) }
+                .Ok(bytes) -> { print("unexpected chunked oversized success: {bytes.len()}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     seventh :: client.get("http://__ADDR__/")
     if seventh == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().text(8388608) == {
-                Ok(text) -> { print("unexpected partial content-length success: {text}") }
-                Err(error) -> { print(error) }
+                .Ok(text) -> { print("unexpected partial content-length success: {text}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     eighth :: client.get("http://__ADDR__/")
     if eighth == {
-        Ok(response) -> {
+        .Ok(response) -> {
             if response.body().text(8388608) == {
-                Ok(text) -> { print("unexpected partial chunked success: {response.status()}:{text}") }
-                Err(error) -> { print(error) }
+                .Ok(text) -> { print("unexpected partial chunked success: {response.status()}:{text}") }
+                .Err(error) -> { print(error) }
             }
         }
-        Err(error) -> { print(error) }
+        .Err(error) -> { print(error) }
     }
     ninth :: client.get("http://__ADDR__/")
     if ninth == {
-        Ok(response) -> { print("unexpected malformed status success: {response.status()}") }
-        Err(error) -> { print(error) }
+        .Ok(response) -> { print("unexpected malformed status success: {response.status()}") }
+        .Err(error) -> { print(error) }
     }
     tenth :: client.get("http://__ADDR__/")
     if tenth == {
-        Ok(response) -> { print("unexpected malformed header success: {response.status()}") }
-        Err(error) -> { print(error) }
+        .Ok(response) -> { print("unexpected malformed header success: {response.status()}") }
+        .Err(error) -> { print(error) }
     }
 }
 "#
@@ -7226,7 +7226,7 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) =>
-        Ok(server.response(200, "ok")
+        .Ok(server.response(200, "ok")
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2"))
     )
@@ -7385,18 +7385,18 @@ fn run() {{
     }}
     groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
     if groups == {{
-        Ok(_) -> print("unexpected ok")
-        Err(error) -> print("{{error.kind}} {{error.operation}}")
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
     empty := data.mean([Float].{{}})
     if empty == {{
-        Ok(_) -> print("unexpected mean")
-        Err(error) -> print("{{error.kind}} {{error.operation}}")
+        .Ok(_) -> print("unexpected mean")
+        .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
     bad := data.quantile([1.0, 2.0], 1.5)
     if bad == {{
-        Ok(_) -> print("unexpected q")
-        Err(error) -> print("{{error.kind}} {{error.operation}}")
+        .Ok(_) -> print("unexpected q")
+        .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
 }}
 "#
@@ -7853,8 +7853,8 @@ fn run() {{
     xml_bad.limits.max_depth = 0
     input1 :: files.open("{probe}") ?? panic("open1")
     if xml.reader(^input1, enc_bad, xml_bad) == {{
-        Ok(_) -> {{ print("accepted") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("accepted") }}
+        .Err(error) -> {{
             print(error.format == encoding.EncodingFormat.XML)
             print(error.kind == encoding.EncodingErrorKind.Limit)
             print(error.byte_offset)
@@ -7872,8 +7872,8 @@ fn run() {{
     xml_depth.limits.max_nodes = 0
     input2 :: files.open("{probe}") ?? panic("open2")
     if xml.reader(^input2, enc_ok, xml_depth) == {{
-        Ok(_) -> {{ print("accepted") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("accepted") }}
+        .Err(error) -> {{
             print(error.format == encoding.EncodingFormat.XML)
             print(error.kind == encoding.EncodingErrorKind.Limit)
             print(error.byte_offset)
@@ -7891,8 +7891,8 @@ fn run() {{
     xml_cross.limits.max_entity_depth = 3
     input3 :: files.open("{probe}") ?? panic("open3")
     if xml.reader(^input3, enc_ok2, xml_cross) == {{
-        Ok(_) -> {{ print("accepted") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("accepted") }}
+        .Err(error) -> {{
             print(error.format == encoding.EncodingFormat.XML)
             print(error.kind == encoding.EncodingErrorKind.Limit)
             print(error.byte_offset)
@@ -7915,13 +7915,13 @@ fn run() {{
     loop true {{
         result :: reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("depth-missed"); break }}
                 }}
             }}
-            Err(error) -> {{
+            .Err(error) -> {{
                 print(error.kind == encoding.EncodingErrorKind.Limit)
                 print(error.reason)
                 break
@@ -7939,13 +7939,13 @@ fn run() {{
     loop true {{
         result :: deep_reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("xml-depth-missed"); break }}
                 }}
             }}
-            Err(error) -> {{
+            .Err(error) -> {{
                 print(error.kind == encoding.EncodingErrorKind.Limit)
                 print(error.reason)
                 break
@@ -8030,8 +8030,8 @@ fn summarize() => String {
 
     conflict_result :: DataTree ? XMLError.{ xml.parse_bytes(conflict) }
     if conflict_result == {
-        Ok(_) -> return "encoding-conflict-missed"
-        Err(error) -> {
+        .Ok(_) -> return "encoding-conflict-missed"
+        .Err(error) -> {
             reason_ok :: error.reason == "XML declaration conflicts with detected input encoding"
             return "{same_bytes(plain_out, plain)}|{same_bytes(utf8_out, utf8_bom)}|{same_bytes(utf16_out, utf16)}|{reason_ok}|{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
         }
@@ -8081,8 +8081,8 @@ use core.encoding.xml as xml
 
 fn show(result: DataTree ? XMLError) => String {
     if result == {
-        Ok(_) -> { return "accepted" }
-        Err(error) -> {
+        .Ok(_) -> { return "accepted" }
+        .Err(error) -> {
             return "{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
         }
     }
@@ -8205,24 +8205,24 @@ use core.encoding.base32 as base32
 
 fn show64(text: String) => String {
     if base64.decode(text) == {
-        Ok(bytes) -> { return "OK:{bytes}" }
-        Err(reason) -> { return "ERR:{reason}" }
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
     }
     return "unreachable"
 }
 
 fn show64url(text: String) => String {
     if base64.decode_url(text) == {
-        Ok(bytes) -> { return "OK:{bytes}" }
-        Err(reason) -> { return "ERR:{reason}" }
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
     }
     return "unreachable"
 }
 
 fn show32(text: String) => String {
     if base32.decode(text) == {
-        Ok(bytes) -> { return "OK:{bytes}" }
-        Err(reason) -> { return "ERR:{reason}" }
+        .Ok(bytes) -> { return "OK:{bytes}" }
+        .Err(reason) -> { return "ERR:{reason}" }
     }
     return "unreachable"
 }
@@ -8414,17 +8414,17 @@ fn run() {{
     loop true {{
         result :: malformed_reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("malformed-missed"); break }}
                 }}
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 again :: malformed_reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("terminal-missed") }}
-                    Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                    .Ok(_) -> {{ print("terminal-missed") }}
+                    .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
                 }}
                 break
             }}
@@ -8436,13 +8436,13 @@ fn run() {{
     loop true {{
         result :: invalid_char_reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("invalid-character-missed"); break }}
                 }}
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 print(first.kind == encoding.EncodingErrorKind.Syntax)
                 print(first.byte_offset)
                 print(first.line ?? -1)
@@ -8451,8 +8451,8 @@ fn run() {{
                 print(first.reason)
                 again :: invalid_char_reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("invalid-character-terminal-missed") }}
-                    Err(second) -> {{ print(first.reason == second.reason) }}
+                    .Ok(_) -> {{ print("invalid-character-terminal-missed") }}
+                    .Err(second) -> {{ print(first.reason == second.reason) }}
                 }}
                 break
             }}
@@ -8466,17 +8466,17 @@ fn run() {{
     loop true {{
         result :: total_reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("total-missed"); break }}
                 }}
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 again :: total_reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("total-terminal-missed") }}
-                    Err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
+                    .Ok(_) -> {{ print("total-terminal-missed") }}
+                    .Err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
                 }}
                 break
             }}
@@ -8489,8 +8489,8 @@ fn run() {{
     if conflict_start == None {{ panic("missing document start") }}
     conflict :: conflict_reader.next()
     if conflict == {{
-        Ok(_) -> {{ print("encoding-conflict-missed") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("encoding-conflict-missed") }}
+        .Err(error) -> {{
             print(error.kind == encoding.EncodingErrorKind.Syntax)
             print(error.byte_offset)
             print(error.reason)
@@ -8618,8 +8618,8 @@ fn run() {{
     bad :: xml.writer(^bad_out) ?? panic("bad writer")
     end := DataTree.Object(["$xml_event": DataTree.Text("document_end")])
     if bad.write(end) == {{
-        Ok(_) -> {{ print("hostile-missed") }}
-        Err(error) -> {{
+        .Ok(_) -> {{ print("hostile-missed") }}
+        .Err(error) -> {{
             print(error.kind == encoding.EncodingErrorKind.State)
             print(error.reason)
         }}
@@ -9188,8 +9188,8 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     if json.parse("{{\"x\":\"a\\qb\"}}") == {
-        Ok(_) -> { print("OK") }
-        Err(e) -> { print("ERR: {e.message}") }
+        .Ok(_) -> { print("OK") }
+        .Err(e) -> { print("ERR: {e.message}") }
     }
 }
 "#,
@@ -9210,8 +9210,8 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     if json.parse(\"{{\\\"x\\\":\\\"a\tb\\\"}}\") == {
-        Ok(_) -> { print(\"OK\") }
-        Err(e) -> { print(\"ERR: {e.message}\") }
+        .Ok(_) -> { print(\"OK\") }
+        .Err(e) -> { print(\"ERR: {e.message}\") }
     }
 }
 ",
@@ -9743,7 +9743,7 @@ impl Email.Decode {
     fn decode(tree: DataTree) => Email ? DecodeError {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
-        return Ok(Email.{addr: s})
+        return .Ok(Email.{addr: s})
     }
 }
 
@@ -9780,7 +9780,7 @@ struct Email { addr: String }
 impl Email.Decode {
     fn decode(tree: DataTree) => Email ? DecodeError {
         value := tree.field("address") ?? DataTree.Text("")
-        return Ok(Email.{ addr: value.text() ?? "" })
+        return .Ok(Email.{ addr: value.text() ?? "" })
     }
 }
 
@@ -9890,7 +9890,7 @@ fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
     ));
     assert!(serde.contains("let (tokens, lex_diags) = crate::Lexer::lex(source);"));
     assert!(serde.contains("crate::Parser::parse(&tokens)"));
-    assert!(serde.contains("Ok(generated) => Some(generated.items)"));
+    assert!(serde.contains(".Ok(generated) => Some(generated.items)"));
     assert!(serde.contains("Some(Item::Impl(imp))"));
     assert!(serde.contains("imp.is_generated_serde = true"));
     assert!(serde.contains("Some(trigger_span)"));
@@ -10079,7 +10079,7 @@ struct Strict { name: String }
 
 fn run() {
     result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
-    if result == Err(e) {
+    if result == .Err(e) {
         print(e.path)
         print(e.reason)
     }
@@ -10910,8 +10910,8 @@ fn run() {
     print("local={local == .Closed}")
     bad :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 0, overflow: .Block }, .Collect)
     if bad == {
-        Ok(_) -> print("bad accepted")
-        Err(_) -> print("invalid capacity")
+        .Ok(_) -> print("bad accepted")
+        .Err(_) -> print("invalid capacity")
     }
     scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
@@ -10963,12 +10963,12 @@ use core.tasks as tasks
 
 fn panic_log_handler(n: Int) => Void ? String {
     panic("log boom")
-    return Err("unreachable")
+    return .Err("unreachable")
 }
 
 fn panic_ignore_handler(n: Int) => Void ? String {
     panic("ignore boom")
-    return Err("unreachable")
+    return .Err("unreachable")
 }
 
 fn run() {
@@ -11033,26 +11033,26 @@ fn run() {
 
     failure_scope :: event.scope()
     collect :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    collect.on_priority(failure_scope, 10, (n: Int) => Err("high"))
-    collect.on_priority(failure_scope, 0, (n: Int) => Err("low"))
+    collect.on_priority(failure_scope, 10, (n: Int) => .Err("high"))
+    collect.on_priority(failure_scope, 0, (n: Int) => .Err("low"))
     collected :: collect.emit_async(1).join()
     print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
     print(collected.trace().summary())
 
     stop :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
-    stop.on_priority(failure_scope, 10, (n: Int) => Err("first"))
+    stop.on_priority(failure_scope, 10, (n: Int) => .Err("first"))
     stop.on_priority(failure_scope, 0, (n: Int) => {})
     stopped :: stop.emit_async(1).join()
     print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
 
     log_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
-    log_errors.on_priority(failure_scope, 10, (n: Int) => Err("logged secret"))
+    log_errors.on_priority(failure_scope, 10, (n: Int) => .Err("logged secret"))
     log_errors.on_priority(failure_scope, 0, (n: Int) => {})
     logged_error :: log_errors.emit_async(1).join()
     print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
 
     ignore_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
-    ignore_errors.on_priority(failure_scope, 10, (n: Int) => Err("ignored secret"))
+    ignore_errors.on_priority(failure_scope, 10, (n: Int) => .Err("ignored secret"))
     ignore_errors.on_priority(failure_scope, 0, (n: Int) => {})
     ignored_error :: ignore_errors.emit_async(1).join()
     print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")
