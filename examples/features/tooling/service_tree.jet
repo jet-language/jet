@@ -2,7 +2,8 @@
 use core.services as services
 
 fn run() {
-    tree :: services.tree("demo")
+    // `:=` — worker/group/send/receive/fail mutate the tree place (Write).
+    tree := services.tree("demo")
     worker :: services.worker(&tree, "echo", 2) ?? panic("worker")
     services.group(&tree, "front", ["echo"]) ?? panic("group")
     services.start(&tree) ?? panic("start")

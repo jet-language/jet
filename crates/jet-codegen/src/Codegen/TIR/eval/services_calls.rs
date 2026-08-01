@@ -22,30 +22,19 @@ impl<'a> EvalCtx<'a> {
             argv.push(self.eval_expr(a, scope)?);
         }
         let result = apply_core_call("core.services", method, argv, source_span, self.repl_mode)?;
-        if matches!(
-            method,
-            "set_restart"
-                | "worker"
-                | "group"
-                | "start"
-                | "stop"
-                | "send"
-                | "receive"
-                | "fail_worker"
-        ) {
-            match crate::Comptime::ServicesLite::take_mut_ok(result) {
-                Ok((tree, value)) => {
-                    if let Some(place) = args.first() {
-                        if !matches!(tree, CtValue::Unit) {
-                            self.write_back_place(place, tree, scope)?;
-                        }
+        // Any `mutate_ok` carrier must write the updated tree back (I9). The
+        // early allowlist only covered the #444 tree slice and missed
+        // delivery/workflow/handoff mutators (#1148–#1153).
+        match crate::Comptime::ServicesLite::take_mut_ok(result) {
+            Ok((tree, value)) => {
+                if let Some(place) = args.first() {
+                    if !matches!(tree, CtValue::Unit) {
+                        self.write_back_place(place, tree, scope)?;
                     }
-                    Ok(value)
                 }
-                Err(err) => Ok(err),
+                Ok(value)
             }
-        } else {
-            Ok(result)
+            Err(err) => Ok(err),
         }
     }
 }

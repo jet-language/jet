@@ -2,7 +2,8 @@
 use core.services as services
 
 fn run() {
-    tree :: services.tree("app")
+    // `:=` — delivery/state/restart/send mutate the tree place (Write).
+    tree := services.tree("app")
     services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
     services.set_state_event_log(&tree) ?? panic("state")
     a :: services.worker(&tree, "a", 2) ?? panic("a")
