@@ -3058,6 +3058,7 @@ fn run() {
 | `matmul` / `reshape` / `broadcast_to` / `transpose` | shape ops |
 | `negate` / `abs` / `exp` / `log` / `sqrt` | unary ufuncs |
 | `sum_axis` | reduce one axis |
+| `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
@@ -3065,6 +3066,28 @@ fn run() {
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
 symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
+
+Backend facts for Core modules (ownership/effects/failure/platform) live in
+[core-backend-facts.md](core-backend-facts.md).
+
+---
+
+## `core.services` — service trees and mailboxes
+
+D-SERVICE1=D: typed service trees over the existing task/channel model. Workers
+own bounded mailboxes; delivery defaults to at-most-once with `Full` under
+capacity; restart policy defaults to OneForOne.
+
+```jet
+use core.services as services
+
+fn run() {
+    tree :: services.tree("app")
+    echo :: services.worker(&tree, "echo", 8) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    services.send(&tree, echo, "hi") ?? panic("send")
+}
+```
 
 ---
 
