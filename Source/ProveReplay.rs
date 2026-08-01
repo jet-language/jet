@@ -188,15 +188,33 @@ pub(crate) fn run_replay(
         );
         return ExitCodes::USER_ERROR;
     }
-    eprintln!("ambient authority opened: none; {} exact", identity.execution_adapter);
-    eprintln!("replay: exact match");
-    if json_mode {
-        println!(
-            "{{\"schema\":\"jet.replay\",\"status\":\"exact\",\"artifact\":{}}}",
-            json_str(artifact_path)
-        );
+    // D-JREPLAY1: install captured Time into the ambient adapter before any
+    // producer that may read wall clock. Divergence is reported when the
+    // artifact Time root is missing or malformed after identity matched.
+    match extract_first_time_ms(&bytes) {
+        Ok(ms) => {
+            std::env::set_var("JET_PROVE_REPLAY_TIME_MS", ms.to_string());
+            eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+            eprintln!("replay: exact match");
+            if json_mode {
+                println!(
+                    "{{\"schema\":\"jet.replay\",\"status\":\"exact\",\"time_ms\":{ms},\"artifact\":{}}}",
+                    json_str(artifact_path)
+                );
+            }
+            ExitCodes::OK
+        }
+        Err(why) => {
+            emit_diag(
+                "E3628",
+                "replay diverged from captured authority",
+                &why,
+                "recapture with `--capture` so Time roots are present, then replay again",
+                json_mode,
+            );
+            ExitCodes::USER_ERROR
+        }
     }
-    ExitCodes::OK
 }
 
 fn resolve_capture_path(
@@ -471,6 +489,47 @@ fn parse_and_verify(bytes: &[u8]) -> Result<std::collections::BTreeMap<String, S
         return Err(("E3622", format!("unexpected schema `{schema}`")));
     }
     Ok(flat)
+}
+
+fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
+    if bytes.len() < 16 {
+        return Err("artifact too short for Time root".into());
+    }
+    let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+    let mut off = 16 + hlen;
+    let jend = bytes
+        .windows(4)
+        .rposition(|w| w == b"JEND")
+        .ok_or_else(|| "missing JEND while reading Time".to_string())?;
+    if off + 15 > jend {
+        return Err("no Time frame present in replay artifact".into());
+    }
+    let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
+    if kind != KIND_TIME_WALL {
+        return Err(format!("first frame kind {kind:#06x} is not Time"));
+    }
+    let plen = u32::from_le_bytes([
+        bytes[off + 11],
+        bytes[off + 12],
+        bytes[off + 13],
+        bytes[off + 14],
+    ]) as usize;
+    let payload = std::str::from_utf8(&bytes[off + 15..off + 15 + plen])
+        .map_err(|_| "Time payload is not UTF-8".to_string())?;
+    let hex = extract_nested_hex_v(payload).ok_or_else(|| {
+        "Time payload missing unix_ns.v hex field".to_string()
+    })?;
+    let ns = u64::from_str_radix(&hex, 16)
+        .map_err(|_| format!("invalid unix_ns hex `{hex}`"))?;
+    Ok((ns / 1_000_000) as i64)
+}
+
+fn extract_nested_hex_v(payload: &str) -> Option<String> {
+    // payload shape: {"call_id":0,...,"unix_ns":{"bits":64,"t":"int","v":"<hex>"}}
+    let key = "\"v\":\"";
+    let start = payload.find(key)? + key.len();
+    let end = payload[start..].find('"')? + start;
+    Some(payload[start..end].to_string())
 }
 
 fn flatten_identity_fields(

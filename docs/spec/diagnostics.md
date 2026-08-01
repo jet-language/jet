@@ -1148,6 +1148,7 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E3621 | replay semantic identity does not match | Source, toolchain, or adapter identity in the artifact does not match the current target. | Recapture against this exact revision. |
 | E3622 | replay artifact is corrupt | Magic, header, frame hash, or footer verification failed. | Pass an intact `.jetproof-replay` path. |
 | E3627 | replay capture refused sensitive data | Safe capture refuses reachable Rand/IO/Net; sensitive capture needs TTY consent. | Use `--capture` for Time-only, or run `--capture-sensitive` interactively. |
+| E3628 | replay diverged from captured authority | Captured Time/IO roots could not be installed or disagreed with the live run. | Recapture with `--capture`, then replay the same identity. |
 | E3629 | replay artifact could not be finalized | Destination path, rename, or durability checks refused the write. | Fix the path and retry; differing existing bytes are never overwritten. |
 | E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() => …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() => … )` or `reactive.effect(() => { … })`. |
 | E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() => { … })`. |
