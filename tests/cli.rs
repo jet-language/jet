@@ -4907,7 +4907,7 @@ fn scene_probe_produces_real_frame_time_samples_and_rejects_forged_cache() {
         assert_eq!(provider["kind"], CanonicalJson::String("SceneProbe".into()));
         assert_eq!(provider["identity"], CanonicalJson::String("main".into()));
         let CanonicalJson::Array(samples) = &m["samples"] else { panic!("samples") };
-        assert_eq!(samples.len(), 20, "SceneProbe must produce exactly 20 samples");
+        assert_eq!(samples.len(), 600, "SceneProbe must produce exactly 600 measured samples");
     }
 
     // Second run should reuse cached report (compatible identity → no new report).

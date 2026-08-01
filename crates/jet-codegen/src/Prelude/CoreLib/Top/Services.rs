@@ -655,10 +655,13 @@ fn jet_services_drain_worker(
     tree: &mut JetServiceTree,
     endpoint: &JetServiceEndpoint,
 ) -> Result<(), JetServiceError> {
-    let worker = jet_services_find_worker_mut(tree, endpoint)?;
-    worker.running = false;
-    if !tree.draining.iter().any(|n| n == &worker.name) {
-        tree.draining.push(worker.name.clone());
+    let name = {
+        let worker = jet_services_find_worker_mut(tree, endpoint)?;
+        worker.running = false;
+        worker.name.clone()
+    };
+    if !tree.draining.iter().any(|n| n == &name) {
+        tree.draining.push(name);
     }
     Ok(())
 }

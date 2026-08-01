@@ -1,0 +1,19 @@
+// D-COMPUTE-ML1 / #1142: training step + Tensor serialization over the CPU oracle.
+use core.compute as compute
+
+fn run() {
+    pred :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("pred")
+    target :: compute.from_list([1.5, 2.5, 2.5]) ?? panic("target")
+    loss :: compute.mse_loss(pred, target) ?? panic("loss")
+    print("loss:{loss}")
+
+    param :: compute.ones([3]) ?? panic("param")
+    grad :: compute.from_list([0.1, 0.2, 0.3]) ?? panic("grad")
+    next :: compute.sgd_step(param, grad, 0.5) ?? panic("sgd")
+    print("param:{compute.to_list(next)}")
+
+    wire :: compute.serialize(next)
+    print("wire:{wire}")
+    round :: compute.deserialize(wire) ?? panic("deserialize")
+    print("round:{compute.to_list(round)}")
+}

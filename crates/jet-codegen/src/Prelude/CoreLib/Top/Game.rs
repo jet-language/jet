@@ -265,16 +265,16 @@ fn jet_game_run(
         .map(|r| r.path.clone())
         .unwrap_or_else(|| "<none>".to_string());
 
-    // D-PERFBUDGET-PROVIDER1 / INTEGRATION1: when JET_SCENE_PROBE=<name>
-    // matches this scene, run 5 warmup + 20 measured frames and emit
-    // JETSCENE1 wire rows to stdout. Normal output is suppressed; the
-    // caller (scene_probe_provider) parses only JETSCENE1 lines.
+    // D-PERFBUDGET-GAMEMIGRATE1 / PROVIDER1: when JET_SCENE_PROBE=<name>
+    // matches this scene, pin identity then run 120 warmup + 600 measured
+    // frames and emit JETSCENE1 wire rows to stdout. Normal output is
+    // suppressed; the caller parses only JETSCENEID/JETSCENE1 lines.
     let probe_name = std::env::var("JET_SCENE_PROBE").ok();
     let measuring = probe_name.as_deref() == Some(scene.name.as_str());
 
     let asset_bytes = scene.assets.state.borrow().asset_bytes;
-    let warmup_frames: i64 = 5;
-    let measure_frames: i64 = 20;
+    let warmup_frames: i64 = 120;
+    let measure_frames: i64 = 600;
     let total_frames = if measuring { warmup_frames + measure_frames } else { 3 };
 
     let mut out = Vec::new();
@@ -317,6 +317,16 @@ fn jet_game_run(
 
     // Hex-encode scene name for the wire protocol (avoids tab/newline issues).
     let scene_hex: String = scene.name.bytes().map(|b| format!("{:02x}", b)).collect();
+
+    if measuring {
+        // D-PERFBUDGET-GAMEMIGRATE1: one SceneProbe pins backend, target,
+        // device, replay/input, scene-ready, 120 warmup, 600 measured,
+        // viewport, and settings before any sample row.
+        println!(
+            "JETSCENEID\t{scene_hex}\tbackend={}/{}/{}\treplay={}\tdevice=headless\tviewport=default\tsettings=default\twarmup={warmup_frames}\tmeasured={measure_frames}\tready=frame0",
+            backend.renderer, backend.audio, backend.editor, replay_path
+        );
+    }
 
     // D-GAME-LOOP1=A: probe path keeps a fixed frame count; ordinary runs loop
     // on backend.should_continue() / present() (headless budget = 3).

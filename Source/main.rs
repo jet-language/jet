@@ -30,6 +30,7 @@ mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
 mod ProveReplay;
+mod ProveSolver;
 mod CmdReport;
 mod CmdSchema;
 mod CmdSemIndex;

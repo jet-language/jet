@@ -632,7 +632,8 @@ fn render_value(v: &Json) -> String {
         Json::Str(s) => json_str(s),
         Json::Int(n) => n.to_string(),
         Json::Obj(fields) => {
-            let mut sorted = fields.clone();
+            let mut sorted: Vec<(String, Json)> =
+                fields.iter().map(|(k, v)| (k.clone(), clone_json(v))).collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
             render_obj(&sorted)
         }

@@ -52,9 +52,9 @@ fn jet_app_invalidate(footprint: String) -> i64 {
                 q.generation += 1;
                 q.value = format!("invalidated@g{}", q.generation);
                 hit += 1;
-                state.ws_pushes += 1;
             }
         }
+        state.ws_pushes += hit;
         state.invalidations += hit;
         hit
     })
@@ -76,13 +76,21 @@ fn jet_app_transact_invalidate(write_set: String) -> i64 {
 fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
     JET_LIVE_REGISTRY.with(|reg| {
         let mut state = reg.borrow_mut();
-        if let Some(q) = state.queries.iter_mut().find(|q| q.id == query.id) {
-            q.generation += 1;
-            q.value = payload;
+        let found = state
+            .queries
+            .iter_mut()
+            .find(|q| q.id == query.id)
+            .map(|q| {
+                q.generation += 1;
+                q.value = payload.clone();
+                q.clone()
+            });
+        if let Some(updated) = found {
             state.ws_pushes += 1;
-            return q.clone();
+            updated
+        } else {
+            query.clone()
         }
-        query.clone()
     })
 }
 

@@ -328,7 +328,7 @@ pub fn core_fixed_sig(
         )),
         ("core.auth", "register_user") => Some((
             vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Unit, Type::String)),
+            Some(result_ty(unit_ty(), Type::String)),
         )),
         ("core.auth", "password_login" | "oauth_finish") => Some((
             vec![

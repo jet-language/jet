@@ -2837,10 +2837,10 @@ pub(crate) fn collect_scene_evidence(
                 _ => {}
             }
         }
-        // Require exactly 20 samples per metric.
-        if frame_ns.len() != 20 || draw_calls.len() != 20 || asset_bytes.len() != 20 || rss_hwm.len() != 20 {
+        // Require exactly 600 measured samples per metric (120 warmup omitted).
+        if frame_ns.len() != 600 || draw_calls.len() != 600 || asset_bytes.len() != 600 || rss_hwm.len() != 600 {
             eprintln!(
-                "budget: SceneProbe `{scene_name}` emitted {}/{}/{}/{} samples; need 20 for each metric",
+                "budget: SceneProbe `{scene_name}` emitted {}/{}/{}/{} samples; need 600 for each metric",
                 frame_ns.len(), draw_calls.len(), asset_bytes.len(), rss_hwm.len()
             );
             continue;

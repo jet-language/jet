@@ -1143,6 +1143,7 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E2908 | performance budget operation failed | Provider protocol/execution, report/container, CAS, permission, or durability validation refused the operation. | Correct the named refusal and retry; there is no force bypass. |
 | E2940 | required proof evidence is unavailable | The `complete_required` policy needs `{producer}`, but `{reason}`. | Perform the producer-specific action named by `jet prove`, then run the same command again. |
 | E2941 | unknown proof lens `{value}` | `jet prove` accepts `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`. | Use one exact value, for example `jet prove TARGET --lens tests`. |
+| E2950 | solver found a counterexample to `{obligation}` | The assignment satisfies every assumption but makes the claim false. | Change the function or claim so every admitted input satisfies the postcondition. |
 | E3620 | replay schema version is incompatible | The `.jetproof-replay` schema major/minor is unsupported by this `jet prove`. | Recapture with a compatible toolchain, or upgrade Jet. |
 | E3621 | replay semantic identity does not match | Source, toolchain, or adapter identity in the artifact does not match the current target. | Recapture against this exact revision. |
 | E3622 | replay artifact is corrupt | Magic, header, frame hash, or footer verification failed. | Pass an intact `.jetproof-replay` path. |
