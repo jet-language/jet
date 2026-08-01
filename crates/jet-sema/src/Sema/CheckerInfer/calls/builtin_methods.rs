@@ -515,7 +515,12 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             let mut refined_ret = ret.clone();
-            if let Some(mut expected) = Collections::builtin_method_arg_types(recv_ty, method) {
+            let build_expected = if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT) {
+                Collections::build_context_method_arg_types(method, args.len())
+            } else {
+                None
+            };
+            if let Some(mut expected) = build_expected.or_else(|| Collections::builtin_method_arg_types(recv_ty, method)) {
                 let inferred_seed = if matches!(
                     method,
                     "reduce" | "fold" | "scan"

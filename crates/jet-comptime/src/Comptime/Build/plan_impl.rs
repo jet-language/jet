@@ -63,9 +63,16 @@ impl BuildPlan {
         for action in self.actions.iter().filter(|action| actions.contains(&action.id)) {
             paths.extend(action.outputs.iter().map(|path| path.as_str().to_string()));
         }
-        Ok(self.generated_modules.iter()
+        let mut selected = self.generated_modules.iter()
             .filter(|module| paths.contains(module.path.as_str()))
-            .collect())
+            .collect::<Vec<_>>();
+        selected.sort_by(|left, right| {
+            left.path
+                .as_str()
+                .cmp(right.path.as_str())
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        Ok(selected)
     }
 
     /// Actions reachable from the selected default target. A plan without a
@@ -274,7 +281,23 @@ impl BuildPlan {
     }
 
     pub fn resource_pools(&self) -> Vec<BuildResourcePoolSpec> {
-        default_resource_pools()
+        let mut pools = default_resource_pools();
+        let mut custom_pools = Vec::new();
+        for action in &self.actions {
+            for pool in action_pools(action) {
+                if !pools.iter().any(|spec| spec.pool.as_str() == pool.as_str()) {
+                    // Named pools are deliberately conservative: absent an
+                    // explicit capacity declaration, one action owns the
+                    // pool. This preserves deterministic serialization and
+                    // prevents a custom pool from becoming an unbounded
+                    // host escape.
+                    custom_pools.push(BuildResourcePoolSpec::new(pool, 1));
+                }
+            }
+        }
+        custom_pools.sort_by(|left, right| left.pool.as_str().cmp(right.pool.as_str()));
+        pools.extend(custom_pools);
+        pools
     }
 
     pub fn graph(&self) -> BuildGraph {

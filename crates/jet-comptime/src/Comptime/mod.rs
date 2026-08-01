@@ -95,7 +95,7 @@ pub fn data_status_rows() -> Vec<(
     DataLite::status_rows()
 }
 pub use Methods::apply_dollar_splices;
-pub use Purity::{check_build_time_io, walk_calls};
+pub use Purity::{check_build_time_io, walk_calls, walk_identifiers};
 pub use Reflect::{
     build_program_info, build_struct_type_info, build_struct_type_info_with_states,
     ProgramSemanticFacts,
@@ -209,7 +209,32 @@ pub fn run_build_entry(
     package: &str,
     allow_impure: bool,
 ) -> Result<ProgramBuildEvaluation, Diagnostic> {
-    let context = Build::begin_program_build(package, program_value);
+    run_build_entry_with_policy(
+        build,
+        funcs,
+        base_dir,
+        program,
+        program_value,
+        package,
+        allow_impure,
+        Build::BuildPolicy::allow_all(),
+    )
+}
+
+/// Build entry with an explicit policy snapshot. The legacy wrapper above is
+/// kept for direct Rust consumers; the production driver uses this seam so
+/// policy cannot be bypassed by the comptime bridge.
+pub fn run_build_entry_with_policy(
+    build: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    program: &ProgramInfo,
+    program_value: CtValue,
+    package: &str,
+    allow_impure: bool,
+    policy: Build::BuildPolicy,
+) -> Result<ProgramBuildEvaluation, Diagnostic> {
+    let context = Build::begin_program_build_with_policy(package, program_value, policy);
     let mut interp = Interp {
         funcs,
         base_dir,
@@ -248,13 +273,27 @@ pub fn run_build_entry(
     };
     if let CtValue::ResErr(error) = &returned {
         Build::abort_program_build(&context);
+        let detail = error.jet_show();
+        let (code, what, why, fix) = if let Some(detail) = detail.strip_prefix("E3511: ") {
+            (
+                "E3511",
+                detail.to_string(),
+                "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
+                "break the dependency between these generators or give each generated module one owner".to_string(),
+            )
+        } else {
+            (
+                "E3502",
+                format!("`fn build` returned an error: {detail}"),
+                "the selected root build entry must finish graph construction before any action runs".to_string(),
+                "fix the failing build operation; use `jet inspect explain-build` to inspect completed graph nodes".to_string(),
+            )
+        };
         return Err(Diagnostic::error(
-            "E3502",
-            format!("`fn build` returned an error: {}", error.jet_show()),
-            "the selected root build entry must finish graph construction before any action runs"
-                .to_string(),
-            "fix the failing build operation; use `jet inspect explain-build` to inspect completed graph nodes"
-                .to_string(),
+            code,
+            what,
+            why,
+            fix,
             Some(build.name_span),
         ));
     }

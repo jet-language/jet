@@ -487,7 +487,7 @@ impl LegacyWrapperSpec {
         }
         let mut labels = self.labels;
         labels.insert("legacy.wrapper".to_string(), self.kind.as_str().to_string());
-        Ok(ActionSpec {
+        let spec = ActionSpec {
             inputs: self.inputs,
             outputs: self.outputs,
             argv: self.argv,
@@ -504,6 +504,8 @@ impl LegacyWrapperSpec {
             resource_pools: BTreeSet::new(),
             legacy_wrapper: Some(self.kind),
             variant_identity: None,
-        })
+        };
+        super::validation::validate_action(self.kind.as_str(), &spec)?;
+        Ok(spec)
     }
 }

@@ -4,6 +4,7 @@ use super::handles::{
     ToolchainHandle,
 };
 use std::collections::BTreeMap;
+use std::path::{Component, Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TargetKind {
@@ -26,6 +27,16 @@ impl BuildPath {
         let path = path.into();
         if path.trim().is_empty() {
             return Err(BuildError::EmptyPath);
+        }
+        if Path::new(&path).is_absolute()
+            || Path::new(&path).components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(BuildError::InvalidPath(path));
         }
         Ok(BuildPath(path))
     }

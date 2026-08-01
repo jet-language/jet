@@ -1279,6 +1279,36 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
 
 /// D-BUILDGEN1: record generated-module output hashes in the unified lock.
 /// Upserts by managed path so a rebuild replaces drift instead of appending.
+pub fn verify_locked_generated_inputs(
+    project_root: &Path,
+    generated: &[ComptimeInput],
+) -> Result<(), Diagnostic> {
+    let Some(lock) = load(project_root) else {
+        if generated.is_empty() {
+            return Ok(());
+        }
+        return Err(Diagnostic::error(
+            "E3512",
+            format!("locked generated input `{}` has no unified lock entry", generated[0].path),
+            "`--locked` requires every generated source hash to be recorded before materialization".to_string(),
+            "rerun without `--locked` to review and record the generated provenance".to_string(),
+            None,
+        ));
+    };
+    for input in generated {
+        if !lock.comptime_inputs.iter().any(|old| old == input) {
+            return Err(Diagnostic::error(
+                "E3512",
+                format!("locked generated input `{}` drifted", input.path),
+                "`--locked` requires generated input and output hashes to match the unified lock exactly".to_string(),
+                "rerun without `--locked` to review and record the new generated provenance".to_string(),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn record_generated_inputs(
     project_root: &Path,
     generated: &[ComptimeInput],
@@ -1297,19 +1327,27 @@ pub fn record_generated_inputs(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
-        });
+    });
     if locked {
-        for input in generated {
-            let matches = lock.comptime_inputs.iter().any(|old| old == input);
-            if !matches {
-                return Err(Diagnostic::error(
-                    "E3512",
-                    format!("locked generated input `{}` drifted", input.path),
-                    "`--locked` requires generated input and output hashes to match the unified lock exactly".to_string(),
-                    "rerun without `--locked` to review and record the new generated provenance".to_string(),
-                    None,
-                ));
-            }
+        let mut expected = lock.comptime_inputs.clone();
+        expected.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+        expected.dedup();
+        let mut actual = generated.to_vec();
+        actual.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+        actual.dedup();
+        if expected != actual {
+            let drifted = actual
+                .iter()
+                .find(|input| !expected.contains(input))
+                .or_else(|| expected.iter().find(|input| !actual.contains(input)));
+            let path = drifted.map(|input| input.path.as_str()).unwrap_or("<unknown>");
+            return Err(Diagnostic::error(
+                "E3512",
+                format!("locked generated input `{path}` drifted"),
+                "`--locked` requires generated input and output hashes to match the unified lock exactly".to_string(),
+                "rerun without `--locked` to review and record the new generated provenance".to_string(),
+                None,
+            ));
         }
         return Ok(());
     }

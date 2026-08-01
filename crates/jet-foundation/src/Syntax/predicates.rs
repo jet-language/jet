@@ -91,6 +91,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): runtime reflection floor —
     // `reflect.of(x) -> Value` with `.type_name()`/`.display()`/`.fields()`.
     "core.reflect",
+    // D-FRONTENDAPI1=A: read-only compiler facts are available only to
+    // compile-time build code; no runtime compiler object is emitted.
+    "core.compiler",
     // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
     // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
     "core.encoding",

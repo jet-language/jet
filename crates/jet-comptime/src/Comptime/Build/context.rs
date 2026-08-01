@@ -24,6 +24,7 @@ use super::validation::{
     validate_probe, validate_toolchain,
 };
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,9 @@ pub struct BuildContext {
     signing_identity_names: HashSet<String>,
     probe_names: HashSet<String>,
     default_toolchain: ToolchainHandle,
+    /// Policy captured at build-session creation. Every typed bridge method
+    /// observes this same policy; no method silently widens it.
+    policy: BuildPolicy,
     /// D-BUILDCTX-FLAGS1=A: project default profile name (`release`, `debug`, …).
     default_profile: Option<String>,
     /// D-BUILDCTX-FLAGS1=A: `--allow-*` grants applied when CLI omits them.
@@ -50,6 +54,10 @@ pub struct BuildContext {
 
 impl BuildContext {
     pub fn new() -> Self {
+        Self::new_with_policy(BuildPolicy::allow_all())
+    }
+
+    pub fn new_with_policy(policy: BuildPolicy) -> Self {
         let context = NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed);
         let default_toolchain = ToolchainHandle {
             id: ToolchainId(0),
@@ -82,9 +90,14 @@ impl BuildContext {
             signing_identity_names: HashSet::new(),
             probe_names: HashSet::new(),
             default_toolchain,
+            policy,
             default_profile: None,
             default_allows: HashSet::new(),
         }
+    }
+
+    pub fn policy(&self) -> &BuildPolicy {
+        &self.policy
     }
 
     /// D-BUILDCTX-FLAGS1=A: set the project default profile (CLI `--profile`/`--release` wins).
@@ -345,14 +358,28 @@ impl BuildContext {
     ) -> Result<GeneratedModuleHandle, BuildError> {
         let module = GeneratedModuleSpec::new(name, path, source);
         validate_generated_module(&module)?;
+        self.push_generated_module(module, None)
+    }
+
+    fn push_generated_module(
+        &mut self,
+        module: GeneratedModuleSpec,
+        plugin: Option<PluginHandle>,
+    ) -> Result<GeneratedModuleHandle, BuildError> {
+        if self
+            .actions
+            .iter()
+            .any(|action| action.outputs.iter().any(|output| output == &module.path))
+        {
+            return Err(BuildError::GeneratedModuleCycle {
+                module: module.name.clone(),
+                path: module.path.as_str().to_string(),
+            });
+        }
         if self.generated_modules.iter().any(|old| old.name == module.name) {
             return Err(BuildError::DuplicateGeneratedModuleName(module.name));
         }
-        if self
-            .generated_modules
-            .iter()
-            .any(|old| old.path == module.path)
-        {
+        if self.generated_modules.iter().any(|old| old.path == module.path) {
             return Err(BuildError::DuplicateGeneratedModulePath(
                 module.path.as_str().to_string(),
             ));
@@ -364,7 +391,7 @@ impl BuildContext {
             path: module.path,
             source_digest: ContentDigest::from_bytes(module.source.as_bytes()),
             source: module.source,
-            plugin: None,
+            plugin,
         });
         Ok(GeneratedModuleHandle {
             id,
@@ -373,6 +400,32 @@ impl BuildContext {
     }
 
     pub fn apply_wasm_component_plugin(
+        &mut self,
+        spec: WasmComponentPluginSpec,
+        contribution: PluginContribution,
+        policy: &BuildPolicy,
+    ) -> Result<PluginApplication, BuildError> {
+        let snapshot = self.clone();
+        let result = self.apply_wasm_component_plugin_inner(spec, contribution, policy);
+        if result.is_err() {
+            *self = snapshot;
+        }
+        result
+    }
+
+    pub fn apply_packaged_wasm_component_plugin(
+        &mut self,
+        manifest_path: impl AsRef<Path>,
+        component_path: impl AsRef<Path>,
+        contribution: PluginContribution,
+        policy: &BuildPolicy,
+    ) -> Result<PluginApplication, BuildError> {
+        let spec = WasmComponentPluginSpec::load_packaged(manifest_path, component_path)
+            .map_err(BuildError::PackagedPlugin)?;
+        self.apply_wasm_component_plugin(spec, contribution, policy)
+    }
+
+    fn apply_wasm_component_plugin_inner(
         &mut self,
         spec: WasmComponentPluginSpec,
         contribution: PluginContribution,
@@ -455,15 +508,8 @@ impl BuildContext {
         let mut module_handles = Vec::new();
         for module in contribution.generated_modules {
             validate_generated_module(&module)?;
-            let id = GeneratedModuleId(self.generated_modules.len());
-            self.generated_modules.push(BuildGeneratedModule {
-                id,
-                name: module.name,
-                path: module.path,
-                source_digest: ContentDigest::from_bytes(module.source.as_bytes()),
-                source: module.source,
-                plugin: Some(plugin),
-            });
+            let handle = self.push_generated_module(module, Some(plugin))?;
+            let id = handle.id();
             module_handles.push(GeneratedModuleHandle {
                 id,
                 context: self.context,
@@ -489,6 +535,16 @@ impl BuildContext {
             return Err(BuildError::DuplicateActionName(name));
         }
         self.validate_action_spec(&name, &spec)?;
+        if let Some(module) = self.generated_modules.iter().find(|module| {
+            spec.outputs
+                .iter()
+                .any(|output| output == &module.path)
+        }) {
+            return Err(BuildError::GeneratedModuleCycle {
+                module: module.name.clone(),
+                path: module.path.as_str().to_string(),
+            });
+        }
         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
         let id = ActionId(self.actions.len());
         self.actions.push(BuildAction {
@@ -577,6 +633,19 @@ impl BuildContext {
             self.validate_refs(&target.deps, &target.actions)?;
         }
         validate_action_output_owners(&self.actions)?;
+        for module in &self.generated_modules {
+            if self.actions.iter().any(|action| {
+                action
+                    .outputs
+                    .iter()
+                    .any(|output| output == &module.path)
+            }) {
+                return Err(BuildError::GeneratedModuleCycle {
+                    module: module.name.clone(),
+                    path: module.path.as_str().to_string(),
+                });
+            }
+        }
         Ok(BuildPlan {
             context: self.context,
             targets: self.targets.clone(),

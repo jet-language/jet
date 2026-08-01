@@ -1,11 +1,14 @@
 use jet::Comptime::Build::{
     ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
-    BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPolicy,
-    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest, GeneratedModuleSpec,
-    LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord, PluginContribution,
-    ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest, RemoteCachePolicy,
-    RemoteDeniedReason, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, TargetKind,
-    TargetSpec, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+    ActionInputSnapshot, ActionKey, ActionOutputRecord, ActionResultRecord, BuildCapability,
+    BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy,
+    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest,
+    GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord,
+    PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest,
+    RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
+    RemoteExecutionResult, RemoteSandboxProof, ReproducibilityClass, SdkIdentity,
+    SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
 };
 use std::fs;
 
@@ -906,6 +909,102 @@ fn cache_provenance_records_hit_miss_and_remote_denial() {
 }
 
 #[test]
+fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_transport_{}_{}",
+        std::process::id(),
+        "roundtrip"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let transport = RemoteCacheTransport::new(&root);
+    let key = ActionKey::new("compile:app");
+    let provenance_digest = ContentDigest::from_bytes(b"provenance");
+    let sandbox = RemoteSandboxProof::new("sandbox-1", key.as_str(), provenance_digest.clone());
+    let policy = RemoteCachePolicy::granted(sandbox.clone());
+    let output_digest = transport.upload_blob(b"compiled", &policy).unwrap();
+    assert_eq!(transport.download_blob(&output_digest, &policy).unwrap(), b"compiled");
+
+    let output = ActionOutputRecord {
+        path: BuildPath::new("build/app").unwrap(),
+        digest: output_digest.clone(),
+        byte_len: 8,
+    };
+    let record = ActionResultRecord {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: vec![output.clone()],
+        provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
+    };
+    transport.upload_action_record(&record, &policy).unwrap();
+    assert_eq!(transport.download_action_record(&key, &policy).unwrap(), record);
+
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+        inputs: vec![ActionInputSnapshot {
+            path: BuildPath::new("src/main.jet").unwrap(),
+            digest: ContentDigest::from_bytes(b"source"),
+            byte_len: 6,
+        }],
+        outputs: vec![output.path.clone()],
+        toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+        sandbox: sandbox.clone(),
+    };
+    transport.submit_execution(&request, &policy).unwrap();
+    let result = RemoteExecutionResult {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: vec![output],
+        toolchain_digest: request.toolchain_digest.clone(),
+        sandbox,
+    };
+    transport.publish_execution_result(&result, &policy).unwrap();
+    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+
+    let wrong_policy = RemoteCachePolicy::granted(RemoteSandboxProof::new(
+        "sandbox-1",
+        "other-action",
+        provenance_digest,
+    ));
+    let error = transport.download_action_record(&key, &wrong_policy).unwrap_err();
+    assert!(matches!(
+        error,
+        jet::Comptime::Build::RemoteCacheError::Denied(denied)
+            if denied.reason == RemoteDeniedReason::ProofDoesNotMatchAction
+    ));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_transport_rejects_a_symlinked_store_root() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_symlink_{}_{}",
+        std::process::id(),
+        "root"
+    ));
+    let outside = root.with_extension("outside");
+    let _ = fs::remove_file(&root);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, &root).unwrap();
+    let key = ActionKey::new("remote-symlink-key");
+    let policy = RemoteCachePolicy::granted(RemoteSandboxProof::new(
+        "sandbox",
+        key.as_str(),
+        ContentDigest::from_bytes(b"provenance"),
+    ));
+    let transport = RemoteCacheTransport::new(&root);
+    assert!(transport.upload_blob(b"must not follow", &policy).is_err());
+    assert!(!outside.join("cas").exists());
+    let _ = fs::remove_file(&root);
+    let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
 fn scheduler_records_parallel_ready_graph_pools_cancellation_and_metrics() {
     let mut b = BuildContext::new();
     let core = b
@@ -1150,7 +1249,7 @@ fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authorit
 #[test]
 fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
     let mut b = BuildContext::new();
-    let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:plugin")
+    let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         .with_capability(BuildCapability::FS)
         .with_capability(BuildCapability::Exec);
     let policy = BuildPolicy::allow_all()
@@ -1161,7 +1260,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
             "compile-shaders",
             ActionSpec::cached(["shaderc", "assets/main.glsl"])
                 .with_inputs(["assets/main.glsl"])
-                .with_outputs([".jet/generated/shaders.jet"])
+                .with_outputs(["build/shaders.bin"])
                 .with_cap(BuildCapability::FS)
                 .with_cap(BuildCapability::Exec),
         )
@@ -1201,7 +1300,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
 
     let denied = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:net")
+            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
                 .with_capability(BuildCapability::Net),
             PluginContribution::new(),
             &BuildPolicy::allow_all(),
@@ -1211,7 +1310,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
 
     let version_err = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("old-plugin", "0.1.0", "sha256:old")
+            WasmComponentPluginSpec::new("old-plugin", "0.1.0", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
                 .with_api_version("jet.build.plugin.v0"),
             PluginContribution::new(),
             &BuildPolicy::allow_all(),
@@ -1224,7 +1323,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
 
     let contributed_cap_denied = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:net")
+            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
                 .with_capability(BuildCapability::FS),
             PluginContribution::new().with_action(
                 "probe-network",
@@ -1239,6 +1338,131 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
         contributed_cap_denied,
         BuildError::PolicyDenied(_)
     ));
+}
+
+#[test]
+fn packaged_build_plugins_verify_bytes_and_roll_back_rejected_contributions() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_plugin_package_{}_{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let component = b"\0asm\x0d\0\x01\0";
+    let digest = ContentDigest::from_bytes(component);
+    let manifest = root.join("plugin.manifest");
+    let component_path = root.join("plugin.wasm");
+    fs::write(
+        &manifest,
+        format!(
+            "name = \"packaged\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{}\"\ncapabilities = [\"FS\"]\n",
+            digest.as_str()
+        ),
+    )
+    .unwrap();
+    fs::write(&component_path, component).unwrap();
+
+    let spec = WasmComponentPluginSpec::load_packaged(&manifest, &component_path).unwrap();
+    assert_eq!(spec.component_digest, digest.as_str());
+
+    let invalid_component = b"not a component";
+    let invalid_manifest = root.join("invalid.manifest");
+    let invalid_component_path = root.join("invalid.wasm");
+    fs::write(
+        &invalid_manifest,
+        format!(
+            "name = \"invalid\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{}\"\ncapabilities = []\n",
+            ContentDigest::from_bytes(invalid_component).as_str()
+        ),
+    )
+    .unwrap();
+    fs::write(&invalid_component_path, invalid_component).unwrap();
+    let invalid = WasmComponentPluginSpec::load_packaged(&invalid_manifest, &invalid_component_path)
+        .expect_err("digest-matching arbitrary bytes must not be a component");
+    assert!(invalid.contains("Component Model binary"), "{invalid}");
+
+    let policy = BuildPolicy::allow_all().with_plugin_grant("packaged", BuildCapability::FS);
+    let rejected = PluginContribution::new()
+        .with_action(
+            "partial-action",
+            ActionSpec::cached(["tool"])
+                .with_outputs(["build/out"])
+                .with_cap(BuildCapability::FS),
+        )
+        .with_generated_module(GeneratedModuleSpec::new(
+            "bad-module",
+            "bad-module.jet",
+            "fn bad() {}",
+        ));
+    let mut build = BuildContext::new();
+    assert!(matches!(
+        build.apply_packaged_wasm_component_plugin(&manifest, &component_path, rejected, &policy),
+        Err(BuildError::InvalidGeneratedModulePath(_))
+    ));
+    assert!(build.plan().unwrap().actions().is_empty());
+    assert!(build.plan().unwrap().plugins().is_empty());
+
+    let accepted = PluginContribution::new().with_action(
+        "packaged-action",
+        ActionSpec::cached(["tool"])
+            .with_outputs(["build/packaged.out"])
+            .with_cap(BuildCapability::FS),
+    );
+    let applied = build
+        .apply_packaged_wasm_component_plugin(&manifest, &component_path, accepted, &policy)
+        .unwrap();
+    assert_eq!(applied.actions.len(), 1);
+    assert_eq!(build.plan().unwrap().plugins().len(), 1);
+
+    fs::write(&component_path, b"tampered").unwrap();
+    assert!(WasmComponentPluginSpec::load_packaged(&manifest, &component_path).is_err());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn action_environment_allowlist_cannot_name_undeclared_values() {
+    let mut build = BuildContext::new();
+    let error = build
+        .action(
+            "env-check",
+            ActionSpec::cached(["tool"])
+                .with_outputs(["build/out"])
+                .with_env_allowlist(["MISSING"]),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        BuildError::UndeclaredEnvName {
+            action: "env-check".to_string(),
+            key: "MISSING".to_string(),
+        }
+    );
+}
+
+#[test]
+fn plugin_action_and_generated_module_cannot_share_one_path() {
+    let result = BuildContext::new().apply_wasm_component_plugin(
+        WasmComponentPluginSpec::new(
+            "collision-plugin",
+            "1.0.0",
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        PluginContribution::new()
+            .with_action(
+                "emit-source",
+                ActionSpec::cached(["generator"])
+                    .with_outputs([".jet/generated/collision.jet"])
+                    .with_cap(BuildCapability::Exec),
+            )
+            .with_generated_module(GeneratedModuleSpec::new(
+                "collision",
+                ".jet/generated/collision.jet",
+                "fn collision() {}",
+            )),
+        &BuildPolicy::allow_all().with_plugin_grant("collision-plugin", BuildCapability::Exec),
+    );
+    assert!(matches!(result, Err(BuildError::GeneratedModuleCycle { .. })));
 }
 
 #[test]

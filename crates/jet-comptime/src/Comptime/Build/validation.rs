@@ -1,4 +1,5 @@
 use super::actions_policy::{ActionCache, ActionSpec, BuildAction, BuildCapability};
+use super::cache_cas::ContentDigest;
 use super::errors_keys::{BuildError, NameKind};
 use super::plugins_modules::{GeneratedModuleSpec, WasmComponentPluginSpec};
 use super::provenance_toolchains::{
@@ -57,6 +58,8 @@ pub(super) fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(),
     if spec.component_digest.trim().is_empty() {
         return Err(BuildError::EmptyPluginField(spec.name.clone()));
     }
+    ContentDigest::parse(&spec.component_digest)
+        .map_err(|error| BuildError::InvalidPluginDigest(error.to_string()))?;
     Ok(())
 }
 
@@ -66,6 +69,19 @@ pub(super) fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<
         || module.source.trim().is_empty()
     {
         return Err(BuildError::EmptyGeneratedModuleField(module.name.clone()));
+    }
+    let path = Path::new(module.path.as_str());
+    let components = path.components().collect::<Vec<_>>();
+    let valid_root = components.len() >= 3
+        && matches!(components[0], Component::Normal(part) if part == ".jet")
+        && matches!(components[1], Component::Normal(part) if part == "generated")
+        && components[2..]
+            .iter()
+            .all(|component| matches!(component, Component::Normal(_)));
+    if !valid_root || path.extension().and_then(|extension| extension.to_str()) != Some("jet") {
+        return Err(BuildError::InvalidGeneratedModulePath(
+            module.path.as_str().to_string(),
+        ));
     }
     Ok(())
 }
@@ -103,7 +119,9 @@ pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildEr
         ProbeKind::PkgConfig { package, .. } if package.trim().is_empty() => {
             return Err(BuildError::EmptyProbeField(name.to_string()));
         }
-        ProbeKind::HeaderCheck { header } if header.trim().is_empty() => {
+        ProbeKind::HeaderCheck { header }
+            if header.trim().is_empty() || !valid_header_name(header) =>
+        {
             return Err(BuildError::EmptyProbeField(name.to_string()));
         }
         ProbeKind::CompileCheck {
@@ -112,13 +130,24 @@ pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildEr
             code,
         } if check.trim().is_empty()
             || code.trim().is_empty()
-            || includes.iter().any(|include| include.trim().is_empty()) =>
+            || includes.iter().any(|include| !valid_header_name(include)) =>
         {
             return Err(BuildError::EmptyProbeField(name.to_string()));
         }
         _ => {}
     }
     validate_provenance(name, &spec.provenance)
+}
+
+fn valid_header_name(header: &str) -> bool {
+    !header.is_empty()
+        && !header.chars().any(|character| {
+            matches!(character, '\0' | '\n' | '\r' | '"' | '<' | '>')
+        })
+        && Path::new(header).is_relative()
+        && Path::new(header)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 pub(super) fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), BuildError> {
@@ -149,6 +178,17 @@ pub(super) fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), Build
     for key in spec.env.keys() {
         if key.trim().is_empty() {
             return Err(BuildError::EmptyEnvName(name.to_string()));
+        }
+    }
+    for key in &spec.env_allowlist {
+        if key.trim().is_empty() {
+            return Err(BuildError::EmptyEnvName(name.to_string()));
+        }
+        if !spec.env.contains_key(key) {
+            return Err(BuildError::UndeclaredEnvName {
+                action: name.to_string(),
+                key: key.clone(),
+            });
         }
     }
     match spec.cache {
@@ -196,6 +236,17 @@ pub(super) fn validate_paths(paths: &[BuildPath]) -> Result<(), BuildError> {
     for path in paths {
         if path.as_str().trim().is_empty() {
             return Err(BuildError::EmptyPath);
+        }
+        let path_value = Path::new(path.as_str());
+        if path_value.is_absolute()
+            || path_value.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(BuildError::InvalidPath(path.as_str().to_string()));
         }
     }
     Ok(())

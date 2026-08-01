@@ -38,6 +38,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_BUILD_TARGET,
     Syntax::TYPE_BUILD_TOOLCHAIN,
     Syntax::TYPE_BUILD_PROBE,
+    "BuildSigningIdentity",
     Syntax::TYPE_PROGRAM_INFO,
     // D-LOCALCELL1=A: built-in local mutation and guard handles.
     "Cell",
@@ -233,6 +234,32 @@ pub fn builtin_method_return(
             ("implements" | "has_method", 1) => Some(Some(Type::Bool)),
             _ => None,
         },
+        Type::Named(n) if n == "CompilerLexed" => match (method, arg_count) {
+            ("source", 0) => Some(Some(Type::String)),
+            ("tokens", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerToken".to_string()))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            _ => None,
+        },
+        Type::Named(n) if n == "CompilerSyntaxTree" => match (method, arg_count) {
+            ("source", 0) => Some(Some(Type::String)),
+            ("items", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerNode".to_string()))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            _ => None,
+        },
+        Type::Named(n) if n == "CompilerChecked" => match (method, arg_count) {
+            ("source", 0) => Some(Some(Type::String)),
+            ("syntax", 0) => Some(Some(Type::Named("CompilerSyntaxTree".to_string()))),
+            ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string()))))),
+            ("effects", 0) => Some(Some(Type::List(Box::new(Type::Named("EffectInfo".to_string()))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            ("semantic_index", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            _ => None,
+        },
+        Type::Named(n) if n == "CompilerSourceMap" => match (method, arg_count) {
+            ("sources", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("generated_lines", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerGeneratedLine".to_string()))))),
+            _ => None,
+        },
         Type::Named(n) if n == "FunctionInfo" => match (method, arg_count) {
             ("reaches_panic", 0) => Some(Some(Type::Bool)),
             _ => None,
@@ -399,18 +426,132 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
             ok: Box::new(Type::String),
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
-        ("action", 5 | 7) => build_result(Syntax::TYPE_BUILD_ACTION),
+        ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
+        ("legacy", 6) => build_result(Syntax::TYPE_BUILD_ACTION),
         ("add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
-        | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
+        | "add_doc" | "add_install" | "add_package" | "add_publish", 3 | 4 | 5 | 6 | 7) => {
             build_result(Syntax::TYPE_BUILD_TARGET)
         }
-        ("toolchain", 2) => build_result(Syntax::TYPE_BUILD_TOOLCHAIN),
-        ("probe", 3) => build_result(Syntax::TYPE_BUILD_PROBE),
+        ("toolchain", 2 | 3 | 4 | 5 | 6) => build_result(Syntax::TYPE_BUILD_TOOLCHAIN),
+        ("signing", 2) => build_result("BuildSigningIdentity"),
+        ("probe", 3 | 4 | 5) => build_result(Syntax::TYPE_BUILD_PROBE),
         ("error", 5) => Some(None),
         ("plan", 0 | 1) => build_result(Syntax::TYPE_BUILD_PLAN),
         // D-BUILDCTX-FLAGS1=A
         ("default_profile", 1) => Some(None),
         ("default_allow", 1) => Some(None),
+        _ => None,
+    }
+}
+
+/// D-BUILDACTION1/D-BUILDTARGET1: build methods have one canonical base
+/// shape and only add typed trailing controls. Keeping this table beside the
+/// return table means the sema contract and the interpreter accept the same
+/// arities; an unknown shape cannot silently become an untyped call.
+pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<Vec<Type>> {
+    let strings = || Type::List(Box::new(Type::String));
+    let actions = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_ACTION.to_string())));
+    let targets = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())));
+    let probes = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string())));
+    match (method, arg_count) {
+        ("generate", 2) => Some(vec![Type::String, Type::String]),
+        ("find" | "embed", 1) => Some(vec![Type::String]),
+        ("fetch", 2) => Some(vec![Type::String, Type::String]),
+        ("action", 5) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+        ]),
+        ("action", 7) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+        ]),
+        ("action", 8) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+        ]),
+        ("action", 9) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String,
+        ]),
+        ("action", 10) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(),
+        ]),
+        ("action", 11) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(),
+        ]),
+        ("action", 12) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(),
+        ]),
+        ("action", 13) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(),
+        ]),
+        ("action", 14) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(),
+        ]),
+        ("action", 15) => Some(vec![
+            Type::String, strings(), strings(), strings(), strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(), Type::String,
+        ]),
+        ("legacy", 6) => Some(vec![
+            Type::String, Type::String, strings(), strings(), strings(), strings(),
+        ]),
+        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
+            Some(vec![Type::String, strings(), actions()])
+        }
+        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 4) => {
+            Some(vec![Type::String, strings(), actions(), targets()])
+        }
+        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 5) => {
+            Some(vec![Type::String, strings(), actions(), targets(), probes()])
+        }
+        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 6) => {
+            Some(vec![
+                Type::String, strings(), actions(), targets(), probes(),
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            ])
+        }
+        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 7) => {
+            Some(vec![
+                Type::String, strings(), actions(), targets(), probes(),
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+                Type::Named("BuildSigningIdentity".to_string()),
+            ])
+        }
+        ("toolchain", 2) => Some(vec![Type::String, Type::String]),
+        ("toolchain", 3..=6) => {
+            let mut args = vec![Type::String, Type::String];
+            args.extend((0..(arg_count - 2)).map(|_| Type::String));
+            Some(args)
+        }
+        ("signing", 2) => Some(vec![Type::String, Type::String]),
+        ("probe", 3) => Some(vec![Type::String, Type::String, Type::String]),
+        ("probe", 4) => Some(vec![Type::String, Type::String, Type::String, Type::String]),
+        ("probe", 5) => Some(vec![Type::String, Type::String, Type::String, Type::String, Type::String]),
+        ("error", 5) => Some(vec![
+            Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()), Type::String,
+            Type::String, Type::String, Type::String,
+        ]),
+        ("plan", 0) => Some(Vec::new()),
+        ("plan", 1) => Some(vec![Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())]),
+        ("default_profile", 1) => Some(vec![Type::String]),
+        ("default_allow", 1) => Some(vec![strings()]),
         _ => None,
     }
 }
@@ -1566,6 +1707,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
                 Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string()))),
             ]),
+            "legacy" => Some(vec![
+                Type::String,
+                Type::String,
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+            ]),
             "add_executable" | "add_library" | "add_test" | "add_bench"
             | "add_asset_bundle" | "add_doc" | "add_install" | "add_package"
             | "add_publish" => Some(vec![
@@ -1587,6 +1736,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
         Type::Named(n) if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") => Some(vec![Type::String]),
+        Type::Named(n) if n == "CompilerLexed" && matches!(method, "source" | "tokens" | "diagnostics") => Some(vec![]),
+        Type::Named(n) if n == "CompilerSyntaxTree" && matches!(method, "source" | "items" | "diagnostics") => Some(vec![]),
+        Type::Named(n) if n == "CompilerChecked" && matches!(method, "source" | "syntax" | "functions" | "effects" | "diagnostics" | "semantic_index") => Some(vec![]),
+        Type::Named(n) if n == "CompilerSourceMap" && matches!(method, "sources" | "generated_lines") => Some(vec![]),
         Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
         Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
         // D-ITERTOOLS1=A: Iter shares list adapter arg types; materializers take none.

@@ -1,8 +1,8 @@
-use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePool};
+use super::actions_policy::{ActionCache, BuildAction, BuildCapability};
 use super::cache_cas::{
     ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
     ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-    LocalCas, atomic_restore_file, secure_read_file,
+    LocalCas, atomic_restore_file, ensure_real_directory, secure_read_file,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -11,9 +11,10 @@ use super::plan_graph::{BuildExecutionReport, BuildPlan};
 use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
 use super::targets::BuildPath;
 use super::validation::resolve_under;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::{fs, io};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,7 +87,7 @@ pub fn execute_build_plan_with_front_end(
     let model = plan.execution_model().map_err(BuildExecutionError::InvalidGraph)?;
     let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
     let records = project_root.join(".jet/build-cache/actions");
-    fs::create_dir_all(&records).map_err(|e| BuildExecutionError::IO {
+    ensure_real_directory(&records).map_err(|e| BuildExecutionError::IO {
         action: "cache".to_string(), detail: e.to_string()
     })?;
     let mut outcomes = Vec::new();
@@ -148,22 +149,33 @@ pub fn execute_build_plan_with_front_end(
 /// capacity; linker/console/GPU/custom pools serialize by name.
 fn execution_batches(plan: &BuildPlan, actions: &[ActionId]) -> Vec<Vec<ActionId>> {
     let mut batches: Vec<Vec<ActionId>> = Vec::new();
-    let mut held: Vec<BTreeSet<String>> = Vec::new();
+    let limits = plan
+        .resource_pools()
+        .into_iter()
+        .map(|spec| (spec.pool.as_str().to_string(), spec.slots))
+        .collect::<BTreeMap<_, _>>();
+    let mut held: Vec<BTreeMap<String, usize>> = Vec::new();
     for action_id in actions {
-        let exclusive = action_pools(&plan.actions[action_id.0])
+        let pools = action_pools(&plan.actions[action_id.0])
             .into_iter()
-            .filter(|pool| !matches!(pool, BuildResourcePool::Cpu | BuildResourcePool::Memory))
             .map(|pool| pool.as_str().to_string())
             .collect::<BTreeSet<_>>();
         let slot = held
             .iter()
-            .position(|used| used.is_disjoint(&exclusive))
+            .position(|used| {
+                pools.iter().all(|pool| {
+                    let limit = limits.get(pool).copied().unwrap_or(1);
+                    limit == 0 || used.get(pool).copied().unwrap_or(0) < limit
+                })
+            })
             .unwrap_or_else(|| {
                 batches.push(Vec::new());
-                held.push(BTreeSet::new());
+                held.push(BTreeMap::new());
                 batches.len() - 1
             });
-        held[slot].extend(exclusive);
+        for pool in pools {
+            *held[slot].entry(pool).or_default() += 1;
+        }
         batches[slot].push(*action_id);
     }
     batches
@@ -242,13 +254,27 @@ fn execute_one_action(
     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
         "{}-{}-{}", std::process::id(), action.id.0, key.as_str().trim_start_matches("act-sha256:")
     ));
-    if sandbox.exists() { fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?; }
-    fs::create_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
+    let sandbox_root = sandbox
+        .parent()
+        .ok_or_else(|| io_action(action, io::Error::new(io::ErrorKind::InvalidInput, "sandbox has no parent")))?;
+    ensure_real_directory(sandbox_root).map_err(|e| io_action(action, e))?;
+    if let Ok(metadata) = fs::symlink_metadata(&sandbox) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(io_action(
+                action,
+                io::Error::new(io::ErrorKind::PermissionDenied, "action sandbox is not a real directory"),
+            ));
+        }
+        fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
+    }
+    ensure_real_directory(&sandbox).map_err(|e| io_action(action, e))?;
     for input in &action.inputs {
         let from = resolve_under(project_root, input.as_str()).map_err(|e| io_action(action, e))?;
         let to = resolve_under(&sandbox, input.as_str()).map_err(|e| io_action(action, e))?;
         if let Some(parent) = to.parent() { fs::create_dir_all(parent).map_err(|e| io_action(action, e))?; }
-        fs::copy(from, to).map_err(|e| io_action(action, e))?;
+        let bytes = super::cache_cas::secure_read_file(project_root, &from)
+            .map_err(|e| io_action(action, e))?;
+        fs::write(to, bytes).map_err(|e| io_action(action, e))?;
     }
     for output in &action.outputs {
         let path = resolve_under(&sandbox, output.as_str()).map_err(|e| io_action(action, e))?;
@@ -268,7 +294,11 @@ fn execute_one_action(
         command.arg("--share-net");
     }
     command.arg("--setenv").arg("PATH").arg("/nix/store");
-    for (key, value) in &action.env {
+    for (key, value) in action
+        .env
+        .iter()
+        .filter(|(key, _)| action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str()))
+    {
         command.arg("--setenv").arg(key).arg(value);
     }
     command.arg(executable).args(&action.argv[1..]);
@@ -285,8 +315,11 @@ fn execute_one_action(
     for declared in &action.outputs {
         let from = resolve_under(&sandbox, declared.as_str()).map_err(|e| io_action(action, e))?;
         let to = resolve_under(project_root, declared.as_str()).map_err(|e| io_action(action, e))?;
+        let bytes = super::cache_cas::secure_read_file(&sandbox, &from)
+            .map_err(|e| io_action(action, e))?;
         prepare_output_destination(project_root, &to).map_err(|e| io_action(action, e))?;
-        fs::copy(from, to).map_err(|e| io_action(action, e))?;
+        super::cache_cas::atomic_restore_file(project_root, &to, &bytes)
+            .map_err(|e| io_action(action, e))?;
     }
     let outcome = ActionOutcome::Succeeded { exit_code: code };
     if action.cache == ActionCache::Cached {
@@ -448,13 +481,65 @@ fn execute_probes(
                 if let Some(version) = min_version { cmd.arg(format!("{package} >= {version}")); } else { cmd.arg(package); }
                 match cmd.status() { Ok(status) => (status.success(), format!("pkg-config exit {}", status.code().unwrap_or(1))), Err(e) => (false, e.to_string()) }
             }
-            ProbeKind::HeaderCheck { header } => (false, format!("header check `{header}` needs an explicit compile-check toolchain")),
-            ProbeKind::CompileCheck { name, .. } => (false, format!("compile check `{name}` needs an explicit compiler action")),
+            ProbeKind::HeaderCheck { header } => {
+                let source = format!("#include <{header}>\nint main(void) {{ return 0; }}\n");
+                run_compile_probe(&source)
+            }
+            ProbeKind::CompileCheck { includes, code, .. } => {
+                let mut source = String::new();
+                for header in includes {
+                    source.push_str(&format!("#include <{header}>\n"));
+                }
+                source.push_str("int main(void) {\n");
+                source.push_str(code);
+                source.push_str("\nreturn 0;\n}\n");
+                run_compile_probe(&source)
+            }
         };
         facts.push(BuildProbeFact { name: probe.name.clone(), success, detail: detail.clone(), reproducibility: probe.reproducibility });
         if !success { return Err(BuildExecutionError::ProbeFailed { probe: probe.name.clone(), detail }); }
     }
     Ok(facts)
+}
+
+fn run_compile_probe(source: &str) -> (bool, String) {
+    let compiler = ["cc", "clang", "gcc"]
+        .into_iter()
+        .find_map(find_program_path);
+    let Some(compiler) = compiler else {
+        return (false, "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string());
+    };
+    let mut child = match Command::new(&compiler)
+        .args(["-x", "c", "-fsyntax-only", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => return (false, format!("could not start {}: {error}", compiler.display())),
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return (false, "could not open compiler input".to_string());
+    };
+    if let Err(error) = stdin.write_all(source.as_bytes()) {
+        return (false, format!("could not send source to {}: {error}", compiler.display()));
+    }
+    drop(stdin);
+    match child.wait_with_output() {
+        Ok(output) if output.status.success() => {
+            (true, format!("{} accepted the syntax probe", compiler.display()))
+        }
+        Ok(output) => {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            (false, if detail.is_empty() {
+                format!("{} rejected the syntax probe", compiler.display())
+            } else {
+                detail
+            })
+        }
+        Err(error) => (false, format!("could not wait for {}: {error}", compiler.display())),
+    }
 }
 
 fn find_program_path(program: &str) -> Option<PathBuf> {

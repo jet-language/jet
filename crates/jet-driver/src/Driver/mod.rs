@@ -758,11 +758,19 @@ fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetProfile::Byt
 #[derive(Debug, Clone)]
 pub struct BuildRunOptions {
     pub grants: std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
+    /// Policy for typed legacy/plugin bridges. Capability grants and bridge
+    /// policy are separate: an explicit `Exec` grant does not implicitly
+    /// enable a legacy wrapper or a plugin.
+    pub policy: crate::Comptime::Build::BuildPolicy,
     pub execute: bool,
     pub allow_impure: bool,
     /// Validate and expose declared graph authority without granting ambient
     /// comptime authority. Used only by read-only CLI/LSP inspection.
     pub inspect_only: bool,
+    /// Materialize every registered generated source for the explicit
+    /// `--emit-generated` inspection surface, even when the selected runtime
+    /// target does not list the source explicitly.
+    pub emit_generated: bool,
     pub locked: bool,
     pub freestanding: bool,
     pub web_target: bool,
@@ -774,9 +782,11 @@ impl Default for BuildRunOptions {
     fn default() -> Self {
         BuildRunOptions {
             grants: std::collections::BTreeSet::new(),
+            policy: crate::Comptime::Build::BuildPolicy::allow_all(),
             execute: true,
             allow_impure: false,
             inspect_only: false,
+            emit_generated: false,
             locked: false,
             freestanding: false,
             web_target: false,
@@ -817,6 +827,12 @@ impl BuildFilesystemTransaction {
         let mut seen = std::collections::BTreeSet::new();
         let mut files = Vec::new();
         for path in paths.into_iter().filter(|path| seen.insert(path.clone())) {
+            if path_has_symlinked_component(&path) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("build transaction path `{}` contains a symlink", path.display()),
+                ));
+            }
             let before = match std::fs::read(&path) {
                 Ok(bytes) => Some(bytes),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -842,17 +858,139 @@ impl Drop for BuildFilesystemTransaction {
         for (path, before) in self.files.iter().rev() {
             match before {
                 Some(bytes) => {
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(path, bytes);
+                    let _ = safe_atomic_write(path, bytes);
                 }
                 None => {
-                    let _ = std::fs::remove_file(path);
+                    if !std::fs::symlink_metadata(path)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    {
+                        let _ = std::fs::remove_file(path);
+                    }
                 }
             }
         }
     }
+}
+
+fn path_has_symlinked_component(path: &std::path::Path) -> bool {
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            std::path::Component::RootDir => {
+                current.push(std::path::MAIN_SEPARATOR.to_string());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => return true,
+            std::path::Component::Normal(part) => current.push(part),
+        }
+        if std::fs::symlink_metadata(&current)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn ensure_real_parent(path: &std::path::Path) -> std::io::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    let mut current = std::path::PathBuf::new();
+    for component in parent.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            std::path::Component::RootDir => {
+                current.push(std::path::MAIN_SEPARATOR.to_string());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "build path contains a parent component",
+                ));
+            }
+            std::path::Component::Normal(part) => current.push(part),
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("build directory `{}` is not a real directory", current.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&current)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn safe_atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    if path_has_symlinked_component(path) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("build path `{}` contains a symlink", path.display()),
+        ));
+    }
+    ensure_real_parent(path)?;
+    if std::fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("build output `{}` is a symlink", path.display()),
+        ));
+    }
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    for attempt in 0..100u32 {
+        let temporary = parent.join(format!(
+            ".jet-atomic-{}-{}",
+            std::process::id(),
+            attempt
+        ));
+        let mut file = match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        use std::io::Write;
+        if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
+        std::fs::rename(&temporary, path)?;
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique build temporary file",
+    ))
+}
+
+fn read_build_file(
+    root: &std::path::Path,
+    path: &std::path::Path,
+) -> std::io::Result<Vec<u8>> {
+    if path.strip_prefix(root).is_err()
+        || path_has_symlinked_component(path)
+        || std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("build file `{}` contains a symlink or is outside the project", path.display()),
+        ));
+    }
+    std::fs::read(path)
 }
 
 /// Static graph facts for CLI and LSP consumers. Build evaluation is pure and
@@ -869,12 +1007,14 @@ fn build_query_options() -> BuildRunOptions {
         // Inspection verifies source declarations and #Impure gates, but it
         // must not require execution grants merely to display the graph.
         grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
+        policy: crate::Comptime::Build::BuildPolicy::allow_all(),
         execute: false,
         // Graph inspection may describe effectful actions, but it has no
         // authority to perform ambient comptime I/O. A user-written #Impure
         // gate therefore still reaches E3411 instead of touching the host.
         allow_impure: false,
         inspect_only: true,
+        emit_generated: false,
         locked: false,
         freestanding: false,
         web_target: false,
@@ -957,19 +1097,120 @@ fn compile_bundle_path_build_inner(
     options: BuildRunOptions,
     overlay: Option<(&std::path::Path, &str)>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    let mut bundle = crate::Loader::load_entry_with_overlay(file, overlay, false)?;
+    let direct_package_overlay = if overlay.is_none() {
+        package_manifest_build_overlay(file)
+    } else {
+        None
+    };
+    let mut bundle = match (overlay, direct_package_overlay.as_ref()) {
+        (Some(overlay), _) => crate::Loader::load_entry_with_overlay(file, Some(overlay), false)?,
+        (None, Some((path, source))) => {
+            crate::Loader::load_entry_with_overlay(file, Some((path, source)), false)?
+        }
+        (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
+    };
+    // D-BUILDSCOPE1: a package owns one optional build entry in `pkg.jet`.
+    // Load that source through the same loader/sema/interpreter path as a
+    // file-local entry, while retaining the ordinary runtime bundle for the
+    // post-build compile.  Imported build functions remain inert: only this
+    // package's own manifest source can become the selected build root.
+    let runtime_source_paths = bundle
+        .modules
+        .iter()
+        .map(|module| module.path.clone())
+        .collect::<Vec<_>>();
+    let package_entry = package_build_entry_source(file, &bundle.project_root);
+    let package_manifest_entry = package_manifest_has_build_entry(file, &bundle.project_root);
+    let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
-    let compile_mode = if options.plugin_target {
+    let is_workspace_entry = std::path::Path::new(file)
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some(crate::Syntax::WORKSPACE_FILE);
+    let compile_mode = if options.plugin_target || has_package_entry || is_workspace_entry {
         crate::Sema::CompileMode::Check
     } else {
         crate::Sema::CompileMode::Run
     };
     bundle.active_os = active_os;
     bundle.web_partition_enforced = options.web_target;
-    let build_index = bundle.modules[bundle.entry]
+    let local_build_indices = bundle.modules[bundle.entry]
         .items
         .iter()
-        .position(|item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"));
+        .enumerate()
+        .filter_map(|(index, item)| {
+            matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if local_build_indices.len() > 1 {
+        return Err(vec![Diagnostic::error(
+            "E3501",
+            "the entry unit contains more than one `fn build`".to_string(),
+            "one unit has one build authority, so dependency and policy order stay auditable".to_string(),
+            "keep the selected `fn build` and rename or remove the other entry".to_string(),
+            local_build_indices
+                .get(1)
+                .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
+                    crate::AST::Item::Func(func) => Some(func.name_span),
+                    _ => None,
+                }),
+        )]);
+    }
+    if package_entry.is_some() && !local_build_indices.is_empty() {
+        let source_span = local_build_indices
+            .first()
+            .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
+                crate::AST::Item::Func(func) => Some(func.name_span),
+                _ => None,
+            });
+        return Err(vec![build_entry_conflict(
+            "the package",
+            "the selected source file",
+            "`pkg.jet`",
+            source_span,
+        )]);
+    }
+    if let Some((package_path, package_source)) = package_entry {
+        let package_path_string = package_path.to_string_lossy().into_owned();
+        bundle = crate::Loader::load_entry_with_overlay(
+            &package_path_string,
+            Some((&package_path, &package_source)),
+            false,
+        )?;
+        bundle.active_os = active_os;
+        bundle.web_partition_enforced = options.web_target;
+    }
+    let local_build_indices = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if local_build_indices.len() > 1 {
+        return Err(vec![Diagnostic::error(
+            "E3501",
+            "the entry unit contains more than one `fn build`".to_string(),
+            "one unit has one build authority, so dependency and policy order stay auditable".to_string(),
+            "keep the selected `fn build` and rename or remove the other entry".to_string(),
+            local_build_indices
+                .get(1)
+                .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
+                    crate::AST::Item::Func(func) => Some(func.name_span),
+                    _ => None,
+                }),
+        )]);
+    }
+    let build_index = local_build_indices.into_iter().next();
+    let build_span = build_index.and_then(|index| {
+        match &bundle.modules[bundle.entry].items[index] {
+            crate::AST::Item::Func(build) => Some(build.span),
+            _ => None,
+        }
+    });
     if let Some(index) = build_index {
         let crate::AST::Item::Func(build) = &bundle.modules[bundle.entry].items[index] else {
             unreachable!()
@@ -982,7 +1223,7 @@ fn compile_bundle_path_build_inner(
     // Build code is compiler-host code. Target restrictions apply only after
     // the selected runtime program replaces it.
     let (diags, effect_facts) =
-        crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
+        crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode);
     let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
         &bundle,
         Some(&effect_facts),
@@ -997,10 +1238,10 @@ fn compile_bundle_path_build_inner(
     {
         match diag.severity {
             // Generated declarations do not exist during the pre-build
-            // reflection pass. Defer only unknown-name errors to the fresh
-            // selected-program sema pass after generation; every other error
-            // still blocks build evaluation.
-            Severity::Error if build_index.is_some() && diag.code == "E0102" => {}
+            // reflection pass. Defer unknown-name errors to the fresh
+            // selected-program sema pass after generation; that pass still
+            // rejects names that no selected generated source provides.
+            Severity::Error if diag.code == "E0102" && build_span.is_some() => {}
             Severity::Error => errors.push(diag),
             Severity::Lint => lints.push(diag),
         }
@@ -1011,6 +1252,7 @@ fn compile_bundle_path_build_inner(
 
     let mut build_run = None;
     let mut filesystem_transaction = None;
+    let mut generated_lock_provenance = None;
     if let Some(index) = build_index {
         let build = match &bundle.modules[bundle.entry].items[index] {
             crate::AST::Item::Func(func) => func,
@@ -1023,17 +1265,14 @@ fn compile_bundle_path_build_inner(
             .flatten()
             .filter_map(|(name, _)| crate::Comptime::Build::BuildCapability::parse(name))
             .collect::<std::collections::BTreeSet<_>>();
-        let has_impure_gate = build
-            .body
-            .iter()
-            .any(|stmt| matches!(stmt, crate::AST::Stmt::Impure { .. }));
+        let has_impure_gate = contains_impure_gate(&build.body);
         let mut funcs = std::collections::HashMap::new();
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
         let mut enums = std::collections::HashMap::new();
         let mut migrations: std::collections::HashMap<String, Vec<&crate::AST::MigrationDecl>> =
             std::collections::HashMap::new();
-        let computed_fields = std::collections::HashMap::new();
+        let mut computed_fields = std::collections::HashMap::new();
         let mut distinct_ranges = std::collections::HashMap::new();
         let mut distinct_bases = std::collections::HashMap::new();
         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
@@ -1051,6 +1290,32 @@ fn compile_bundle_path_build_inner(
                         *type_name_counts.entry(def.name.clone()).or_default() += 1
                     }
                     _ => {}
+                }
+            }
+        }
+        // D-FIELDPOL1: the build interpreter consumes the same source
+        // expressions that sema rewrote and checked as computed getters. Keep
+        // both the qualified and unique short type keys; this mirrors the
+        // method/type lookup tables above and avoids a build-only reflection
+        // gap for sibling-field reads.
+        for module in &bundle.modules {
+            for item in &module.items {
+                if let crate::AST::Item::Struct(def) = item {
+                    let owner = format!("{}::{}", module.alias, def.name);
+                    for field in &def.fields {
+                        if let Some(expression) = &field.computed {
+                            computed_fields.insert(
+                                (owner.clone(), field.name.clone()),
+                                expression.as_ref(),
+                            );
+                            if type_name_counts.get(&def.name) == Some(&1) {
+                                computed_fields.insert(
+                                    (def.name.clone(), field.name.clone()),
+                                    expression.as_ref(),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1137,21 +1402,21 @@ fn compile_bundle_path_build_inner(
         };
         let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
         let program_value = crate::Comptime::build_program_info(&bundle, &semantic_facts);
-        let base_dir = std::path::Path::new(file)
-            .parent()
-            .unwrap_or(std::path::Path::new("."));
-        let package = std::path::Path::new(file)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("app");
-        let evaluated = crate::Comptime::run_build_entry(
+        // Package and workspace entries may be selected from `src/` or from
+        // a named source file. Build-relative inputs always belong to the
+        // owning project root, which is also the root used by generated
+        // output, action execution, and lock provenance.
+        let base_dir = &bundle.project_root;
+        let package = build_package_name(file);
+        let evaluated = crate::Comptime::run_build_entry_with_policy(
             build,
             &funcs,
             base_dir,
             &info,
             program_value,
-            package,
+            &package,
             options.allow_impure,
+            options.policy.clone(),
         )
         .map_err(|diag| vec![diag])?;
 
@@ -1171,10 +1436,30 @@ fn compile_bundle_path_build_inner(
             .plan
             .selected_action_ids()
             .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-        let selected_generated = evaluated
+        let selected_generated = if options.emit_generated {
+            evaluated.plan.generated_modules().iter().collect()
+        } else {
+            evaluated
+                .plan
+                .selected_generated_modules()
+                .map_err(|error| vec![build_plan_diagnostic(&error)])?
+        };
+        let mut existing_source_paths = runtime_source_paths.clone();
+        existing_source_paths.extend(bundle.modules.iter().map(|module| module.path.clone()));
+        let selected_action_outputs = evaluated
             .plan
-            .selected_generated_modules()
-            .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+            .actions()
+            .iter()
+            .filter(|action| selected_actions.contains(&action.id))
+            .flat_map(|action| action.outputs.iter().map(|output| output.as_str().to_string()))
+            .collect::<Vec<_>>();
+        validate_selected_action_outputs(
+            &evaluated.plan,
+            &selected_actions,
+            &selected_generated,
+            &bundle.project_root,
+            &existing_source_paths,
+        )?;
         let transaction_paths = selected_generated
             .iter()
             .map(|module| bundle.project_root.join(module.path.as_str()))
@@ -1205,11 +1490,16 @@ fn compile_bundle_path_build_inner(
                     hash: module.source_digest.as_str().to_string(),
                 })
                 .collect::<Vec<_>>();
-            crate::Lock::record_generated_inputs(&bundle.project_root, &planned_generated, true)
+            crate::Lock::verify_locked_generated_inputs(&bundle.project_root, &planned_generated)
                 .map_err(|diagnostic| vec![diagnostic])?;
         }
         let mut generated = if options.execute {
-            materialize_and_check_generated(&selected_generated, &bundle.project_root)?
+            materialize_and_check_generated(
+                &selected_generated,
+                &bundle.project_root,
+                &existing_source_paths,
+                &selected_action_outputs,
+            )?
         } else {
             selected_generated
                 .iter()
@@ -1221,10 +1511,11 @@ fn compile_bundle_path_build_inner(
                 .collect()
         };
         let executed = if options.execute {
+            let execution_grants = effective_grants(&options, &evaluated.plan);
             crate::Comptime::Build::execute_build_plan(
                 &evaluated.plan,
                 &bundle.project_root,
-                &options.grants,
+                &execution_grants,
             )
             .map_err(|error| vec![build_execution_diagnostic(error)])?
         } else {
@@ -1240,6 +1531,7 @@ fn compile_bundle_path_build_inner(
             generated.extend(check_action_generated_sources(
                 &evaluated.plan,
                 &bundle.project_root,
+                &existing_source_paths,
             )?);
             let mut locked_provenance = generated
                 .iter()
@@ -1261,8 +1553,8 @@ fn compile_bundle_path_build_inner(
                 .filter(|action| selected_actions.contains(&action.id))
             {
                 for input in &action.inputs {
-                    let path = bundle.project_root.join(input.as_str());
-                    let bytes = std::fs::read(&path)
+                    let path = normalize_project_path(&bundle.project_root, std::path::Path::new(input.as_str()));
+                    let bytes = read_build_file(&bundle.project_root, &path)
                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
                         path: input.as_str().to_string(),
@@ -1272,8 +1564,8 @@ fn compile_bundle_path_build_inner(
                     });
                 }
                 for output in &action.outputs {
-                    let path = bundle.project_root.join(output.as_str());
-                    let bytes = std::fs::read(&path)
+                    let path = normalize_project_path(&bundle.project_root, std::path::Path::new(output.as_str()));
+                    let bytes = read_build_file(&bundle.project_root, &path)
                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
                         path: output.as_str().to_string(),
@@ -1285,13 +1577,11 @@ fn compile_bundle_path_build_inner(
             }
             locked_provenance.sort_by(|a, b| a.path.cmp(&b.path));
             locked_provenance.dedup_by(|a, b| a.path == b.path && a.hash == b.hash);
-            if let Err(diagnostic) = crate::Lock::record_generated_inputs(
-                &bundle.project_root,
-                &locked_provenance,
-                options.locked,
-            ) {
-                return Err(vec![diagnostic]);
-            }
+            // Keep the lock write until the fresh selected runtime bundle has
+            // passed its complete sema check.  A package dependency loader
+            // may run during that reload; writing a new generated-only lock
+            // here would make that loader see an incomplete dependency lock.
+            generated_lock_provenance = Some(locked_provenance);
         }
         let mut planned_bundle = if options.execute {
             load_planned_runtime_bundle(file, &evaluated.plan, &generated, &bundle.project_root)?
@@ -1358,6 +1648,11 @@ fn compile_bundle_path_build_inner(
         if !planned_errors.is_empty() {
             return Err(planned_errors);
         }
+    }
+
+    if let Some(provenance) = generated_lock_provenance.take() {
+        crate::Lock::record_generated_inputs(&bundle.project_root, &provenance, options.locked)
+            .map_err(|diagnostic| vec![diagnostic])?;
     }
 
     // Static graph/query/explain (`execute: false`) must not codegen the
@@ -1503,6 +1798,16 @@ fn load_planned_runtime_bundle(
         .collect::<Vec<_>>();
     additions.sort_by(|a, b| a.1.cmp(&b.1));
     additions.dedup_by(|a, b| a.1 == b.1);
+    let selected_paths = additions
+        .iter()
+        .map(|(_, path)| normalize_project_path(project_root, path))
+        .collect::<std::collections::BTreeSet<_>>();
+    let already_loaded = bundle
+        .modules
+        .iter()
+        .map(|module| normalize_project_path(project_root, &module.path))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut loaded_by_path = std::collections::BTreeMap::new();
     for (generator, path) in additions {
         let loaded = crate::Loader::load_entry_with_overlay(
             path.to_str().unwrap_or(build_file),
@@ -1515,10 +1820,102 @@ fn load_planned_runtime_bundle(
             }
             diagnostics
         })?;
-        let entry = loaded.entry;
+        for module in loaded.modules {
+            let key = normalize_project_path(project_root, &module.path);
+            loaded_by_path.entry(key).or_insert(module);
+        }
+    }
+
+    // Selected roots are promoted into the runtime entry below. Their file
+    // imports cannot be copied verbatim: those paths are relative to the
+    // generated file, while the promoted functions now live in the entry
+    // module. Keep each loaded import target as an inline code module so the
+    // promoted functions retain their namespace without a second loader pass.
+    let mut inline_imports = std::collections::BTreeMap::new();
+    for module in loaded_by_path.values() {
+        for import in &module.imports {
+            let crate::AST::ImportKind::File(import_path, _) = &import.kind else {
+                continue;
+            };
+            let mut target_path = module
+                .path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .to_path_buf();
+            for part in import_path.split('/') {
+                if !part.is_empty() && part != "." {
+                    target_path.push(part);
+                }
+            }
+            target_path.set_extension(crate::Syntax::FILE_EXT);
+            let target_path = normalize_project_path(project_root, &target_path);
+            let Some(target) = loaded_by_path.get(&target_path) else {
+                continue;
+            };
+            let alias = import.import_alias();
+            inline_imports.entry(alias).or_insert_with(|| {
+                (
+                    target.items.clone(),
+                    target.web_target_ceiling,
+                )
+            });
+        }
+    }
+
+    // Promote every selected root exactly once. A selected module can also be
+    // discovered transitively while loading another selected root; collecting
+    // first prevents that module from being both an inline import and a second
+    // top-level declaration set.
+    for path in &selected_paths {
+        if already_loaded.contains(path) {
+            continue;
+        }
+        if let Some(module) = loaded_by_path.remove(path) {
+            bundle.modules[bundle.entry].items.extend(module.items);
+        }
+    }
+
+    let inline_aliases = inline_imports.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+    for (alias, (items, web_target)) in inline_imports {
         bundle.modules[bundle.entry]
             .items
-            .extend(loaded.modules.into_iter().nth(entry).unwrap().items);
+            .push(crate::AST::Item::CodeModule(crate::AST::CodeModule {
+                name: alias,
+                name_span: crate::Diagnostics::Span::new(0, 0),
+                is_pub: false,
+                is_package_pub: false,
+                body: Some(items),
+                web_target,
+                instance_identity: None,
+                span: crate::Diagnostics::Span::new(0, 0),
+            }));
+    }
+
+    // Keep quoted imports from selected/generated roots available after their
+    // top-level declarations are merged into the runtime entry. The ordinary
+    // loader already checked these modules; wrapping their items as inline
+    // CodeModules preserves the imported alias without teaching the runtime
+    // bundle a second file-resolution mechanism.
+    for (path, module) in loaded_by_path {
+        if already_loaded.contains(&path)
+            || selected_paths.contains(&path)
+            || inline_aliases.contains(&module.alias)
+        {
+            continue;
+        }
+        let alias = module.alias.clone();
+        bundle.modules[bundle.entry]
+            .items
+            .push(crate::AST::Item::CodeModule(crate::AST::CodeModule {
+                name: alias,
+                name_span: crate::Diagnostics::Span::new(0, 0),
+                is_pub: false,
+                is_package_pub: false,
+                body: Some(module.items),
+                web_target: module.web_target_ceiling,
+                instance_identity: None,
+                span: crate::Diagnostics::Span::new(0, 0),
+            }));
     }
     Ok(bundle)
 }
@@ -1526,6 +1923,7 @@ fn load_planned_runtime_bundle(
 fn check_action_generated_sources(
     plan: &crate::Comptime::Build::BuildPlan,
     root: &std::path::Path,
+    existing_source_paths: &[std::path::PathBuf],
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let registered = plan
         .generated_modules()
@@ -1545,9 +1943,36 @@ fn check_action_generated_sources(
             if !output.as_str().ends_with(".jet") || registered.contains(output.as_str()) {
                 continue;
             }
-            let path = root.join(output.as_str());
-            let source = std::fs::read_to_string(&path)
-                .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
+            let path = normalize_project_path(root, std::path::Path::new(output.as_str()));
+            if has_symlinked_component(root, &path)
+                || std::fs::symlink_metadata(&path)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            {
+                return Err(vec![generated_collision_diag(
+                    &action.name,
+                    output.as_str(),
+                )]);
+            }
+            let source_path = existing_source_paths
+                .iter()
+                .map(|source| normalize_project_path(root, source))
+                .any(|source| source == path);
+            if source_path {
+                return Err(vec![generated_collision_diag(
+                    &action.name,
+                    output.as_str(),
+                )]);
+            }
+            let source = String::from_utf8(
+                read_build_file(root, &path)
+                    .map_err(|error| vec![generated_io_diag(&action.name, &error)])?,
+            )
+            .map_err(|error| {
+                vec![generated_io_diag(
+                    &action.name,
+                    &std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+                )]
+            })?;
             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
                 path.to_str().unwrap_or(output.as_str()),
                 None,
@@ -1578,6 +2003,50 @@ fn check_action_generated_sources(
     Ok(out)
 }
 
+fn validate_selected_action_outputs(
+    plan: &crate::Comptime::Build::BuildPlan,
+    selected_actions: &std::collections::BTreeSet<crate::Comptime::Build::ActionId>,
+    generated: &[&crate::Comptime::Build::BuildGeneratedModule],
+    root: &std::path::Path,
+    existing_source_paths: &[std::path::PathBuf],
+) -> Result<(), Vec<Diagnostic>> {
+    let source_paths = existing_source_paths
+        .iter()
+        .map(|source| normalize_project_path(root, source))
+        .collect::<std::collections::BTreeSet<_>>();
+    for action in plan.actions().iter().filter(|action| selected_actions.contains(&action.id)) {
+        for output in &action.outputs {
+            let path = normalize_project_path(root, std::path::Path::new(output.as_str()));
+            if has_symlinked_component(root, &path) {
+                return Err(vec![Diagnostic::error(
+                    "E3505",
+                    format!(
+                        "build action `{}` cannot write output `{}` through a symlink",
+                        action.name,
+                        output.as_str()
+                    ),
+                    "sandboxed build outputs must stay inside the project and must not follow symlinks".to_string(),
+                    "remove the symlink or choose a real output directory inside the project".to_string(),
+                    None,
+                )]);
+            }
+            if source_paths.contains(&path) {
+                return Err(vec![generated_collision_diag(&action.name, output.as_str())]);
+            }
+            if generated.iter().any(|module| {
+                normalize_project_path(root, std::path::Path::new(module.path.as_str())) == path
+            }) {
+                return Err(vec![generated_cycle_diag(
+                    &action.name,
+                    output.as_str(),
+                    "a selected build action and a generated module both own this path",
+                )]);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn valid_build_signature(func: &crate::AST::Func) -> bool {
     if func.params.len() != 1
         || func.params[0].ty
@@ -1590,6 +2059,147 @@ fn valid_build_signature(func: &crate::AST::Func) -> bool {
         Some(crate::AST::Type::Result { ok, .. })
             if **ok == crate::AST::Type::Named(crate::Syntax::TYPE_BUILD_PLAN.to_string())
     )
+}
+
+fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        crate::AST::Stmt::Impure { .. } => true,
+        crate::AST::Stmt::While { body, .. }
+        | crate::AST::Stmt::For { body, .. }
+        | crate::AST::Stmt::Loop { body, .. }
+        | crate::AST::Stmt::Reactive { body, .. }
+        | crate::AST::Stmt::Shield { body, .. }
+        | crate::AST::Stmt::Off { body, .. }
+        | crate::AST::Stmt::DebugOnly { body, .. }
+        | crate::AST::Stmt::Region { body, .. }
+        | crate::AST::Stmt::Policy { body, .. }
+        | crate::AST::Stmt::TaskGroup { body, .. }
+        | crate::AST::Stmt::Layout { body, .. }
+        | crate::AST::Stmt::Caps { body, .. }
+        | crate::AST::Stmt::Grant { body, .. }
+        | crate::AST::Stmt::ComptimeBlock { body, .. }
+        | crate::AST::Stmt::Live { body, .. }
+        | crate::AST::Stmt::Transact { body, .. }
+        | crate::AST::Stmt::Unsafe { body, .. }
+        | crate::AST::Stmt::ScopeMember { body, .. } => contains_impure_gate(body),
+        crate::AST::Stmt::Switch {
+            arms, else_body, ..
+        }
+        | crate::AST::Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => arms.iter().any(|arm| contains_impure_gate(&arm.body))
+            || else_body
+                .as_deref()
+                .is_some_and(contains_impure_gate),
+        crate::AST::Stmt::CountedLoop { step, body, .. } => {
+            step.as_deref().is_some_and(|step| contains_impure_gate(std::slice::from_ref(step)))
+                || contains_impure_gate(body)
+        }
+        crate::AST::Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            contains_impure_gate(then_body)
+                || else_body
+                    .as_deref()
+                    .is_some_and(contains_impure_gate)
+        }
+        crate::AST::Stmt::ContextBlock { body, .. }
+        | crate::AST::Stmt::AssumeDet { body, .. } => contains_impure_gate(body),
+        _ => false,
+    })
+}
+
+/// Generated-source ownership follows the nearest package definition. A
+/// manifest-less file keeps its historical stem-based package name so the
+/// single-file build surface remains stable.
+fn build_package_name(file: &str) -> String {
+    let entry = std::path::Path::new(file);
+    let absolute = if entry.is_absolute() {
+        entry.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|directory| directory.join(entry))
+            .unwrap_or_else(|_| entry.to_path_buf())
+    };
+    let mut directory = absolute.parent();
+    while let Some(dir) = directory {
+        let path = dir.join(crate::Syntax::PAYLOAD_FILE);
+        if let Ok(source) = std::fs::read_to_string(&path) {
+            if let Ok(manifest) = crate::PackageManifest::parse(&source) {
+                if !manifest.package.name.is_empty() {
+                    return manifest.package.name;
+                }
+            }
+            break;
+        }
+        directory = dir.parent();
+    }
+    absolute
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("app")
+        .to_string()
+}
+
+fn package_build_entry_source(
+    file: &str,
+    project_root: &std::path::Path,
+) -> Option<(std::path::PathBuf, String)> {
+    let package_path = project_root.join(crate::Syntax::PAYLOAD_FILE);
+    let entry_path = std::path::Path::new(file);
+    let entry_path = if entry_path.is_absolute() {
+        entry_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(entry_path)
+    };
+    if normalize_project_path(project_root, &entry_path)
+        == normalize_project_path(project_root, &package_path)
+    {
+        return None;
+    }
+    let source = std::fs::read_to_string(&package_path).ok()?;
+    let build_source = crate::PackageManifest::build_entry_source(&source)?;
+    Some((package_path, build_source))
+}
+
+fn package_manifest_build_overlay(file: &str) -> Option<(std::path::PathBuf, String)> {
+    let path = std::path::Path::new(file);
+    if path.file_name().and_then(|name| name.to_str()) != Some(crate::Syntax::PAYLOAD_FILE) {
+        return None;
+    }
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(path)
+    };
+    let source = std::fs::read_to_string(&path).ok()?;
+    let build_source = crate::PackageManifest::build_entry_source(&source)?;
+    Some((path, build_source))
+}
+
+fn package_manifest_has_build_entry(file: &str, project_root: &std::path::Path) -> bool {
+    let entry_path = std::path::Path::new(file);
+    let entry_path = if entry_path.is_absolute() {
+        entry_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(entry_path)
+    };
+    let package_path = project_root.join(crate::Syntax::PAYLOAD_FILE);
+    normalize_project_path(project_root, &entry_path)
+        == normalize_project_path(project_root, &package_path)
+        && std::fs::read_to_string(package_path)
+            .ok()
+            .and_then(|source| crate::PackageManifest::build_entry_source(&source))
+            .is_some()
 }
 
 fn validate_build_authority(
@@ -1661,7 +2271,7 @@ fn effective_grants(
     grants
 }
 
-fn program_semantic_facts(
+pub fn program_semantic_facts(
     bundle: &crate::AST::ProgramBundle,
     checked: &crate::Sema::SemIndexEffectFacts,
 ) -> crate::Comptime::ProgramSemanticFacts {
@@ -1724,46 +2334,367 @@ fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
     )
 }
 
+fn build_entry_conflict(
+    unit: &str,
+    first_location: &str,
+    second_location: &str,
+    span: Option<crate::Diagnostics::Span>,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E3520",
+        format!(
+            "two build entries for {unit}: {first_location} and {second_location}"
+        ),
+        "one unit has exactly one build entry so policy and provenance have one auditable home"
+            .to_string(),
+        format!("keep the `fn build` in {first_location} and remove the entry in {second_location}"),
+        span,
+    )
+}
+
 fn materialize_and_check_generated(
     modules: &[&crate::Comptime::Build::BuildGeneratedModule],
     root: &std::path::Path,
+    existing_source_paths: &[std::path::PathBuf],
+    action_outputs: &[String],
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
+    let mut modules = modules.to_vec();
+    modules.sort_by(|left, right| left.path.as_str().cmp(right.path.as_str()).then_with(|| left.name.cmp(&right.name)));
+    let lock = crate::Lock::load(root);
+    let existing_source_paths = existing_source_paths
+        .iter()
+        .map(|path| normalize_project_path(root, path))
+        .collect::<Vec<_>>();
+    let action_outputs = action_outputs
+        .iter()
+        .map(|path| normalize_project_path(root, std::path::Path::new(path)))
+        .collect::<Vec<_>>();
+
+    // Preflight every ownership decision before touching the tree. A failed
+    // later module must not leave an earlier generated file visible to the
+    // loader or to a concurrent observer.
+    let mut planned_paths = std::collections::BTreeSet::new();
+    for module in &modules {
+        let path = normalize_project_path(root, std::path::Path::new(module.path.as_str()));
+        if !planned_paths.insert(path.clone()) {
+            return Err(vec![generated_cycle_diag(
+                &module.name,
+                module.path.as_str(),
+                "two generated modules claim the same managed path",
+            )]);
+        }
+        if action_outputs.iter().any(|output| output == &path) {
+            return Err(vec![generated_cycle_diag(
+                &module.name,
+                module.path.as_str(),
+                "a selected build action and a generated module both own this path",
+            )]);
+        }
+        if has_symlinked_component(root, &path) {
+            return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+        }
+        let managed = managed_generated_file(lock.as_ref(), root, &path, &module.source_digest);
+        if existing_source_paths.iter().any(|source| source == &path) && !managed {
+            return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || (!metadata.is_file() && !managed) {
+                return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+            }
+            if metadata.is_file() && !managed {
+                return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+            }
+        }
+    }
+
+    let path_indices = modules
+        .iter()
+        .enumerate()
+        .map(|(index, module)| {
+            (
+                normalize_project_path(root, std::path::Path::new(module.path.as_str())),
+                index,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let dependencies = modules
+        .iter()
+        .map(|module| {
+            generated_dependencies(
+                module,
+                &normalize_project_path(root, std::path::Path::new(module.path.as_str())),
+                root,
+                &path_indices,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let rounds = generated_rounds(&dependencies, &modules)?;
+
     let mut provenance = Vec::new();
-    for module in modules {
-        let path = root.join(module.path.as_str());
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+    for round in rounds {
+        for index in round {
+            let module = modules[index];
+            let path = normalize_project_path(root, std::path::Path::new(module.path.as_str()));
+            safe_atomic_write(&path, module.source.as_bytes())
                 .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
-        }
-        std::fs::write(&path, &module.source)
-            .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
-        let mut generated_bundle = crate::Loader::load_entry_with_overlay(
-            path.to_str().unwrap_or(module.path.as_str()),
-            None,
-            false,
-        )
-        .map_err(|mut diags| {
-            for diag in &mut diags {
-                diag.what = format!("generated module `{}`: {}", module.name, diag.what);
+            let mut generated_bundle = crate::Loader::load_entry_with_overlay(
+                path.to_str().unwrap_or(module.path.as_str()),
+                None,
+                false,
+            )
+            .map_err(|mut diags| {
+                for diag in &mut diags {
+                    diag.what = format!("generated module `{}`: {}", module.name, diag.what);
+                }
+                diags
+            })?;
+            let mut diags =
+                crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
+            diags.retain(|diag| diag.severity == Severity::Error);
+            if !diags.is_empty() {
+                for diag in &mut diags {
+                    diag.what = format!("generated module `{}`: {}", module.name, diag.what);
+                }
+                return Err(diags);
             }
-            diags
-        })?;
-        let mut diags =
-            crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
-        diags.retain(|diag| diag.severity == Severity::Error);
-        if !diags.is_empty() {
-            for diag in &mut diags {
-                diag.what = format!("generated module `{}`: {}", module.name, diag.what);
-            }
-            return Err(diags);
+            provenance.push(GeneratedSourceProvenance {
+                name: module.name.clone(),
+                path,
+                digest: module.source_digest.clone(),
+            });
         }
-        provenance.push(GeneratedSourceProvenance {
-            name: module.name.clone(),
-            path,
-            digest: module.source_digest.clone(),
-        });
     }
     Ok(provenance)
+}
+
+/// Build the dependency edges used by bounded generated-source staging. A
+/// generated file can observe an earlier file through the ordinary quoted-file
+/// import; no generation-only syntax or second semantic mechanism is needed.
+fn generated_dependencies(
+    module: &crate::Comptime::Build::BuildGeneratedModule,
+    path: &std::path::Path,
+    root: &std::path::Path,
+    paths: &std::collections::BTreeMap<std::path::PathBuf, usize>,
+) -> Result<Vec<usize>, Vec<Diagnostic>> {
+    let (tokens, lex_diags) = crate::Lexer::lex(&module.source);
+    if !lex_diags.is_empty() {
+        return Err(annotate_generated_frontend_diags(&module.name, lex_diags));
+    }
+    let program = crate::Parser::parse(&tokens)
+        .map_err(|diags| annotate_generated_frontend_diags(&module.name, diags))?;
+    let mut dependencies = std::collections::BTreeSet::new();
+    for import in program.imports {
+        let crate::AST::ImportKind::File(import_path, _) = import.kind else {
+            continue;
+        };
+        let Some(candidate) = generated_import_path(path, root, &import_path) else {
+            continue;
+        };
+        if let Some(index) = paths.get(&candidate) {
+            dependencies.insert(*index);
+        }
+    }
+    Ok(dependencies.into_iter().collect())
+}
+
+fn generated_import_path(
+    path: &std::path::Path,
+    root: &std::path::Path,
+    import_path: &str,
+) -> Option<std::path::PathBuf> {
+    if import_path.trim().is_empty() || import_path.starts_with('/') {
+        return None;
+    }
+    let mut candidate = path.parent()?.to_path_buf();
+    for part in import_path.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return None;
+        }
+        candidate.push(part);
+    }
+    candidate.set_extension(crate::Syntax::FILE_EXT);
+    Some(normalize_project_path(root, &candidate))
+}
+
+fn annotate_generated_frontend_diags(
+    name: &str,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Vec<Diagnostic> {
+    for diagnostic in &mut diagnostics {
+        diagnostic.what = format!("generated module `{name}`: {}", diagnostic.what);
+    }
+    diagnostics
+}
+
+/// Return dependency layers in stable path/name order. A layer is materialized
+/// only after every module it imports has passed the front end, so a later
+/// layer can observe an earlier layer while the total number of rounds remains
+/// bounded by the number of generated modules.
+fn generated_rounds(
+    dependencies: &[Vec<usize>],
+    modules: &[&crate::Comptime::Build::BuildGeneratedModule],
+) -> Result<Vec<Vec<usize>>, Vec<Diagnostic>> {
+    let mut dependents = vec![Vec::<usize>::new(); modules.len()];
+    let mut remaining = dependencies.iter().map(Vec::len).collect::<Vec<_>>();
+    for (module, deps) in dependencies.iter().enumerate() {
+        for dependency in deps {
+            dependents[*dependency].push(module);
+        }
+    }
+    for dependents in &mut dependents {
+        dependents.sort_unstable();
+    }
+
+    let mut ready = std::collections::BTreeSet::new();
+    for (index, count) in remaining.iter().enumerate() {
+        if *count == 0 {
+            ready.insert(index);
+        }
+    }
+    let mut rounds = Vec::new();
+    let mut emitted = 0;
+    while !ready.is_empty() {
+        let current = ready.iter().copied().collect::<Vec<_>>();
+        ready.clear();
+        for module in &current {
+            emitted += 1;
+            for dependent in &dependents[*module] {
+                remaining[*dependent] -= 1;
+                if remaining[*dependent] == 0 {
+                    ready.insert(*dependent);
+                }
+            }
+        }
+        rounds.push(current);
+    }
+    if emitted == modules.len() {
+        return Ok(rounds);
+    }
+
+    let mut state = vec![0u8; modules.len()];
+    let mut stack = Vec::new();
+    let cycle = (0..modules.len())
+        .find_map(|index| generated_cycle_chain(index, dependencies, &mut state, &mut stack))
+        .unwrap_or_else(|| vec![0]);
+    let first = cycle[0];
+    let chain = cycle
+        .iter()
+        .map(|index| modules[*index].name.as_str())
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    Err(vec![generated_cycle_diag(
+        &modules[first].name,
+        modules[first].path.as_str(),
+        &format!("dependency chain `{chain}` is cyclic"),
+    )])
+}
+
+fn generated_cycle_chain(
+    index: usize,
+    dependencies: &[Vec<usize>],
+    state: &mut [u8],
+    stack: &mut Vec<usize>,
+) -> Option<Vec<usize>> {
+    if state[index] == 1 {
+        let start = stack.iter().position(|item| *item == index).unwrap_or(0);
+        let mut cycle = stack[start..].to_vec();
+        cycle.push(index);
+        return Some(cycle);
+    }
+    if state[index] == 2 {
+        return None;
+    }
+    state[index] = 1;
+    stack.push(index);
+    for dependency in &dependencies[index] {
+        if let Some(cycle) = generated_cycle_chain(*dependency, dependencies, state, stack) {
+            return Some(cycle);
+        }
+    }
+    stack.pop();
+    state[index] = 2;
+    None
+}
+
+fn normalize_project_path(root: &std::path::Path, path: &std::path::Path) -> std::path::PathBuf {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn has_symlinked_component(root: &std::path::Path, path: &std::path::Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return true;
+    };
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(part) = component else {
+            return true;
+        };
+        current.push(part);
+        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+            if metadata.file_type().is_symlink() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn managed_generated_file(
+    lock: Option<&crate::Lock::LockFile>,
+    root: &std::path::Path,
+    path: &std::path::Path,
+    digest: &crate::Comptime::Build::ContentDigest,
+) -> bool {
+    let Some(lock) = lock else {
+        return false;
+    };
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    lock.comptime_inputs
+        .iter()
+        .any(|input| input.path == relative && input.hash == digest.as_str())
+}
+
+fn generated_collision_diag(name: &str, path: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3510",
+        format!("`b.generate(\"{name}\")` would shadow the module at `{path}`"),
+        "generation is additive: what you wrote is always what compiles".to_string(),
+        "rename the generated module, or delete the hand-written one".to_string(),
+        None,
+    )
+}
+
+fn generated_cycle_diag(name: &str, path: &str, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3511",
+        format!("generation rounds form a cycle: `{name}` at `{path}`"),
+        "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
+        format!("{reason}; break the dependency between these generators"),
+        None,
+    )
 }
 
 fn generated_io_diag(name: &str, error: &std::io::Error) -> Diagnostic {
@@ -2334,15 +3265,35 @@ pub fn check_file_with_overlays_and_import_root(
     }
 }
 
-/// Check-only from source text (eval mode). Returns only error-severity diagnostics.
-pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
+/// Check-only from source text (eval mode), retaining the checked bundle and
+/// the same effect facts used by the semantic-index and build reflection
+/// consumers. This is the in-memory counterpart of
+/// `check_file_with_effect_facts`; it performs no filesystem I/O.
+pub fn check_eval_with_effect_facts(
+    src: &str,
+    file: &str,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
-        return lex_diags;
+        return (
+            lex_diags,
+            None,
+            crate::Sema::SemIndexEffectFacts::default(),
+        );
     }
     let mut prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => return ds,
+        Err(ds) => {
+            return (
+                ds,
+                None,
+                crate::Sema::SemIndexEffectFacts::default(),
+            )
+        }
     };
     let mut bundle = crate::AST::ProgramBundle {
         entry: 0,
@@ -2383,13 +3334,32 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-        return diags;
+        return (
+            diags,
+            None,
+            crate::Sema::SemIndexEffectFacts::default(),
+        );
     }
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,
-        Err(diags) => return diags,
+        Err(diags) => {
+            return (
+                diags,
+                None,
+                crate::Sema::SemIndexEffectFacts::default(),
+            )
+        }
     };
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Eval);
+    let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(
+        &mut bundle,
+        crate::Sema::CompileMode::Eval,
+    );
+    (diags, Some(bundle), facts)
+}
+
+/// Check-only from source text (eval mode). Returns only error-severity diagnostics.
+pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
+    let (diags, _, _) = check_eval_with_effect_facts(src, file);
     diags
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
