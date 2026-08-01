@@ -90,10 +90,23 @@ fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<S
 /// I9: the TIR interpreter is the deopt tier for `jet run`/`jet dev`. It must
 /// produce the same output the native build does, never a stale copy.
 fn interpret(src: &str) -> String {
+    // Pin field / `from`-return write-through walks nested PlaceMut projections
+    // with large TIR eval frames; the default test thread stack is too small.
+    let src = src.to_string();
+    std::thread::Builder::new()
+        .name("jet-pin-interpret".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || interpret_on_thread(src))
+        .expect("spawn pin interpret thread")
+        .join()
+        .expect("pin interpret thread")
+}
+
+fn interpret_on_thread(src: String) -> String {
     let dir = unique_tmp();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("fixture.jet");
-    std::fs::write(&path, src).unwrap();
+    std::fs::write(&path, &src).unwrap();
     let mut bundle = jet::Loader::load_entry(&path.to_string_lossy())
         .expect("fixture loads");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
