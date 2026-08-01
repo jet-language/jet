@@ -533,11 +533,28 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
+    // Kernel closure: JetStd brace-chain files name these Top symbols
+    // (FileReader, text fold, JSON frames, TCPStream, deadlines). Emit them
+    // for every Core program so R10 gating cannot break the intrinsic kernel.
+    out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+
     if needs_email {
         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
     }
     if needs_raylib {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+        // File/DB/Plugin handles already emitted in the kernel closure above;
+        // raylib-only when explicitly used stays a no-op re-include guard via
+        // the same source (idempotent struct defs would conflict). Skip.
     }
     if needs_game {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
@@ -546,8 +563,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
     }
     if needs_text {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+        // Text/Unicode already in kernel closure.
     }
     if needs_fs_runtime {
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -559,15 +575,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_math {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
     }
     if needs_encoding {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
+        // Encoding templates already in kernel closure.
     }
     if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
@@ -631,6 +642,30 @@ const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.r
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
+
+fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // WebApp/DevServer call into HTTPServer helpers. Emit them only when the
+    // program actually uses web/HTTP/app surfaces so R10 files/mem programs
+    // stay free of those symbols.
+    let needs_web = core_usage_matches(
+        used_core,
+        &[
+            "core.web",
+            "core.http",
+            "core.http.server",
+            "core.http.client",
+            "app",
+        ],
+    );
+    let needs_live = core_usage_matches(used_core, &["app", "core.web"]);
+    if needs_web {
+        out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
+    }
+    if needs_live {
+        out.push_str(LIVEQUERY_PRELUDE);
+    }
+}
 
 fn push_mem_prelude(out: &mut String) {
     out.push_str("mod jet_uninit_semantics {\n");
@@ -2411,9 +2446,7 @@ pub fn emit_bundle_dbg(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
-        out.push_str(LIVEQUERY_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -2592,9 +2625,7 @@ pub fn emit_bundle_tests_cov(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
-        out.push_str(LIVEQUERY_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -2795,9 +2826,7 @@ pub fn emit_bundle_fuzz(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
-        out.push_str(LIVEQUERY_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -3051,9 +3080,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
-        out.push_str(LIVEQUERY_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
