@@ -392,6 +392,17 @@ pub(crate) fn corelib_emission_fingerprint(
 }
 
 fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // JetStd Open/CommonTypes + EncodingStream/Codecs name these foundation
+    // modules unconditionally — always emit them with the Core kernel.
+    out.push_str("\nmod jet_xml_pull {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_base_encoding_strict {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_regex_syntax {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
+    out.push_str("\n}\n");
     let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
     let needs_base = core_usage_matches(
         used_core,
@@ -402,22 +413,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.binary",
         ],
     );
-    let needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
-    if needs_xml {
-        out.push_str("\nmod jet_xml_pull {\n");
-        out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
-        out.push_str("\n}\n");
-    }
-    if needs_base {
-        out.push_str("\nmod jet_base_encoding_strict {\n");
-        out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
-        out.push_str("\n}\n");
-    }
-    if needs_regex {
-        out.push_str("\nmod jet_regex_syntax {\n");
-        out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
-        out.push_str("\n}\n");
-    }
+    let _needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
 
     for part in CORELIB_KERNEL_PARTS {
         out.push_str(part);
@@ -534,8 +530,8 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
-    // (FileReader, text fold, JSON frames, TCPStream, deadlines). Emit them
-    // for every Core program so R10 gating cannot break the intrinsic kernel.
+    // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
+    // NetHTTP is TCP/TLS only — HTTP serve/router lives in HTTPServer (gated).
     out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
@@ -544,6 +540,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
@@ -569,7 +566,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
     }
     if needs_crypto {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
+        // CryptoEntropy already in kernel closure (TLS identity + JetStd).
     }
     if needs_process {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
@@ -588,8 +585,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
     }
     if needs_net {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+        // DNS + NetHTTP (TCP/TLS) already in kernel closure.
     }
     if needs_http {
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
