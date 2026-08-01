@@ -16,6 +16,7 @@ fn restart_to_ct(r: JetServiceRestart) -> CtValue {
         variant: match r {
             JetServiceRestart::OneForOne => "OneForOne".to_string(),
             JetServiceRestart::OneForAll => "OneForAll".to_string(),
+            JetServiceRestart::RestForOne => "RestForOne".to_string(),
         },
         args: Vec::new(),
     }
@@ -30,6 +31,7 @@ fn ct_to_restart(v: &CtValue, span: Span) -> Result<JetServiceRestart, Diagnosti
         } if type_name == "ServiceRestart" => match variant.as_str() {
             "OneForOne" => Ok(JetServiceRestart::OneForOne),
             "OneForAll" => Ok(JetServiceRestart::OneForAll),
+            "RestForOne" => Ok(JetServiceRestart::RestForOne),
             _ => Err(unsupported("ServiceRestart", span)),
         },
         _ => Err(unsupported("ServiceRestart", span)),
@@ -206,6 +208,94 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
     })
 }
 
+fn state_adapter_to_ct(a: JetServiceStateAdapter) -> CtValue {
+    CtValue::Enum {
+        type_name: "ServiceStateAdapter".to_string(),
+        variant: match a {
+            JetServiceStateAdapter::Empty => "Empty".to_string(),
+            JetServiceStateAdapter::Snapshot => "Snapshot".to_string(),
+            JetServiceStateAdapter::EventLog => "EventLog".to_string(),
+        },
+        args: Vec::new(),
+    }
+}
+
+fn ct_to_state_adapter(v: &CtValue, span: Span) -> Result<JetServiceStateAdapter, Diagnostic> {
+    match v {
+        CtValue::Enum {
+            type_name,
+            variant,
+            ..
+        } if type_name == "ServiceStateAdapter" => match variant.as_str() {
+            "Empty" => Ok(JetServiceStateAdapter::Empty),
+            "Snapshot" => Ok(JetServiceStateAdapter::Snapshot),
+            "EventLog" => Ok(JetServiceStateAdapter::EventLog),
+            _ => Err(unsupported("ServiceStateAdapter", span)),
+        },
+        _ => Ok(JetServiceStateAdapter::Empty),
+    }
+}
+
+fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceWorkflow".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(w.id.clone())),
+            ("run_id".to_string(), CtValue::Int(w.run_id)),
+            ("version".to_string(), CtValue::Int(w.version)),
+            (
+                "steps".to_string(),
+                CtValue::List(w.steps.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "history".to_string(),
+                CtValue::List(w.history.iter().cloned().map(CtValue::Str).collect()),
+            ),
+        ],
+    }
+}
+
+fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnostic> {
+    let CtValue::Struct { fields, .. } = v else {
+        return Err(unsupported("ServiceWorkflow", span));
+    };
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| unsupported("workflow field", span))
+    };
+    let str_list = |name: &str| -> Result<Vec<String>, Diagnostic> {
+        match field(name)? {
+            CtValue::List(xs) => xs
+                .iter()
+                .map(|x| match x {
+                    CtValue::Str(s) => Ok(s.clone()),
+                    _ => Err(unsupported("workflow string", span)),
+                })
+                .collect(),
+            _ => Ok(Vec::new()),
+        }
+    };
+    Ok(JetServiceWorkflow {
+        id: match field("id")? {
+            CtValue::Str(s) => s.clone(),
+            _ => return Err(unsupported("workflow id", span)),
+        },
+        run_id: match field("run_id")? {
+            CtValue::Int(n) => *n,
+            _ => 0,
+        },
+        version: match field("version")? {
+            CtValue::Int(n) => *n,
+            _ => 1,
+        },
+        steps: str_list("steps")?,
+        history: str_list("history")?,
+    })
+}
+
 fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceTree".to_string(),
@@ -242,7 +332,79 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 ),
             ),
             ("started".to_string(), CtValue::Bool(tree.started)),
+            (
+                "state_adapter".to_string(),
+                state_adapter_to_ct(tree.state_adapter.clone()),
+            ),
+            (
+                "snapshot".to_string(),
+                match &tree.snapshot {
+                    Some(s) => CtValue::Str(s.clone()),
+                    None => CtValue::Str(String::new()),
+                },
+            ),
+            (
+                "event_log".to_string(),
+                CtValue::List(tree.event_log.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "dead_letters".to_string(),
+                CtValue::List(tree.dead_letters.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "idempotency_seen".to_string(),
+                CtValue::List(
+                    tree.idempotency_seen
+                        .iter()
+                        .cloned()
+                        .map(CtValue::Str)
+                        .collect(),
+                ),
+            ),
+            (
+                "directory".to_string(),
+                CtValue::List(
+                    tree.directory
+                        .iter()
+                        .map(|(n, ep)| {
+                            CtValue::Struct {
+                                type_name: "ServiceDirectoryEntry".to_string(),
+                                fields: vec![
+                                    ("name".to_string(), CtValue::Str(n.clone())),
+                                    ("endpoint".to_string(), endpoint_to_ct(ep)),
+                                ],
+                            }
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "draining".to_string(),
+                CtValue::List(tree.draining.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "workflows".to_string(),
+                CtValue::List(tree.workflows.iter().map(workflow_to_ct).collect()),
+            ),
+            ("chaos_fails".to_string(), CtValue::Int(tree.chaos_fails)),
+            (
+                "previous_generation".to_string(),
+                CtValue::Int(tree.previous_generation),
+            ),
         ],
+    }
+}
+
+fn ct_str_list(v: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
+    match v {
+        CtValue::List(xs) => xs
+            .iter()
+            .map(|x| match x {
+                CtValue::Str(s) => Ok(s.clone()),
+                _ => Err(unsupported("string list", span)),
+            })
+            .collect(),
+        _ => Ok(Vec::new()),
     }
 }
 
@@ -260,6 +422,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("tree field", span))
     };
+    let opt_field = |name: &str| fields.iter().find(|(n, _)| n == name).map(|(_, v)| v);
     let workers = match field("workers")? {
         CtValue::List(xs) => xs
             .iter()
@@ -312,6 +475,41 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             .collect::<Result<Vec<_>, _>>()?,
         _ => Vec::new(),
     };
+    let directory = match opt_field("directory") {
+        Some(CtValue::List(xs)) => xs
+            .iter()
+            .map(|x| {
+                let CtValue::Struct { fields, .. } = x else {
+                    return Err(unsupported("directory entry", span));
+                };
+                let name = fields
+                    .iter()
+                    .find(|(n, _)| n == "name")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| unsupported("directory name", span))?;
+                let endpoint = fields
+                    .iter()
+                    .find(|(n, _)| n == "endpoint")
+                    .ok_or_else(|| unsupported("directory endpoint", span))?;
+                Ok((name, ct_to_endpoint(&endpoint.1, span)?))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
+    let workflows = match opt_field("workflows") {
+        Some(CtValue::List(xs)) => xs
+            .iter()
+            .map(|x| ct_to_workflow(x, span))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
+    let snapshot = match opt_field("snapshot") {
+        Some(CtValue::Str(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    };
     Ok(JetServiceTree {
         name: match field("name")? {
             CtValue::Str(s) => s.clone(),
@@ -328,6 +526,37 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         started: match field("started")? {
             CtValue::Bool(b) => *b,
             _ => false,
+        },
+        state_adapter: match opt_field("state_adapter") {
+            Some(v) => ct_to_state_adapter(v, span)?,
+            None => JetServiceStateAdapter::Empty,
+        },
+        snapshot,
+        event_log: match opt_field("event_log") {
+            Some(v) => ct_str_list(v, span)?,
+            None => Vec::new(),
+        },
+        dead_letters: match opt_field("dead_letters") {
+            Some(v) => ct_str_list(v, span)?,
+            None => Vec::new(),
+        },
+        idempotency_seen: match opt_field("idempotency_seen") {
+            Some(v) => ct_str_list(v, span)?,
+            None => Vec::new(),
+        },
+        directory,
+        draining: match opt_field("draining") {
+            Some(v) => ct_str_list(v, span)?,
+            None => Vec::new(),
+        },
+        workflows,
+        chaos_fails: match opt_field("chaos_fails") {
+            Some(CtValue::Int(n)) => *n,
+            _ => 0,
+        },
+        previous_generation: match opt_field("previous_generation") {
+            Some(CtValue::Int(n)) => *n,
+            _ => 0,
         },
     })
 }
@@ -395,10 +624,21 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         },
         "restart_one_for_one" => Ok(restart_to_ct(jet_services_restart_one_for_one())),
         "restart_one_for_all" => Ok(restart_to_ct(jet_services_restart_one_for_all())),
+        "restart_rest_for_one" => Ok(restart_to_ct(jet_services_restart_rest_for_one())),
+        "delivery_at_most_once" => Ok(delivery_to_ct(jet_services_delivery_at_most_once())),
+        "delivery_durable" => Ok(delivery_to_ct(jet_services_delivery_durable())),
         "set_restart" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
             let restart = ct_to_restart(one(1)?, span)?;
             Ok(match jet_services_set_restart(&mut tree, restart) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "set_delivery" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let delivery = ct_to_delivery(one(1)?, span)?;
+            Ok(match jet_services_set_delivery(&mut tree, delivery) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
                 Err(e) => CtValue::ResErr(Box::new(map_err(e))),
             })
@@ -500,6 +740,173 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             span,
         )?))),
         "tree_show" => Ok(CtValue::Str(jet_services_tree_show(&ct_to_tree(
+            one(0)?,
+            span,
+        )?))),
+        "send_durable" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let endpoint = ct_to_endpoint(one(1)?, span)?;
+            let message = match one(2)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("message", span)),
+            };
+            let key = match one(3)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("idempotency key", span)),
+            };
+            Ok(match jet_services_send_durable(&mut tree, &endpoint, message, key) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "dead_letter_count" => Ok(CtValue::Int(jet_services_dead_letter_count(&ct_to_tree(
+            one(0)?,
+            span,
+        )?))),
+        "drain_dead_letters" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            Ok(match jet_services_drain_dead_letters(&mut tree) {
+                Ok(n) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(n)))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "set_state_empty" | "set_state_snapshot" | "set_state_event_log" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let result = match method {
+                "set_state_empty" => jet_services_set_state_empty(&mut tree),
+                "set_state_snapshot" => jet_services_set_state_snapshot(&mut tree),
+                _ => jet_services_set_state_event_log(&mut tree),
+            };
+            Ok(match result {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "commit_snapshot" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let payload = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("snapshot payload", span)),
+            };
+            Ok(match jet_services_commit_snapshot(&mut tree, payload) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "restore_snapshot" => {
+            let tree = ct_to_tree(one(0)?, span)?;
+            Ok(match jet_services_restore_snapshot(&tree) {
+                Ok(s) => CtValue::ResOk(Box::new(CtValue::Str(s))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "append_event" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let event = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("event", span)),
+            };
+            Ok(match jet_services_append_event(&mut tree, event) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "event_count" => Ok(CtValue::Int(jet_services_event_count(&ct_to_tree(
+            one(0)?,
+            span,
+        )?))),
+        "replay_events" => Ok(CtValue::Str(jet_services_replay_events(&ct_to_tree(
+            one(0)?,
+            span,
+        )?))),
+        "workflow_start" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let id = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("workflow id", span)),
+            };
+            let version = match one(2)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("workflow version", span)),
+            };
+            Ok(match jet_services_workflow_start(&mut tree, id, version) {
+                Ok(run_id) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(run_id)))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "workflow_step" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            let step = match one(2)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("step", span)),
+            };
+            Ok(match jet_services_workflow_step(&mut tree, run_id, step) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "workflow_history" => {
+            let tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            Ok(match jet_services_workflow_history(&tree, run_id) {
+                Ok(s) => CtValue::ResOk(Box::new(CtValue::Str(s))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "directory_register" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let name = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("directory name", span)),
+            };
+            let endpoint = ct_to_endpoint(one(2)?, span)?;
+            Ok(match jet_services_directory_register(&mut tree, name, endpoint) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "directory_resolve" => {
+            let tree = ct_to_tree(one(0)?, span)?;
+            let name = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("directory name", span)),
+            };
+            Ok(match jet_services_directory_resolve(&tree, &name) {
+                Ok(ep) => CtValue::ResOk(Box::new(endpoint_to_ct(&ep))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "directory_generation" => Ok(CtValue::Int(jet_services_directory_generation(
+            &ct_to_tree(one(0)?, span)?,
+        ))),
+        "drain_worker" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let endpoint = ct_to_endpoint(one(1)?, span)?;
+            Ok(match jet_services_drain_worker(&mut tree, &endpoint) {
+                Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "handoff_generation" | "rollback_generation" | "chaos_fail" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let result = match method {
+                "handoff_generation" => jet_services_handoff_generation(&mut tree),
+                "rollback_generation" => jet_services_rollback_generation(&mut tree),
+                _ => jet_services_chaos_fail(&mut tree),
+            };
+            Ok(match result {
+                Ok(n) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(n)))),
+                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+            })
+        }
+        "observe" => Ok(CtValue::Str(jet_services_observe(&ct_to_tree(
             one(0)?,
             span,
         )?))),

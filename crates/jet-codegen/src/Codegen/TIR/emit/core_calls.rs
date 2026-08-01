@@ -972,6 +972,100 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.compute", "stream_new") => format!("{}()", helper("jet_compute_stream_new")),
+        ("core.compute", "stream_sync") => {
+            format!("{}(&({}))", helper("jet_compute_stream_sync"), arg(0))
+        }
+        ("core.compute", "stream_show") => {
+            format!("{}(&({}))", helper("jet_compute_stream_show"), arg(0))
+        }
+        ("core.compute", "transfer") => format!(
+            "{}(&({}), {})",
+            helper("jet_compute_transfer"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "transfer_show") => {
+            format!("{}(&({}))", helper("jet_compute_transfer_show"), arg(0))
+        }
+        ("core.compute", "kernel_bounds_ok") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_kernel_bounds_ok"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "raw_kernel_contract") => format!(
+            "{}(({}).clone(), {})",
+            helper("jet_compute_raw_kernel_contract"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "jvp_mul") => format!(
+            "{}(&({}), &({}), &({}), &({}))",
+            helper("jet_compute_jvp_mul"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.compute", "value_and_grad_mul") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_value_and_grad_mul"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "grad_value") => {
+            format!("{}(&({}))", helper("jet_compute_grad_value"), arg(0))
+        }
+        ("core.compute", "grad_a") => format!("{}(&({}))", helper("jet_compute_grad_a"), arg(0)),
+        ("core.compute", "grad_b") => format!("{}(&({}))", helper("jet_compute_grad_b"), arg(0)),
+        ("core.compute", "grad_show") => {
+            format!("{}(&({}))", helper("jet_compute_grad_show"), arg(0))
+        }
+        ("core.compute", "mse_loss") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_mse_loss"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "sgd_step") => format!(
+            "{}(&({}), &({}), {})",
+            helper("jet_compute_sgd_step"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.compute", "serialize") => {
+            format!("{}(&({}))", helper("jet_compute_serialize"), arg(0))
+        }
+        ("core.compute", "deserialize") => {
+            format!("{}(&({}))", helper("jet_compute_deserialize"), arg(0))
+        }
+        ("core.compute", "to_sparse") => {
+            format!("{}(&({}))", helper("jet_compute_to_sparse"), arg(0))
+        }
+        ("core.compute", "sparse_nnz") => {
+            format!("{}(&({}))", helper("jet_compute_sparse_nnz"), arg(0))
+        }
+        ("core.compute", "sparse_mv") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_sparse_mv"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "sparse_show") => {
+            format!("{}(&({}))", helper("jet_compute_sparse_show"), arg(0))
+        }
+        ("core.compute", "matmul_f32_tile") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_matmul_f32_tile"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "profile_f32_strict") => {
+            format!("{}()", helper("jet_compute_profile_f32_strict"))
+        }
+        ("core.compute", "profile_show") => format!("{}()", helper("jet_compute_profile_show")),
         ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
         ("core.services", "restart_one_for_one") => {
             format!("{}()", helper("jet_services_restart_one_for_one"))
@@ -979,9 +1073,24 @@ pub(crate) fn emit_tir_core_call(
         ("core.services", "restart_one_for_all") => {
             format!("{}()", helper("jet_services_restart_one_for_all"))
         }
+        ("core.services", "restart_rest_for_one") => {
+            format!("{}()", helper("jet_services_restart_rest_for_one"))
+        }
+        ("core.services", "delivery_at_most_once") => {
+            format!("{}()", helper("jet_services_delivery_at_most_once"))
+        }
+        ("core.services", "delivery_durable") => {
+            format!("{}()", helper("jet_services_delivery_durable"))
+        }
         ("core.services", "set_restart") => format!(
             "{}(&mut ({}), {})",
             helper("jet_services_set_restart"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "set_delivery") => format!(
+            "{}(&mut ({}), {})",
+            helper("jet_services_set_delivery"),
             arg(0),
             arg(1)
         ),
@@ -1012,6 +1121,14 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        ("core.services", "send_durable") => format!(
+            "{}(&mut ({}), &({}), ({}).clone(), ({}).clone())",
+            helper("jet_services_send_durable"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
         ("core.services", "receive") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_services_receive"),
@@ -1036,6 +1153,108 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.services", "dead_letter_count") => {
+            format!("{}(&({}))", helper("jet_services_dead_letter_count"), arg(0))
+        }
+        ("core.services", "drain_dead_letters") => format!(
+            "{}(&mut ({}))",
+            helper("jet_services_drain_dead_letters"),
+            arg(0)
+        ),
+        ("core.services", "set_state_empty") => {
+            format!("{}(&mut ({}))", helper("jet_services_set_state_empty"), arg(0))
+        }
+        ("core.services", "set_state_snapshot") => format!(
+            "{}(&mut ({}))",
+            helper("jet_services_set_state_snapshot"),
+            arg(0)
+        ),
+        ("core.services", "set_state_event_log") => format!(
+            "{}(&mut ({}))",
+            helper("jet_services_set_state_event_log"),
+            arg(0)
+        ),
+        ("core.services", "commit_snapshot") => format!(
+            "{}(&mut ({}), ({}).clone())",
+            helper("jet_services_commit_snapshot"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "restore_snapshot") => {
+            format!("{}(&({}))", helper("jet_services_restore_snapshot"), arg(0))
+        }
+        ("core.services", "append_event") => format!(
+            "{}(&mut ({}), ({}).clone())",
+            helper("jet_services_append_event"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "event_count") => {
+            format!("{}(&({}))", helper("jet_services_event_count"), arg(0))
+        }
+        ("core.services", "replay_events") => {
+            format!("{}(&({}))", helper("jet_services_replay_events"), arg(0))
+        }
+        ("core.services", "workflow_start") => format!(
+            "{}(&mut ({}), ({}).clone(), {})",
+            helper("jet_services_workflow_start"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "workflow_step") => format!(
+            "{}(&mut ({}), {}, ({}).clone())",
+            helper("jet_services_workflow_step"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "workflow_history") => format!(
+            "{}(&({}), {})",
+            helper("jet_services_workflow_history"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "directory_register") => format!(
+            "{}(&mut ({}), ({}).clone(), {})",
+            helper("jet_services_directory_register"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "directory_resolve") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_services_directory_resolve"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "directory_generation") => format!(
+            "{}(&({}))",
+            helper("jet_services_directory_generation"),
+            arg(0)
+        ),
+        ("core.services", "drain_worker") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_services_drain_worker"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "handoff_generation") => format!(
+            "{}(&mut ({}))",
+            helper("jet_services_handoff_generation"),
+            arg(0)
+        ),
+        ("core.services", "rollback_generation") => format!(
+            "{}(&mut ({}))",
+            helper("jet_services_rollback_generation"),
+            arg(0)
+        ),
+        ("core.services", "chaos_fail") => {
+            format!("{}(&mut ({}))", helper("jet_services_chaos_fail"), arg(0))
+        }
+        ("core.services", "observe") => {
+            format!("{}(&({}))", helper("jet_services_observe"), arg(0))
+        }
         ("core.services", "endpoint_show") => {
             format!("{}(&({}))", helper("jet_services_endpoint_show"), arg(0))
         }

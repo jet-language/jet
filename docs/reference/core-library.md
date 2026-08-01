@@ -3059,6 +3059,11 @@ fn run() {
 | `negate` / `abs` / `exp` / `log` / `sqrt` | unary ufuncs |
 | `sum_axis` | reduce one axis |
 | `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
+| `to_sparse` / `sparse_mv` / `sparse_nnz` | CSR sparse view over dense |
+| `value_and_grad_mul` / `jvp_mul` / `grad_*` | reverse default + JVP |
+| `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
+| `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
+| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, kernel tiers |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
@@ -3074,9 +3079,14 @@ Backend facts for Core modules (ownership/effects/failure/platform) live in
 
 ## `core.services` — service trees and mailboxes
 
-D-SERVICE1=D: typed service trees over the existing task/channel model. Workers
-own bounded mailboxes; delivery defaults to at-most-once with `Full` under
-capacity; restart policy defaults to OneForOne.
+D-SERVICE1=D / D-SERVICE-DELIVERY1=D / D-SERVICE-STATE1=D /
+D-SERVICE-WORKFLOW1=D / D-SERVICE-IDENTITY1=D / D-SERVICE-UPGRADE1=D: typed
+service trees over the existing task/channel model. Workers own bounded
+mailboxes; delivery defaults to at-most-once with `Full` under capacity;
+`send_durable` requires DurableAtLeastOnce plus an idempotency key; restart
+policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
+Empty / Snapshot / EventLog; workflows, directory identity, and generation
+handoff/rollback are first-class.
 
 ```jet
 use core.services as services

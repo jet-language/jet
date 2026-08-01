@@ -729,19 +729,165 @@ pub fn core_fixed_sig(
                 Type::Named("ComputeError".to_string()),
             )),
         )),
+        ("core.compute", "stream_new") => Some((vec![], Some(Type::Named("ComputeStream".to_string())))),
+        ("core.compute", "stream_sync") => Some((
+            vec![(read, Type::Named("ComputeStream".to_string()))],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "stream_show") => Some((
+            vec![(read, Type::Named("ComputeStream".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "transfer_show") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "transfer") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("ComputeDevice".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "kernel_bounds_ok") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Int))),
+                (read, Type::List(Box::new(Type::Int))),
+            ],
+            Some(result_ty(Type::Bool, Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "raw_kernel_contract") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::String, Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "jvp_mul") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "value_and_grad_mul") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("GradTriple".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "grad_value" | "grad_a" | "grad_b") => Some((
+            vec![(read, Type::Named("GradTriple".to_string()))],
+            Some(Type::Named("Tensor".to_string())),
+        )),
+        ("core.compute", "grad_show") => Some((
+            vec![(read, Type::Named("GradTriple".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "sparse_show") => Some((
+            vec![(read, Type::Named("SparseTensor".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "serialize") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "mse_loss") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "sgd_step") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Float),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "deserialize") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "to_sparse") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(result_ty(
+                Type::Named("SparseTensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "sparse_nnz") => Some((
+            vec![(read, Type::Named("SparseTensor".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.compute", "sparse_mv") => Some((
+            vec![
+                (read, Type::Named("SparseTensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "matmul_f32_tile") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "profile_f32_strict" | "profile_show") => {
+            Some((vec![], Some(Type::String)))
+        },
         // D-SERVICE1=D (#444): service tree topology + mailboxes.
         ("core.services", "tree") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("ServiceTree".to_string())),
         )),
-        ("core.services", "restart_one_for_one" | "restart_one_for_all") => Some((
-            vec![],
-            Some(Type::Named("ServiceRestart".to_string())),
-        )),
+        ("core.services", "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one") => {
+            Some((vec![], Some(Type::Named("ServiceRestart".to_string()))))
+        }
+        ("core.services", "delivery_at_most_once" | "delivery_durable") => {
+            Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
+        }
         ("core.services", "set_restart") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
                 (read, Type::Named("ServiceRestart".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "set_delivery") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceDelivery".to_string())),
             ],
             Some(result_ty(
                 Type::Named("Unit".into()),
@@ -788,6 +934,18 @@ pub fn core_fixed_sig(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        ("core.services", "send_durable") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
         ("core.services", "receive") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
@@ -802,7 +960,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
         )),
-        ("core.services", "fail_worker") => Some((
+        ("core.services", "fail_worker" | "drain_worker") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
                 (read, Type::Named("ServiceEndpoint".to_string())),
@@ -811,6 +969,92 @@ pub fn core_fixed_sig(
                 Type::Named("Unit".into()),
                 Type::Named("ServiceError".to_string()),
             )),
+        )),
+        ("core.services", "dead_letter_count" | "event_count" | "directory_generation") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.services", "drain_dead_letters") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "set_state_empty" | "set_state_snapshot" | "set_state_event_log") => {
+            Some((
+                vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+                Some(result_ty(
+                    Type::Named("Unit".into()),
+                    Type::Named("ServiceError".to_string()),
+                )),
+            ))
+        }
+        ("core.services", "commit_snapshot" | "append_event") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "restore_snapshot") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "replay_events" | "observe") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.services", "workflow_start") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "workflow_step") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "workflow_history") => Some((
+            vec![
+                (read, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "directory_register") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "directory_resolve") => Some((
+            vec![
+                (read, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("ServiceEndpoint".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
         )),
         ("core.services", "endpoint_show") => Some((
             vec![(read, Type::Named("ServiceEndpoint".to_string()))],

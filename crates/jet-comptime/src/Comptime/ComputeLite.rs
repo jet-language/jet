@@ -173,6 +173,135 @@ fn map_err(err: JetComputeError) -> CtValue {
     }
 }
 
+fn grad_to_ct(g: &JetComputeGradTriple) -> CtValue {
+    CtValue::Struct {
+        type_name: "GradTriple".to_string(),
+        fields: vec![
+            ("value".to_string(), tensor_to_ct(&g.value)),
+            ("grad_a".to_string(), tensor_to_ct(&g.grad_a)),
+            ("grad_b".to_string(), tensor_to_ct(&g.grad_b)),
+        ],
+    }
+}
+
+fn ct_to_grad(value: &CtValue, span: Span) -> Result<JetComputeGradTriple, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("GradTriple", span));
+    };
+    if type_name != "GradTriple" && type_name != "JetComputeGradTriple" {
+        return Err(unsupported("GradTriple", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| unsupported("GradTriple field", span))
+    };
+    Ok(JetComputeGradTriple {
+        value: ct_to_tensor(field("value")?, span)?,
+        grad_a: ct_to_tensor(field("grad_a")?, span)?,
+        grad_b: ct_to_tensor(field("grad_b")?, span)?,
+    })
+}
+
+fn stream_to_ct(s: &JetComputeStream) -> CtValue {
+    CtValue::Struct {
+        type_name: "ComputeStream".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Int(s.id)),
+            ("device".to_string(), device_to_ct(s.device)),
+        ],
+    }
+}
+
+fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ComputeStream", span));
+    };
+    if type_name != "ComputeStream" && type_name != "JetComputeStream" {
+        return Err(unsupported("ComputeStream", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| unsupported("ComputeStream field", span))
+    };
+    Ok(JetComputeStream {
+        id: match field("id")? {
+            CtValue::Int(n) => *n,
+            _ => 1,
+        },
+        device: ct_to_device(field("device")?, span)?,
+    })
+}
+
+fn sparse_to_ct(s: &JetSparseCsr) -> CtValue {
+    CtValue::Struct {
+        type_name: "SparseTensor".to_string(),
+        fields: vec![
+            ("rows".to_string(), CtValue::Int(s.rows)),
+            ("cols".to_string(), CtValue::Int(s.cols)),
+            (
+                "row_ptr".to_string(),
+                CtValue::List(s.row_ptr.iter().copied().map(CtValue::Int).collect()),
+            ),
+            (
+                "col_idx".to_string(),
+                CtValue::List(s.col_idx.iter().copied().map(CtValue::Int).collect()),
+            ),
+            (
+                "values".to_string(),
+                CtValue::List(
+                    s.values
+                        .iter()
+                        .map(|v| CtValue::Float(CtFloat::f64(*v)))
+                        .collect(),
+                ),
+            ),
+        ],
+    }
+}
+
+fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("SparseTensor", span));
+    };
+    if type_name != "SparseTensor" && type_name != "JetSparseCsr" {
+        return Err(unsupported("SparseTensor", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| unsupported("SparseTensor field", span))
+    };
+    Ok(JetSparseCsr {
+        rows: match field("rows")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("sparse rows", span)),
+        },
+        cols: match field("cols")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("sparse cols", span)),
+        },
+        row_ptr: as_i64_list(field("row_ptr")?, span)?,
+        col_idx: as_i64_list(field("col_idx")?, span)?,
+        values: as_f64_list(field("values")?, span)?,
+    })
+}
+
+fn ok_grad(g: JetComputeGradTriple) -> CtValue {
+    CtValue::ResOk(Box::new(grad_to_ct(&g)))
+}
+
+fn ok_sparse(s: JetSparseCsr) -> CtValue {
+    CtValue::ResOk(Box::new(sparse_to_ct(&s)))
+}
+
 fn ok_tensor(tensor: JetTensor) -> CtValue {
     CtValue::ResOk(Box::new(tensor_to_ct(&tensor)))
 }
@@ -384,6 +513,131 @@ pub fn apply(
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
+        "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
+        "stream_sync" => Ok(
+            match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
+                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "stream_show" => Ok(CtValue::Str(jet_compute_stream_show(&ct_to_stream(
+            one(0)?,
+            span,
+        )?))),
+        "transfer" => Ok(match jet_compute_transfer(
+            &ct_to_tensor(one(0)?, span)?,
+            ct_to_device(one(1)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "transfer_show" => Ok(CtValue::Str(jet_compute_transfer_show(&ct_to_tensor(
+            one(0)?,
+            span,
+        )?))),
+        "kernel_bounds_ok" => Ok(match jet_compute_kernel_bounds_ok(
+            &as_i64_list(one(0)?, span)?,
+            &as_i64_list(one(1)?, span)?,
+        ) {
+            Ok(b) => CtValue::ResOk(Box::new(CtValue::Bool(b))),
+            Err(e) => err_compute(e),
+        }),
+        "raw_kernel_contract" => {
+            let reason = match one(0)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("raw kernel reason", span)),
+            };
+            Ok(
+                match jet_compute_raw_kernel_contract(reason, as_int(one(1)?, span)?) {
+                    Ok(s) => CtValue::ResOk(Box::new(CtValue::Str(s))),
+                    Err(e) => err_compute(e),
+                },
+            )
+        }
+        "jvp_mul" => Ok(match jet_compute_jvp_mul(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+            &ct_to_tensor(one(2)?, span)?,
+            &ct_to_tensor(one(3)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "value_and_grad_mul" => Ok(match jet_compute_value_and_grad_mul(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+        ) {
+            Ok(g) => ok_grad(g),
+            Err(e) => err_compute(e),
+        }),
+        "grad_value" | "grad_a" | "grad_b" => {
+            let g = ct_to_grad(one(0)?, span)?;
+            Ok(tensor_to_ct(&match method {
+                "grad_value" => jet_compute_grad_value(&g),
+                "grad_a" => jet_compute_grad_a(&g),
+                _ => jet_compute_grad_b(&g),
+            }))
+        }
+        "grad_show" => Ok(CtValue::Str(jet_compute_grad_show(&ct_to_grad(
+            one(0)?,
+            span,
+        )?))),
+        "mse_loss" => Ok(match jet_compute_mse_loss(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+        ) {
+            Ok(v) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Err(e) => err_compute(e),
+        }),
+        "sgd_step" => Ok(match jet_compute_sgd_step(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+            as_float(one(2)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "serialize" => Ok(CtValue::Str(jet_compute_serialize(&ct_to_tensor(
+            one(0)?,
+            span,
+        )?))),
+        "deserialize" => {
+            let payload = match one(0)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("serialize payload", span)),
+            };
+            Ok(match jet_compute_deserialize(&payload) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            })
+        }
+        "to_sparse" => Ok(match jet_compute_to_sparse(&ct_to_tensor(one(0)?, span)?) {
+            Ok(s) => ok_sparse(s),
+            Err(e) => err_compute(e),
+        }),
+        "sparse_nnz" => Ok(CtValue::Int(jet_compute_sparse_nnz(&ct_to_sparse(
+            one(0)?,
+            span,
+        )?))),
+        "sparse_mv" => Ok(match jet_compute_sparse_mv(
+            &ct_to_sparse(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "sparse_show" => Ok(CtValue::Str(jet_compute_sparse_show(&ct_to_sparse(
+            one(0)?,
+            span,
+        )?))),
+        "matmul_f32_tile" => Ok(match jet_compute_matmul_f32_tile(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "profile_f32_strict" | "profile_show" => Ok(CtValue::Str(jet_compute_profile_show())),
         _ => Err(unsupported(
             &format!("`core.compute.{method}()`"),
             span,

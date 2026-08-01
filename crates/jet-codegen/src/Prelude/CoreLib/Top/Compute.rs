@@ -722,3 +722,389 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     }
     Ok(out)
 }
+
+// ── #1138: stream + transfer receipts (CPU oracle) ──────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetComputeStream {
+    id: i64,
+    device: JetComputeDevice,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetComputeTransferReceipt {
+    from: JetComputeDevice,
+    to: JetComputeDevice,
+    bytes: i64,
+    fallback: String,
+}
+
+impl JetShow for JetComputeStream {
+    fn jet_show(&self) -> String {
+        format!("ComputeStream(id={}, device={})", self.id, self.device.jet_show())
+    }
+}
+
+impl JetShow for JetComputeTransferReceipt {
+    fn jet_show(&self) -> String {
+        format!(
+            "Transfer(from={}, to={}, bytes={}, fallback={})",
+            self.from.jet_show(),
+            self.to.jet_show(),
+            self.bytes,
+            self.fallback
+        )
+    }
+}
+
+fn jet_compute_stream_new() -> JetComputeStream {
+    JetComputeStream {
+        id: 1,
+        device: JetComputeDevice::Cpu,
+    }
+}
+
+fn jet_compute_stream_sync(_stream: &JetComputeStream) -> Result<(), JetComputeError> {
+    Ok(())
+}
+
+fn jet_compute_stream_show(stream: &JetComputeStream) -> String {
+    stream.jet_show()
+}
+
+fn jet_compute_transfer(
+    tensor: &JetTensor,
+    device: JetComputeDevice,
+) -> Result<JetTensor, JetComputeError> {
+    let bytes = (tensor.data.len() * std::mem::size_of::<f64>()) as i64;
+    let from = tensor.device;
+    let mut out = jet_compute_on_device(tensor, device)?;
+    let fallback = if from == out.device {
+        "none".to_string()
+    } else {
+        "cpu-oracle-copy".to_string()
+    };
+    out.last_placement.reason = format!(
+        "transfer bytes={bytes} fallback={fallback} from={} to={}",
+        from.jet_show(),
+        out.device.jet_show()
+    );
+    let _ = JetComputeTransferReceipt {
+        from,
+        to: out.device,
+        bytes,
+        fallback,
+    };
+    Ok(out)
+}
+
+fn jet_compute_transfer_show(tensor: &JetTensor) -> String {
+    tensor.last_placement.jet_show()
+}
+
+// ── #1139 / #1140: safe kernel bounds + raw-kernel contract label ────────────
+
+fn jet_compute_kernel_bounds_ok(
+    shape: &[i64],
+    indices: &[i64],
+) -> Result<bool, JetComputeError> {
+    if shape.len() != indices.len() {
+        return Err(JetComputeError::RankMismatch(
+            "kernel index rank must match tensor shape".to_string(),
+        ));
+    }
+    for (i, (&idx, &dim)) in indices.iter().zip(shape.iter()).enumerate() {
+        if idx < 0 || idx >= dim {
+            return Err(JetComputeError::OutOfBounds(format!(
+                "kernel index {idx} out of bounds for axis {i} (extent {dim})"
+            )));
+        }
+    }
+    Ok(true)
+}
+
+/// Records a raw-kernel contract string under `#Unsafe` (D-COMPUTE-KERNEL1).
+fn jet_compute_raw_kernel_contract(reason: String, arity: i64) -> Result<String, JetComputeError> {
+    if reason.trim().is_empty() {
+        return Err(JetComputeError::Device(
+            "raw kernel contract requires a non-empty #Unsafe reason".to_string(),
+        ));
+    }
+    if arity < 0 {
+        return Err(JetComputeError::InvalidShape(
+            "raw kernel arity must be non-negative".to_string(),
+        ));
+    }
+    Ok(format!("RawKernel(reason={reason}, arity={arity})"))
+}
+
+// ── #1141 / D-COMPUTE-AUTODIFF1: reverse-mode VJP + JVP for dense ops ────────
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetComputeGradTriple {
+    value: JetTensor,
+    grad_a: JetTensor,
+    grad_b: JetTensor,
+}
+
+impl JetShow for JetComputeGradTriple {
+    fn jet_show(&self) -> String {
+        format!(
+            "GradTriple(value={}, grad_a={}, grad_b={})",
+            self.value.jet_show(),
+            self.grad_a.jet_show(),
+            self.grad_b.jet_show()
+        )
+    }
+}
+
+fn jet_compute_vjp_add(
+    _a: &JetTensor,
+    _b: &JetTensor,
+    cot: &JetTensor,
+) -> Result<(JetTensor, JetTensor), JetComputeError> {
+    Ok((cot.clone(), cot.clone()))
+}
+
+fn jet_compute_vjp_mul(
+    a: &JetTensor,
+    b: &JetTensor,
+    cot: &JetTensor,
+) -> Result<(JetTensor, JetTensor), JetComputeError> {
+    Ok((jet_compute_mul(b, cot)?, jet_compute_mul(a, cot)?))
+}
+
+fn jet_compute_vjp_matmul(
+    a: &JetTensor,
+    b: &JetTensor,
+    cot: &JetTensor,
+) -> Result<(JetTensor, JetTensor), JetComputeError> {
+    let b_t = jet_compute_transpose(b)?;
+    let a_t = jet_compute_transpose(a)?;
+    Ok((jet_compute_matmul(cot, &b_t)?, jet_compute_matmul(&a_t, cot)?))
+}
+
+/// Forward-mode JVP of elementwise mul: `t_a * b + a * t_b`.
+fn jet_compute_jvp_mul(
+    a: &JetTensor,
+    b: &JetTensor,
+    t_a: &JetTensor,
+    t_b: &JetTensor,
+) -> Result<JetTensor, JetComputeError> {
+    let left = jet_compute_mul(t_a, b)?;
+    let right = jet_compute_mul(a, t_b)?;
+    jet_compute_add(&left, &right)
+}
+
+/// Scalar-loss convenience: value + ∂/∂a + ∂/∂b of `sum(a * b)`.
+fn jet_compute_value_and_grad_mul(
+    a: &JetTensor,
+    b: &JetTensor,
+) -> Result<JetComputeGradTriple, JetComputeError> {
+    let value = jet_compute_mul(a, b)?;
+    let ones = jet_compute_ones(&value.shape)?;
+    let (ga, gb) = jet_compute_vjp_mul(a, b, &ones)?;
+    Ok(JetComputeGradTriple {
+        value,
+        grad_a: ga,
+        grad_b: gb,
+    })
+}
+
+fn jet_compute_grad_value(g: &JetComputeGradTriple) -> JetTensor {
+    g.value.clone()
+}
+
+fn jet_compute_grad_a(g: &JetComputeGradTriple) -> JetTensor {
+    g.grad_a.clone()
+}
+
+fn jet_compute_grad_b(g: &JetComputeGradTriple) -> JetTensor {
+    g.grad_b.clone()
+}
+
+fn jet_compute_grad_show(g: &JetComputeGradTriple) -> String {
+    g.jet_show()
+}
+
+// ── #1142: ML step + serialization over the Tensor oracle ───────────────────
+
+fn jet_compute_mse_loss(pred: &JetTensor, target: &JetTensor) -> Result<f64, JetComputeError> {
+    let diff = jet_compute_binary("sub", pred, target)?;
+    let sq = jet_compute_mul(&diff, &diff)?;
+    let n = jet_compute_numel(&sq.shape)? as f64;
+    if n == 0.0 {
+        return Err(JetComputeError::InvalidShape(
+            "mse_loss requires a non-empty tensor".to_string(),
+        ));
+    }
+    Ok(sq.data.iter().sum::<f64>() / n)
+}
+
+fn jet_compute_sgd_step(
+    param: &JetTensor,
+    grad: &JetTensor,
+    lr: f64,
+) -> Result<JetTensor, JetComputeError> {
+    let scaled = jet_compute_full(&grad.shape, lr)?;
+    let delta = jet_compute_mul(grad, &scaled)?;
+    jet_compute_binary("sub", param, &delta)
+}
+
+fn jet_compute_serialize(tensor: &JetTensor) -> String {
+    let shape = tensor
+        .shape
+        .iter()
+        .map(|d| d.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let data = tensor
+        .data
+        .iter()
+        .map(|v| format!("{v}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("shape={shape};data={data}")
+}
+
+fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
+    let Some((shape_part, data_part)) = payload.split_once(";data=") else {
+        return Err(JetComputeError::InvalidShape(
+            "deserialize expects shape=…;data=…".to_string(),
+        ));
+    };
+    let shape_str = shape_part
+        .strip_prefix("shape=")
+        .ok_or_else(|| JetComputeError::InvalidShape("missing shape=".to_string()))?;
+    let shape: Vec<i64> = if shape_str.is_empty() {
+        Vec::new()
+    } else {
+        shape_str
+            .split(',')
+            .map(|p| {
+                p.parse::<i64>().map_err(|_| {
+                    JetComputeError::InvalidShape(format!("bad shape axis `{p}`"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let data: Vec<f64> = if data_part.is_empty() {
+        Vec::new()
+    } else {
+        data_part
+            .split(',')
+            .map(|p| {
+                p.parse::<f64>().map_err(|_| {
+                    JetComputeError::InvalidShape(format!("bad data value `{p}`"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let expected = jet_compute_numel(&shape)?;
+    if expected != data.len() as i64 {
+        return Err(JetComputeError::InvalidShape(format!(
+            "deserialize numel mismatch: shape wants {expected}, got {}",
+            data.len()
+        )));
+    }
+    let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu)?;
+    tensor.data = data;
+    Ok(tensor)
+}
+
+// ── #1137 sparse CSR + #1143 CPU SIMD tile + #1147 profile ──────────────────
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetSparseCsr {
+    rows: i64,
+    cols: i64,
+    row_ptr: Vec<i64>,
+    col_idx: Vec<i64>,
+    values: Vec<f64>,
+}
+
+impl JetShow for JetSparseCsr {
+    fn jet_show(&self) -> String {
+        format!(
+            "SparseCsr({}x{}, nnz={})",
+            self.rows,
+            self.cols,
+            self.values.len()
+        )
+    }
+}
+
+fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeError> {
+    if tensor.shape.len() != 2 {
+        return Err(JetComputeError::RankMismatch(
+            "to_sparse requires a rank-2 tensor".to_string(),
+        ));
+    }
+    let rows = tensor.shape[0];
+    let cols = tensor.shape[1];
+    let mut row_ptr = vec![0i64];
+    let mut col_idx = Vec::new();
+    let mut values = Vec::new();
+    for r in 0..rows {
+        for c in 0..cols {
+            let v = jet_compute_get(tensor, &vec![r, c])?;
+            if v != 0.0 {
+                col_idx.push(c);
+                values.push(v);
+            }
+        }
+        row_ptr.push(values.len() as i64);
+    }
+    Ok(JetSparseCsr {
+        rows,
+        cols,
+        row_ptr,
+        col_idx,
+        values,
+    })
+}
+
+fn jet_compute_sparse_nnz(sparse: &JetSparseCsr) -> i64 {
+    sparse.values.len() as i64
+}
+
+fn jet_compute_sparse_mv(
+    sparse: &JetSparseCsr,
+    vector: &JetTensor,
+) -> Result<JetTensor, JetComputeError> {
+    if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
+        return Err(JetComputeError::RankMismatch(format!(
+            "sparse_mv expects a length-{} vector",
+            sparse.cols
+        )));
+    }
+    let mut out = jet_compute_zeros(&vec![sparse.rows])?;
+    for r in 0..sparse.rows {
+        let start = sparse.row_ptr[r as usize] as usize;
+        let end = sparse.row_ptr[(r + 1) as usize] as usize;
+        let mut acc = 0.0;
+        for k in start..end {
+            let c = sparse.col_idx[k];
+            acc += sparse.values[k] * vector.data[c as usize];
+        }
+        jet_compute_set(&mut out, &vec![r], acc)?;
+    }
+    Ok(out)
+}
+
+fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String {
+    sparse.jet_show()
+}
+
+/// Named CPU-SIMD profile path; math matches scalar matmul (D-COMPUTE-BACKEND1).
+fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    jet_compute_matmul(a, b)
+}
+
+fn jet_compute_profile_f32_strict() -> String {
+    "F32Strict+Reproducible".to_string()
+}
+
+fn jet_compute_profile_show() -> String {
+    jet_compute_profile_f32_strict()
+}
