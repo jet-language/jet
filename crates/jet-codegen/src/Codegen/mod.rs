@@ -528,7 +528,8 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
-    let needs_auth = core_usage_matches(used_core, &["core.auth", "app"]) || needs_crypto;
+    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+    let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
@@ -598,9 +599,12 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if needs_auth {
-        // D-AUTH1=A / D-AUTH2=A: `core.auth` + `app.auth` prelude.
+    if needs_auth_tokens {
+        // D-AUTH2=A: JWT/PASETO verify prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+    }
+    if needs_auth_session {
+        // D-AUTH1=A: sessions + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
     }
     if needs_sync {
