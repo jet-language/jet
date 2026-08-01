@@ -208,7 +208,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream"
-        | "GradTriple" | "SparseTensor"
+        | "GradTriple" | "SparseTensor" | "RawKernelContract"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery"
@@ -316,10 +316,16 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
         | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
+        | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
+        | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"
+        | "CompilerViewSourcePath" | "CompilerViewSource" | "CompilerViewProjection"
+        | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
+        | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
+        | "CompilerOutputEntry"
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
-        | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo"
+        | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -433,6 +439,11 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     {
         return Some(Type::String);
     }
+    if matches!(type_name, "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap")
+        && field == "schema_version"
+    {
+        return Some(Type::Int);
+    }
     if type_name == "CompilerNode" {
         return match field {
             "kind" => Some(Type::String),
@@ -457,31 +468,207 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "CompilerSemanticIndex" {
+        return match field {
+            "schema_version" => Some(Type::Int),
+            "source_digest" => Some(Type::String),
+            "definitions" => Some(Type::List(Box::new(Type::Named(
+                "CompilerDefinition".to_string(),
+            )))),
+            "references" => Some(Type::List(Box::new(Type::Named(
+                "CompilerReference".to_string(),
+            )))),
+            "calls" => Some(Type::List(Box::new(Type::Named(
+                "CompilerCall".to_string(),
+            )))),
+            "effects" => Some(Type::List(Box::new(Type::Named(
+                "CompilerEffect".to_string(),
+            )))),
+            "outputs" => Some(Type::List(Box::new(Type::Named(
+                "CompilerOutput".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerDefinition" {
+        return match field {
+            "identity" | "name" | "module" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            "kind" => Some(Type::Named("CompilerSymbolKind".to_string())),
+            "view_provenance" => Some(Type::List(Box::new(Type::Named(
+                "CompilerViewProvenance".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerSymbolKind" {
+        return match field {
+            "kind" => Some(Type::String),
+            "params" => Some(Type::List(Box::new(Type::Named(
+                "CompilerParam".to_string(),
+            )))),
+            "ret" | "parent" | "ty" => Some(Type::Option(Box::new(Type::String))),
+            "fields" => Some(Type::List(Box::new(Type::Named(
+                "CompilerField".to_string(),
+            )))),
+            "variants" => Some(Type::List(Box::new(Type::String))),
+            "mutable" => Some(Type::Option(Box::new(Type::Bool))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerParam" {
+        return match field {
+            "name" | "ty" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerField" {
+        return match field {
+            "name" | "ty" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerViewProvenance" {
+        return match field {
+            "output_path" => Some(Type::List(Box::new(Type::String))),
+            "sources" => Some(Type::List(Box::new(Type::Named(
+                "CompilerViewSourcePath".to_string(),
+            )))),
+            "mutable" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerViewSourcePath" {
+        return match field {
+            "source" => Some(Type::Named("CompilerViewSource".to_string())),
+            "projections" => Some(Type::List(Box::new(Type::Named(
+                "CompilerViewProjection".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerViewSource" {
+        return match field {
+            "kind" => Some(Type::String),
+            "index" => Some(Type::Option(Box::new(Type::Int))),
+            "module" | "name" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerViewProjection" {
+        return match field {
+            "kind" => Some(Type::String),
+            "name" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerReference" {
+        return match field {
+            "name" | "module" => Some(Type::String),
+            "scope_identity" => Some(Type::Option(Box::new(Type::String))),
+            "target" => Some(Type::Option(Box::new(Type::Named(
+                "CompilerDefinitionAnchor".to_string(),
+            )))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerDefinitionAnchor" {
+        return match field {
+            "module" | "kind" => Some(Type::String),
+            "semantic_identity" => Some(Type::Option(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerCall" {
+        return match field {
+            "caller" | "callee" | "module" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerEffect" {
+        return match field {
+            "function" => Some(Type::String),
+            "direct" | "callees" | "inferred" => Some(Type::List(Box::new(Type::String))),
+            "maximal" => Some(Type::Bool),
+            "provenance" => Some(Type::List(Box::new(Type::Named(
+                "CompilerEffectProvenance".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerEffectProvenance" {
+        return match field {
+            "effect" => Some(Type::String),
+            "call_path" => Some(Type::List(Box::new(Type::String))),
+            "spans" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_SOURCE_SPAN.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerOutput" {
+        return match field {
+            "binding" | "kind" | "name" | "module" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            "entry" => Some(Type::Named("CompilerOutputEntry".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerOutputEntry" {
+        return match field {
+            "identity" | "name" | "module" | "authority" => Some(Type::String),
+            "definition_span" | "reference_span" => {
+                Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+            }
+            "params" | "effects" => Some(Type::List(Box::new(Type::String))),
+            "return_type" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
     match type_name {
         "CompilerLexed" => return match field {
+            "schema_version" => Some(Type::Int),
             "tokens" => Some(Type::List(Box::new(Type::Named("CompilerToken".to_string())))),
             "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
             _ => None,
         },
         "CompilerSyntaxTree" => return match field {
+            "schema_version" => Some(Type::Int),
             "items" => Some(Type::List(Box::new(Type::Named("CompilerNode".to_string())))),
             "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
             _ => None,
         },
         "CompilerChecked" => return match field {
+            "schema_version" => Some(Type::Int),
             "syntax" => Some(Type::Named("CompilerSyntaxTree".to_string())),
             "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
             "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
             "effects" => Some(Type::List(Box::new(Type::Named("EffectInfo".to_string())))),
-            "semantic_index" => Some(Type::List(Box::new(Type::String))),
+            // A failed check has diagnostics but no trustworthy semantic
+            // index. Keep that absence explicit at the typed API boundary;
+            // callers must not mistake an empty index for a checked file.
+            "semantic_index" => Some(Type::Option(Box::new(Type::Named(
+                "CompilerSemanticIndex".to_string(),
+            )))),
             _ => None,
         },
         _ => {}
     }
     if type_name == "CompilerSourceMap" {
         return match field {
+            "schema_version" => Some(Type::Int),
             "sources" => Some(Type::List(Box::new(Type::String))),
             "generated_lines" => Some(Type::List(Box::new(Type::Named("CompilerGeneratedLine".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerError" {
+        return match field {
+            "code" | "message" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
     }
@@ -490,6 +677,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "module" | "identity" | "kind" => Some(Type::String),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
+            "type_params" => Some(Type::List(Box::new(Type::Named("TypeParamInfo".to_string())))),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "marker_names" | "implements" => Some(Type::List(Box::new(Type::String))),
             "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
@@ -566,6 +754,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
             "params" | "markers" => Some(Type::List(Box::new(Type::String))),
             "is_pub" => Some(Type::Bool),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
     }
@@ -574,6 +763,15 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "ty" => Some(Type::String),
             "markers" => Some(Type::List(Box::new(Type::String))),
             "is_pub" => Some(Type::Bool),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "TypeParamInfo" {
+        return match field {
+            "name" => Some(Type::String),
+            "bounds" => Some(Type::List(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
     }

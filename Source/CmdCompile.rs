@@ -84,40 +84,40 @@ pub(crate) fn run_compiler_api(operation: &str, file: &str, _mode: OutputMode) {
     let document = match operation {
         "lex" => match fs::read_to_string(path) {
             Ok(source) => jet::Compiler::lex_source_json(&source),
-            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+            Err(error) => jet::Compiler::compiler_api_error_json(
+                operation,
+                file,
+                "E0956",
+                format!("could not read compiler input: {error}"),
+            ),
         },
         "parse" => match fs::read_to_string(path) {
             Ok(source) => jet::Compiler::parse_source_json(&source),
-            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+            Err(error) => jet::Compiler::compiler_api_error_json(
+                operation,
+                file,
+                "E0956",
+                format!("could not read compiler input: {error}"),
+            ),
         },
         "check" => jet::Compiler::check_file_json(path),
         "source-map" | "source_map" => match fs::read_to_string(path) {
             Ok(source) => jet::Compiler::source_map_json(&source),
-            Err(error) => compiler_api_error(operation, file, &error.to_string()),
+            Err(error) => jet::Compiler::compiler_api_error_json(
+                operation,
+                file,
+                "E0956",
+                format!("could not read compiler input: {error}"),
+            ),
         },
-        _ => {
-            eprintln!(
-                "usage: jet inspect compiler <lex|parse|check|source-map> <file>"
-            );
-            exit(ExitCodes::USAGE);
-        }
+        _ => jet::Compiler::compiler_api_error_json(
+            operation,
+            file,
+            "E0956",
+            "unsupported compiler operation; choose lex, parse, check, or source-map",
+        ),
     };
     println!("{document}");
-}
-
-fn compiler_api_error(operation: &str, file: &str, message: &str) -> String {
-    format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"operation\":{},\"file\":{},\"error\":{}}}",
-        jet::Compiler::JSON_SCHEMA_VERSION,
-        jet::Compiler::API_VERSION,
-        json_string(operation),
-        json_string(file),
-        json_string(message),
-    )
-}
-
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
 }
 
 fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, json: bool) {

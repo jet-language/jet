@@ -1581,16 +1581,103 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
     }
 }
 
+/// Fragment evaluation normally receives the free-function table from the
+/// comptime driver and a separate semantic method table. Build the same
+/// lookup surface that whole-program lowering has: methods are keyed by
+/// Owner::method, while free functions retain their source keys.
+fn merge_fragment_funcs<'a>(
+    funcs: &'a HashMap<String, &'a Func>,
+    methods: &'a HashMap<(String, String), &'a Func>,
+) -> HashMap<String, &'a Func> {
+    let mut merged = funcs.clone();
+    for ((owner, name), function) in methods {
+        merged
+            .entry(format!("{owner}::{name}"))
+            .or_insert(*function);
+    }
+    merged
+}
+
+fn seed_fragment_structs(
+    cx: &mut Cx,
+    structs: &HashMap<String, &crate::AST::StructDef>,
+    methods: &HashMap<(String, String), &Func>,
+    computed_fields: &HashMap<(String, String), &Expr>,
+) {
+    for (name, definition) in structs {
+        cx.type_names.insert(name.clone());
+        cx.struct_fields.insert(
+            name.clone(),
+            definition
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect(),
+        );
+        if !definition.type_params.is_empty() {
+            let params = definition
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            cx.struct_type_params
+                .insert(name.clone(), params.iter().cloned().collect());
+            cx.struct_type_param_order.insert(name.clone(), params);
+        }
+        let computed = definition
+            .fields
+            .iter()
+            .filter(|field| field.computed.is_some())
+            .map(|field| field.name.clone())
+            .collect::<std::collections::HashSet<_>>();
+        if !computed.is_empty() {
+            cx.computed_fields.insert(name.clone(), computed);
+        }
+    }
+    // Preserve sema's qualified and short keys even if a fragment's StructDef
+    // table is sparse.
+    for ((owner, field), _) in computed_fields {
+        cx.computed_fields
+            .entry(owner.clone())
+            .or_default()
+            .insert(field.clone());
+    }
+    for ((owner, name), method) in methods {
+        let key = (owner.clone(), name.clone());
+        if let Some(self_param) = method
+            .params
+            .iter()
+            .find(|param| param.name == crate::Syntax::KW_SELF)
+        {
+            cx.method_self_convs.insert(key.clone(), self_param.convention);
+        }
+        cx.method_sigs.insert(
+            key.clone(),
+            method
+                .params
+                .iter()
+                .filter(|param| param.name != crate::Syntax::KW_SELF)
+                .map(|param| (param.convention, param.ty.clone()))
+                .collect(),
+        );
+        cx.method_rets.insert(key, method.return_type.clone());
+    }
+}
+
 /// Lower one expression for the evaluator (comptime / REPL fragments).
 pub fn lower_expr_for_eval(
     expr: &Expr,
     funcs: &HashMap<String, &Func>,
+    methods: &HashMap<(String, String), &Func>,
+    structs: &HashMap<String, &crate::AST::StructDef>,
+    computed_fields: &HashMap<(String, String), &Expr>,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<TExpr, Diagnostic> {
     let mut cx = empty_cx();
+    seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
     seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
@@ -1617,12 +1704,16 @@ pub fn lower_expr_for_eval(
 pub fn lower_stmts_for_eval(
     stmts: &[Stmt],
     funcs: &HashMap<String, &Func>,
+    methods: &HashMap<(String, String), &Func>,
+    structs: &HashMap<String, &crate::AST::StructDef>,
+    computed_fields: &HashMap<(String, String), &Expr>,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<Vec<TStmt>, Diagnostic> {
     let mut cx = empty_cx();
+    seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
     seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
@@ -1756,6 +1847,41 @@ pub fn run_program(
 }
 
 pub fn run_program_with_structs(
+    program: &JitProgram,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    globals: HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    struct_fields: HashMap<String, Vec<(String, bool)>>,
+    struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+) -> Result<CtValue, Diagnostic> {
+    // The evaluator's exhaustive expression dispatcher is intentionally one
+    // semantic spine, but its large Rust frame makes ordinary test/CLI stacks
+    // too small for nested aggregate literals. Keep the public runtime seam
+    // on a bounded worker stack; this changes no language semantics.
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("jet-tir-eval".to_string())
+            .stack_size(8 * 1024 * 1024)
+            .spawn_scoped(scope, move || {
+                run_program_with_structs_on_stack(
+                    program,
+                    base_dir,
+                    sink,
+                    globals,
+                    core_imports,
+                    allow_impure,
+                    struct_fields,
+                    struct_field_types,
+                )
+            })
+            .expect("evaluator worker");
+        worker.join().expect("evaluator worker panicked")
+    })
+}
+
+fn run_program_with_structs_on_stack(
     program: &JitProgram,
     base_dir: &Path,
     sink: &mut DevSink,
@@ -1986,27 +2112,38 @@ fn run_bundle(
 fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
+    let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
     let tir = lower_expr_for_eval(
         req.expr,
-        req.funcs,
+        &fragment_funcs,
+        req.methods,
+        req.structs,
+        req.computed_fields,
         req.globals,
         req.core_imports,
         req.distinct_ranges,
         req.distinct_bases,
     )?;
     let mut cx = empty_cx();
+    seed_fragment_structs(&mut cx, req.structs, req.methods, req.computed_fields);
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
-    seed_fragment_funcs(&mut cx, req.funcs);
+    seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.struct_fields = normalize_struct_field_types(req.structs);
     cx.type_names.extend(req.structs.keys().cloned());
     cx.core_imports = req.core_imports.clone();
-    let lowered: Vec<TFunc> = req
-        .funcs
+    let lowered: Vec<TFunc> = fragment_funcs
         .iter()
         .filter_map(|(name, f)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::Codegen::TIR::with_eval_fragment(|| {
                     let mut lowered = match name.rsplit_once("::") {
+                        Some((owner, method))
+                            if req
+                                .methods
+                                .contains_key(&(owner.to_string(), method.to_string())) =>
+                        {
+                            TIR::lower_method(f, owner, &cx)
+                        }
                         Some((owner, "encode")) => {
                             TIR::lower_trait_method(f, owner, &cx, crate::Generics::ENCODE)
                         }
@@ -2090,25 +2227,38 @@ fn eval_expr_hook(
 fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
+    let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
     let tir = lower_stmts_for_eval(
         req.stmts,
-        req.funcs,
+        &fragment_funcs,
+        req.methods,
+        req.structs,
+        req.computed_fields,
         req.globals,
         req.core_imports,
         req.distinct_ranges,
         req.distinct_bases,
     )?;
     let mut cx = empty_cx();
+    seed_fragment_structs(&mut cx, req.structs, req.methods, req.computed_fields);
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
-    seed_fragment_funcs(&mut cx, req.funcs);
+    seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.core_imports = req.core_imports.clone();
-    let lowered: Vec<TFunc> = req
-        .funcs
+    let lowered: Vec<TFunc> = fragment_funcs
         .iter()
         .filter_map(|(name, f)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::Codegen::TIR::with_eval_fragment(|| {
-                    let mut lowered = TIR::lower_func(f, &cx);
+                    let mut lowered = match name.rsplit_once("::") {
+                        Some((owner, method))
+                            if req
+                                .methods
+                                .contains_key(&(owner.to_string(), method.to_string())) =>
+                        {
+                            TIR::lower_method(f, owner, &cx)
+                        }
+                        _ => TIR::lower_func(f, &cx),
+                    };
                     lowered.name = name.clone();
                     lowered
                 })

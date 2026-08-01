@@ -281,7 +281,7 @@ fn compile_programmable_build_opts_inner(
             file,
             Driver::BuildRunOptions {
                 grants,
-                policy: Comptime::Build::BuildPolicy::allow_all(),
+                policy: production_build_policy(),
                 execute: true,
                 allow_impure,
                 inspect_only: false,
@@ -336,7 +336,11 @@ fn compile_workspace_build_opts(
                 None,
             )]);
         }
-        let member_grants = resolve_build_grants(&entry.to_string_lossy(), grants)?;
+        // A dependency/member is its own authority boundary. The workspace
+        // CLI grant names the workspace root; it is not inherited by every
+        // member. Package-local and explicitly subject-matched workspace
+        // grants still flow through `resolve_build_grants`.
+        let member_grants = resolve_build_grants(&entry.to_string_lossy(), &[])?;
         let member_grants = member_grants
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
@@ -345,7 +349,7 @@ fn compile_workspace_build_opts(
             &entry.to_string_lossy(),
             Driver::BuildRunOptions {
                 grants: member_grants,
-                policy: Comptime::Build::BuildPolicy::allow_all(),
+                policy: production_build_policy(),
                 execute: true,
                 allow_impure,
                 inspect_only: false,
@@ -371,7 +375,7 @@ fn compile_workspace_build_opts(
         &workspace_path.to_string_lossy(),
         Driver::BuildRunOptions {
             grants: workspace_grants,
-            policy: Comptime::Build::BuildPolicy::allow_all(),
+            policy: production_build_policy(),
             execute: true,
             allow_impure,
             inspect_only: false,
@@ -398,6 +402,7 @@ fn export_generated_sources(
     };
     let project_root = build_project_root(file);
     let export_root = project_root.join("build/generated");
+    let mut exports = Vec::new();
     for generated in build.generated.iter().filter(|generated| {
         generated
             .path
@@ -429,17 +434,107 @@ fn export_generated_sources(
                 None,
             )]
         })?;
+        exports.push((generated.name.as_str(), destination, source));
+    }
+    let paths = exports.iter().map(|(_, path, _)| path.clone());
+    let mut transaction = GeneratedExportTransaction::new(&project_root, paths).map_err(|error| {
+        vec![Diagnostic::error(
+            "E3510",
+            format!("could not prepare generated export: {error}"),
+            "the visible export must be all-or-nothing and must not alter the compiled source".to_string(),
+            "fix the build/generated directory permissions and try again".to_string(),
+            None,
+        )]
+    })?;
+    for (name, destination, source) in exports {
         write_exported_generated_file(&project_root, &destination, &source).map_err(|error| {
             vec![Diagnostic::error(
                 "E3510",
-                format!("could not write generated module `{}`: {error}", generated.name),
+                format!("could not write generated module `{name}`: {error}"),
                 "the visible export must not alter the compiled source".to_string(),
                 "fix the build/generated directory permissions and try again".to_string(),
                 None,
             )]
         })?;
     }
+    transaction.commit();
     Ok(())
+}
+
+struct GeneratedExportTransaction {
+    files: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
+    project_root: std::path::PathBuf,
+    committed: bool,
+}
+
+impl GeneratedExportTransaction {
+    fn new(
+        project_root: &std::path::Path,
+        paths: impl IntoIterator<Item = std::path::PathBuf>,
+    ) -> std::io::Result<Self> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut files = Vec::new();
+        for path in paths.into_iter().filter(|path| seen.insert(path.clone())) {
+            if path_has_symlinked_component(project_root, &path) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("generated export path `{}` contains a symlink", path.display()),
+                ));
+            }
+            let before = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!("generated export path `{}` is a symlink", path.display()),
+                    ));
+                }
+                Ok(metadata) if !metadata.is_file() => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        format!("generated export path `{}` is not a file", path.display()),
+                    ));
+                }
+                Ok(_) => Some(std::fs::read(&path)?),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
+            files.push((path, before));
+        }
+        Ok(Self {
+            files,
+            project_root: project_root.to_path_buf(),
+            committed: false,
+        })
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for GeneratedExportTransaction {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        for (path, before) in self.files.iter().rev() {
+            if path_has_symlinked_component(&self.project_root, path) {
+                continue;
+            }
+            match before {
+                Some(bytes) => {
+                    let _ = write_exported_generated_file(&self.project_root, path, bytes);
+                }
+                None => {
+                    if !std::fs::symlink_metadata(path)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn is_workspace_build_entry(file: &str) -> bool {
@@ -733,6 +828,17 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     }
     for denied in workspace_denies { allowed.remove(&denied); }
     Ok(allowed.into_iter().collect())
+}
+
+fn production_build_policy() -> Comptime::Build::BuildPolicy {
+    let ci = std::env::var("CI")
+        .ok()
+        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
+    if ci {
+        Comptime::Build::BuildPolicy::ci_default()
+    } else {
+        Comptime::Build::BuildPolicy::local_default()
+    }
 }
 
 fn compile_bundle_path_opts(

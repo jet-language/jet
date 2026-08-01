@@ -6,6 +6,18 @@ use crate::Lexer::{TokKind, Token};
 use crate::{Lexer, Parser, AST};
 
 pub const API_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 1;
+
+fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> CtValue {
+    ct_struct(
+        "CompilerError",
+        vec![
+            ("code", CtValue::Str(code.to_string())),
+            ("message", CtValue::Str(message.into())),
+            ("span", span_value(span.into())),
+        ],
+    )
+}
 
 /// D-FRONTENDAPI1=A: comptime bridge for the same read-only compiler values
 /// exposed by this Rust module. The callback is installed at the compiler
@@ -33,47 +45,56 @@ pub fn eval_core_call(
             }).flatten() {
                 Some(source) => source,
                 None => {
-                    return Some(Err(Diagnostic::error(
+                    return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
                         "E0956",
-                        "`core.compiler.check` needs a parsed syntax tree with its source".to_string(),
-                        "checking a parsed compiler value preserves the exact source that produced it".to_string(),
-                        "pass the result of `core.compiler.parse(source)`".to_string(),
-                        Some(span),
-                    )))
+                        "`core.compiler.check` needs a parsed syntax tree with its source",
+                        span,
+                    )))))
                 }
             }
         }
         _ => {
-            return Some(Err(Diagnostic::error(
+            let message = if method == "check" {
+                "`core.compiler.check` expects one CompilerSyntaxTree".to_string()
+            } else {
+                format!("`core.compiler.{method}` expects one source String")
+            };
+            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
                 "E0956",
-                if method == "check" {
-                    "`core.compiler.check` expects one CompilerSyntaxTree".to_string()
-                } else {
-                    format!("`core.compiler.{method}` expects one source String")
-                },
-                "the compiler API accepts immutable front-end values and never mutates an AST".to_string(),
-                if method == "check" {
-                    "pass the result of `core.compiler.parse(source)`".to_string()
-                } else {
-                    "pass exactly one String containing the source to inspect".to_string()
-                },
-                Some(span),
-            )))
+                message,
+                span,
+            )))))
         }
     };
+    if method == "check" {
+        let Some(CtValue::Struct { fields, .. }) = args.first() else {
+            unreachable!("check input was validated above")
+        };
+        let schema = fields.iter().find_map(|(name, value)| {
+            (name == "schema_version").then_some(value)
+        });
+        if !matches!(schema, Some(CtValue::Int(value)) if *value == i64::from(SCHEMA_VERSION)) {
+            let got = schema
+                .and_then(|value| match value { CtValue::Int(value) => Some(*value), _ => None })
+                .map_or_else(|| "missing".to_string(), |value| value.to_string());
+            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
+                "E0956",
+                format!("unsupported CompilerSyntaxTree schema version {got}"),
+                span,
+            )))));
+        }
+    }
     let value = match method {
         "lex" => lexed_value(&lex_source(&source)),
         "parse" => syntax_tree_value(&parse_source(&source)),
         "check" => checked_value(&source),
         "source_map" => source_map_value(&source_map_from_generated_rust(&source)),
         _ => {
-            return Some(Err(Diagnostic::error(
+            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
                 "E0956",
                 format!("unknown `core.compiler` operation `{method}`"),
-                "the stable compiler surface is limited to lex, parse, check, and source_map".to_string(),
-                "choose one of the listed read-only operations".to_string(),
-                Some(span),
-            )))
+                span,
+            )))))
         }
     };
     Some(Ok(CtValue::ResOk(Box::new(value))))
@@ -130,6 +151,7 @@ fn lexed_value(lexed: &LexedSource) -> CtValue {
     ct_struct(
         "CompilerLexed",
         vec![
+            ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
             ("source", CtValue::Str(lexed.source.clone())),
             (
                 "tokens",
@@ -205,6 +227,7 @@ fn syntax_tree_value(tree: &SyntaxTree) -> CtValue {
     ct_struct(
         "CompilerSyntaxTree",
         vec![
+            ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
             ("source", CtValue::Str(tree.source.clone())),
             (
                 "items",
@@ -262,6 +285,429 @@ fn effect_info_value(values: impl IntoIterator<Item = String>) -> CtValue {
     )
 }
 
+fn compiler_option_string(value: Option<&str>) -> CtValue {
+    value.map_or(
+        CtValue::None(Type::String),
+        |value| CtValue::Some(Box::new(CtValue::Str(value.to_string()))),
+    )
+}
+
+fn compiler_option_int(value: Option<usize>) -> CtValue {
+    value.map_or(
+        CtValue::None(Type::Int),
+        |value| CtValue::Some(Box::new(CtValue::Int(value as i64))),
+    )
+}
+
+fn compiler_string_list(values: impl IntoIterator<Item = String>) -> CtValue {
+    CtValue::List(values.into_iter().map(CtValue::Str).collect())
+}
+
+fn compiler_semantic_span(span: jet_semindex::SourceSpan) -> CtValue {
+    span_value(TextRange {
+        start: span.start,
+        end: span.end,
+    })
+}
+
+fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
+    let (kind_name, params, ret, fields, variants, parent, mutable, ty) = match kind {
+        jet_semindex::SymbolKind::Module => {
+            ("module", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
+        }
+        jet_semindex::SymbolKind::Function { params, ret } => (
+            "function",
+            params
+                .iter()
+                .map(|(name, ty)| {
+                    ct_struct(
+                        "CompilerParam",
+                        vec![
+                            ("name", CtValue::Str(name.clone())),
+                            ("ty", CtValue::Str(ty.clone())),
+                        ],
+                    )
+                })
+                .collect(),
+            ret.as_deref(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            None,
+        ),
+        jet_semindex::SymbolKind::Struct { fields } => (
+            "struct",
+            Vec::new(),
+            None,
+            fields
+                .iter()
+                .map(|(name, ty)| {
+                    ct_struct(
+                        "CompilerField",
+                        vec![
+                            ("name", CtValue::Str(name.clone())),
+                            ("ty", CtValue::Str(ty.clone())),
+                        ],
+                    )
+                })
+                .collect(),
+            Vec::new(),
+            None,
+            None,
+            None,
+        ),
+        jet_semindex::SymbolKind::Enum { variants } => (
+            "enum",
+            Vec::new(),
+            None,
+            Vec::new(),
+            variants.clone(),
+            None,
+            None,
+            None,
+        ),
+        jet_semindex::SymbolKind::Trait => {
+            ("trait", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
+        }
+        jet_semindex::SymbolKind::Tag => {
+            ("tag", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
+        }
+        jet_semindex::SymbolKind::Type => {
+            ("type", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
+        }
+        jet_semindex::SymbolKind::Const => {
+            ("const", Vec::new(), None, Vec::new(), Vec::new(), None, None, None)
+        }
+        jet_semindex::SymbolKind::EnumVariant { parent } => (
+            "enum_variant",
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Some(parent.as_str()),
+            None,
+            None,
+        ),
+        jet_semindex::SymbolKind::Field { ty, parent } => (
+            "field",
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Some(parent.as_str()),
+            None,
+            Some(ty.as_str()),
+        ),
+        jet_semindex::SymbolKind::Local { mutable, ty } => (
+            "local",
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+            Some(*mutable),
+            ty.as_deref(),
+        ),
+        jet_semindex::SymbolKind::Param { ty } => (
+            "param",
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            Some(ty.as_str()),
+        ),
+    };
+    ct_struct(
+        "CompilerSymbolKind",
+        vec![
+            ("kind", CtValue::Str(kind_name.to_string())),
+            ("params", CtValue::List(params)),
+            ("ret", compiler_option_string(ret)),
+            ("fields", CtValue::List(fields)),
+            ("variants", compiler_string_list(variants)),
+            ("parent", compiler_option_string(parent)),
+            (
+                "mutable",
+                mutable.map_or(CtValue::None(Type::Bool), |value| {
+                    CtValue::Some(Box::new(CtValue::Bool(value)))
+                }),
+            ),
+            ("ty", compiler_option_string(ty)),
+        ],
+    )
+}
+
+fn compiler_view_source_value(source: &jet_semindex::ViewSourceFact) -> CtValue {
+    let (kind, index, module, name) = match source {
+        jet_semindex::ViewSourceFact::Receiver => ("receiver", None, None, None),
+        jet_semindex::ViewSourceFact::Parameter(index) => {
+            ("parameter", Some(*index), None, None)
+        }
+        jet_semindex::ViewSourceFact::Static { module_path, name } => {
+            ("static", None, Some(module_path.as_str()), Some(name.as_str()))
+        }
+    };
+    ct_struct(
+        "CompilerViewSource",
+        vec![
+            ("kind", CtValue::Str(kind.to_string())),
+            ("index", compiler_option_int(index)),
+            ("module", compiler_option_string(module)),
+            ("name", compiler_option_string(name)),
+        ],
+    )
+}
+
+fn compiler_view_projection_value(
+    projection: &jet_semindex::ViewProjectionFact,
+) -> CtValue {
+    let (kind, name) = match projection {
+        jet_semindex::ViewProjectionFact::Field(name) => ("field", Some(name.as_str())),
+        jet_semindex::ViewProjectionFact::Index => ("index", None),
+        jet_semindex::ViewProjectionFact::Range => ("range", None),
+    };
+    ct_struct(
+        "CompilerViewProjection",
+        vec![
+            ("kind", CtValue::Str(kind.to_string())),
+            ("name", compiler_option_string(name)),
+        ],
+    )
+}
+
+fn compiler_view_provenance_value(
+    provenance: &jet_semindex::ViewProvenanceFact,
+) -> CtValue {
+    let sources = provenance
+        .sources
+        .iter()
+        .map(|source| {
+            ct_struct(
+                "CompilerViewSourcePath",
+                vec![
+                    ("source", compiler_view_source_value(&source.source)),
+                    (
+                        "projections",
+                        CtValue::List(
+                            source
+                                .projections
+                                .iter()
+                                .map(compiler_view_projection_value)
+                                .collect(),
+                        ),
+                    ),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "CompilerViewProvenance",
+        vec![
+            (
+                "output_path",
+                compiler_string_list(provenance.output_path.clone()),
+            ),
+            ("sources", CtValue::List(sources)),
+            ("mutable", CtValue::Bool(provenance.mutable)),
+        ],
+    )
+}
+
+fn compiler_definition_value(definition: &jet_semindex::SymbolDef) -> CtValue {
+    ct_struct(
+        "CompilerDefinition",
+        vec![
+            ("identity", CtValue::Str(definition.identity.clone())),
+            ("name", CtValue::Str(definition.name.clone())),
+            ("module", CtValue::Str(definition.module_path.clone())),
+            ("span", compiler_semantic_span(definition.def_span)),
+            ("kind", compiler_symbol_kind_value(&definition.kind)),
+            (
+                "view_provenance",
+                CtValue::List(
+                    definition
+                        .view_provenance
+                        .iter()
+                        .map(compiler_view_provenance_value)
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+fn compiler_anchor_value(anchor: &jet_semindex::DefinitionAnchor) -> CtValue {
+    ct_struct(
+        "CompilerDefinitionAnchor",
+        vec![
+            ("module", CtValue::Str(anchor.module_path.clone())),
+            ("kind", CtValue::Str(anchor.kind.clone())),
+            (
+                "semantic_identity",
+                compiler_option_string(anchor.semantic_identity.as_deref()),
+            ),
+            ("span", compiler_semantic_span(anchor.def_span)),
+        ],
+    )
+}
+
+fn compiler_reference_value(reference: &jet_semindex::SymbolRef) -> CtValue {
+    ct_struct(
+        "CompilerReference",
+        vec![
+            ("name", CtValue::Str(reference.name.clone())),
+            ("module", CtValue::Str(reference.module_path.clone())),
+            (
+                "scope_identity",
+                compiler_option_string(reference.scope_identity.as_deref()),
+            ),
+            (
+                "target",
+                reference.target.as_ref().map_or(
+                    CtValue::None(Type::Named("CompilerDefinitionAnchor".to_string())),
+                    |target| CtValue::Some(Box::new(compiler_anchor_value(target))),
+                ),
+            ),
+            ("span", compiler_semantic_span(reference.span)),
+        ],
+    )
+}
+
+fn compiler_call_value(call: &jet_semindex::CallEdge) -> CtValue {
+    ct_struct(
+        "CompilerCall",
+        vec![
+            ("caller", CtValue::Str(call.caller.clone())),
+            ("callee", CtValue::Str(call.callee.clone())),
+            ("module", CtValue::Str(call.module_path.clone())),
+            ("span", compiler_semantic_span(call.call_span)),
+        ],
+    )
+}
+
+fn compiler_effect_value(effect: &jet_semindex::EffectFact) -> CtValue {
+    let provenance = effect
+        .provenance
+        .iter()
+        .map(|origin| {
+            ct_struct(
+                "CompilerEffectProvenance",
+                vec![
+                    ("effect", CtValue::Str(origin.effect.clone())),
+                    (
+                        "call_path",
+                        compiler_string_list(origin.call_path.clone()),
+                    ),
+                    (
+                        "spans",
+                        CtValue::List(
+                            origin
+                                .spans
+                                .iter()
+                                .copied()
+                                .map(compiler_semantic_span)
+                                .collect(),
+                        ),
+                    ),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "CompilerEffect",
+        vec![
+            ("function", CtValue::Str(effect.function.clone())),
+            ("direct", compiler_string_list(effect.direct.clone())),
+            ("callees", compiler_string_list(effect.callees.clone())),
+            ("inferred", compiler_string_list(effect.inferred.clone())),
+            ("maximal", CtValue::Bool(effect.maximal)),
+            ("provenance", CtValue::List(provenance)),
+        ],
+    )
+}
+
+fn compiler_output_entry_value(entry: &jet_semindex::OutputEntryFact) -> CtValue {
+    ct_struct(
+        "CompilerOutputEntry",
+        vec![
+            ("identity", CtValue::Str(entry.identity.clone())),
+            ("name", CtValue::Str(entry.name.clone())),
+            ("module", CtValue::Str(entry.module_path.clone())),
+            ("definition_span", compiler_semantic_span(entry.definition_span)),
+            ("reference_span", compiler_semantic_span(entry.reference_span)),
+            ("params", compiler_string_list(entry.params.clone())),
+            (
+                "return_type",
+                compiler_option_string(entry.return_type.as_deref()),
+            ),
+            ("authority", CtValue::Str(entry.authority.clone())),
+            ("effects", compiler_string_list(entry.effects.clone())),
+        ],
+    )
+}
+
+fn compiler_output_value(output: &jet_semindex::OutputFact) -> CtValue {
+    ct_struct(
+        "CompilerOutput",
+        vec![
+            ("binding", CtValue::Str(output.binding.clone())),
+            ("kind", CtValue::Str(output.kind.clone())),
+            ("name", CtValue::Str(output.name.clone())),
+            ("module", CtValue::Str(output.module_path.clone())),
+            ("span", compiler_semantic_span(output.span)),
+            ("entry", compiler_output_entry_value(&output.entry)),
+        ],
+    )
+}
+
+fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -> CtValue {
+    ct_struct(
+        "CompilerSemanticIndex",
+        vec![
+            ("schema_version", CtValue::Int(index.schema_version() as i64)),
+            (
+                "source_digest",
+                CtValue::Str(crate::SHA256::sha256_hex(source.as_bytes())),
+            ),
+            (
+                "definitions",
+                CtValue::List(
+                    index
+                        .definitions()
+                        .iter()
+                        .map(compiler_definition_value)
+                        .collect(),
+                ),
+            ),
+            (
+                "references",
+                CtValue::List(
+                    index
+                        .references()
+                        .iter()
+                        .map(compiler_reference_value)
+                        .collect(),
+                ),
+            ),
+            (
+                "calls",
+                CtValue::List(index.call_edges().iter().map(compiler_call_value).collect()),
+            ),
+            (
+                "effects",
+                CtValue::List(index.effects().iter().map(compiler_effect_value).collect()),
+            ),
+            (
+                "outputs",
+                CtValue::List(index.outputs().iter().map(compiler_output_value).collect()),
+            ),
+        ],
+    )
+}
+
 fn checked_value(source: &str) -> CtValue {
     let syntax = parse_source(source);
     let (checked_diagnostics, bundle, effect_facts) =
@@ -270,6 +716,9 @@ fn checked_value(source: &str) -> CtValue {
         .iter()
         .map(diagnostic_view)
         .collect::<Vec<_>>();
+    let has_errors = checked_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error);
     let syntax_value = syntax_tree_value(&syntax);
     let (functions, effects, semantic_index) = if let Some(bundle) = bundle.as_ref() {
         let semantic_facts = crate::Driver::program_semantic_facts(bundle, &effect_facts);
@@ -284,10 +733,11 @@ fn checked_value(source: &str) -> CtValue {
                 .map(|effect| effect_info_value(effect.inferred.clone()))
                 .collect(),
         );
-        // The Jet surface currently types this field as a list of strings. A
-        // single canonical JSON row preserves the complete semindex without
-        // inventing a second, partial semantic model for comptime values.
-        let semantic_index = CtValue::List(vec![CtValue::Str(index.to_json())]);
+        let semantic_index = if has_errors {
+            CtValue::None(Type::Named("CompilerSemanticIndex".to_string()))
+        } else {
+            CtValue::Some(Box::new(compiler_semantic_index_value(&index, source)))
+        };
         (functions, effects, semantic_index)
     } else {
         let functions = syntax
@@ -298,13 +748,14 @@ fn checked_value(source: &str) -> CtValue {
             .collect::<Vec<_>>();
         (
             CtValue::List(functions),
-            CtValue::List(Vec::new()),
+            CtValue::None(Type::Named("CompilerSemanticIndex".to_string())),
             CtValue::List(Vec::new()),
         )
     };
     ct_struct(
         "CompilerChecked",
         vec![
+            ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
             ("source", CtValue::Str(source.to_string())),
             ("syntax", syntax_value),
             (
@@ -322,6 +773,7 @@ fn source_map_value(map: &SourceMap) -> CtValue {
     ct_struct(
         "CompilerSourceMap",
         vec![
+            ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
             (
                 "sources",
                 CtValue::List(map.sources.iter().cloned().map(CtValue::Str).collect()),
@@ -438,6 +890,7 @@ pub struct SyntaxNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxTree {
     pub api_version: u32,
+    pub schema_version: u32,
     pub source: String,
     pub items: Vec<SyntaxNode>,
     pub diagnostics: Vec<DiagnosticView>,
@@ -446,6 +899,7 @@ pub struct SyntaxTree {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexedSource {
     pub api_version: u32,
+    pub schema_version: u32,
     pub source: String,
     pub tokens: Vec<TokenView>,
     pub diagnostics: Vec<DiagnosticView>,
@@ -454,6 +908,7 @@ pub struct LexedSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceMap {
     pub api_version: u32,
+    pub schema_version: u32,
     pub sources: Vec<String>,
     pub generated_lines: Vec<GeneratedLine>,
 }
@@ -468,6 +923,7 @@ pub struct GeneratedLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemIndexView {
     pub schema_version: u32,
+    pub source_digest: String,
     pub definitions: Vec<jet_semindex::SymbolDef>,
     pub references: Vec<jet_semindex::SymbolRef>,
     pub calls: Vec<jet_semindex::CallEdge>,
@@ -478,6 +934,7 @@ pub struct SemIndexView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedFile {
     pub api_version: u32,
+    pub schema_version: u32,
     pub diagnostics: Vec<DiagnosticView>,
     pub syntax: Option<SyntaxTree>,
     pub semantic_index: Option<SemIndexView>,
@@ -487,6 +944,7 @@ pub fn lex_source(src: &str) -> LexedSource {
     let (tokens, diagnostics) = Lexer::lex(src);
     LexedSource {
         api_version: API_VERSION,
+        schema_version: SCHEMA_VERSION,
         source: src.to_string(),
         tokens: tokens.iter().map(|token| token_view(src, token)).collect(),
         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
@@ -496,8 +954,9 @@ pub fn lex_source(src: &str) -> LexedSource {
 pub fn parse_source(src: &str) -> SyntaxTree {
     let lexed = lex_source(src);
     if !lexed.diagnostics.is_empty() {
-        return SyntaxTree {
-            api_version: API_VERSION,
+            return SyntaxTree {
+                api_version: API_VERSION,
+                schema_version: SCHEMA_VERSION,
             source: src.to_string(),
             items: Vec::new(),
             diagnostics: lexed.diagnostics,
@@ -508,12 +967,14 @@ pub fn parse_source(src: &str) -> SyntaxTree {
     match Parser::parse_for_check(&tokens) {
         Ok((program, parse_teaching)) => SyntaxTree {
             api_version: API_VERSION,
+            schema_version: SCHEMA_VERSION,
             source: src.to_string(),
             items: program.items.iter().map(item_node).collect(),
             diagnostics: parse_teaching.iter().map(diagnostic_view).collect(),
         },
         Err(diagnostics) => SyntaxTree {
             api_version: API_VERSION,
+            schema_version: SCHEMA_VERSION,
             source: src.to_string(),
             items: Vec::new(),
             diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
@@ -533,10 +994,13 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
     } else {
         bundle
             .as_ref()
-            .map(|bundle| SemIndexView::from(jet_semindex::from_checked(bundle, &facts)))
+            .map(|bundle| {
+                SemIndexView::from_index(jet_semindex::from_checked(bundle, &facts), &source)
+            })
     };
     CheckedFile {
         api_version: API_VERSION,
+        schema_version: SCHEMA_VERSION,
         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
         syntax,
         semantic_index,
@@ -547,7 +1011,7 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
 /// persist compiler facts. This is deliberately hand-written: the compiler
 /// seam has no serialization dependency, and the field order is part of the
 /// schema's deterministic output.
-pub const JSON_SCHEMA_VERSION: u32 = 1;
+pub const JSON_SCHEMA_VERSION: u32 = SCHEMA_VERSION;
 
 pub fn lex_source_json(source: &str) -> String {
     format!(
@@ -569,22 +1033,39 @@ pub fn parse_source_json(source: &str) -> String {
 
 pub fn check_file_json(path: &std::path::Path) -> String {
     let file = path.to_string_lossy();
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return compiler_api_error_json(
+                "check",
+                &file,
+                "E0956",
+                format!("could not read compiler input: {error}"),
+            )
+        }
+    };
     let (diagnostics, bundle, facts) =
         crate::Driver::check_file_with_effect_facts(&file, None, true);
     let diagnostic_views = diagnostics.iter().map(diagnostic_view).collect::<Vec<_>>();
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
-    let source = std::fs::read_to_string(path).unwrap_or_default();
     let syntax = bundle.as_ref().map(|bundle| bundle_syntax_tree(bundle, &source));
     let semantic_index = if has_errors {
         "null".to_string()
     } else {
         bundle
             .as_ref()
-            .map(|bundle| jet_semindex::from_checked(bundle, &facts).to_json())
+            .map(|bundle| {
+                compiler_semantic_index_value(
+                    &jet_semindex::from_checked(bundle, &facts),
+                    &source,
+                )
+                    .to_json()
+            })
             .unwrap_or_else(|| "null".to_string())
     };
     let value = format!(
-        "{{\"api_version\":{},\"diagnostics\":{},\"syntax\":{},\"semantic_index\":{}}}",
+        "{{\"schema_version\":{},\"api_version\":{},\"diagnostics\":{},\"syntax\":{},\"semantic_index\":{}}}",
+        SCHEMA_VERSION,
         API_VERSION,
         json_diagnostics(&diagnostic_views),
         syntax
@@ -599,6 +1080,26 @@ pub fn check_file_json(path: &std::path::Path) -> String {
         API_VERSION,
         json_string(&file),
         value,
+    )
+}
+
+/// Serialize one compiler-operation failure at the JSON boundary. The typed
+/// Jet surface uses `CompilerError`; JSON carries the same fields without
+/// leaking a Rust or rustc error string as the whole payload.
+pub fn compiler_api_error_json(
+    operation: &str,
+    file: &str,
+    code: &str,
+    message: impl Into<String>,
+) -> String {
+    format!(
+        "{{\"schema_version\":{},\"api_version\":{},\"operation\":{},\"file\":{},\"error\":{{\"code\":{},\"message\":{}}}}}",
+        JSON_SCHEMA_VERSION,
+        API_VERSION,
+        json_string(operation),
+        json_string(file),
+        json_string(code),
+        json_string(&message.into()),
     )
 }
 
@@ -668,7 +1169,8 @@ fn json_lexed(lexed: &LexedSource) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"api_version\":{},\"source\":{},\"tokens\":[{}],\"diagnostics\":{}}}",
+        "{{\"schema_version\":{},\"api_version\":{},\"source\":{},\"tokens\":[{}],\"diagnostics\":{}}}",
+        lexed.schema_version,
         lexed.api_version,
         json_string(&lexed.source),
         tokens,
@@ -720,7 +1222,8 @@ fn json_syntax_tree(tree: &SyntaxTree) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"api_version\":{},\"source\":{},\"items\":[{}],\"diagnostics\":{}}}",
+        "{{\"schema_version\":{},\"api_version\":{},\"source\":{},\"items\":[{}],\"diagnostics\":{}}}",
+        tree.schema_version,
         tree.api_version,
         json_string(&tree.source),
         items,
@@ -752,8 +1255,8 @@ fn json_source_map(map: &SourceMap) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"api_version\":{},\"sources\":[{}],\"generated_lines\":[{}]}}",
-        map.api_version, sources, lines
+        "{{\"schema_version\":{},\"api_version\":{},\"sources\":[{}],\"generated_lines\":[{}]}}",
+        map.schema_version, map.api_version, sources, lines
     )
 }
 
@@ -783,15 +1286,17 @@ pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {
     }
     SourceMap {
         api_version: API_VERSION,
+        schema_version: SCHEMA_VERSION,
         sources,
         generated_lines,
     }
 }
 
-impl From<jet_semindex::SemIndex> for SemIndexView {
-    fn from(index: jet_semindex::SemIndex) -> Self {
+impl SemIndexView {
+    fn from_index(index: jet_semindex::SemIndex, source: &str) -> Self {
         SemIndexView {
             schema_version: index.schema_version(),
+            source_digest: crate::SHA256::sha256_hex(source.as_bytes()),
             definitions: index.definitions().to_vec(),
             references: index.references().to_vec(),
             calls: index.call_edges().to_vec(),
@@ -834,6 +1339,7 @@ fn bundle_syntax_tree(bundle: &AST::ProgramBundle, source: &str) -> SyntaxTree {
     }
     SyntaxTree {
         api_version: API_VERSION,
+        schema_version: SCHEMA_VERSION,
         source: source.to_string(),
         items,
         diagnostics: Vec::new(),

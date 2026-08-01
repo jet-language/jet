@@ -35,6 +35,63 @@ use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
 use std::collections::HashMap;
 
+/// Preserve contextual union typing when a sema-resolved comptime value stays
+/// as a `CtLit`. The literal must remain a single fact for JIT/interpreter, but
+/// its serialized AOT form still needs the generated union enum wrapper.
+fn bake_comptime_value_with_type(
+    value: &crate::AST::CtValue,
+    ty: &Type,
+    cx: &Cx,
+) -> crate::AST::CtValue {
+    use crate::AST::CtValue;
+
+    match ty {
+        Type::Union(members) => {
+            let enum_name = crate::AST::union_enum_name(members);
+            if matches!(
+                value,
+                CtValue::Enum { type_name, .. } if type_name == &enum_name
+            ) {
+                return value.clone();
+            }
+            let Some(member) = members.iter().find(|member| value.jet_type() == **member) else {
+                return value.clone();
+            };
+            CtValue::Enum {
+                type_name: enum_name,
+                variant: crate::AST::union_member_tag(member),
+                args: vec![(
+                    None,
+                    bake_comptime_value_with_type(value, member, cx),
+                )],
+            }
+        }
+        Type::Named(_) | Type::Apply { .. } => {
+            let CtValue::Struct { type_name, fields } = value else {
+                return value.clone();
+            };
+            let typed_fields = fields
+                .iter()
+                .map(|(field, value)| {
+                    let field_ty = struct_field_type(cx, ty, field).or_else(|| {
+                        struct_field_type(cx, &Type::Named(type_name.clone()), field)
+                    });
+                    let value = field_ty
+                        .as_ref()
+                        .map(|field_ty| bake_comptime_value_with_type(value, field_ty, cx))
+                        .unwrap_or_else(|| value.clone());
+                    (field.clone(), value)
+                })
+                .collect();
+            CtValue::Struct {
+                type_name: type_name.clone(),
+                fields: typed_fields,
+            }
+        }
+        _ => value.clone(),
+    }
+}
+
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
     let mut split_views = split_view_plan(stmts, cx);
@@ -784,7 +841,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()).unwrap_or_else(|| {
                         b.ct
                             .as_ref()
-                            .map(|v| TExprKind::CtLit(v.clone()))
+                            .map(|v| {
+                                let value = b.ty.as_ref().map_or_else(
+                                    || v.clone(),
+                                    |ty| bake_comptime_value_with_type(v, ty, cx),
+                                );
+                                TExprKind::CtLit(value)
+                            })
                             .unwrap_or(TExprKind::DefaultLit)
                     }),
                 };
@@ -1682,6 +1745,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::ScopeMember {
             name, args, body, ..
         } => {
+            if crate::Syntax::is_stdlib_dsl_block_marker(name) {
+                let mut scoped = clone_env(env);
+                return TStmt::Region(lower_stmts(body, cx, &mut scoped));
+            }
             let kind = if name == Syntax::SCOPE_TEST_SETUP {
                 ScopeMemberKind::Setup
             } else if name == Syntax::SCOPE_TEST_EXPECT_FAIL {

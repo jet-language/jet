@@ -252,7 +252,9 @@ pub fn builtin_method_return(
             ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string()))))),
             ("effects", 0) => Some(Some(Type::List(Box::new(Type::Named("EffectInfo".to_string()))))),
             ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
-            ("semantic_index", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("semantic_index", 0) => Some(Some(Type::Option(Box::new(Type::Named(
+                "CompilerSemanticIndex".to_string(),
+            ))))),
             _ => None,
         },
         Type::Named(n) if n == "CompilerSourceMap" => match (method, arg_count) {
@@ -426,15 +428,19 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
             ok: Box::new(Type::String),
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
+        ("plugin", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::Named(Syntax::TYPE_VOID.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+        })),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
-        ("legacy", 6) => build_result(Syntax::TYPE_BUILD_ACTION),
+        ("legacy", 6..=16) => build_result(Syntax::TYPE_BUILD_ACTION),
         ("add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
         | "add_doc" | "add_install" | "add_package" | "add_publish", 3 | 4 | 5 | 6 | 7) => {
             build_result(Syntax::TYPE_BUILD_TARGET)
         }
         ("toolchain", 2 | 3 | 4 | 5 | 6) => build_result(Syntax::TYPE_BUILD_TOOLCHAIN),
         ("signing", 2) => build_result("BuildSigningIdentity"),
-        ("probe", 3 | 4 | 5) => build_result(Syntax::TYPE_BUILD_PROBE),
+        ("probe", 3..=6) => build_result(Syntax::TYPE_BUILD_PROBE),
         ("error", 5) => Some(None),
         ("plan", 0 | 1) => build_result(Syntax::TYPE_BUILD_PLAN),
         // D-BUILDCTX-FLAGS1=A
@@ -455,6 +461,7 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
     let probes = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string())));
     match (method, arg_count) {
         ("generate", 2) => Some(vec![Type::String, Type::String]),
+        ("plugin", 2) => Some(vec![Type::String, Type::String]),
         ("find" | "embed", 1) => Some(vec![Type::String]),
         ("fetch", 2) => Some(vec![Type::String, Type::String]),
         ("action", 5) => Some(vec![
@@ -504,9 +511,47 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
             Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
             Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(), Type::String,
         ]),
-        ("legacy", 6) => Some(vec![
-            Type::String, Type::String, strings(), strings(), strings(), strings(),
-        ]),
+        ("legacy", 6..=16) => {
+            let mut args = vec![
+                Type::String,
+                Type::String,
+                strings(),
+                strings(),
+                strings(),
+                strings(),
+            ];
+            if arg_count >= 7 {
+                args.push(Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()));
+            }
+            if arg_count >= 8 {
+                args.push(probes());
+            }
+            if arg_count >= 9 {
+                args.push(Type::Named("BuildSigningIdentity".to_string()));
+            }
+            if arg_count >= 10 {
+                args.push(Type::String);
+            }
+            if arg_count >= 11 {
+                args.push(strings());
+            }
+            if arg_count >= 12 {
+                args.push(strings());
+            }
+            if arg_count >= 13 {
+                args.push(strings());
+            }
+            if arg_count >= 14 {
+                args.push(strings());
+            }
+            if arg_count >= 15 {
+                args.push(strings());
+            }
+            if arg_count >= 16 {
+                args.push(Type::String);
+            }
+            Some(args)
+        }
         ("add_executable" | "add_library" | "add_test" | "add_bench"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
             Some(vec![Type::String, strings(), actions()])
@@ -542,8 +587,36 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
         }
         ("signing", 2) => Some(vec![Type::String, Type::String]),
         ("probe", 3) => Some(vec![Type::String, Type::String, Type::String]),
-        ("probe", 4) => Some(vec![Type::String, Type::String, Type::String, Type::String]),
-        ("probe", 5) => Some(vec![Type::String, Type::String, Type::String, Type::String, Type::String]),
+        ("probe", 4) => Some(vec![
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::Union(vec![
+                Type::String,
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            ]),
+        ]),
+        ("probe", 5) => Some(vec![
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::Union(vec![
+                Type::String,
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            ]),
+            Type::Union(vec![
+                Type::String,
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            ]),
+        ]),
+        ("probe", 6) => Some(vec![
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+        ]),
         ("error", 5) => Some(vec![
             Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()), Type::String,
             Type::String, Type::String, Type::String,
@@ -1698,6 +1771,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "generate" => Some(vec![Type::String, Type::String]),
             "find" | "embed" => Some(vec![Type::String]),
             "fetch" => Some(vec![Type::String, Type::String]),
+            "plugin" => Some(vec![Type::String, Type::String]),
             "action" => Some(vec![
                 Type::String,
                 Type::List(Box::new(Type::String)),

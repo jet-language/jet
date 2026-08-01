@@ -61,6 +61,7 @@ pub mod QueryService;
 // it lives directly in this crate instead of the shared model.
 pub mod PluginExport;
 pub mod CompilerExtensionHook;
+pub mod BuildPluginHook;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
 // pure policy computation over the manifest/effect-fixpoint data (no
 // network/provider/shell), so they live in the shared read-only model too —

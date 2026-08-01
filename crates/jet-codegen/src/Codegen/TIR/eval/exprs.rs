@@ -43,6 +43,60 @@ fn stable_place_address(key: &str) -> i64 {
     }
 }
 
+/// TIR-eval representation of the erased `SQL = (String, Vec<String>)`
+/// runtime value. The AOT emitter uses a Rust tuple; keeping named fields in
+/// the evaluator makes the same representation inspectable without adding a
+/// second semantic type or a host-only shortcut.
+fn typed_sql_value(template: String, params: Vec<CtValue>) -> CtValue {
+    CtValue::Struct {
+        type_name: "SQL".to_string(),
+        fields: vec![
+            ("template".to_string(), CtValue::Str(template)),
+            ("params".to_string(), CtValue::List(params)),
+        ],
+    }
+}
+
+fn typed_sql_parts(value: &CtValue, span: crate::Diagnostics::Span) -> Result<(String, Vec<CtValue>), crate::Diagnostics::Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("SQL value", span));
+    };
+    if type_name != "SQL" {
+        return Err(unsupported("SQL value", span));
+    }
+    let template = fields.iter().find_map(|(name, value)| {
+        (name == "template").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    }).flatten();
+    let params = fields.iter().find_map(|(name, value)| {
+        (name == "params").then(|| match value {
+            CtValue::List(value) => Some(value.clone()),
+            _ => None,
+        })
+    }).flatten();
+    match (template, params) {
+        (Some(template), Some(params)) => Ok((template, params)),
+        _ => Err(unsupported("malformed SQL value", span)),
+    }
+}
+
+fn typed_html_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn local_cell_handle(type_name: &str, index: usize) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -3009,6 +3063,78 @@ impl<'a> EvalCtx<'a> {
                             } else {
                                 Err(unsupported("fixed-list index recv", self.span()))
                             }
+                        }
+                    }
+                }
+                crate::Codegen::TIR::THostCall::TypedText { kind, arg } => {
+                    use crate::Codegen::TIR::TTypedTextForm;
+                    let value = self.eval_expr(arg, scope)?;
+                    match kind {
+                        TTypedTextForm::SQLRaw => match value {
+                            CtValue::Str(template) => Ok(typed_sql_value(template, Vec::new())),
+                            _ => Err(unsupported("SQL.raw expects String", self.span())),
+                        },
+                        TTypedTextForm::HTMLRaw | TTypedTextForm::HTMLText => match value {
+                            CtValue::Str(_) => Ok(value),
+                            _ => Err(unsupported("HTML value expects String", self.span())),
+                        },
+                        TTypedTextForm::ShRaw => match value {
+                            CtValue::Str(text) => Ok(CtValue::List(
+                                text.split_whitespace()
+                                    .map(|word| CtValue::Str(word.to_string()))
+                                    .collect(),
+                            )),
+                            _ => Err(unsupported("Sh.raw expects String", self.span())),
+                        },
+                        TTypedTextForm::SQLTemplate => {
+                            Ok(CtValue::Str(typed_sql_parts(&value, self.span())?.0))
+                        }
+                        TTypedTextForm::SQLParams => {
+                            Ok(CtValue::List(typed_sql_parts(&value, self.span())?.1))
+                        }
+                    }
+                }
+                crate::Codegen::TIR::THostCall::TypedTextInterp {
+                    kind,
+                    literals,
+                    holes,
+                } => {
+                    use crate::Codegen::TIR::TTypedTextInterpKind;
+                    let mut values = Vec::with_capacity(holes.len());
+                    for hole in holes {
+                        values.push(self.eval_expr(hole, scope)?);
+                    }
+                    match kind {
+                        TTypedTextInterpKind::SQL => Ok(typed_sql_value(
+                            literals.join("?"),
+                            values
+                                .into_iter()
+                                .map(|value| CtValue::Str(value.jet_show()))
+                                .collect(),
+                        )),
+                        TTypedTextInterpKind::Sh => {
+                            let mut argv = Vec::new();
+                            for (index, literal) in literals.iter().enumerate() {
+                                argv.extend(
+                                    literal
+                                        .split_whitespace()
+                                        .map(|word| CtValue::Str(word.to_string())),
+                                );
+                                if let Some(value) = values.get(index) {
+                                    argv.push(CtValue::Str(value.jet_show()));
+                                }
+                            }
+                            Ok(CtValue::List(argv))
+                        }
+                        TTypedTextInterpKind::HTML => {
+                            let mut text = String::new();
+                            for (index, literal) in literals.iter().enumerate() {
+                                text.push_str(literal);
+                                if let Some(value) = values.get(index) {
+                                    text.push_str(&typed_html_escape(&value.jet_show()));
+                                }
+                            }
+                            Ok(CtValue::Str(text))
                         }
                     }
                 }

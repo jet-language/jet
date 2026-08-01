@@ -782,7 +782,7 @@ impl Default for BuildRunOptions {
     fn default() -> Self {
         BuildRunOptions {
             grants: std::collections::BTreeSet::new(),
-            policy: crate::Comptime::Build::BuildPolicy::allow_all(),
+            policy: crate::Comptime::Build::BuildPolicy::local_default(),
             execute: true,
             allow_impure: false,
             inspect_only: false,
@@ -1007,7 +1007,7 @@ fn build_query_options() -> BuildRunOptions {
         // Inspection verifies source declarations and #Impure gates, but it
         // must not require execution grants merely to display the graph.
         grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
-        policy: crate::Comptime::Build::BuildPolicy::allow_all(),
+        policy: crate::Comptime::Build::BuildPolicy::local_default(),
         execute: false,
         // Graph inspection may describe effectful actions, but it has no
         // authority to perform ambient comptime I/O. A user-written #Impure
@@ -1277,6 +1277,7 @@ fn compile_bundle_path_build_inner(
         let mut distinct_bases = std::collections::HashMap::new();
         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
         let mut type_name_counts = std::collections::HashMap::<String, usize>::new();
+        let mut const_name_counts = std::collections::HashMap::<String, usize>::new();
         for module in &bundle.modules {
             for item in &module.items {
                 match item {
@@ -1288,6 +1289,9 @@ fn compile_bundle_path_build_inner(
                     }
                     crate::AST::Item::Enum(def) => {
                         *type_name_counts.entry(def.name.clone()).or_default() += 1
+                    }
+                    crate::AST::Item::Const(def) if def.is_comptime && def.ct.is_some() => {
+                        *const_name_counts.entry(def.name.clone()).or_default() += 1
                     }
                     _ => {}
                 }
@@ -1387,7 +1391,22 @@ fn compile_bundle_path_build_inner(
                 }
             }
         }
-        let globals = std::collections::HashMap::new();
+        // D-FIELDPOL1/D-MODCOMPUTE1: top-level immutable comptime constants
+        // are real inputs to the same pure build interpreter as computed
+        // fields. Keep qualified names always and expose a short name only
+        // when the program has one unambiguous declaration.
+        let mut globals = std::collections::HashMap::new();
+        for module in &bundle.modules {
+            for item in &module.items {
+                let crate::AST::Item::Const(def) = item else { continue };
+                if !def.is_comptime { continue; }
+                let Some(value) = &def.ct else { continue };
+                globals.insert(format!("{}::{}", module.alias, def.name), value.clone());
+                if const_name_counts.get(&def.name) == Some(&1) {
+                    globals.insert(def.name.clone(), value.clone());
+                }
+            }
+        }
         let core_imports = core_aliases(&bundle.modules[bundle.entry]);
         let info = crate::Comptime::ProgramInfo {
             globals,
@@ -1408,15 +1427,18 @@ fn compile_bundle_path_build_inner(
         // output, action execution, and lock provenance.
         let base_dir = &bundle.project_root;
         let package = build_package_name(file);
-        let evaluated = crate::Comptime::run_build_entry_with_policy(
-            build,
-            &funcs,
-            base_dir,
-            &info,
-            program_value,
-            &package,
-            options.allow_impure,
-            options.policy.clone(),
+        let evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
+            crate::BuildPluginHook::run_packaged_build_plugin,
+            || crate::Comptime::run_build_entry_with_policy(
+                build,
+                &funcs,
+                base_dir,
+                &info,
+                program_value,
+                &package,
+                options.allow_impure,
+                options.policy.clone(),
+            ),
         )
         .map_err(|diag| vec![diag])?;
 
@@ -1459,6 +1481,7 @@ fn compile_bundle_path_build_inner(
             &selected_generated,
             &bundle.project_root,
             &existing_source_paths,
+            build_span,
         )?;
         let transaction_paths = selected_generated
             .iter()
@@ -1499,6 +1522,7 @@ fn compile_bundle_path_build_inner(
                 &bundle.project_root,
                 &existing_source_paths,
                 &selected_action_outputs,
+                build_span,
             )?
         } else {
             selected_generated
@@ -1532,6 +1556,7 @@ fn compile_bundle_path_build_inner(
                 &evaluated.plan,
                 &bundle.project_root,
                 &existing_source_paths,
+                build_span,
             )?);
             let mut locked_provenance = generated
                 .iter()
@@ -1924,6 +1949,7 @@ fn check_action_generated_sources(
     plan: &crate::Comptime::Build::BuildPlan,
     root: &std::path::Path,
     existing_source_paths: &[std::path::PathBuf],
+    span: Option<crate::Diagnostics::Span>,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let registered = plan
         .generated_modules()
@@ -1951,6 +1977,7 @@ fn check_action_generated_sources(
                 return Err(vec![generated_collision_diag(
                     &action.name,
                     output.as_str(),
+                    span,
                 )]);
             }
             let source_path = existing_source_paths
@@ -1961,6 +1988,7 @@ fn check_action_generated_sources(
                 return Err(vec![generated_collision_diag(
                     &action.name,
                     output.as_str(),
+                    span,
                 )]);
             }
             let source = String::from_utf8(
@@ -2009,6 +2037,7 @@ fn validate_selected_action_outputs(
     generated: &[&crate::Comptime::Build::BuildGeneratedModule],
     root: &std::path::Path,
     existing_source_paths: &[std::path::PathBuf],
+    span: Option<crate::Diagnostics::Span>,
 ) -> Result<(), Vec<Diagnostic>> {
     let source_paths = existing_source_paths
         .iter()
@@ -2031,7 +2060,7 @@ fn validate_selected_action_outputs(
                 )]);
             }
             if source_paths.contains(&path) {
-                return Err(vec![generated_collision_diag(&action.name, output.as_str())]);
+                return Err(vec![generated_collision_diag(&action.name, output.as_str(), span)]);
             }
             if generated.iter().any(|module| {
                 normalize_project_path(root, std::path::Path::new(module.path.as_str())) == path
@@ -2040,6 +2069,7 @@ fn validate_selected_action_outputs(
                     &action.name,
                     output.as_str(),
                     "a selected build action and a generated module both own this path",
+                    span,
                 )]);
             }
         }
@@ -2357,6 +2387,7 @@ fn materialize_and_check_generated(
     root: &std::path::Path,
     existing_source_paths: &[std::path::PathBuf],
     action_outputs: &[String],
+    span: Option<crate::Diagnostics::Span>,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let mut modules = modules.to_vec();
     modules.sort_by(|left, right| left.path.as_str().cmp(right.path.as_str()).then_with(|| left.name.cmp(&right.name)));
@@ -2381,6 +2412,7 @@ fn materialize_and_check_generated(
                 &module.name,
                 module.path.as_str(),
                 "two generated modules claim the same managed path",
+                span,
             )]);
         }
         if action_outputs.iter().any(|output| output == &path) {
@@ -2388,21 +2420,22 @@ fn materialize_and_check_generated(
                 &module.name,
                 module.path.as_str(),
                 "a selected build action and a generated module both own this path",
+                span,
             )]);
         }
         if has_symlinked_component(root, &path) {
-            return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+            return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
         }
         let managed = managed_generated_file(lock.as_ref(), root, &path, &module.source_digest);
         if existing_source_paths.iter().any(|source| source == &path) && !managed {
-            return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+            return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
         }
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || (!metadata.is_file() && !managed) {
-                return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+                return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
             }
             if metadata.is_file() && !managed {
-                return Err(vec![generated_collision_diag(&module.name, module.path.as_str())]);
+                return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
             }
         }
     }
@@ -2428,7 +2461,7 @@ fn materialize_and_check_generated(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let rounds = generated_rounds(&dependencies, &modules)?;
+    let rounds = generated_rounds(&dependencies, &modules, span)?;
 
     let mut provenance = Vec::new();
     for round in rounds {
@@ -2536,6 +2569,7 @@ fn annotate_generated_frontend_diags(
 fn generated_rounds(
     dependencies: &[Vec<usize>],
     modules: &[&crate::Comptime::Build::BuildGeneratedModule],
+    span: Option<crate::Diagnostics::Span>,
 ) -> Result<Vec<Vec<usize>>, Vec<Diagnostic>> {
     let mut dependents = vec![Vec::<usize>::new(); modules.len()];
     let mut remaining = dependencies.iter().map(Vec::len).collect::<Vec<_>>();
@@ -2589,6 +2623,7 @@ fn generated_rounds(
         &modules[first].name,
         modules[first].path.as_str(),
         &format!("dependency chain `{chain}` is cyclic"),
+        span,
     )])
 }
 
@@ -2677,23 +2712,32 @@ fn managed_generated_file(
         .any(|input| input.path == relative && input.hash == digest.as_str())
 }
 
-fn generated_collision_diag(name: &str, path: &str) -> Diagnostic {
+fn generated_collision_diag(
+    name: &str,
+    path: &str,
+    span: Option<crate::Diagnostics::Span>,
+) -> Diagnostic {
     Diagnostic::error(
         "E3510",
         format!("`b.generate(\"{name}\")` would shadow the module at `{path}`"),
         "generation is additive: what you wrote is always what compiles".to_string(),
         "rename the generated module, or delete the hand-written one".to_string(),
-        None,
+        span,
     )
 }
 
-fn generated_cycle_diag(name: &str, path: &str, reason: &str) -> Diagnostic {
+fn generated_cycle_diag(
+    name: &str,
+    path: &str,
+    reason: &str,
+    span: Option<crate::Diagnostics::Span>,
+) -> Diagnostic {
     Diagnostic::error(
         "E3511",
         format!("generation rounds form a cycle: `{name}` at `{path}`"),
         "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
         format!("{reason}; break the dependency between these generators"),
-        None,
+        span,
     )
 }
 
@@ -3595,6 +3639,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         is_task: false,
         task_span: None,
         every: None,
+        task_metadata: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,

@@ -19,6 +19,8 @@
 
 #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
 mod CompilerExtensionHost;
+#[path = "../../jet-pkg-model/src/Prelude/BuildPlugin.rs"]
+mod BuildPluginHost;
 
 fn main() {
     jetpack::Codegen::TIR::install_comptime_bridge();
@@ -27,6 +29,11 @@ fn main() {
         == Some(jet_pkg_model::CompilerExtension::HOST_SUBCOMMAND)
     {
         std::process::exit(run_compiler_extension_host(&args[1..]));
+    }
+    if args.first().map(String::as_str)
+        == Some(jet_comptime::Comptime::Build::BUILD_PLUGIN_HOST_SUBCOMMAND)
+    {
+        std::process::exit(run_build_plugin_host(&args[1..]));
     }
     if let Some(code) = jetpack::CLI::ProfileDispatch::dispatch_current_process() {
         std::process::exit(code);
@@ -40,6 +47,99 @@ fn main() {
         std::process::exit(0);
     }
     std::process::exit(jetpack::run(args));
+}
+
+/// Hidden, bounded build-plugin host protocol. Request bytes arrive on stdin;
+/// one list<u8> guest response is written to stdout. The caller validates the
+/// graph response and performs the transaction in the compiler process.
+fn run_build_plugin_host(args: &[String]) -> i32 {
+    use jet_comptime::Comptime::Build::{
+        ContentDigest, WasmComponentPluginSpec, BUILD_PLUGIN_MAX_REQUEST_BYTES,
+        BUILD_PLUGIN_MAX_RESPONSE_BYTES,
+    };
+    use std::fs;
+    use std::io::{Read, Write};
+
+    let [manifest_path, component_path, expected_manifest_digest, expected_component_digest] = args
+    else {
+        eprintln!("build-plugin host requires manifest, component, and expected digests");
+        return 2;
+    };
+    for (path, label) in [(manifest_path, "manifest"), (component_path, "component")] {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => {
+                eprintln!("build-plugin {label} must be a regular non-symlink file");
+                return 2;
+            }
+            Err(error) => {
+                eprintln!("couldn't stat build-plugin {label}: {error}");
+                return 2;
+            }
+        }
+    }
+    let manifest = match fs::read(manifest_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("couldn't read build-plugin manifest: {error}");
+            return 2;
+        }
+    };
+    let component = match fs::read(component_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("couldn't read build-plugin component: {error}");
+            return 2;
+        }
+    };
+    let actual_manifest_digest = ContentDigest::from_bytes(&manifest);
+    if actual_manifest_digest.as_str() != expected_manifest_digest {
+        eprintln!("build-plugin manifest changed after verification");
+        return 2;
+    }
+    let spec = match WasmComponentPluginSpec::load_packaged_bytes(&manifest, &component) {
+        Ok(spec) => spec,
+        Err(error) => {
+            eprintln!("couldn't verify build-plugin package: {error}");
+            return 2;
+        }
+    };
+    if spec.component_digest.as_str() != expected_component_digest {
+        eprintln!("build-plugin component changed after verification");
+        return 2;
+    }
+    let mut request = Vec::new();
+    if let Err(error) = std::io::stdin()
+        .take(BUILD_PLUGIN_MAX_REQUEST_BYTES.saturating_add(1) as u64)
+        .read_to_end(&mut request)
+    {
+        eprintln!("couldn't read build-plugin request: {error}");
+        return 2;
+    }
+    if request.len() > BUILD_PLUGIN_MAX_REQUEST_BYTES {
+        eprintln!(
+            "build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes"
+        );
+        return 2;
+    }
+    let response = match BuildPluginHost::run(component_path, &component, &request) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    if response.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES {
+        eprintln!(
+            "build-plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes"
+        );
+        return 2;
+    }
+    if let Err(error) = std::io::stdout().write_all(&response) {
+        eprintln!("couldn't write build-plugin response: {error}");
+        return 2;
+    }
+    0
 }
 
 /// Hidden, bounded compiler-extension host protocol. Snapshot bytes arrive on
