@@ -14,6 +14,35 @@ use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
 
+/// Stable place identity for `mem.address_of` under TIR-eval (no real ASLR).
+fn tir_place_address_key(expr: &TExpr) -> String {
+    match &expr.kind {
+        TExprKind::Local(local) => local.name.clone(),
+        TExprKind::Field { recv, field, .. } => {
+            format!("{}.{}", tir_place_address_key(recv), field)
+        }
+        TExprKind::Index { base, index, .. } => {
+            format!("{}[{}]", tir_place_address_key(base), tir_place_address_key(index))
+        }
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => tir_place_address_key(place),
+        _ => format!("ty:{}", expr.ty.show()),
+    }
+}
+
+fn stable_place_address(key: &str) -> i64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in key.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let addr = (hash as i64).wrapping_abs();
+    if addr == 0 {
+        1
+    } else {
+        addr
+    }
+}
+
 fn local_cell_handle(type_name: &str, index: usize) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -2009,6 +2038,15 @@ impl<'a> EvalCtx<'a> {
                 }
                 if module == "core.services" {
                     return self.eval_core_services_call(method, args, *source_span, scope);
+                }
+                // D-PIN1 / S58: `mem.address_of(place)` is an inert address cast.
+                // AOT lowers to `(&place as *const _ as usize as i64)`. The
+                // interpreter has no real addresses, so mint a stable non-zero
+                // identity from the place path (I9: same non-zero / inequality
+                // facts a program can observe).
+                if module == "core.mem" && method == "address_of" && args.len() == 1 {
+                    let key = tir_place_address_key(&args[0]);
+                    return Ok(CtValue::Int(stable_place_address(&key)));
                 }
                 if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
                     let pointer = self.eval_expr(&args[0], scope)?;

@@ -33,8 +33,9 @@ fn error_codes(src: &str) -> Vec<String> {
 
 /// Compile to Rust and, when rustc is present, build and run. The rustc step is
 /// the I2 backstop: a pin the front end accepted must also survive the borrow
-/// checker without any generated `unsafe`.
-fn build_and_run(name: &str, src: &str) -> Option<String> {
+/// checker. Pass `allow_authored_unsafe` when the Jet source contains an
+/// audited `#Unsafe("…")` region that must lower to Rust `unsafe`.
+fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<String> {
     let dir0 = unique_tmp();
     std::fs::create_dir_all(&dir0).unwrap();
     let fpath = dir0.join("fixture.jet");
@@ -49,16 +50,18 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
         &common::strip_vetted_prelude_modules(&out.rust),
         "jet_taskgroup_scoped",
     );
-    let leaked: Vec<&str> = user
-        .lines()
-        .filter(|line| line.contains("unsafe") && !line.trim_start().starts_with("//"))
-        .take(5)
-        .collect();
-    assert!(
-        leaked.is_empty(),
-        "a pin must not need `unsafe` outside the vetted prelude helpers:\n{}",
-        leaked.join("\n")
-    );
+    if !allow_authored_unsafe {
+        let leaked: Vec<&str> = user
+            .lines()
+            .filter(|line| line.contains("unsafe") && !line.trim_start().starts_with("//"))
+            .take(5)
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "a pin must not need `unsafe` outside the vetted prelude helpers:\n{}",
+            leaked.join("\n")
+        );
+    }
 
     if Command::new("rustc").arg("--version").output().is_err() {
         eprintln!("note: rustc not found; compiled front end only");
@@ -201,7 +204,7 @@ fn run() {{
 "#
     );
     assert_eq!(interpret(&src), "42 1\n");
-    if let Some(out) = build_and_run("edit_through", &src) {
+    if let Some(out) = build_and_run("edit_through", &src, false) {
         assert_eq!(out, "42 1\n");
     }
 }
@@ -227,7 +230,7 @@ fn run() {{
 "#
     );
     assert_eq!(interpret(&src), "ready 41 1\n");
-    if let Some(out) = build_and_run("pin_field", &src) {
+    if let Some(out) = build_and_run("pin_field", &src, false) {
         assert_eq!(out, "ready 41 1\n");
     }
 }
@@ -296,7 +299,7 @@ fn run() {{
 "#
     );
     assert_eq!(interpret(&src), "2\n");
-    if let Some(out) = build_and_run("branch_path", &src) {
+    if let Some(out) = build_and_run("branch_path", &src, false) {
         assert_eq!(out, "2\n");
     }
 }
@@ -338,7 +341,7 @@ fn run() {{
     );
     assert_eq!(error_codes(&src), Vec::<String>::new());
     assert_eq!(interpret(&src), "1 1\n");
-    if let Some(out) = build_and_run("index_pin", &src) {
+    if let Some(out) = build_and_run("index_pin", &src, false) {
         assert_eq!(out, "1 1\n");
     }
 }
@@ -366,7 +369,7 @@ fn run() {{
     );
     assert_eq!(error_codes(&src), Vec::<String>::new());
     assert_eq!(interpret(&src), "1 2\n");
-    if let Some(out) = build_and_run("sibling_pins", &src) {
+    if let Some(out) = build_and_run("sibling_pins", &src, false) {
         assert_eq!(out, "1 2\n");
     }
 }
@@ -389,7 +392,7 @@ fn run() {{
     );
     assert_eq!(error_codes(&src), Vec::<String>::new());
     assert_eq!(interpret(&src), "3\n");
-    if let Some(out) = build_and_run("loop_pin", &src) {
+    if let Some(out) = build_and_run("loop_pin", &src, false) {
         assert_eq!(out, "3\n");
     }
 }
@@ -443,7 +446,7 @@ fn run() {{
     );
     assert_eq!(error_codes(&src), Vec::<String>::new());
     assert_eq!(interpret(&src), "ready 42 1\n");
-    if let Some(out) = build_and_run("return_pin_field", &src) {
+    if let Some(out) = build_and_run("return_pin_field", &src, false) {
         assert_eq!(out, "ready 42 1\n");
     }
 }
@@ -497,7 +500,7 @@ fn run() {
 "#;
     assert_eq!(error_codes(src), Vec::<String>::new());
     assert_eq!(interpret(src), "8 true\n");
-    if let Some(out) = build_and_run("safe_pin_api", src) {
+    if let Some(out) = build_and_run("safe_pin_api", src, true) {
         assert_eq!(out, "8 true\n");
     }
 }
@@ -536,7 +539,7 @@ fn run() {
 }
 "#;
     assert_eq!(error_codes(src), Vec::<String>::new());
-    if let Some(out) = build_and_run("pin_panic_cleanup", src) {
+    if let Some(out) = build_and_run("pin_panic_cleanup", src, false) {
         assert!(
             out.contains("body 1") && out.contains("closed pin"),
             "panic must still run automatic cleanup while a pin is live: {out:?}"
@@ -601,7 +604,7 @@ fn run() {
 "#;
     assert_eq!(error_codes(src), Vec::<String>::new());
     assert_eq!(interpret(src), "3 1 5 2\n");
-    if let Some(out) = build_and_run("fixed_arena_pin", src) {
+    if let Some(out) = build_and_run("fixed_arena_pin", src, false) {
         assert_eq!(out, "3 1 5 2\n");
     }
 }
