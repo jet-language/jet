@@ -13,6 +13,10 @@ use crate::Comptime::DevSink;
 pub struct ExprEvalRequest<'a> {
     pub expr: &'a Expr,
     pub funcs: &'a HashMap<String, &'a Func>,
+    /// Instance/associated methods are kept in their semantic owner/name table
+    /// by comptime. The TIR fragment host needs the same table to lower
+    /// computed-field getters and to call user methods.
+    pub methods: &'a HashMap<(String, String), &'a Func>,
     pub extern_names: &'a HashSet<String>,
     pub base_dir: &'a Path,
     pub globals: &'a HashMap<String, CtValue>,
@@ -20,6 +24,7 @@ pub struct ExprEvalRequest<'a> {
     pub allow_impure: bool,
     pub initial_impure_depth: usize,
     pub structs: &'a HashMap<String, &'a StructDef>,
+    pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a HashMap<String, Type>,
     pub fuel: u64,
@@ -34,6 +39,7 @@ pub struct ExprEvalRequest<'a> {
 pub struct BlockEvalRequest<'a> {
     pub stmts: &'a [Stmt],
     pub funcs: &'a HashMap<String, &'a Func>,
+    pub methods: &'a HashMap<(String, String), &'a Func>,
     pub extern_names: &'a HashSet<String>,
     pub base_dir: &'a Path,
     pub globals: &'a HashMap<String, CtValue>,
@@ -46,6 +52,7 @@ pub struct BlockEvalRequest<'a> {
     pub repl_mode: bool,
     pub allow_impure: bool,
     pub impure_depth: usize,
+    pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
     /// D-METADERIVE1: `emit(…)` fragments from a derive body.
     pub emitted_fragments: Option<&'a mut Vec<String>>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.

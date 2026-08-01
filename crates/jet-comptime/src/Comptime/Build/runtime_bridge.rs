@@ -4,8 +4,8 @@ use super::actions_policy::{
 use super::context::BuildContext;
 use super::errors_keys::BuildError;
 use super::handles::{
-    ActionHandle, ActionId, ProbeHandle, ProbeId, TargetId, TargetRef, ToolchainHandle,
-    ToolchainId,
+    ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, SigningIdentityId,
+    TargetId, TargetRef, ToolchainHandle, ToolchainId,
 };
 use super::plan_graph::BuildPlan;
 use super::provenance_toolchains::{
@@ -34,7 +34,7 @@ thread_local! {
 /// Start one selected-root build evaluation. Session is thread-local so
 /// parallel compiler invocations cannot share graph mutation.
 pub fn begin_program_build(package: impl Into<String>, program: CtValue) -> CtValue {
-    begin_program_build_with_policy(package, program, BuildPolicy::allow_all())
+    begin_program_build_with_policy(package, program, BuildPolicy::local_default())
 }
 
 /// Start a build session with the caller's already-resolved policy. The
@@ -175,11 +175,12 @@ fn eval_session_method(
     let action_has_effects = action_caps_index
         .and_then(|index| args.get(index))
         .is_some_and(|value| matches!(value, CtValue::List(values) if !values.is_empty()));
+    let plugin_requested = method == "plugin";
     let ambient_probe = method == "probe"
         && !args.iter().rev().take(2).any(|value| {
             matches!(value, CtValue::Str(name) if name.eq_ignore_ascii_case("reproducible"))
         });
-    if (ambient_probe || action_has_effects) && !in_impure_gate {
+    if (ambient_probe || action_has_effects || plugin_requested) && !in_impure_gate {
         return Err(Diagnostic::error(
             "E3502",
             format!("`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"),
@@ -189,6 +190,19 @@ fn eval_session_method(
         ));
     }
     let result = match method {
+        "plugin" => {
+            let manifest = string_arg(&args, 0, span)?;
+            let component = string_arg(&args, 1, span)?;
+            let policy = session.context.policy().clone();
+            session
+                .context
+                .apply_packaged_wasm_component_plugin_from_host(
+                    Path::new(&manifest),
+                    Path::new(&component),
+                    &policy,
+                )
+                .map(|_| CtValue::Unit)
+        }
         "generate" => {
             let name = string_arg(&args, 0, span)?;
             let source = string_arg(&args, 1, span)?;
@@ -328,6 +342,105 @@ fn eval_session_method(
             for cap in caps {
                 wrapper = wrapper.with_cap(parse_capability(&cap, span)?);
             }
+            if args.len() >= 7 {
+                let toolchain = handle_arg(
+                    &args,
+                    6,
+                    crate::Syntax::TYPE_BUILD_TOOLCHAIN,
+                    id,
+                    span,
+                )?;
+                wrapper = wrapper.with_toolchain(ToolchainHandle {
+                    id: ToolchainId(toolchain),
+                    context: id,
+                });
+            }
+            if args.len() >= 8 {
+                for probe in handle_list_arg(
+                    &args,
+                    7,
+                    crate::Syntax::TYPE_BUILD_PROBE,
+                    id,
+                    span,
+                )? {
+                    wrapper = wrapper.with_probe(ProbeHandle {
+                        id: ProbeId(probe),
+                        context: id,
+                    });
+                }
+            }
+            if args.len() >= 9 {
+                let signing = handle_arg(
+                    &args,
+                    8,
+                    "BuildSigningIdentity",
+                    id,
+                    span,
+                )?;
+                wrapper = wrapper.with_signing_identity(SigningIdentityHandle {
+                    id: SigningIdentityId(signing),
+                    context: id,
+                });
+            }
+            if args.len() >= 10 {
+                let kind = string_arg(&args, 9, span)?;
+                wrapper = wrapper.with_kind(match kind.to_ascii_lowercase().as_str() {
+                    "compile" => ActionKind::Compile,
+                    "docs" => ActionKind::Docs,
+                    "debug" => ActionKind::Debug,
+                    "source_archive" | "source-archive" => ActionKind::SourceArchive,
+                    "generic" => ActionKind::Generic,
+                    _ => return Err(build_diag(&format!("unknown action kind `{kind}`"), span)),
+                });
+            }
+            if args.len() >= 11 {
+                for pool in string_list_arg(&args, 10, span)? {
+                    let pool = match pool.to_ascii_lowercase().as_str() {
+                        "cpu" => BuildResourcePool::Cpu,
+                        "memory" => BuildResourcePool::Memory,
+                        "linker" => BuildResourcePool::Linker,
+                        "console" => BuildResourcePool::Console,
+                        "gpu" => BuildResourcePool::GPU,
+                        _ => BuildResourcePool::Custom(pool),
+                    };
+                    wrapper = wrapper.with_pool(pool);
+                }
+            }
+            if args.len() >= 12 {
+                for entry in string_list_arg(&args, 11, span)? {
+                    let (key, value) = entry.split_once('=').ok_or_else(|| {
+                        build_diag("legacy wrapper environment entries must use KEY=VALUE", span)
+                    })?;
+                    wrapper = wrapper.with_env(key, value);
+                }
+            }
+            if args.len() >= 13 {
+                wrapper = wrapper.with_env_allowlist(string_list_arg(&args, 12, span)?);
+            }
+            if args.len() >= 14 {
+                for entry in string_list_arg(&args, 13, span)? {
+                    let (helper, version) = entry.split_once('=').ok_or_else(|| {
+                        build_diag("legacy wrapper helper entries must use NAME=VERSION", span)
+                    })?;
+                    wrapper = wrapper.with_helper_version(helper, version);
+                }
+            }
+            if args.len() >= 15 {
+                for entry in string_list_arg(&args, 14, span)? {
+                    let (label, value) = entry.split_once('=').ok_or_else(|| {
+                        build_diag("legacy wrapper label entries must use NAME=VALUE", span)
+                    })?;
+                    wrapper = wrapper.with_label(label, value);
+                }
+            }
+            if args.len() >= 16 {
+                let cache = string_arg(&args, 15, span)?;
+                wrapper = wrapper.with_cache(match cache.to_ascii_lowercase().as_str() {
+                    "cached" => ActionCache::Cached,
+                    "phony" | "uncached" => ActionCache::UncachedPhony,
+                    _ => return Err(build_diag("legacy wrapper cache must be cached or phony", span)),
+                });
+            }
             let spec = wrapper
                 .into_action_spec(session.context.policy())
                 .map_err(|error| build_error_diag(&error, span))?;
@@ -442,17 +555,31 @@ fn eval_session_method(
                 "find_program" => ProbeSpec::find_program(value),
                 "pkg_config" => ProbeSpec::pkg_config(value),
                 "header" => ProbeSpec::header_check(value),
-                "compile_check" if (4..=5).contains(&args.len()) => ProbeSpec::compile_check(
+                "compile_check" if (4..=6).contains(&args.len()) => ProbeSpec::compile_check(
                     value,
                     std::iter::empty::<String>(),
                     string_arg(&args, 3, span)?,
                 ),
                 _ => return Err(build_diag(&format!("unknown typed probe kind `{kind}`"), span)),
             };
-            let reproducibility = if kind == "compile_check" {
-                args.get(4)
+            let (reproducibility, toolchain_index) = if kind == "compile_check" {
+                match args.get(4) {
+                    Some(CtValue::Struct { .. }) => (None, Some(4)),
+                    Some(_) => (args.get(4), (args.len() >= 6).then_some(5)),
+                    None => (None, None),
+                }
             } else {
-                args.get(3)
+                if args.len() > 5 {
+                    return Err(build_diag(
+                        "non-compile probes accept at most one reproducibility value and one toolchain",
+                        span,
+                    ));
+                }
+                match args.get(3) {
+                    Some(CtValue::Struct { .. }) => (None, Some(3)),
+                    Some(_) => (args.get(3), (args.len() >= 5).then_some(4)),
+                    None => (None, None),
+                }
             };
             if let Some(value) = reproducibility {
                 let value = match value {
@@ -463,6 +590,19 @@ fn eval_session_method(
                     "ambient" => ReproducibilityClass::Ambient,
                     "reproducible" => ReproducibilityClass::Reproducible,
                     _ => return Err(build_diag("probe reproducibility must be `ambient` or `reproducible`", span)),
+                });
+            }
+            if let Some(index) = toolchain_index {
+                let toolchain = handle_arg(
+                    &args,
+                    index,
+                    crate::Syntax::TYPE_BUILD_TOOLCHAIN,
+                    id,
+                    span,
+                )?;
+                spec = spec.with_toolchain(ToolchainHandle {
+                    id: ToolchainId(toolchain),
+                    context: id,
                 });
             }
             session

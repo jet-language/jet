@@ -297,12 +297,33 @@ pub struct BuildPolicy {
 }
 
 impl BuildPolicy {
-    pub fn allow_all() -> Self {
+    /// Production policy for a local build. The caller still supplies the
+    /// action's declared capabilities and the build context enforces them;
+    /// this policy only selects which optional integration surfaces are
+    /// available by default.
+    pub fn local_default() -> Self {
         BuildPolicy {
             legacy_wrappers: PolicySetting::Allow,
             wasm_plugins: PolicySetting::Allow,
             plugin_grants: BTreeMap::new(),
         }
+    }
+
+    /// Production policy for CI. Legacy wrappers require an explicit local
+    /// policy or an imported graph so CI cannot silently escape the typed
+    /// build surface.
+    pub fn ci_default() -> Self {
+        BuildPolicy {
+            legacy_wrappers: PolicySetting::deny(
+                "legacy build wrappers are disabled in CI by the production policy",
+            ),
+            wasm_plugins: PolicySetting::Allow,
+            plugin_grants: BTreeMap::new(),
+        }
+    }
+
+    pub fn allow_all() -> Self {
+        Self::local_default()
     }
 
     pub fn deny_legacy_wrappers(reason: impl Into<String>) -> Self {
@@ -368,7 +389,16 @@ pub struct LegacyWrapperSpec {
     pub outputs: Vec<BuildPath>,
     pub caps: BTreeSet<BuildCapability>,
     pub env: BTreeMap<String, String>,
+    pub env_allowlist: BTreeSet<String>,
+    pub cache: ActionCache,
+    pub action_kind: ActionKind,
+    pub toolchain: Option<ToolchainHandle>,
+    pub probes: Vec<ProbeHandle>,
+    pub signing_identity: Option<SigningIdentityHandle>,
     pub labels: BTreeMap<String, String>,
+    pub helper_versions: BTreeMap<String, String>,
+    pub resource_pools: BTreeSet<BuildResourcePool>,
+    pub variant_identity: Option<String>,
 }
 
 impl LegacyWrapperSpec {
@@ -424,7 +454,16 @@ impl LegacyWrapperSpec {
             outputs: Vec::new(),
             caps: BTreeSet::new(),
             env: BTreeMap::new(),
+            env_allowlist: BTreeSet::new(),
+            cache: ActionCache::Cached,
+            action_kind: ActionKind::Generic,
+            toolchain: None,
+            probes: Vec::new(),
+            signing_identity: None,
             labels: BTreeMap::new(),
+            helper_versions: BTreeMap::new(),
+            resource_pools: BTreeSet::new(),
+            variant_identity: None,
         }
     }
 
@@ -458,6 +497,59 @@ impl LegacyWrapperSpec {
         self
     }
 
+    pub fn with_env_allowlist<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.env_allowlist.extend(keys.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn with_cache(mut self, cache: ActionCache) -> Self {
+        self.cache = cache;
+        self
+    }
+
+    pub fn with_kind(mut self, kind: ActionKind) -> Self {
+        self.action_kind = kind;
+        self
+    }
+
+    pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
+        self.toolchain = Some(toolchain);
+        self
+    }
+
+    pub fn with_probe(mut self, probe: ProbeHandle) -> Self {
+        self.probes.push(probe);
+        self
+    }
+
+    pub fn with_signing_identity(mut self, identity: SigningIdentityHandle) -> Self {
+        self.signing_identity = Some(identity);
+        self
+    }
+
+    pub fn with_helper_version(
+        mut self,
+        helper: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        self.helper_versions.insert(helper.into(), version.into());
+        self
+    }
+
+    pub fn with_pool(mut self, pool: BuildResourcePool) -> Self {
+        self.resource_pools.insert(pool);
+        self
+    }
+
+    pub fn with_variant_identity(mut self, identity: impl Into<String>) -> Self {
+        self.variant_identity = Some(identity.into());
+        self
+    }
+
     pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.labels.insert(key.into(), value.into());
         self
@@ -485,6 +577,25 @@ impl LegacyWrapperSpec {
         if self.caps.is_empty() {
             return Err(BuildError::LegacyWrapperWithoutCaps(self.kind));
         }
+        let actual = self
+            .argv
+            .first()
+            .map(|value| {
+                std::path::Path::new(value)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(value)
+                    .trim_end_matches(".cmd")
+                    .trim_end_matches(".exe")
+                    .to_ascii_lowercase()
+            })
+            .unwrap_or_default();
+        if actual != self.kind.as_str() {
+            return Err(BuildError::LegacyWrapperCommandMismatch {
+                wrapper: self.kind,
+                actual,
+            });
+        }
         let mut labels = self.labels;
         labels.insert("legacy.wrapper".to_string(), self.kind.as_str().to_string());
         let spec = ActionSpec {
@@ -492,18 +603,18 @@ impl LegacyWrapperSpec {
             outputs: self.outputs,
             argv: self.argv,
             env: self.env,
-            env_allowlist: BTreeSet::new(),
+            env_allowlist: self.env_allowlist,
             caps: self.caps,
-            cache: ActionCache::Cached,
-            kind: ActionKind::Generic,
-            toolchain: None,
-            probes: Vec::new(),
-            signing_identity: None,
+            cache: self.cache,
+            kind: self.action_kind,
+            toolchain: self.toolchain,
+            probes: self.probes,
+            signing_identity: self.signing_identity,
             labels,
-            helper_versions: BTreeMap::new(),
-            resource_pools: BTreeSet::new(),
+            helper_versions: self.helper_versions,
+            resource_pools: self.resource_pools,
             legacy_wrapper: Some(self.kind),
-            variant_identity: None,
+            variant_identity: self.variant_identity,
         };
         super::validation::validate_action(self.kind.as_str(), &spec)?;
         Ok(spec)

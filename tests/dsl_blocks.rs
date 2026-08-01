@@ -4,7 +4,8 @@
 #[test]
 fn sql_and_html_blocks_compile_and_formatter_round_trip() {
     let source = r#"
-fn run() {
+    struct User { id: Int }
+    fn run() {
     #SQL<User> {
         query :: SQL.{"select id from users"}
         print(query.template())
@@ -39,4 +40,35 @@ fn dsl_block_body_keeps_normal_sema_and_whitelist_rules() {
 
     let foreign_marker = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
     assert!(!foreign_marker.is_empty(), "third-party DSL markers must not parse as a DSL");
+}
+
+#[test]
+fn typed_text_forms_cover_sql_html_sh_and_audited_raw() {
+    let source = r#"
+fn run() {
+    id :: 7
+    query :: SQL.{"select * from users where id = {id}"}
+    _template :: query.template()
+    _params :: query.params()
+    name :: "<unsafe>"
+    page :: HTML.{"<p>{name}</p>"}
+    _text :: page.text()
+    _sql :: SQL.raw("select 1")
+    _html :: HTML.raw("<b>audited</b>")
+    command :: Sh.{"printf <%s> {name}"}
+}
+"#;
+    jet::compile(source).expect("typed domain text should compile through one checked path");
+}
+
+#[test]
+fn sql_row_header_is_a_real_declared_type_position() {
+    let error = jet::compile("fn run() { #SQL<MissingRow> {} }\n").unwrap_err();
+    assert!(
+        error.iter().any(|diagnostic| {
+            diagnostic.what.contains("MissingRow")
+                || diagnostic.fix.contains("MissingRow")
+        }),
+        "unknown SQL row type should use ordinary declared-type diagnostics: {error:?}"
+    );
 }

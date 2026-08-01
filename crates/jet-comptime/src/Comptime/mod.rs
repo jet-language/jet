@@ -217,7 +217,7 @@ pub fn run_build_entry(
         program_value,
         package,
         allow_impure,
-        Build::BuildPolicy::allow_all(),
+        Build::BuildPolicy::local_default(),
     )
 }
 
@@ -550,6 +550,7 @@ pub fn evaluate_with_imports_opts(
     TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
+        methods: empty_methods(),
         extern_names,
         base_dir,
         globals,
@@ -557,6 +558,7 @@ pub fn evaluate_with_imports_opts(
         allow_impure,
         initial_impure_depth,
         structs: &HashMap::new(),
+        computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,
@@ -613,6 +615,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
+        methods: empty_methods(),
         extern_names,
         base_dir,
         globals,
@@ -620,6 +623,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         allow_impure,
         initial_impure_depth,
         structs,
+        computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,
@@ -1095,11 +1099,13 @@ pub fn run_block_with_imports(
     match TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
         stmts,
         funcs: &refs,
+        methods: empty_methods(),
         extern_names,
         base_dir,
         globals,
         core_imports,
         structs: &HashMap::new(),
+        computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,

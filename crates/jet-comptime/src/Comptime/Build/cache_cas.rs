@@ -9,6 +9,9 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+const MAX_REMOTE_WIRE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_REMOTE_ITEMS: usize = 100_000;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionKey(pub(super) String);
 
@@ -349,6 +352,20 @@ impl RemoteCacheTransport {
         Ok(self.cas.put_blob(bytes)?)
     }
 
+    /// Upload a blob as part of an execution exchange. An execute grant is
+    /// distinct from a cache-write grant: a worker must be able to return its
+    /// declared outputs without also being allowed to publish cache records.
+    pub fn upload_execution_blob(
+        &self,
+        bytes: &[u8],
+        policy: &RemoteCachePolicy,
+    ) -> Result<ContentDigest, RemoteCacheError> {
+        policy
+            .check(RemoteActionRequest::Execute)
+            .map_err(RemoteCacheError::Denied)?;
+        Ok(self.cas.put_blob(bytes)?)
+    }
+
     pub fn download_blob(
         &self,
         digest: &ContentDigest,
@@ -356,6 +373,20 @@ impl RemoteCacheTransport {
     ) -> Result<Vec<u8>, RemoteCacheError> {
         policy
             .check(RemoteActionRequest::CacheRead)
+            .map_err(RemoteCacheError::Denied)?;
+        Ok(self.cas.read_blob(digest)?)
+    }
+
+    /// Fetch a blob named by a remote execution result. This is part of the
+    /// execution exchange, not a cache hit, so an execute-only grant may read
+    /// it without also enabling remote cache reads.
+    pub fn download_execution_blob(
+        &self,
+        digest: &ContentDigest,
+        policy: &RemoteCachePolicy,
+    ) -> Result<Vec<u8>, RemoteCacheError> {
+        policy
+            .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         Ok(self.cas.read_blob(digest)?)
     }
@@ -512,7 +543,11 @@ impl RemoteCacheTransport {
         Ok(result)
     }
 
-    fn read_execution_request(
+    /// Read and validate a queued request for a remote worker. This is the
+    /// worker-facing half of the transport; it returns the immutable request
+    /// envelope, while the worker must upload declared input/output blobs and
+    /// publish a parity-checked result through `publish_execution_result`.
+    pub fn read_execution_request(
         &self,
         key: &ActionKey,
     ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
@@ -695,8 +730,14 @@ fn encode_remote_execution_request(request: &RemoteExecutionRequest) -> String {
 fn decode_remote_execution_request(
     bytes: &[u8],
 ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES {
+        return Err(RemoteCacheError::InvalidRecord(
+            "execution request exceeds the wire-size limit".to_string(),
+        ));
+    }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| RemoteCacheError::InvalidRecord("execution request is not UTF-8".to_string()))?;
+    let mut seen = BTreeSet::new();
     let mut version = None;
     let mut key = None;
     let mut toolchain_digest = None;
@@ -711,30 +752,38 @@ fn decode_remote_execution_request(
     let mut outputs = Vec::new();
     for line in text.lines() {
         if let Some(value) = line.strip_prefix("version=") {
+            if !seen.insert("version") { return Err(duplicate_remote_field("version")); }
             version = Some(parse_remote_version(value, "execution request")?);
         } else if let Some(value) = line.strip_prefix("key=") {
+            if !seen.insert("key") { return Err(duplicate_remote_field("key")); }
             key = Some(ActionKey::new(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution key is not UTF-8".to_string())
             })?));
         } else if let Some(value) = line.strip_prefix("toolchain=") {
+            if !seen.insert("toolchain") { return Err(duplicate_remote_field("toolchain")); }
             toolchain_digest = Some(ContentDigest::parse(value)?);
         } else if let Some(value) = line.strip_prefix("sandbox=") {
+            if !seen.insert("sandbox") { return Err(duplicate_remote_field("sandbox")); }
             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("sandbox id is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("proof_action=") {
+            if !seen.insert("proof_action") { return Err(duplicate_remote_field("proof_action")); }
             proof_action = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("proof action key is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("proof_provenance=") {
+            if !seen.insert("proof_provenance") { return Err(duplicate_remote_field("proof_provenance")); }
             proof_provenance = Some(ContentDigest::parse(value)?);
         } else if let Some(value) = line.strip_prefix("argv=") {
+            if !seen.insert("argv") { return Err(duplicate_remote_field("argv")); }
             argv_count = Some(parse_remote_count(value, "argv")?);
         } else if let Some(value) = line.strip_prefix("arg=") {
             argv.push(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution argument is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("inputs=") {
+            if !seen.insert("inputs") { return Err(duplicate_remote_field("inputs")); }
             input_count = Some(parse_remote_count(value, "inputs")?);
         } else if let Some(value) = line.strip_prefix("input\t") {
             let fields = value.split('\t').collect::<Vec<_>>();
@@ -753,11 +802,16 @@ fn decode_remote_execution_request(
                 })?,
             });
         } else if let Some(value) = line.strip_prefix("outputs=") {
+            if !seen.insert("outputs") { return Err(duplicate_remote_field("outputs")); }
             output_count = Some(parse_remote_count(value, "outputs")?);
         } else if let Some(value) = line.strip_prefix("output=") {
             outputs.push(BuildPath(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution output path is not UTF-8".to_string())
             })?));
+        } else if !line.trim().is_empty() {
+            return Err(RemoteCacheError::InvalidRecord(format!(
+                "unknown execution request field `{line}`"
+            )));
         }
     }
     if version != Some(1)
@@ -813,8 +867,14 @@ fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
 fn decode_remote_execution_result(
     bytes: &[u8],
 ) -> Result<RemoteExecutionResult, RemoteCacheError> {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES {
+        return Err(RemoteCacheError::InvalidRecord(
+            "execution result exceeds the wire-size limit".to_string(),
+        ));
+    }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| RemoteCacheError::InvalidRecord("execution result is not UTF-8".to_string()))?;
+    let mut seen = BTreeSet::new();
     let mut version = None;
     let mut key = None;
     let mut outcome = None;
@@ -826,26 +886,34 @@ fn decode_remote_execution_result(
     let mut outputs = Vec::new();
     for line in text.lines() {
         if let Some(value) = line.strip_prefix("version=") {
+            if !seen.insert("version") { return Err(duplicate_remote_field("version")); }
             version = Some(parse_remote_version(value, "execution result")?);
         } else if let Some(value) = line.strip_prefix("key=") {
+            if !seen.insert("key") { return Err(duplicate_remote_field("key")); }
             key = Some(ActionKey::new(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution result key is not UTF-8".to_string())
             })?));
         } else if let Some(value) = line.strip_prefix("outcome=") {
+            if !seen.insert("outcome") { return Err(duplicate_remote_field("outcome")); }
             outcome = Some(parse_remote_outcome(value)?);
         } else if let Some(value) = line.strip_prefix("toolchain=") {
+            if !seen.insert("toolchain") { return Err(duplicate_remote_field("toolchain")); }
             toolchain_digest = Some(ContentDigest::parse(value)?);
         } else if let Some(value) = line.strip_prefix("sandbox=") {
+            if !seen.insert("sandbox") { return Err(duplicate_remote_field("sandbox")); }
             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution result sandbox is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("proof_action=") {
+            if !seen.insert("proof_action") { return Err(duplicate_remote_field("proof_action")); }
             proof_action = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution result action key is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("proof_provenance=") {
+            if !seen.insert("proof_provenance") { return Err(duplicate_remote_field("proof_provenance")); }
             proof_provenance = Some(ContentDigest::parse(value)?);
         } else if let Some(value) = line.strip_prefix("outputs=") {
+            if !seen.insert("outputs") { return Err(duplicate_remote_field("outputs")); }
             output_count = Some(parse_remote_count(value, "outputs")?);
         } else if let Some(value) = line.strip_prefix("output\t") {
             let fields = value.split('\t').collect::<Vec<_>>();
@@ -863,6 +931,10 @@ fn decode_remote_execution_result(
                     RemoteCacheError::InvalidRecord("execution output byte length is not a number".to_string())
                 })?,
             });
+        } else if !line.trim().is_empty() {
+            return Err(RemoteCacheError::InvalidRecord(format!(
+                "unknown execution result field `{line}`"
+            )));
         }
     }
     if version != Some(1) || output_count != Some(outputs.len()) {
@@ -898,9 +970,15 @@ fn encode_remote_outcome(outcome: ActionOutcome) -> String {
 }
 
 fn parse_remote_count(value: &str, field: &str) -> Result<usize, RemoteCacheError> {
-    value.parse::<usize>().map_err(|_| {
+    let count = value.parse::<usize>().map_err(|_| {
         RemoteCacheError::InvalidRecord(format!("execution {field} count is not a number"))
-    })
+    })?;
+    if count > MAX_REMOTE_ITEMS {
+        return Err(RemoteCacheError::InvalidRecord(format!(
+            "execution {field} count exceeds {MAX_REMOTE_ITEMS}"
+        )));
+    }
+    Ok(count)
 }
 
 fn parse_remote_version(value: &str, record: &str) -> Result<u32, RemoteCacheError> {
@@ -1085,8 +1163,14 @@ fn encode_remote_record(record: &ActionResultRecord) -> String {
 }
 
 fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheError> {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES {
+        return Err(RemoteCacheError::InvalidRecord(
+            "cache record exceeds the wire-size limit".to_string(),
+        ));
+    }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| RemoteCacheError::InvalidRecord("record is not UTF-8".to_string()))?;
+    let mut seen = BTreeSet::new();
     let mut version = None;
     let mut key = None;
     let mut outcome = None;
@@ -1095,19 +1179,22 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
     let mut outputs = Vec::new();
     for line in text.lines() {
         if let Some(value) = line.strip_prefix("version=") {
+            if !seen.insert("version") { return Err(duplicate_remote_field("version")); }
             version = Some(parse_remote_version(value, "cache record")?);
         } else if let Some(value) = line.strip_prefix("key=") {
+            if !seen.insert("key") { return Err(duplicate_remote_field("key")); }
             key = Some(ActionKey::new(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("cache record key is not UTF-8".to_string())
             })?));
         } else if let Some(value) = line.strip_prefix("outcome=") {
+            if !seen.insert("outcome") { return Err(duplicate_remote_field("outcome")); }
             outcome = Some(parse_remote_outcome(value)?);
         } else if let Some(value) = line.strip_prefix("status=") {
+            if !seen.insert("status") { return Err(duplicate_remote_field("status")); }
             status = Some(parse_remote_status(value)?);
         } else if let Some(value) = line.strip_prefix("outputs=") {
-            output_count = Some(value.parse::<usize>().map_err(|_| {
-                RemoteCacheError::InvalidRecord("output count is not a number".to_string())
-            })?);
+            if !seen.insert("outputs") { return Err(duplicate_remote_field("outputs")); }
+            output_count = Some(parse_remote_count(value, "cache outputs")?);
         } else if let Some(value) = line.strip_prefix("output\t") {
             let fields = value.split('\t').collect::<Vec<_>>();
             if fields.len() != 3 {
@@ -1124,6 +1211,10 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
                 digest,
                 byte_len,
             });
+        } else if !line.trim().is_empty() {
+            return Err(RemoteCacheError::InvalidRecord(format!(
+                "unknown cache record field `{line}`"
+            )));
         }
     }
     if version != Some(1) || output_count != Some(outputs.len()) {
@@ -1144,6 +1235,10 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
             remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
         },
     })
+}
+
+fn duplicate_remote_field(field: &str) -> RemoteCacheError {
+    RemoteCacheError::InvalidRecord(format!("remote record field `{field}` appears more than once"))
 }
 
 fn parse_remote_outcome(value: &str) -> Result<ActionOutcome, RemoteCacheError> {

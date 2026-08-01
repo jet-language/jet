@@ -79,6 +79,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_task: false,
         task_span: None,
         every: None,
+        task_metadata: None,
         inline_foreign: None,
         body: Vec::new(),
     }
@@ -96,6 +97,13 @@ fn struct_field<'a>(v: &'a CtValue, name: &str) -> &'a CtValue {
         panic!("expected struct");
     };
     &fields.iter().find(|(n, _)| n == name).unwrap().1
+}
+
+fn list_struct_field<'a>(v: &'a CtValue, index: usize, name: &str) -> &'a CtValue {
+    let CtValue::List(values) = v else {
+        panic!("expected list");
+    };
+    struct_field(&values[index], name)
 }
 
 #[test]
@@ -133,6 +141,21 @@ fn type_info_exposes_methods_type_params_and_markers() {
     assert_eq!(list_len(struct_field(&info, "fields")), 2);
     assert_eq!(list_len(struct_field(&info, "methods")), 1);
     assert_eq!(list_len(struct_field(&info, "type_params")), 1);
+    assert!(matches!(
+        list_struct_field(struct_field(&info, "fields"), 0, "span"),
+        CtValue::Struct { fields, .. }
+            if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(0)))
+    ));
+    assert!(matches!(
+        list_struct_field(struct_field(&info, "methods"), 0, "span"),
+        CtValue::Struct { fields, .. }
+            if fields.iter().any(|(name, value)| name == "end" && matches!(value, CtValue::Int(1)))
+    ));
+    assert!(matches!(
+        list_struct_field(struct_field(&info, "type_params"), 0, "span"),
+        CtValue::Struct { fields, .. }
+            if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(0)))
+    ));
     let markers = struct_field(&info, "markers");
     assert_eq!(list_len(markers), 1);
     assert!(matches!(

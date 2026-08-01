@@ -1,4 +1,5 @@
 use super::handles::{ProbeId, SigningIdentityId, ToolchainHandle, ToolchainId};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockRecord {
@@ -155,6 +156,9 @@ pub struct ToolchainSpec {
     pub sdk: Option<SdkIdentity>,
     pub linker: Option<LinkerIdentity>,
     pub sysroot: Option<SysrootIdentity>,
+    /// Executables are part of the declared toolchain. Target actions and
+    /// probes resolve through this map instead of borrowing the host PATH.
+    pub tools: BTreeMap<String, String>,
     pub provenance: BuildProvenance,
 }
 
@@ -167,6 +171,7 @@ impl ToolchainSpec {
             sdk: None,
             linker: None,
             sysroot: None,
+            tools: BTreeMap::new(),
             provenance,
         }
     }
@@ -180,6 +185,7 @@ impl ToolchainSpec {
             sdk: None,
             linker: None,
             sysroot: None,
+            tools: BTreeMap::new(),
             provenance,
         }
     }
@@ -203,6 +209,11 @@ impl ToolchainSpec {
         self.sysroot = Some(sysroot);
         self
     }
+
+    pub fn with_tool(mut self, name: impl Into<String>, path: impl Into<String>) -> Self {
+        self.tools.insert(name.into(), path.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,6 +226,7 @@ pub struct BuildToolchain {
     pub sdk: Option<SdkIdentity>,
     pub linker: Option<LinkerIdentity>,
     pub sysroot: Option<SysrootIdentity>,
+    pub tools: BTreeMap<String, String>,
     pub provenance: BuildProvenance,
 }
 

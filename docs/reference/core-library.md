@@ -787,8 +787,12 @@ policy_new(table, expression) => RowPolicy ? String
 policy_allows(policy, user, row_owner) => Bool
 ```
 
-Merges are deterministic. Beginner row policies use `owner == user`; expert
-policies may use `true`. Live-query binding uses `app.sync_over(session, doc)`.
+Merges are deterministic and retain independent replica contributions. Beginner
+row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
+over: session)` publishes the typed CRDT representation through a bounded
+session registry and returns a monotonic delivery receipt. Database row-policy
+attachment to a connection is still owner-gated; `policy_allows` is the pure
+policy evaluator until that binding decision is ratified.
 
 Example: `examples/features/tooling/sync_crdt.jet`.
 
@@ -3055,6 +3059,12 @@ bound parameters, not string interpolation. The runtime uses SQLite's prepared
 statement cache under that same path; there is no separate unsafe raw-query or
 prepare-only API.
 
+`SQL.{"…"}` is the checked query form: literal segments stay in the template and
+each `{hole}` becomes one bound parameter. `HTML.{"…"}` escapes each hole before
+inserting it, and `Sh.{"…"}` makes each hole one argv item without shell word
+splitting. A runtime `String` cannot become one of these types; the explicit
+`.raw(...)` constructors are the audited escape for already-reviewed text.
+
 D-DBDRIVER1=A: `Driver` is the backend-neutral trait for that parameterized
 surface (`query` / `query_one` / `execute` / `begin` / `commit` / `rollback`).
 `DBConnection` is the first implementation. Call sites can take `T: Driver`
@@ -3103,10 +3113,10 @@ fn run() {
 | `sum_axis` | reduce one axis |
 | `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
 | `to_sparse` / `sparse_mv` / `sparse_nnz` | CSR sparse view over dense |
-| `value_and_grad_mul` / `jvp_mul` / `grad_*` | reverse default + JVP |
+| `value_and_grad_mul` / `jvp_*` / `vjp_*` / `grad_*` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
-| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, kernel tiers |
+| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, safe-kernel proof, and typed audited raw-kernel contract |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |

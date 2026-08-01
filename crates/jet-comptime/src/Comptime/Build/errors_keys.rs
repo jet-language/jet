@@ -41,6 +41,7 @@ pub enum BuildError {
     InvalidPath(String),
     EmptyToolchainTriple(String),
     EmptyIdentityField(String),
+    MissingLockedProvenance(String),
     EmptyProbeField(String),
     EmptyActionArgv(String),
     EmptyEnvName(String),
@@ -65,6 +66,10 @@ pub enum BuildError {
     LegacyWrapperWithoutInputs(LegacyWrapperKind),
     LegacyWrapperWithoutOutputs(LegacyWrapperKind),
     LegacyWrapperWithoutCaps(LegacyWrapperKind),
+    LegacyWrapperCommandMismatch {
+        wrapper: LegacyWrapperKind,
+        actual: String,
+    },
     PolicyDenied(PolicyExplanation),
     EmptyPluginField(String),
     InvalidPluginDigest(String),
@@ -262,7 +267,7 @@ pub(super) fn canonical_effective_action_key(
     action: &BuildAction,
     inputs: &[ActionInputSnapshot],
     grants: &BTreeSet<BuildCapability>,
-    executable: &Path,
+    _executable: &Path,
     executable_digest: &ContentDigest,
     probe_facts: &[BuildProbeFact],
 ) -> ActionKey {
@@ -272,8 +277,10 @@ pub(super) fn canonical_effective_action_key(
     w.str(base.as_str());
     w.str("effective-policy");
     for grant in grants { encode_capability(&mut w, grant); }
-    w.str("resolved-executable");
-    w.str(&executable.display().to_string());
+    // The resolved filesystem path is host-local and must not split an
+    // otherwise identical remote action identity. The executable bytes remain
+    // part of the key through their content digest.
+    w.str("resolved-executable-digest");
     w.str(executable_digest.as_str());
     w.str("actual-probe-facts");
     for fact in probe_facts {
@@ -281,6 +288,8 @@ pub(super) fn canonical_effective_action_key(
         w.bool(fact.success);
         w.str(&fact.detail);
         w.str(&format!("{:?}", fact.reproducibility));
+        w.str(&format!("{}:{}", fact.toolchain.context, fact.toolchain.id.0));
+        w.str(fact.toolchain_provenance.as_str());
     }
     w.str("compiler-identity");
     w.str(concat!(env!("CARGO_PKG_NAME"), "@", env!("CARGO_PKG_VERSION")));
@@ -346,6 +355,8 @@ fn encode_toolchain(w: &mut KeyWriter, toolchain: &BuildToolchain) {
         }
         None => w.bool(false),
     }
+    w.str("tools");
+    w.map_str(&toolchain.tools);
     encode_provenance(w, &toolchain.provenance);
 }
 

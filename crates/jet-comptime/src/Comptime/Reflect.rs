@@ -148,6 +148,16 @@ pub fn build_field_info(field: &Field) -> CtValue {
             ("ty", ct_str(field.ty.name())),
             ("markers", ct_list(marker_names(&field.serde_markers))),
             ("is_pub", ct_bool(field.is_pub)),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(field.name_span.start as i64)),
+                        ("end", CtValue::Int(field.name_span.end as i64)),
+                    ],
+                ),
+            ),
         ],
     )
 }
@@ -177,6 +187,16 @@ pub fn build_method_info(method: &Func) -> CtValue {
             ("signature", ct_str(format_method_sig(method))),
             ("markers", ct_list(Vec::new())),
             ("is_pub", ct_bool(method.is_pub)),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(method.name_span.start as i64)),
+                        ("end", CtValue::Int(method.name_span.end as i64)),
+                    ],
+                ),
+            ),
         ],
     )
 }
@@ -190,6 +210,16 @@ pub fn build_type_param_info(param: &TypeParam) -> CtValue {
             (
                 "bounds",
                 ct_list(param.bounds.iter().map(|b| ct_str(b.clone())).collect()),
+            ),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(param.name_span.start as i64)),
+                        ("end", CtValue::Int(param.name_span.end as i64)),
+                    ],
+                ),
             ),
         ],
     )
@@ -400,6 +430,10 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
             ("ty", ct_str(ty)),
             ("markers", ct_list(marker_names(&variant.serde_markers))),
             ("is_pub", ct_bool(def.is_pub)),
+            ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[
+                ("start", CtValue::Int(variant.name_span.start as i64)),
+                ("end", CtValue::Int(variant.name_span.end as i64)),
+            ])),
         ])
     }).collect();
     let methods = def
@@ -686,6 +720,7 @@ mod tests {
             is_task: false,
             task_span: None,
             every: None,
+            task_metadata: None,
             inline_foreign: None,
             inline_span: None,
             return_view_provenance: None,

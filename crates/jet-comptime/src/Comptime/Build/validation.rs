@@ -97,6 +97,11 @@ pub(super) fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(),
     if let Some(linker) = &spec.linker {
         validate_identity(name, &linker.name, &linker.provenance)?;
     }
+    for (tool, path) in &spec.tools {
+        if tool.trim().is_empty() || path.trim().is_empty() || path.contains('\0') {
+            return Err(BuildError::EmptyIdentityField(name.to_string()));
+        }
+    }
     validate_provenance(name, &spec.provenance)
 }
 
@@ -136,7 +141,15 @@ pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildEr
         }
         _ => {}
     }
-    validate_provenance(name, &spec.provenance)
+    validate_provenance(name, &spec.provenance)?;
+    if matches!(
+        spec.reproducibility,
+        super::provenance_toolchains::ReproducibilityClass::Reproducible
+    ) && spec.provenance.lock.is_none()
+    {
+        return Err(BuildError::MissingLockedProvenance(name.to_string()));
+    }
+    Ok(())
 }
 
 fn valid_header_name(header: &str) -> bool {

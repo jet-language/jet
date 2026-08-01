@@ -102,6 +102,12 @@ fn check_file_api_includes_semindex_for_clean_program() {
     );
     let sem = checked.semantic_index.expect("clean file has semindex");
     assert_eq!(sem.schema_version, jet_semindex::SCHEMA_VERSION);
+    assert_eq!(
+        sem.source_digest,
+        jet::SHA256::sha256_hex(
+            b"fn helper() => Int {\n    return 41\n}\n\nfn run() {\n    print(helper() + 1)\n}\n",
+        )
+    );
     assert!(sem.definitions.iter().any(|d| d.name == "run"));
     assert!(sem.definitions.iter().any(|d| d.name == "helper"));
     assert!(sem.calls.iter().any(|c| c.callee == "helper"));
@@ -145,7 +151,8 @@ fn compiler_api_json_mirrors_are_schema_versioned() {
     let path = fixture_file("compiler_api_json.jet", source);
     let check = jet::Compiler::check_file_json(&path);
     assert!(check.contains("\"operation\":\"check\""));
-    assert!(check.contains("\"semantic_index\":"));
+    assert!(check.contains("\"semantic_index\":{\"schema_version\":1"));
+    assert!(!check.contains("semantic_index\\\""), "semantic facts must not be JSON strings");
     let map = jet::Compiler::source_map_json(
         "// jet:source-map source=input.jet\n// jet:line 3\n",
     );
@@ -165,6 +172,36 @@ fn compiler_api_cli_returns_the_same_json_envelope() {
     assert!(stdout.contains("\"schema_version\":1"));
     assert!(stdout.contains("\"operation\":\"parse\""));
     assert!(stdout.contains("\"name\":\"run\""));
+    assert_eq!(
+        stdout.trim(),
+        jet::Compiler::parse_source_json("fn run() { print(\"cli\") }\n")
+    );
+}
+
+#[test]
+fn compiler_cli_mirrors_each_read_only_operation_exactly() {
+    let source = "fn run() { print(\"same\") }\n";
+    let path = fixture_file("compiler_api_differential.jet", source);
+    for operation in ["lex", "parse", "check", "source-map"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["inspect", "compiler", operation, path.to_str().unwrap()])
+            .output()
+            .expect("run compiler inspection command");
+        assert!(
+            output.status.success(),
+            "{operation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let actual = String::from_utf8(output.stdout).expect("compiler JSON is UTF-8");
+        let expected = match operation {
+            "lex" => jet::Compiler::lex_source_json(source),
+            "parse" => jet::Compiler::parse_source_json(source),
+            "check" => jet::Compiler::check_file_json(&path),
+            "source-map" => jet::Compiler::source_map_json(source),
+            _ => unreachable!(),
+        };
+        assert_eq!(actual.trim(), expected, "{operation}");
+    }
 }
 
 #[test]
@@ -183,6 +220,56 @@ fn compiler_api_is_compile_time_only() {
             .any(|diagnostic| diagnostic.what.contains("compile-time only")),
         "diagnostic must teach the phase boundary: {diagnostics:?}"
     );
+}
+
+#[test]
+fn compiler_api_failures_are_typed_and_schema_checked() {
+    let bad_shape = jet::Compiler::eval_core_call(
+        "core.compiler",
+        "check",
+        vec![jet::AST::CtValue::Str("not-a-syntax-tree".to_string())],
+        jet::Diagnostics::Span::new(0, 1),
+    )
+    .expect("compiler callback handles its module")
+    .expect("failure is a typed Result value, not a host diagnostic");
+    let jet::AST::CtValue::ResErr(error) = bad_shape else {
+        panic!("expected CompilerError result, got {bad_shape:?}");
+    };
+    assert!(matches!(
+        error.as_ref(),
+        jet::AST::CtValue::Struct { type_name, fields }
+            if type_name == "CompilerError"
+                && fields.iter().any(|(name, value)| name == "code" && value == &jet::AST::CtValue::Str("E0956".into()))
+    ));
+
+    let stale_tree = jet::AST::CtValue::Struct {
+        type_name: "CompilerSyntaxTree".to_string(),
+        fields: vec![
+            ("schema_version".to_string(), jet::AST::CtValue::Int(999)),
+            ("source".to_string(), jet::AST::CtValue::Str("fn run() {}".to_string())),
+        ],
+    };
+    let stale = jet::Compiler::eval_core_call(
+        "core.compiler",
+        "check",
+        vec![stale_tree],
+        jet::Diagnostics::Span::new(0, 1),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(matches!(stale, jet::AST::CtValue::ResErr(_)));
+}
+
+#[test]
+fn compiler_cli_unknown_operation_uses_structured_error_object() {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "compiler", "unknown", "missing.jet"])
+        .output()
+        .expect("run compiler operation error");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"error\":{\"code\":\"E0956\""));
+    assert!(!stdout.contains("\"error\":\""), "error must be an object");
 }
 
 #[test]

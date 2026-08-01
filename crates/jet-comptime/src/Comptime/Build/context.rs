@@ -1,5 +1,8 @@
 use super::NEXT_CONTEXT;
-use super::actions_policy::{ActionSpec, BuildAction, BuildPolicy, PolicyExplanation, PolicySetting};
+use super::actions_policy::{
+    ActionKind, ActionSpec, BuildAction, BuildCapability, BuildPolicy, BuildResourcePool,
+    LegacyWrapperKind, PolicyExplanation, PolicySetting,
+};
 use super::cache_cas::ContentDigest;
 use super::errors_keys::{BuildError, NameKind};
 use super::handles::{
@@ -11,19 +14,20 @@ use super::handles::{
 use super::plan_graph::BuildPlan;
 use super::plugins_modules::{
     BUILD_PLUGIN_API_VERSION, BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec,
-    PluginApplication, PluginContribution, WasmComponentPluginSpec,
+    PackagedPluginContribution, PackagedPluginTarget, PluginApplication, PluginContribution,
+    PluginTargetSpec, WasmComponentPluginSpec,
 };
 use super::provenance_toolchains::{
     BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeSpec,
     SigningIdentitySpec, ToolchainRole, ToolchainSpec,
 };
-use super::targets::{BuildTarget, TargetKind, TargetSpec};
+use super::targets::{BuildPath, BuildTarget, TargetKind, TargetSpec};
 use super::validation::{
     cap_name, check_name, validate_action, validate_action_output_owners,
     validate_generated_module, validate_identity, validate_paths, validate_plugin_spec,
     validate_probe, validate_toolchain,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -54,7 +58,7 @@ pub struct BuildContext {
 
 impl BuildContext {
     pub fn new() -> Self {
-        Self::new_with_policy(BuildPolicy::allow_all())
+        Self::new_with_policy(BuildPolicy::local_default())
     }
 
     pub fn new_with_policy(policy: BuildPolicy) -> Self {
@@ -78,6 +82,7 @@ impl BuildContext {
                 sdk: None,
                 linker: None,
                 sysroot: None,
+                tools: std::collections::BTreeMap::new(),
                 provenance: BuildProvenance::inferred_host(),
             }],
             signing_identities: Vec::new(),
@@ -137,6 +142,7 @@ impl BuildContext {
             sdk: spec.sdk,
             linker: spec.linker,
             sysroot: spec.sysroot,
+            tools: spec.tools,
             provenance: spec.provenance,
         });
         Ok(ToolchainHandle {
@@ -425,26 +431,367 @@ impl BuildContext {
         self.apply_wasm_component_plugin(spec, contribution, policy)
     }
 
-    fn apply_wasm_component_plugin_inner(
+    /// Production packaged-plugin path. The sibling jetpack host instantiates
+    /// the verified Component Model guest and returns only the bounded wire
+    /// contribution; this method resolves symbolic references and then uses
+    /// the same transactional graph application as the in-memory seam.
+    pub fn apply_packaged_wasm_component_plugin_from_host(
         &mut self,
-        spec: WasmComponentPluginSpec,
-        contribution: PluginContribution,
+        manifest_path: impl AsRef<Path>,
+        component_path: impl AsRef<Path>,
         policy: &BuildPolicy,
     ) -> Result<PluginApplication, BuildError> {
-        validate_plugin_spec(&spec)?;
+        let manifest_path = manifest_path.as_ref();
+        let component_path = component_path.as_ref();
+        let (spec, manifest_digest) =
+            WasmComponentPluginSpec::load_packaged_with_manifest_digest(manifest_path, component_path)
+                .map_err(BuildError::PackagedPlugin)?;
+        // Do this before instantiation. A denied component must not run guest
+        // code merely to discover that its requested capability is forbidden.
+        self.validate_plugin_policy(&spec, policy)?;
+        let wire = super::plugins_modules::run_packaged_plugin(
+            manifest_path,
+            component_path,
+            &spec,
+            &manifest_digest,
+        )
+        .map_err(BuildError::PackagedPlugin)?;
+        let contribution = self.resolve_packaged_contribution(wire)?;
+        self.apply_wasm_component_plugin(spec, contribution, policy)
+    }
+
+    fn resolve_packaged_contribution(
+        &self,
+        wire: PackagedPluginContribution,
+    ) -> Result<PluginContribution, BuildError> {
+        let action_names = wire
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| {
+                if self.action_names.contains(&action.name) {
+                    return Err(BuildError::DuplicateActionName(action.name.clone()));
+                }
+                Ok((
+                    action.name.clone(),
+                    ActionHandle {
+                        id: ActionId(self.actions.len() + index),
+                        context: self.context,
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        if action_names.len() != wire.actions.len() {
+            return Err(BuildError::PackagedPlugin(
+                "packaged plugin declares a duplicate action name".to_string(),
+            ));
+        }
+        // Resolve guest targets in dependency order. The wire contract permits
+        // a target to name a later target, but BuildContext handles are only
+        // valid after their target has been inserted. A stable DFS gives those
+        // references real ids without mutating the context during validation;
+        // the outer transactional apply still rolls back any later failure.
+        let mut target_indices = BTreeMap::new();
+        for (index, target) in wire.targets.iter().enumerate() {
+            if self.target_names.contains(&target.name) {
+                return Err(BuildError::DuplicateTargetName(target.name.clone()));
+            }
+            if target_indices.insert(target.name.clone(), index).is_some() {
+                return Err(BuildError::PackagedPlugin(
+                    "packaged plugin declares a duplicate target name".to_string(),
+                ));
+            }
+        }
+        let mut target_states = vec![0u8; wire.targets.len()];
+        let mut target_order = Vec::with_capacity(wire.targets.len());
+        fn visit_packaged_target(
+            index: usize,
+            targets: &[PackagedPluginTarget],
+            target_indices: &BTreeMap<String, usize>,
+            existing_targets: &HashSet<String>,
+            states: &mut [u8],
+            order: &mut Vec<usize>,
+        ) -> Result<(), BuildError> {
+            match states[index] {
+                2 => return Ok(()),
+                1 => {
+                    return Err(BuildError::PackagedPlugin(format!(
+                        "packaged plugin target dependency cycle at `{}`",
+                        targets[index].name
+                    )))
+                }
+                _ => {}
+            }
+            states[index] = 1;
+            for dependency in &targets[index].deps {
+                if let Some(&dependency_index) = target_indices.get(dependency) {
+                    visit_packaged_target(
+                        dependency_index,
+                        targets,
+                        target_indices,
+                        existing_targets,
+                        states,
+                        order,
+                    )?;
+                } else if !existing_targets.contains(dependency) {
+                    return Err(BuildError::PackagedPlugin(format!(
+                        "target {} references unknown target {dependency}",
+                        targets[index].name
+                    )));
+                }
+            }
+            states[index] = 2;
+            order.push(index);
+            Ok(())
+        }
+        for index in 0..wire.targets.len() {
+            visit_packaged_target(
+                index,
+                &wire.targets,
+                &target_indices,
+                &self.target_names,
+                &mut target_states,
+                &mut target_order,
+            )?;
+        }
+        let mut target_names = BTreeMap::new();
+        for (order_index, &target_index) in target_order.iter().enumerate() {
+            target_names.insert(
+                wire.targets[target_index].name.clone(),
+                TargetRef {
+                    id: TargetId(self.targets.len() + order_index),
+                    context: self.context,
+                },
+            );
+        }
+
+        let actions = wire
+            .actions
+            .into_iter()
+            .map(|action| {
+                let name = action.name.clone();
+                let toolchain = action
+                    .toolchain
+                    .as_deref()
+                    .map(|name| self.named_toolchain(name))
+                    .transpose()?;
+                let probes = action
+                    .probes
+                    .iter()
+                    .map(|name| self.named_probe(name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let signing_identity = action
+                    .signing_identity
+                    .as_deref()
+                    .map(|name| self.named_signing_identity(name))
+                    .transpose()?;
+                let cache = match action.cache.as_str() {
+                    "cached" => super::actions_policy::ActionCache::Cached,
+                    "phony" | "uncached-phony" => {
+                        super::actions_policy::ActionCache::UncachedPhony
+                    }
+                    other => {
+                        return Err(BuildError::PackagedPlugin(format!(
+                            "action {name} has unknown cache mode {other}"
+                        )))
+                    }
+                };
+                let kind = parse_packaged_action_kind(&action.kind)?;
+                let caps = action
+                    .caps
+                    .iter()
+                    .map(|cap_name| {
+                        BuildCapability::parse(cap_name).ok_or_else(|| {
+                            BuildError::PackagedPlugin(format!(
+                                "action {name} declares unknown capability {cap_name}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<BTreeSet<_>, _>>()?;
+                let resource_pools = action
+                    .resource_pools
+                    .iter()
+                    .map(|pool| parse_packaged_resource_pool(pool))
+                    .collect::<BTreeSet<_>>();
+                let legacy_wrapper = action
+                    .legacy_wrapper
+                    .as_deref()
+                    .map(parse_packaged_legacy_wrapper)
+                    .transpose()?;
+                let spec = ActionSpec {
+                    inputs: packaged_paths(&action.inputs)?,
+                    outputs: packaged_paths(&action.outputs)?,
+                    argv: action.argv,
+                    env: action.env,
+                    env_allowlist: action.env_allowlist,
+                    caps,
+                    cache,
+                    kind,
+                    toolchain,
+                    probes,
+                    signing_identity,
+                    labels: action.labels,
+                    helper_versions: action.helper_versions,
+                    resource_pools,
+                    legacy_wrapper,
+                    variant_identity: action.variant_identity,
+                };
+                Ok((name, spec))
+            })
+            .collect::<Result<Vec<_>, BuildError>>()?;
+
+        let targets = target_order
+            .into_iter()
+            .map(|target_index| wire.targets[target_index].clone())
+            .map(|target| {
+                let deps = target
+                    .deps
+                    .iter()
+                    .map(|name| {
+                        target_names
+                            .get(name)
+                            .copied()
+                            .or_else(|| self.named_target(name).ok())
+                            .ok_or_else(|| {
+                                BuildError::PackagedPlugin(format!(
+                                    "target {} references unknown target {name}",
+                                    target.name
+                                ))
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let actions = target
+                    .actions
+                    .iter()
+                    .map(|name| {
+                        action_names
+                            .get(name)
+                            .copied()
+                            .or_else(|| self.named_action(name).ok())
+                            .ok_or_else(|| {
+                                BuildError::PackagedPlugin(format!(
+                                    "target {} references unknown action {name}",
+                                    target.name
+                                ))
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let probes = target
+                    .probes
+                    .iter()
+                    .map(|name| self.named_probe(name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let toolchain = target
+                    .toolchain
+                    .as_deref()
+                    .map(|name| self.named_toolchain(name))
+                    .transpose()?;
+                let signing_identity = target
+                    .signing_identity
+                    .as_deref()
+                    .map(|name| self.named_signing_identity(name))
+                    .transpose()?;
+                let spec = TargetSpec {
+                    sources: packaged_paths(&target.sources)?,
+                    inputs: packaged_paths(&target.inputs)?,
+                    outputs: packaged_paths(&target.outputs)?,
+                    deps,
+                    actions,
+                    probes,
+                    toolchain,
+                    signing_identity,
+                    metadata: target.metadata,
+                };
+                Ok(PluginTargetSpec {
+                    kind: parse_packaged_target_kind(&target.kind)?,
+                    name: target.name,
+                    spec,
+                })
+            })
+            .collect::<Result<Vec<_>, BuildError>>()?;
+        Ok(PluginContribution {
+            actions,
+            targets,
+            generated_modules: wire.generated_modules,
+        })
+    }
+
+    fn named_action(&self, name: &str) -> Result<ActionHandle, BuildError> {
+        self.actions
+            .iter()
+            .find(|action| action.name == name)
+            .map(|action| ActionHandle {
+                id: action.id,
+                context: self.context,
+            })
+            .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown action {name}")))
+    }
+
+    fn named_target(&self, name: &str) -> Result<TargetRef, BuildError> {
+        self.targets
+            .iter()
+            .find(|target| target.name == name)
+            .map(|target| TargetRef {
+                id: target.id,
+                context: self.context,
+            })
+            .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown target {name}")))
+    }
+
+    fn named_toolchain(&self, name: &str) -> Result<ToolchainHandle, BuildError> {
+        self.toolchains
+            .iter()
+            .find(|toolchain| toolchain.name == name)
+            .map(|toolchain| ToolchainHandle {
+                id: toolchain.id,
+                context: self.context,
+            })
+            .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown toolchain {name}")))
+    }
+
+    fn named_probe(&self, name: &str) -> Result<ProbeHandle, BuildError> {
+        self.probes
+            .iter()
+            .find(|probe| probe.name == name)
+            .map(|probe| ProbeHandle {
+                id: probe.id,
+                context: self.context,
+            })
+            .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown probe {name}")))
+    }
+
+    fn named_signing_identity(
+        &self,
+        name: &str,
+    ) -> Result<SigningIdentityHandle, BuildError> {
+        self.signing_identities
+            .iter()
+            .find(|identity| identity.name == name)
+            .map(|identity| SigningIdentityHandle {
+                id: identity.id,
+                context: self.context,
+            })
+            .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown signing identity {name}")))
+    }
+
+    fn validate_plugin_policy(
+        &self,
+        spec: &WasmComponentPluginSpec,
+        policy: &BuildPolicy,
+    ) -> Result<BTreeSet<BuildCapability>, BuildError> {
+        validate_plugin_spec(spec)?;
         if spec.api_version != BUILD_PLUGIN_API_VERSION {
             return Err(BuildError::PluginVersionMismatch {
-                plugin: spec.name,
+                plugin: spec.name.clone(),
                 expected: BUILD_PLUGIN_API_VERSION.to_string(),
-                actual: spec.api_version,
+                actual: spec.api_version.clone(),
             });
         }
         if let PolicySetting::Deny(reason) = &policy.wasm_plugins {
-            let caps = spec.requested_caps.iter().cloned().collect();
             return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
                 format!("wasm build plugin {}", spec.name),
                 reason,
-                caps,
+                spec.requested_caps.iter().cloned().collect(),
             )));
         }
         let grants = policy
@@ -461,15 +808,33 @@ impl BuildContext {
                 )));
             }
         }
+        Ok(grants)
+    }
+
+    fn apply_wasm_component_plugin_inner(
+        &mut self,
+        spec: WasmComponentPluginSpec,
+        contribution: PluginContribution,
+        policy: &BuildPolicy,
+    ) -> Result<PluginApplication, BuildError> {
+        let grants = self.validate_plugin_policy(&spec, policy)?;
         for (_, action) in &contribution.actions {
             for cap in &action.caps {
-                if !grants.contains(cap) {
-                    return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
-                        format!("wasm build plugin {}", spec.name),
+                if !spec.requested_caps.contains(cap) || !grants.contains(cap) {
+                    let reason = if !spec.requested_caps.contains(cap) {
+                        format!(
+                            "contributed action uses capability {} not declared by the plugin manifest",
+                            cap_name(cap)
+                        )
+                    } else {
                         format!(
                             "contributed action uses ungranted capability {}",
                             cap_name(cap)
-                        ),
+                        )
+                    };
+                    return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+                        format!("wasm build plugin {}", spec.name),
+                        reason,
                         action.caps.iter().cloned().collect(),
                     )));
                 }
@@ -531,7 +896,7 @@ impl BuildContext {
         plugin: Option<PluginHandle>,
     ) -> Result<ActionHandle, BuildError> {
         let name = check_name(name.into(), NameKind::Action)?;
-        if !self.action_names.insert(name.clone()) {
+        if self.action_names.contains(&name) {
             return Err(BuildError::DuplicateActionName(name));
         }
         self.validate_action_spec(&name, &spec)?;
@@ -545,6 +910,7 @@ impl BuildContext {
                 path: module.path.as_str().to_string(),
             });
         }
+        self.action_names.insert(name.clone());
         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
         let id = ActionId(self.actions.len());
         self.actions.push(BuildAction {
@@ -604,10 +970,11 @@ impl BuildContext {
         plugin: Option<PluginHandle>,
     ) -> Result<TargetId, BuildError> {
         let name = check_name(name.into(), NameKind::Target)?;
-        if !self.target_names.insert(name.clone()) {
+        if self.target_names.contains(&name) {
             return Err(BuildError::DuplicateTargetName(name));
         }
         self.validate_target_spec(&spec)?;
+        self.target_names.insert(name.clone());
         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
         let id = TargetId(self.targets.len());
         self.targets.push(BuildTarget {
@@ -752,5 +1119,66 @@ impl BuildContext {
 impl Default for BuildContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn packaged_paths(paths: &[String]) -> Result<Vec<BuildPath>, BuildError> {
+    paths
+        .iter()
+        .map(|path| BuildPath::new(path.clone()))
+        .collect()
+}
+
+fn parse_packaged_action_kind(value: &str) -> Result<ActionKind, BuildError> {
+    match value {
+        "compile" => Ok(ActionKind::Compile),
+        "docs" => Ok(ActionKind::Docs),
+        "debug" => Ok(ActionKind::Debug),
+        "source-archive" => Ok(ActionKind::SourceArchive),
+        "generic" => Ok(ActionKind::Generic),
+        _ => Err(BuildError::PackagedPlugin(format!(
+            "unknown action kind {value}"
+        ))),
+    }
+}
+
+fn parse_packaged_resource_pool(value: &str) -> BuildResourcePool {
+    match value {
+        "cpu" => BuildResourcePool::Cpu,
+        "memory" => BuildResourcePool::Memory,
+        "linker" => BuildResourcePool::Linker,
+        "console" => BuildResourcePool::Console,
+        "gpu" => BuildResourcePool::GPU,
+        custom => BuildResourcePool::Custom(custom.to_string()),
+    }
+}
+
+fn parse_packaged_legacy_wrapper(value: &str) -> Result<LegacyWrapperKind, BuildError> {
+    match value {
+        "cmake" => Ok(LegacyWrapperKind::CMake),
+        "make" => Ok(LegacyWrapperKind::Make),
+        "gradle" => Ok(LegacyWrapperKind::Gradle),
+        "npm" => Ok(LegacyWrapperKind::Npm),
+        "cargo" => Ok(LegacyWrapperKind::Cargo),
+        _ => Err(BuildError::PackagedPlugin(format!(
+            "unknown legacy wrapper {value}"
+        ))),
+    }
+}
+
+fn parse_packaged_target_kind(value: &str) -> Result<TargetKind, BuildError> {
+    match value {
+        "executable" => Ok(TargetKind::Executable),
+        "library" => Ok(TargetKind::Library),
+        "test" => Ok(TargetKind::Test),
+        "bench" => Ok(TargetKind::Bench),
+        "asset-bundle" => Ok(TargetKind::AssetBundle),
+        "doc" => Ok(TargetKind::Doc),
+        "install" => Ok(TargetKind::Install),
+        "package" => Ok(TargetKind::Package),
+        "publish" => Ok(TargetKind::Publish),
+        _ => Err(BuildError::PackagedPlugin(format!(
+            "unknown target kind {value}"
+        ))),
     }
 }

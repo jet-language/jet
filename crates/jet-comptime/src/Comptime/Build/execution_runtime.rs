@@ -2,11 +2,13 @@ use super::actions_policy::{ActionCache, BuildAction, BuildCapability};
 use super::cache_cas::{
     ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
     ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-    LocalCas, atomic_restore_file, ensure_real_directory, secure_read_file,
+    LocalCas, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason,
+    RemoteExecutionRequest, RemoteSandboxProof, atomic_restore_file, ensure_real_directory,
+    secure_read_file,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
-use super::handles::{ActionHandle, ActionId, ProbeId};
+use super::handles::{ActionHandle, ActionId, ProbeId, ToolchainHandle};
 use super::plan_graph::{BuildExecutionReport, BuildPlan};
 use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
 use super::targets::BuildPath;
@@ -15,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::{fs, io};
+use std::{fs, io, time::{Duration, Instant}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProbeFact {
@@ -23,6 +25,8 @@ pub struct BuildProbeFact {
     pub success: bool,
     pub detail: String,
     pub reproducibility: ReproducibilityClass,
+    pub toolchain: ToolchainHandle,
+    pub toolchain_provenance: ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,10 +197,28 @@ fn execute_one_action(
     front_end: FrontEndCompletion,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
-    let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::IO {
-        action: action.name.clone(), detail: format!("tool `{}` was not found", action.argv[0])
-    })?;
-    let executable_bytes = fs::read(&executable).map_err(|e| io_action(action, e))?;
+    let remote_requested = std::env::var_os("JET_BUILD_REMOTE_ROOT").is_some()
+        && (remote_policy_env("JET_BUILD_REMOTE_CACHE")
+            || remote_policy_env("JET_BUILD_REMOTE_EXECUTE"));
+    let executable = resolve_program_path(plan, action.toolchain, &action.argv[0])
+        .or_else(|| {
+            // A remote cache hit also needs a stable command identity, but it
+            // must not require the local machine to have the target toolchain.
+            // The declared argv spelling is the remote identity fallback; a
+            // local miss still fails below instead of silently running it from
+            // PATH.
+            remote_requested
+                .then(|| PathBuf::from(&action.argv[0]))
+        })
+        .ok_or_else(|| BuildExecutionError::IO {
+            action: action.name.clone(),
+            detail: format!("tool {} was not found", action.argv[0]),
+        })?;
+    let executable_bytes = if executable.is_file() {
+        fs::read(&executable).map_err(|e| io_action(action, e))?
+    } else {
+        action.argv[0].as_bytes().to_vec()
+    };
     let executable_digest = ContentDigest::from_bytes(&executable_bytes);
     let action_probe_names = action.probes.iter().map(|probe| plan.probes[probe.id.0].name.as_str()).collect::<BTreeSet<_>>();
     let effective_probe_facts = probe_facts.iter().filter(|fact| action_probe_names.contains(fact.name.as_str())).cloned().collect::<Vec<_>>();
@@ -209,6 +231,7 @@ fn execute_one_action(
         &effective_probe_facts,
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
+    let remote = remote_for_action(plan, action, &key, project_root, grants)?;
     let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
         .map(|record| record.key);
@@ -240,6 +263,47 @@ fn execute_one_action(
             }
         }
     }
+    if action.cache == ActionCache::Cached
+        && front_end.authorize_cache_lookup().is_ok()
+    {
+        if let Some((transport, policy, _execute)) = &remote {
+            match transport.download_action_record(&key, policy) {
+                Ok(record) => {
+                    if !matches!(
+                        record.outcome,
+                        ActionOutcome::Succeeded { .. } | ActionOutcome::RestoredFromCache
+                    ) {
+                        return Err(remote_action(
+                            action,
+                            "remote cache record contains a failed outcome".to_string(),
+                        ));
+                    }
+                    restore_remote_outputs(
+                        transport,
+                        policy,
+                        project_root,
+                        action,
+                        &record,
+                        super::cache_cas::RemoteActionRequest::CacheRead,
+                    )
+                    .map_err(|detail| remote_action(action, detail))?;
+                    write_last_rebuild_record(
+                        project_root,
+                        action,
+                        &key,
+                        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                        None,
+                    )?;
+                    return Ok(ActionOutcome::RestoredFromCache);
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == io::ErrorKind::NotFound => {}
+                Err(RemoteCacheError::Denied(denied))
+                    if denied.reason == RemoteDeniedReason::GrantNotAllowed => {}
+                Err(error) => return Err(remote_action(action, error.to_string())),
+            }
+        }
+    }
 
     let rebuild_status = if action.cache == ActionCache::UncachedPhony {
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction)
@@ -250,6 +314,101 @@ fn execute_one_action(
     } else {
         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
     };
+
+    if let Some((transport, policy, true)) = &remote {
+        let proof = policy
+            .proof()
+            .cloned()
+            .ok_or_else(|| remote_action(action, "remote sandbox proof is missing".to_string()))?;
+        for snapshot in &snapshots {
+            let path = resolve_under(project_root, snapshot.path.as_str())
+                .map_err(|e| io_action(action, e))?;
+            let bytes = secure_read_file(project_root, &path).map_err(|e| io_action(action, e))?;
+            let digest = transport
+                .upload_execution_blob(&bytes, policy)
+                .map_err(|error| remote_action(action, error.to_string()))?;
+            if digest != snapshot.digest || bytes.len() as u64 != snapshot.byte_len {
+                return Err(remote_action(
+                    action,
+                    format!(
+                        "remote input CAS identity changed for {}",
+                        snapshot.path.as_str()
+                    ),
+                ));
+            }
+        }
+        let request = RemoteExecutionRequest {
+            key: key.clone(),
+            argv: action.argv.clone(),
+            inputs: snapshots.clone(),
+            outputs: action.outputs.clone(),
+            toolchain_digest: toolchain_provenance_digest(plan, action.toolchain),
+            sandbox: proof,
+        };
+        transport
+            .submit_execution(&request, policy)
+            .map_err(|error| remote_action(action, error.to_string()))?;
+        let result = wait_remote_execution_result(transport, policy, &key, action)?;
+        match result.outcome {
+            ActionOutcome::Succeeded { exit_code } => {
+                restore_remote_outputs(
+                    transport,
+                    policy,
+                    project_root,
+                    action,
+                    &ActionResultRecord {
+                        key: result.key.clone(),
+                        outcome: result.outcome,
+                        outputs: result.outputs.clone(),
+                        provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                    },
+                    super::cache_cas::RemoteActionRequest::Execute,
+                )
+                .map_err(|detail| remote_action(action, detail))?;
+                if action.cache == ActionCache::Cached {
+                    let record = cas
+                        .capture_declared_outputs(
+                            project_root,
+                            action,
+                            key.clone(),
+                            ActionOutcome::Succeeded { exit_code },
+                            ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                        )
+                        .map_err(|e| io_action(action, e))?;
+                    if policy
+                        .check(super::cache_cas::RemoteActionRequest::CacheWrite)
+                        .is_ok()
+                    {
+                        publish_remote_outputs(transport, policy, project_root, &record)
+                            .map_err(|detail| remote_action(action, detail))?;
+                    }
+                    write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
+                }
+                write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
+                return Ok(ActionOutcome::Succeeded { exit_code });
+            }
+            ActionOutcome::Failed { exit_code } => {
+                write_last_rebuild_record(
+                    project_root,
+                    action,
+                    &key,
+                    rebuild_status,
+                    Some(exit_code),
+                )?;
+                return Err(BuildExecutionError::ActionFailed {
+                    action: action.name.clone(),
+                    exit_code,
+                    stderr: "remote execution failed".to_string(),
+                });
+            }
+            ActionOutcome::RestoredFromCache => {
+                return Err(remote_action(
+                    action,
+                    "remote execution returned a cache-only outcome".to_string(),
+                ));
+            }
+        }
+    }
 
     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
         "{}-{}-{}", std::process::id(), action.id.0, key.as_str().trim_start_matches("act-sha256:")
@@ -327,11 +486,228 @@ fn execute_one_action(
             project_root, action, key.clone(), outcome,
             ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
         ).map_err(|e| io_action(action, e))?;
+        if let Some((transport, policy, _)) = &remote {
+            publish_remote_outputs(transport, policy, project_root, &record)
+                .map_err(|detail| remote_action(action, detail))?;
+        }
         write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
     }
     write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
+}
+
+fn remote_for_action(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    key: &ActionKey,
+    project_root: &Path,
+    grants: &BTreeSet<BuildCapability>,
+) -> Result<Option<(RemoteCacheTransport, RemoteCachePolicy, bool)>, BuildExecutionError> {
+    let Some(root) = std::env::var_os("JET_BUILD_REMOTE_ROOT") else {
+        return Ok(None);
+    };
+    let cache_grant = remote_policy_env("JET_BUILD_REMOTE_CACHE");
+    let execute = remote_policy_env("JET_BUILD_REMOTE_EXECUTE");
+    if !cache_grant && !execute {
+        // Configuring a transport is not itself permission to use it. Local
+        // execution/cache remains the default until one remote grant is
+        // explicitly supplied.
+        return Ok(None);
+    }
+    if !grants.contains(&BuildCapability::Net) {
+        return Err(BuildExecutionError::MissingGrant {
+            action: format!("remote build transport for {}", action.name),
+            capability: BuildCapability::Net,
+        });
+    }
+    let root = PathBuf::from(root);
+    let root = if root.is_absolute() {
+        root
+    } else {
+        project_root.join(root)
+    };
+    let proof = RemoteSandboxProof::new(
+        format!("local-{}-{}", std::process::id(), action.id.0),
+        key.as_str(),
+        toolchain_provenance_digest(plan, action.toolchain),
+    );
+    if !action.caps.contains(&BuildCapability::Net) {
+        return Err(BuildExecutionError::MissingGrant {
+            action: format!("remote build transport for {}", action.name),
+            capability: BuildCapability::Net,
+        });
+    }
+    Ok(Some((
+        RemoteCacheTransport::new(root),
+        RemoteCachePolicy::with_grants(cache_grant, cache_grant, execute, proof),
+        execute,
+    )))
+}
+
+fn remote_policy_env(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"))
+}
+
+fn wait_remote_execution_result(
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+    key: &ActionKey,
+    action: &BuildAction,
+) -> Result<super::cache_cas::RemoteExecutionResult, BuildExecutionError> {
+    let timeout_ms = std::env::var("JET_BUILD_REMOTE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(30_000);
+    let timeout = Duration::from_millis(timeout_ms);
+    let deadline = Instant::now() + timeout;
+    loop {
+        match transport.download_execution_result(key, policy) {
+            Ok(result) => return Ok(result),
+            Err(RemoteCacheError::Io(error))
+                if error.kind() == io::ErrorKind::NotFound
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(remote_action(
+                    action,
+                    format!(
+                        "remote worker did not publish a result within {}ms",
+                        timeout.as_millis()
+                    ),
+                ));
+            }
+            Err(error) => return Err(remote_action(action, error.to_string())),
+        }
+    }
+}
+
+fn restore_remote_outputs(
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+    project_root: &Path,
+    action: &BuildAction,
+    record: &ActionResultRecord,
+    blob_request: super::cache_cas::RemoteActionRequest,
+) -> Result<(), String> {
+    if record.outputs.len() != action.outputs.len()
+        || record
+            .outputs
+            .iter()
+            .zip(&action.outputs)
+            .any(|(output, declared)| output.path != *declared)
+    {
+        return Err("remote output record does not exactly match action declarations".to_string());
+    }
+    let mut staged = Vec::with_capacity(record.outputs.len());
+    let mut backups = Vec::with_capacity(record.outputs.len());
+    for output in &record.outputs {
+        let bytes = match blob_request {
+            super::cache_cas::RemoteActionRequest::CacheRead => transport.download_blob(&output.digest, policy),
+            super::cache_cas::RemoteActionRequest::Execute => {
+                transport.download_execution_blob(&output.digest, policy)
+            }
+            super::cache_cas::RemoteActionRequest::CacheWrite => {
+                return Err("remote output restore cannot use a cache-write grant".to_string());
+            }
+        }
+        .map_err(|error| error.to_string())?;
+        if bytes.len() as u64 != output.byte_len
+            || ContentDigest::from_bytes(&bytes) != output.digest
+        {
+            return Err(format!(
+                "remote output blob {} failed digest or length verification",
+                output.path.as_str()
+            ));
+        }
+        let path = resolve_under(project_root, output.path.as_str())
+            .map_err(|error| error.to_string())?;
+        let previous = match secure_read_file(project_root, &path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.to_string()),
+        };
+        backups.push((path.clone(), previous));
+        staged.push((path, bytes));
+    }
+    for (path, bytes) in &staged {
+        if let Err(error) = prepare_output_destination(project_root, path)
+            .and_then(|()| atomic_restore_file(project_root, path, bytes))
+        {
+            rollback_output_restore(project_root, &backups);
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
+fn rollback_output_restore(project_root: &Path, backups: &[(PathBuf, Option<Vec<u8>>)]) {
+    for (path, previous) in backups.iter().rev() {
+        match previous {
+            Some(bytes) => {
+                let _ = prepare_output_destination(project_root, path)
+                    .and_then(|()| atomic_restore_file(project_root, path, bytes));
+            }
+            None => match fs::symlink_metadata(path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {}
+                Ok(metadata) if metadata.is_file() => {
+                    let _ = fs::remove_file(path);
+                }
+                _ => {}
+            },
+        }
+    }
+}
+
+fn publish_remote_outputs(
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+    project_root: &Path,
+    record: &ActionResultRecord,
+) -> Result<(), String> {
+    let mut outputs = Vec::with_capacity(record.outputs.len());
+    for output in &record.outputs {
+        let path = resolve_under(project_root, output.path.as_str())
+            .map_err(|error| error.to_string())?;
+        let bytes = secure_read_file(project_root, &path).map_err(|error| error.to_string())?;
+        let digest = transport
+            .upload_blob(&bytes, policy)
+            .map_err(|error| error.to_string())?;
+        if digest != output.digest || bytes.len() as u64 != output.byte_len {
+            return Err(format!(
+                "remote output CAS identity changed for {}",
+                output.path.as_str()
+            ));
+        }
+        outputs.push(ActionOutputRecord {
+            path: output.path.clone(),
+            digest,
+            byte_len: bytes.len() as u64,
+        });
+    }
+    transport
+        .upload_action_record(
+            &ActionResultRecord {
+                key: record.key.clone(),
+                outcome: record.outcome,
+                outputs,
+                provenance: record.provenance.clone(),
+            },
+            policy,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn remote_action(action: &BuildAction, detail: String) -> BuildExecutionError {
+    BuildExecutionError::IO {
+        action: format!("remote {}", action.name),
+        detail,
+    }
 }
 
 pub(super) struct LastRebuildRecord {
@@ -468,12 +844,12 @@ fn execute_probes(
     let mut facts = Vec::new();
     for probe in plan.probes.iter().filter(|probe| selected.contains(&probe.id)) {
         let (success, detail) = match &probe.kind {
-            ProbeKind::FindProgram { program } => match find_program_path(program) {
+            ProbeKind::FindProgram { program } => match resolve_program_path(plan, probe.toolchain, program) {
                 Some(path) => (true, path.display().to_string()),
                 None => (false, format!("program `{program}` not found")),
             },
             ProbeKind::PkgConfig { package, min_version } => {
-                let Some(pkg_config) = find_program_path("pkg-config") else {
+                let Some(pkg_config) = resolve_program_path(plan, probe.toolchain, "pkg-config") else {
                     return Err(BuildExecutionError::ProbeFailed { probe: probe.name.clone(), detail: "pkg-config not found".to_string() });
                 };
                 let mut cmd = Command::new(pkg_config);
@@ -483,7 +859,7 @@ fn execute_probes(
             }
             ProbeKind::HeaderCheck { header } => {
                 let source = format!("#include <{header}>\nint main(void) {{ return 0; }}\n");
-                run_compile_probe(&source)
+                run_compile_probe(plan, probe.toolchain, &source)
             }
             ProbeKind::CompileCheck { includes, code, .. } => {
                 let mut source = String::new();
@@ -493,19 +869,26 @@ fn execute_probes(
                 source.push_str("int main(void) {\n");
                 source.push_str(code);
                 source.push_str("\nreturn 0;\n}\n");
-                run_compile_probe(&source)
+                run_compile_probe(plan, probe.toolchain, &source)
             }
         };
-        facts.push(BuildProbeFact { name: probe.name.clone(), success, detail: detail.clone(), reproducibility: probe.reproducibility });
+        facts.push(BuildProbeFact {
+            name: probe.name.clone(),
+            success,
+            detail: detail.clone(),
+            reproducibility: probe.reproducibility,
+            toolchain: probe.toolchain,
+            toolchain_provenance: toolchain_provenance_digest(plan, probe.toolchain),
+        });
         if !success { return Err(BuildExecutionError::ProbeFailed { probe: probe.name.clone(), detail }); }
     }
     Ok(facts)
 }
 
-fn run_compile_probe(source: &str) -> (bool, String) {
+fn run_compile_probe(plan: &BuildPlan, toolchain: ToolchainHandle, source: &str) -> (bool, String) {
     let compiler = ["cc", "clang", "gcc"]
         .into_iter()
-        .find_map(find_program_path);
+        .find_map(|name| resolve_program_path(plan, toolchain, name));
     let Some(compiler) = compiler else {
         return (false, "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string());
     };
@@ -551,6 +934,49 @@ fn find_program_path(program: &str) -> Option<PathBuf> {
             candidate.is_file().then(|| fs::canonicalize(candidate).ok()).flatten()
         })
     })
+}
+
+fn resolve_program_path(
+    plan: &BuildPlan,
+    toolchain_handle: ToolchainHandle,
+    program: &str,
+) -> Option<PathBuf> {
+    let toolchain = plan.toolchain(toolchain_handle)?;
+    if let Some(declared) = toolchain.tools.get(program) {
+        return canonical_executable_path(declared);
+    }
+    let basename = Path::new(program).file_name().and_then(|name| name.to_str());
+    if let Some(basename) = basename {
+        if let Some(declared) = toolchain.tools.get(basename) {
+            return canonical_executable_path(declared);
+        }
+    }
+    if Path::new(program).components().count() > 1 {
+        if let Some(path) = canonical_executable_path(program) {
+            return Some(path);
+        }
+    }
+    // The host toolchain is explicitly ambient. A target toolchain must name
+    // the executable in its declaration; falling through to PATH here would
+    // make a cross build depend on whichever host tool happens to be installed.
+    if matches!(toolchain.role, super::provenance_toolchains::ToolchainRole::Host) {
+        find_program_path(program)
+    } else {
+        None
+    }
+}
+
+fn canonical_executable_path(program: &str) -> Option<PathBuf> {
+    let path = Path::new(program);
+    path.is_file().then(|| fs::canonicalize(path).ok()).flatten()
+}
+
+fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> ContentDigest {
+    let identity = plan
+        .toolchain(toolchain)
+        .map(|value| format!("{value:?}"))
+        .unwrap_or_else(|| "missing-toolchain".to_string());
+    ContentDigest::from_bytes(identity.as_bytes())
 }
 
 fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<()> {
