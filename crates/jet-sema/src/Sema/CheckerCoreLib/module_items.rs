@@ -827,13 +827,17 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-WEBAPP1=D / D-WEBAUTHOR1=D: full-stack application builder + browser APIs.
         "core.web" => &[
             "on", "value", "storage", "app", "page", "App", "Page", "Context", "Mount",
-            "live", "subscribe", "invalidate", "live_get", "live_show", "live_stats",
-            "LiveQuery",
+            "live", "subscribe", "invalidate", "transact_invalidate", "signal_push",
+            "live_get", "live_show", "live_stats",
+            "auth", "auth_oauth", "auth_routes", "auth_show", "sync_over",
+            "LiveQuery", "Auth", "Session",
         ],
-        // D-LIVEQUERY1=A: application live-query surface (same Prelude as core.web).
+        // D-LIVEQUERY1=A / D-AUTH1=A: application live-query + auth surface.
         "app" => &[
-            "live", "subscribe", "invalidate", "live_get", "live_show", "live_stats",
-            "LiveQuery",
+            "live", "subscribe", "invalidate", "transact_invalidate", "signal_push",
+            "live_get", "live_show", "live_stats",
+            "auth", "auth_oauth", "auth_routes", "auth_show", "sync_over",
+            "LiveQuery", "Auth", "Session",
         ],
         "core.web.storage" => &["local", "session"],
         "core.web.storage.local" | "core.web.storage.session" => &["get", "set", "remove", "clear"],
@@ -891,9 +895,54 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "authorize_wrapped_import", "commit_import_wrapped",
         ],
         "core.vault.expert" => &["prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"],
-        // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: strict HS256 JWT and v4.public
-        // PASETO verification with required expected audience.
-        "core.auth" => &["verify_jwt", "verify_paseto"],
+        // D-AUTH1=A / D-AUTH2=A: token verify + session batteries.
+        "core.auth" => &[
+            "verify_jwt",
+            "verify_paseto",
+            "register_user",
+            "password_login",
+            "session_validate",
+            "session_show",
+            "session_user",
+            "session_cookie",
+            "session_id",
+            "magic_link_issue",
+            "magic_link_consume",
+            "oauth_begin",
+            "oauth_finish",
+            "Claims",
+            "AuthError",
+            "Session",
+            "Auth",
+        ],
+        // D-SYNC1=A / D-DBPOLICY1=A.
+        "core.sync" => &[
+            "text_new",
+            "text_set",
+            "text_merge",
+            "text_show",
+            "counter_new",
+            "counter_inc",
+            "counter_merge",
+            "counter_value",
+            "map_new",
+            "map_set",
+            "map_get",
+            "map_merge",
+            "map_show",
+            "list_new",
+            "list_push",
+            "list_merge",
+            "list_show",
+            "policy_new",
+            "policy_allows",
+            "policy_show",
+            "SyncText",
+            "SyncCounter",
+            "SyncMap",
+            "SyncList",
+            "RowPolicy",
+        ],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -912,7 +961,8 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
-        | ("core.auth", "Claims" | "AuthError")
+        | ("core.auth", "Claims" | "AuthError" | "Session" | "Auth")
+        | ("core.sync", "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy")
         | ("core.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
             | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TLSVersion")

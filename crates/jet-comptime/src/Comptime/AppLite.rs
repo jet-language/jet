@@ -88,6 +88,23 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(CtValue::Int(jet_app_invalidate(footprint)))
         }
+        "transact_invalidate" => {
+            let write_set = match one(0)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("write_set", span)),
+            };
+            Ok(CtValue::Int(jet_app_transact_invalidate(write_set)))
+        }
+        "signal_push" => {
+            let payload = match one(1)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("payload", span)),
+            };
+            Ok(live_to_ct(&jet_app_signal_push(
+                &ct_to_live(one(0)?, span)?,
+                payload,
+            )))
+        }
         "live_get" => Ok(CtValue::Str(jet_app_live_get(&ct_to_live(one(0)?, span)?))),
         "live_show" => Ok(CtValue::Str(jet_app_live_show(&ct_to_live(one(0)?, span)?))),
         "live_stats" => Ok(CtValue::Str(jet_app_live_stats())),

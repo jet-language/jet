@@ -11,4 +11,8 @@ fn run() {
     print(app.live_stats())
     expert :: app.subscribe("metrics")
     print(app.live_show(expert))
+    tx :: app.transact_invalidate("users,orders")
+    print("tx:{tx}")
+    q2 :: app.signal_push(q, "signal:users")
+    print("value:{app.live_get(q2)}")
 }

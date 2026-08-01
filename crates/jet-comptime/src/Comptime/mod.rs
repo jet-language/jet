@@ -30,6 +30,8 @@ mod ZstdEntropy;
 pub mod ComputeLite;
 pub mod ServicesLite;
 pub mod AppLite;
+pub mod AuthLite;
+pub mod SyncLite;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;

@@ -752,6 +752,13 @@ impl Cx {
             (Some("core.crypto" | "jet.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
+            (Some("core.auth"), "Session") => Some("Session"),
+            (Some("core.auth"), "Auth") => Some("Auth"),
+            (Some("core.sync"), "SyncText") => Some("SyncText"),
+            (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
+            (Some("core.sync"), "SyncMap") => Some("SyncMap"),
+            (Some("core.sync"), "SyncList") => Some("SyncList"),
+            (Some("core.sync"), "RowPolicy") => Some("RowPolicy"),
             (Some("core.http.client"), "Proxy") => Some("HTTPProxy"),
             (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
             (Some("core.http.client"), "RetryPolicy") => Some("HTTPRetryPolicy"),
@@ -1293,6 +1300,27 @@ impl Cx {
             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
                 format!("{}JetAuthError", self.root_prefix)
             }
+            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
+                format!("{}JetAuthSession", self.root_prefix)
+            }
+            Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
+                format!("{}JetAuthApp", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncText" && !self.type_names.contains(name) => {
+                format!("{}JetSyncText", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncCounter" && !self.type_names.contains(name) => {
+                format!("{}JetSyncCounter", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncMap" && !self.type_names.contains(name) => {
+                format!("{}JetSyncMap", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncList" && !self.type_names.contains(name) => {
+                format!("{}JetSyncList", self.root_prefix)
+            }
+            Type::Named(name) if name == "RowPolicy" && !self.type_names.contains(name) => {
+                format!("{}JetRowPolicy", self.root_prefix)
+            }
             Type::Named(name)
                 if !self.type_names.contains(name)
                     && core_crypto_rust_type_name(name).is_some() =>
@@ -1628,8 +1656,25 @@ impl Cx {
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
-                if resolved == "Claims" || resolved == "AuthError" {
-                    let rust = if resolved == "Claims" { "JetAuthClaims" } else { "JetAuthError" };
+                if resolved == "Claims" || resolved == "AuthError" || resolved == "Session" || resolved == "Auth"
+                    || resolved == "SyncText"
+                    || resolved == "SyncCounter"
+                    || resolved == "SyncMap"
+                    || resolved == "SyncList"
+                    || resolved == "RowPolicy"
+                {
+                    let rust = match resolved {
+                        "Claims" => "JetAuthClaims",
+                        "AuthError" => "JetAuthError",
+                        "Session" => "JetAuthSession",
+                        "Auth" => "JetAuthApp",
+                        "SyncText" => "JetSyncText",
+                        "SyncCounter" => "JetSyncCounter",
+                        "SyncMap" => "JetSyncMap",
+                        "SyncList" => "JetSyncList",
+                        "RowPolicy" => "JetRowPolicy",
+                        _ => resolved,
+                    };
                     return format!("{}{rust}", self.root_prefix);
                 }
                 if let Some(rust) = core_crypto_rust_type_name(resolved) {

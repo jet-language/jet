@@ -1,0 +1,24 @@
+// D-AUTH1=A (#506): sessions, password login, OAuth begin/finish, magic links.
+use core.auth as auth
+use app
+
+fn run() {
+    auth.register_user("alice", "argon2id:demo") ?? panic("register")
+    sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
+    print(auth.session_show(sess))
+    print("user:{auth.session_user(sess)}")
+    print("cookie:{auth.session_cookie(sess)}")
+
+    magic :: auth.magic_link_issue("bob", 1_700_000_000_000, 600_000) ?? panic("magic")
+    magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? panic("consume")
+    print("magic_user:{auth.session_user(magic_sess)}")
+
+    state :: auth.oauth_begin("google") ?? panic("oauth begin")
+    oauth_sess :: auth.oauth_finish(state, "carol", 1_700_000_000_200, 3_600_000) ?? panic("oauth finish")
+    print("oauth_user:{auth.session_user(oauth_sess)}")
+
+    gate0 :: app.auth("users")
+    gate :: app.auth_oauth(gate0, "google github")
+    print(app.auth_show(gate))
+    print(app.auth_routes(gate))
+}

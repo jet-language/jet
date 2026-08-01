@@ -60,6 +60,32 @@ fn jet_app_invalidate(footprint: String) -> i64 {
     })
 }
 
+/// D-LIVEQUERY1: `#Transact` write-set → invalidate matching live footprints
+/// and count a `core.ws` push into the Signal payload generation.
+fn jet_app_transact_invalidate(write_set: String) -> i64 {
+    let mut total = 0i64;
+    for part in write_set.split(|c| c == ',' || c == ';' || c == ' ') {
+        let footprint = part.trim();
+        if !footprint.is_empty() {
+            total += jet_app_invalidate(footprint.to_string());
+        }
+    }
+    total
+}
+
+fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
+    JET_LIVE_REGISTRY.with(|reg| {
+        let mut state = reg.borrow_mut();
+        if let Some(q) = state.queries.iter_mut().find(|q| q.id == query.id) {
+            q.generation += 1;
+            q.value = payload;
+            state.ws_pushes += 1;
+            return q.clone();
+        }
+        query.clone()
+    })
+}
+
 fn jet_app_live_get(query: &JetLiveQuery) -> String {
     JET_LIVE_REGISTRY.with(|reg| {
         let state = reg.borrow();

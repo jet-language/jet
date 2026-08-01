@@ -732,16 +732,25 @@ Examples: `examples/features/crypto/vault_keys.jet` and
 `examples/features/crypto/vault_key_wrap.jet`, plus
 `examples/features/memory/expiring_secret.jet`.
 
-### `core.auth` — strict JWT and PASETO verification
+### `core.auth` — token verification and session batteries
 
-`core.auth` exports two standalone verifiers:
+`core.auth` exports standalone JWT/PASETO verifiers plus D-AUTH1 session
+batteries. `app.auth` reuses the same Prelude symbols (one mechanism):
 
 ```jet
 verify_jwt(token, key:, audience:, issuer:, clock_skew:) => Claims ? AuthError
 verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) => Claims ? AuthError
+
+register_user(user_id, password_hash) => () ? String
+password_login(user_id, password_hash, now_ms, ttl_ms) => Session ? String
+session_validate(session_id, now_ms) => Session ? String
+magic_link_issue(user_id, now_ms, ttl_ms) => String ? String
+magic_link_consume(token, now_ms, ttl_ms) => Session ? String
+oauth_begin(provider) => String ? String
+oauth_finish(state, subject, now_ms, ttl_ms) => Session ? String
 ```
 
-`issuer` and `clock_skew` are optional for both functions; `footer` and
+`issuer` and `clock_skew` are optional for both verifiers; `footer` and
 `implicit` are optional for PASETO. JWT accepts only HS256 and keys of at least
 32 bytes. PASETO accepts only `v4.public`, requires a 32-byte Ed25519 public
 key, and verifies the PAE input including the supplied footer and implicit
@@ -758,10 +767,30 @@ canonical.
 `issuer: String?`, `expires_at: Int`, and `issued_at: Int?`. `AuthError` is an
 inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
 `WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`, `TokenExpired`, and
-`DecodeError` variants. The implementation is compiler-embedded, reuses Jet's
-JSON and crypto mechanisms, and adds no external dependency.
+`DecodeError` variants. Sessions use httponly/secure/samesite cookie defaults.
+The implementation is compiler-embedded, reuses Jet's JSON and crypto
+mechanisms, and adds no external dependency.
 
-Example: `examples/features/crypto/auth_tokens.jet`.
+Examples: `examples/features/crypto/auth_tokens.jet`,
+`examples/features/crypto/auth_sessions.jet`.
+
+### `core.sync` — CRDT values and row policy
+
+`core.sync` ships D-SYNC1 CRDT value types and D-DBPOLICY1 row policies:
+
+```jet
+text_new / text_set / text_merge / text_show
+counter_new / counter_inc / counter_merge / counter_value
+map_new / map_set / map_get / map_merge / map_show
+list_new / list_push / list_merge / list_show
+policy_new(table, expression) => RowPolicy ? String
+policy_allows(policy, user, row_owner) => Bool
+```
+
+Merges are deterministic. Beginner row policies use `owner == user`; expert
+policies may use `true`. Live-query binding uses `app.sync_over(session, doc)`.
+
+Example: `examples/features/tooling/sync_crdt.jet`.
 
 ### `core.watcher` — file/process/port change events
 

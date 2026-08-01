@@ -203,7 +203,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-AUTH-TOKENPOLICY1=A (ratified 2026-07-18): strict standalone JWT/PASETO
     // verification. Callers name key and audience; exp+aud are required, and
     // unknown algorithms, versions, and purposes fail closed.
+    // D-AUTH1=A: session batteries share this module.
     "core.auth",
+    // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + typed row policies.
+    "core.sync",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

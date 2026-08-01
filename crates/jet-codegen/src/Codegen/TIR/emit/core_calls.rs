@@ -2237,6 +2237,165 @@ pub(crate) fn emit_tir_core_call(
                 footer, implicit, regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"),
             )
         }
+        ("core.auth", "register_user") => format!(
+            "{}(({}).clone(), ({}).clone())",
+            helper("jet_auth_register_user"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.auth", "password_login") => format!(
+            "{}(({}).clone(), ({}).clone(), {}, {})",
+            helper("jet_auth_password_login"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.auth", "session_validate") => format!(
+            "{}(&({}), {})",
+            helper("jet_auth_session_validate"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.auth", "session_show") => {
+            format!("{}(&({}))", helper("jet_auth_session_show"), arg(0))
+        }
+        ("core.auth", "session_user") => {
+            format!("{}(&({}))", helper("jet_auth_session_user"), arg(0))
+        }
+        ("core.auth", "session_cookie") => {
+            format!("{}(&({}))", helper("jet_auth_session_cookie"), arg(0))
+        }
+        ("core.auth", "session_id") => {
+            format!("{}(&({}))", helper("jet_auth_session_id"), arg(0))
+        }
+        ("core.auth", "magic_link_issue") => format!(
+            "{}(({}).clone(), {}, {})",
+            helper("jet_auth_magic_link_issue"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.auth", "magic_link_consume") => format!(
+            "{}(({}).clone(), {}, {})",
+            helper("jet_auth_magic_link_consume"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.auth", "oauth_begin") => format!(
+            "{}(({}).clone())",
+            helper("jet_auth_oauth_begin"),
+            arg(0)
+        ),
+        ("core.auth", "oauth_finish") => format!(
+            "{}(({}).clone(), ({}).clone(), {}, {})",
+            helper("jet_auth_oauth_finish"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.sync", "text_new") => format!(
+            "{}(({}).clone(), ({}).clone())",
+            helper("jet_sync_text_new"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "text_set") => format!(
+            "{}(({}), ({}).clone(), ({}).clone())",
+            helper("jet_sync_text_set"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.sync", "text_merge") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_sync_text_merge"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "text_show") => {
+            format!("{}(&({}))", helper("jet_sync_text_show"), arg(0))
+        }
+        ("core.sync", "counter_new") => format!(
+            "{}(({}).clone(), {})",
+            helper("jet_sync_counter_new"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "counter_inc") => format!(
+            "{}(({}), ({}).clone(), {})",
+            helper("jet_sync_counter_inc"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.sync", "counter_merge") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_sync_counter_merge"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "counter_value") => {
+            format!("{}(&({}))", helper("jet_sync_counter_value"), arg(0))
+        }
+        ("core.sync", "map_new") => format!("{}()", helper("jet_sync_map_new")),
+        ("core.sync", "map_set") => format!(
+            "{}(({}), ({}).clone(), ({}).clone())",
+            helper("jet_sync_map_set"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.sync", "map_get") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_sync_map_get"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "map_merge") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_sync_map_merge"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "map_show") => {
+            format!("{}(&({}))", helper("jet_sync_map_show"), arg(0))
+        }
+        ("core.sync", "list_new") => format!("{}()", helper("jet_sync_list_new")),
+        ("core.sync", "list_push") => format!(
+            "{}(({}), ({}).clone(), ({}).clone())",
+            helper("jet_sync_list_push"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.sync", "list_merge") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_sync_list_merge"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "list_show") => {
+            format!("{}(&({}))", helper("jet_sync_list_show"), arg(0))
+        }
+        ("core.sync", "policy_new") => format!(
+            "{}(({}).clone(), ({}).clone())",
+            helper("jet_db_policy_new"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.sync", "policy_allows") => format!(
+            "{}(&({}), &({}), &({}))",
+            helper("jet_db_policy_allows"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.sync", "policy_show") => {
+            format!("{}(&({}))", helper("jet_db_policy_show"), arg(0))
+        }
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
         // (project-relative) and decrypts with the local identity, via the
         // age-style crypto FFI bridge. Already the exact `Option<String>` shape
@@ -3165,6 +3324,17 @@ pub(crate) fn emit_tir_core_call(
             cx.root_prefix,
             arg(0)
         ),
+        ("app" | "core.web", "transact_invalidate") => format!(
+            "{}jet_app_transact_invalidate(({}).clone())",
+            cx.root_prefix,
+            arg(0)
+        ),
+        ("app" | "core.web", "signal_push") => format!(
+            "{}jet_app_signal_push(&({}), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
         ("app" | "core.web", "live_get") => {
             format!("{}jet_app_live_get(&({}))", cx.root_prefix, arg(0))
         }
@@ -3174,6 +3344,29 @@ pub(crate) fn emit_tir_core_call(
         ("app" | "core.web", "live_stats") => {
             format!("{}jet_app_live_stats()", cx.root_prefix)
         }
+        ("app" | "core.web", "auth") => format!(
+            "{}jet_app_auth(({}).clone())",
+            cx.root_prefix,
+            arg(0)
+        ),
+        ("app" | "core.web", "auth_oauth") => format!(
+            "{}jet_app_auth_oauth(({}), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
+        ("app" | "core.web", "auth_routes") => {
+            format!("{}jet_app_auth_routes(&({}))", cx.root_prefix, arg(0))
+        }
+        ("app" | "core.web", "auth_show") => {
+            format!("{}jet_app_auth_show(&({}))", cx.root_prefix, arg(0))
+        }
+        ("app" | "core.web", "sync_over") => format!(
+            "{}jet_app_sync_over(({}).clone(), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
         ("core.web.storage.local" | "core.web.storage.session", "get") => {
             "None::<String>".to_string()
         }

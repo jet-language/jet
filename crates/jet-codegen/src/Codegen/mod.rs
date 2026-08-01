@@ -528,7 +528,8 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
-    let needs_auth = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+    let needs_auth = core_usage_matches(used_core, &["core.auth", "app"]) || needs_crypto;
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     if needs_email {
@@ -598,8 +599,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
     if needs_auth {
-        // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.
+        // D-AUTH1=A / D-AUTH2=A: `core.auth` + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+    }
+    if needs_sync {
+        // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
     }
     if needs_services {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));

@@ -326,6 +326,150 @@ pub fn core_fixed_sig(
                 Type::Named("AuthError".into()),
             )),
         )),
+        ("core.auth", "register_user") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Unit, Type::String)),
+        )),
+        ("core.auth", "password_login" | "oauth_finish") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::Named("Session".into()), Type::String)),
+        )),
+        ("core.auth", "magic_link_consume") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Named("Session".into()), Type::String)),
+        )),
+        ("core.auth", "session_validate") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::Named("Session".into()), Type::String)),
+        )),
+        ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => {
+            Some((
+                vec![(read, Type::Named("Session".into()))],
+                Some(Type::String),
+            ))
+        }
+        ("core.auth", "magic_link_issue") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.auth", "oauth_begin") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.sync", "text_new") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Named("SyncText".into())),
+        )),
+        ("core.sync", "text_set") => Some((
+            vec![
+                (read, Type::Named("SyncText".into())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Named("SyncText".into())),
+        )),
+        ("core.sync", "text_merge") => Some((
+            vec![
+                (read, Type::Named("SyncText".into())),
+                (read, Type::Named("SyncText".into())),
+            ],
+            Some(Type::Named("SyncText".into())),
+        )),
+        ("core.sync", "text_show") => Some((
+            vec![(read, Type::Named("SyncText".into()))],
+            Some(Type::String),
+        )),
+        ("core.sync", "counter_new") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::Named("SyncCounter".into())),
+        )),
+        ("core.sync", "counter_inc") => Some((
+            vec![
+                (read, Type::Named("SyncCounter".into())),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(Type::Named("SyncCounter".into())),
+        )),
+        ("core.sync", "counter_merge") => Some((
+            vec![
+                (read, Type::Named("SyncCounter".into())),
+                (read, Type::Named("SyncCounter".into())),
+            ],
+            Some(Type::Named("SyncCounter".into())),
+        )),
+        ("core.sync", "counter_value") => Some((
+            vec![(read, Type::Named("SyncCounter".into()))],
+            Some(Type::Int),
+        )),
+        ("core.sync", "map_new") => Some((vec![], Some(Type::Named("SyncMap".into())))),
+        ("core.sync", "list_new") => Some((vec![], Some(Type::Named("SyncList".into())))),
+        ("core.sync", "map_set") => Some((
+            vec![
+                (read, Type::Named("SyncMap".into())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Named("SyncMap".into())),
+        )),
+        ("core.sync", "map_get") => Some((
+            vec![(read, Type::Named("SyncMap".into())), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.sync", "map_merge") => Some((
+            vec![
+                (read, Type::Named("SyncMap".into())),
+                (read, Type::Named("SyncMap".into())),
+            ],
+            Some(Type::Named("SyncMap".into())),
+        )),
+        ("core.sync", "map_show") => Some((
+            vec![(read, Type::Named("SyncMap".into()))],
+            Some(Type::String),
+        )),
+        ("core.sync", "list_push") => Some((
+            vec![
+                (read, Type::Named("SyncList".into())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Named("SyncList".into())),
+        )),
+        ("core.sync", "list_merge") => Some((
+            vec![
+                (read, Type::Named("SyncList".into())),
+                (read, Type::Named("SyncList".into())),
+            ],
+            Some(Type::Named("SyncList".into())),
+        )),
+        ("core.sync", "list_show") => Some((
+            vec![(read, Type::Named("SyncList".into()))],
+            Some(Type::String),
+        )),
+        ("core.sync", "policy_new") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Named("RowPolicy".into()),
+                Type::String,
+            )),
+        )),
+        ("core.sync", "policy_allows") => Some((
+            vec![
+                (read, Type::Named("RowPolicy".into())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.sync", "policy_show") => Some((
+            vec![(read, Type::Named("RowPolicy".into()))],
+            Some(Type::String),
+        )),
         ("core.process", "exit") => Some((vec![(read, int)], None)),
         ("core.process", "run") => Some((
             vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
@@ -2591,15 +2735,41 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::Named("LiveQuery".to_string())),
         )),
-        ("app" | "core.web", "invalidate") => Some((
+        ("app" | "core.web", "invalidate" | "transact_invalidate") => Some((
             vec![(read, Type::String)],
             Some(Type::Int),
+        )),
+        ("app" | "core.web", "signal_push") => Some((
+            vec![
+                (read, Type::Named("LiveQuery".to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Named("LiveQuery".to_string())),
         )),
         ("app" | "core.web", "live_get" | "live_show") => Some((
             vec![(read, Type::Named("LiveQuery".to_string()))],
             Some(Type::String),
         )),
         ("app" | "core.web", "live_stats") => Some((vec![], Some(Type::String))),
+        ("app" | "core.web", "auth") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Auth".to_string())),
+        )),
+        ("app" | "core.web", "auth_oauth") => Some((
+            vec![
+                (read, Type::Named("Auth".to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Named("Auth".to_string())),
+        )),
+        ("app" | "core.web", "auth_routes" | "auth_show") => Some((
+            vec![(read, Type::Named("Auth".to_string()))],
+            Some(Type::String),
+        )),
+        ("app" | "core.web", "sync_over") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
         ("core.web.storage.local" | "core.web.storage.session", "get") => Some((
             vec![(read, string.clone())],
             Some(Type::Option(Box::new(Type::String))),
