@@ -466,3 +466,142 @@ fn run() {{
     );
     assert_eq!(error_codes(&src), vec!["E0220"]);
 }
+
+// ── Criterion 2: local #Unsafe, safe Pin API at call sites ─────────────────
+
+#[test]
+fn library_wires_self_ref_under_unsafe_and_exposes_safe_pin_api() {
+    // The audited region stays inside the library. Callers of `wire_self` never
+    // write `#Unsafe` — they receive a ready `Pin<SelfNode>` (D-PIN1 step 5).
+    let src = r#"
+use core.mem
+
+struct SelfNode {
+    payload: Int
+    self_addr: Int
+}
+
+fn wire_self(node: &SelfNode) => Pin<SelfNode> {
+    #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
+        node.self_addr = mem.address_of(node.payload)
+    }
+    return mem.pin(&node)
+}
+
+fn run() {
+    node := SelfNode.{payload: 7, self_addr: 0}
+    pinned :: wire_self(&node)
+    pinned.payload += 1
+    print("{(pinned.payload)} {(pinned.self_addr != 0)}")
+}
+"#;
+    assert_eq!(error_codes(src), Vec::<String>::new());
+    assert_eq!(interpret(src), "8 true\n");
+    if let Some(out) = build_and_run("safe_pin_api", src) {
+        assert_eq!(out, "8 true\n");
+    }
+}
+
+// ── Criterion 4: cleanup / panic / cancel keep the contract ────────────────
+
+#[test]
+fn automatic_cleanup_still_runs_when_a_pin_is_live_at_panic() {
+    // Owner destruction / panic must not skip resource cleanup, and the pin
+    // must not outlive the place it names (D-PIN1 criterion 4).
+    let src = r#"
+use core.mem
+
+struct Guard {
+    name: String
+}
+
+impl Guard.Close {
+    fn close(^self) {
+        print("closed {self.name}")
+    }
+}
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn run() {
+    guard := Guard.{name: "pin"}
+    node := Node.{payload: 1, hops: 0}
+    pinned :: mem.pin(&node)
+    pinned.hops += 1
+    print("body {(pinned.hops)}")
+    panic("stop")
+}
+"#;
+    assert_eq!(error_codes(src), Vec::<String>::new());
+    if let Some(out) = build_and_run("pin_panic_cleanup", src) {
+        assert!(
+            out.contains("body 1") && out.contains("closed pin"),
+            "panic must still run automatic cleanup while a pin is live: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn cancelling_a_task_cannot_smuggle_a_pin_across_the_boundary() {
+    // Cancellation ends the task; a pin is a borrow into one owner's storage
+    // and must not become a cross-task escape hatch (criterion 4 + task law).
+    let src = format!(
+        r#"{NODE}
+use core.tasks
+
+fn run() {{
+    node := Node.{{payload: 7, hops: 0}}
+    pinned :: mem.pin(&node)
+    handle :: tasks.spawn(() => {{
+        pinned.hops += 1
+        return pinned.payload
+    }})
+    handle.cancel()
+    print("{{(handle.join())}}")
+}}
+"#
+    );
+    let codes = error_codes(&src);
+    assert!(
+        !codes.is_empty(),
+        "a live pin must not cross into a cancellable task body: {codes:?}"
+    );
+}
+
+// ── Criterion 5: Fixed / arena / caller-storage pin parity ─────────────────
+
+#[test]
+fn pinning_fixed_and_arena_storage_keeps_edits_in_caller_owned_places() {
+    let src = r#"
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn run() {
+    fixed :: mem.Fixed.new(size: 256)
+    fixed_node :: fixed.alloc(Node.{payload: 3, hops: 0})
+    fixed_pin :: mem.pin(&fixed_node)
+    fixed_pin.hops += 1
+
+    arena :: mem.Arena.new(capacity: 1024)
+    arena_node :: arena.alloc(Node.{payload: 5, hops: 0})
+    arena_pin :: mem.pin(&arena_node)
+    arena_pin.hops += 2
+
+    print("{(fixed_pin.payload)} {(fixed_pin.hops)} {(arena_pin.payload)} {(arena_pin.hops)}")
+    close(^fixed)
+    close(^arena)
+}
+"#;
+    assert_eq!(error_codes(src), Vec::<String>::new());
+    assert_eq!(interpret(src), "3 1 5 2\n");
+    if let Some(out) = build_and_run("fixed_arena_pin", src) {
+        assert_eq!(out, "3 1 5 2\n");
+    }
+}

@@ -5362,3 +5362,15 @@ reference cycle are rejected at sema (E0221). Expert intentional cycles use
 `.strong_count()` — and free when strong roots drop. One Shared mechanism (I8);
 full I9; no follow-on card. Flagship: `examples/features/memory/shared_weak_cycle.jet`.
 Card #1372.
+
+**2026-07-26 — D-PIN1=A / D-PIN2=A / D-PIN3=A**: `mem.pin(&place) -> Pin<T>` is
+the reusable address-stability contract. `Pin<T>` is a tracked write window on
+one place; safe code may read and edit through it but must not move, replace, or
+resize the pinned storage while any pin is live (E0218/E0219). Pin reuses the
+owner/provenance graph — no second memory model. A field declared `Pin<U>` is
+the structural projection mark (D-PIN3=A): reaching it through a pinned value
+projects to `Pin<U>`; every other field projects as an ordinary view (D-PIN2=A).
+Dropping the final pin ends the no-move loan. Unsafe construction stays inside
+a library (`#Unsafe("…") { … }` in a safe function body); callers use the safe
+`Pin<T>` API with no audited region. Spelling lives in Syntax.rs (`MEM_PIN`,
+`TYPE_PIN`). Flagship: `examples/features/memory/pin.jet`. Card #1200.

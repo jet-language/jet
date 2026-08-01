@@ -11,6 +11,9 @@
 // (D-PIN3=A), and every other field projects as an ordinary value. That is the
 // one expert stored-window exception to "a struct field owns its value"
 // (see ref_field.jet).
+//
+// Criterion 2: unsafe construction stays inside the library. Call sites never
+// write `#Unsafe` — they receive a ready `Pin<T>` from a safe API.
 use core.mem
 
 struct Node {
@@ -18,11 +21,27 @@ struct Node {
     hops: Int
 }
 
+// Self-referential node: `self_addr` names this place's payload once wiring
+// finishes. The raw address write is audited locally; callers stay safe.
+struct SelfNode {
+    payload: Int
+    self_addr: Int
+}
+
 // An intrusive queue. It never allocates a node: the caller owns the storage
 // and lends it, so `Queue` records the promise instead of copying the node.
 struct Queue {
     label: String
     head: Pin<Node>
+}
+
+// Safe public API: the `#Unsafe` block stays inside the function body. Callers
+// of `wire_self` do not need an audited region (D-PIN1 step 5 / criterion 2).
+fn wire_self(node: &SelfNode) => Pin<SelfNode> {
+    #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
+        node.self_addr = mem.address_of(node.payload)
+    }
+    return mem.pin(&node)
 }
 
 fn run() {
@@ -43,4 +62,10 @@ fn run() {
     print("label: {(queue.label)}")
     print("payload: {(queue.head.payload)}")
     print("hops: {(queue.head.hops)}")
+
+    // Self-referential construction through a safe library API (criterion 2+5).
+    self_node := SelfNode.{payload: 7, self_addr: 0}
+    self_pinned :: wire_self(&self_node)
+    print("self_payload: {(self_pinned.payload)}")
+    print("self_wired: {(self_pinned.self_addr != 0)}")
 }
