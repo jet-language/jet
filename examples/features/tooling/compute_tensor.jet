@@ -10,7 +10,8 @@ fn run() {
     print("device:{compute.device(zeros)}")
 
     ones :: compute.ones([2, 3]) ?? panic("ones")
-    sum :: compute.add(zeros, ones) ?? panic("add")
+    // `:=` — `compute.set` takes Write access to the tensor place.
+    sum := compute.add(zeros, ones) ?? panic("add")
     compute.set(&sum, [0, 1], 4.0) ?? panic("set")
     print("cell:{compute.get(sum, [0, 1]) ?? panic("get")}")
 

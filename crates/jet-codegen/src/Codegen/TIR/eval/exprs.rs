@@ -2823,7 +2823,33 @@ impl<'a> EvalCtx<'a> {
                         self.pending_return = Some(CtValue::Unit);
                         Ok(CtValue::Unit)
                     }
-                    crate::Codegen::TIR::TOrFallback::Panic { .. } => {
+                    crate::Codegen::TIR::TOrFallback::Panic { msg, loc } => {
+                        let message = self.eval_expr(msg, scope)?.jet_show();
+                        let file = loc.file.trim_matches('"');
+                        let fn_name = loc.fn_name.trim_matches('"');
+                        let src_line = loc.src_line.trim_matches('"');
+                        let line_s = loc.line.to_string();
+                        let margin = line_s.len();
+                        let pad = " ".repeat(margin);
+                        let col_offset = loc.col.saturating_sub(1) as usize;
+                        let caret = "^".repeat(loc.caret.max(1) as usize);
+                        let rendered = format!(
+                            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+                            loc.line,
+                            " ".repeat(col_offset)
+                        );
+                        if let Some(sink) = self.sink.as_ref() {
+                            let mut sink = sink.lock().expect("evaluator sink poisoned");
+                            sink.stderr.push_str(&rendered);
+                            sink.exit_code = Some(70);
+                            return Err(Diagnostic::error(
+                                "SOFT_EXIT",
+                                "70".to_string(),
+                                "or-fallback panic stop".to_string(),
+                                String::new(),
+                                Some(self.span()),
+                            ));
+                        }
                         Err(unsupported("or-fallback panic", self.span()))
                     }
                     _ => Err(unsupported("or-fallback form", self.span())),

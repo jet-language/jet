@@ -19,7 +19,20 @@ fn text_to_ct(doc: &JetSyncText) -> CtValue {
 fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
     CtValue::Struct {
         type_name: "SyncCounter".to_string(),
-        fields: vec![("value".to_string(), CtValue::Int(jet_sync_counter_value(c)))],
+        fields: vec![(
+            "counts".to_string(),
+            CtValue::List(
+                c.counts
+                    .iter()
+                    .map(|(replica, value)| {
+                        CtValue::Tuple(vec![
+                            CtValue::Str(replica.clone()),
+                            CtValue::Int(*value),
+                        ])
+                    })
+                    .collect(),
+            ),
+        )],
     }
 }
 
@@ -86,6 +99,31 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
         CtValue::Struct { type_name, fields }
             if type_name == "SyncCounter" || type_name == "JetSyncCounter" =>
         {
+            if let Some(CtValue::List(entries)) = fields
+                .iter()
+                .find(|(n, _)| n == "counts")
+                .map(|(_, v)| v)
+            {
+                let mut counts = Vec::new();
+                for entry in entries {
+                    match entry {
+                        CtValue::Tuple(parts) if parts.len() == 2 => {
+                            let replica = match &parts[0] {
+                                CtValue::Str(s) => s.clone(),
+                                _ => return Err(unsupported("SyncCounter replica", span)),
+                            };
+                            let value = match &parts[1] {
+                                CtValue::Int(n) => *n,
+                                _ => return Err(unsupported("SyncCounter value", span)),
+                            };
+                            counts.push((replica, value));
+                        }
+                        _ => return Err(unsupported("SyncCounter entry", span)),
+                    }
+                }
+                return Ok(JetSyncCounter { counts });
+            }
+            // Legacy ambient shape stored only the summed value.
             let value = fields
                 .iter()
                 .find(|(n, _)| n == "value")

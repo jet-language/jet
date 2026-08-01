@@ -1863,6 +1863,10 @@ pub fn apply_core_call(
         // D-SERVICE1=D / I9: same Prelude as AOT (`ServicesLite` includes Services.rs).
         ("core.services", method) => super::super::ServicesLite::apply(method, &args, span),
         // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
+        // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
+        // `evaluate_constant` cannot fold them into Ok(literals) while leaving
+        // the runtime `JET_AUTH_STORE` empty. AuthLite still serves impure /
+        // interpreter ambient via `apply_impure_core_call` → here.
         ("core.auth", method)
             if matches!(
                 method,

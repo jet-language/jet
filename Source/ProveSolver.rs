@@ -197,6 +197,7 @@ pub(crate) enum SolverOutcome {
 #[derive(Clone, Debug)]
 enum SolverFail {
     CoefficientOverflow,
+    #[allow(dead_code)]
     StructuralLimit,
 }
 
