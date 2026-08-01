@@ -1867,8 +1867,8 @@ use core.tls as tls
 fn run() {
     empty :: [U8].{}
     if tls.RootCertificates.from_pem(empty) == {
-        Ok(_) -> print("empty-ok")
-        Err(_) -> print("empty-fail")
+        .Ok(_) -> print("empty-ok")
+        .Err(_) -> print("empty-fail")
     }
 }
 "#;
@@ -1888,8 +1888,8 @@ fn run() {{
     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
     client :: http.Client.new().tls(cfg).protocols(false, true, false)
     if client.send(http.request("GET", "https://localhost:{port}/")) == {{
-        Ok(_) -> print("ok")
-        Err(_) -> print("tls-fail")
+        .Ok(_) -> print("ok")
+        .Err(_) -> print("tls-fail")
     }}
 }}
 "#,
@@ -2059,8 +2059,8 @@ fn run() {{
     only13 :: base.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("tls13")
     client13 :: http.Client.new().tls(only13).protocols(false, true, false)
     if client13.send(http.request("GET", "https://localhost:{port}/")) == {{
-        Ok(_) -> print("tls13-ok")
-        Err(_) -> print("tls13-fail")
+        .Ok(_) -> print("tls13-ok")
+        .Err(_) -> print("tls13-fail")
     }}
     only12 :: base.with_version_bounds(min: .Tls12, max: .Tls12) ?? panic("tls12")
     client12 :: http.Client.new().tls(only12).protocols(false, true, false)
@@ -2121,8 +2121,8 @@ fn run() {{
     bare :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("bare")
     client_bare :: http.Client.new().tls(bare).protocols(false, true, false)
     if client_bare.send(http.request("GET", "https://localhost:{port}/")) == {{
-        Ok(_) -> print("bare-ok")
-        Err(_) -> print("bare-fail")
+        .Ok(_) -> print("bare-ok")
+        .Err(_) -> print("bare-fail")
     }}
     cfg :: bare.with_client_identity(identity) ?? panic("with identity")
     client :: http.Client.new().tls(cfg).protocols(false, true, false)
@@ -2421,8 +2421,8 @@ fn run() {{
     client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
     #Context(deadline: time.now() + 40) {{
         if client.send(http.request("GET", "http://{addr}/slow")) == {{
-            Ok(_) -> print("ok")
-            Err(_) -> print("timeout")
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
         }}
     }}
 }}
@@ -2464,8 +2464,8 @@ use core.time as time
 fn run() {{
     #Context(deadline: time.now()) {{
         if http.get("http://{addr}/expired") == {{
-            Ok(_) -> print("ok")
-            Err(_) -> print("timeout")
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
         }}
     }}
 }}
@@ -2512,8 +2512,8 @@ use core.time as time
 fn run() {{
     #Context(deadline: time.now()) {{
         if http.post("http://{addr}/expired", "body") == {{
-            Ok(_) -> print("ok")
-            Err(_) -> print("timeout")
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
         }}
     }}
 }}
@@ -2793,8 +2793,8 @@ fn run() {{
     client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
     req :: http.request("GET", "http://{addr}/slow").first_byte_timeout(40)
     if client.send(req) == {{
-        Ok(_) -> print("ok")
-        Err(_) -> print("timeout")
+        .Ok(_) -> print("ok")
+        .Err(_) -> print("timeout")
     }}
 }}
 "#

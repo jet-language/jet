@@ -1261,12 +1261,22 @@ const EXPECT_EXPECTED: &str = "expect-ok";
 
 #[test]
 fn rustc_backed_linalg_simd_matches_all_execution_tiers_exactly() {
-    let source = parity_source("linalg_view()", LINALG_DECLS);
-    assert_eq!(
-        check_aot_comptime("linalg/simd-direct", &source),
-        LINALG_EXPECTED
-    );
-    check_dev_tiers("linalg-simd-direct", &source, LINALG_EXPECTED);
+    // Linalg + SIMD tier matrix blows the default test thread stack under
+    // debug builds (same class as pin/interpreter fixtures).
+    std::thread::Builder::new()
+        .name("linalg-simd-parity".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let source = parity_source("linalg_view()", LINALG_DECLS);
+            assert_eq!(
+                check_aot_comptime("linalg/simd-direct", &source),
+                LINALG_EXPECTED
+            );
+            check_dev_tiers("linalg-simd-direct", &source, LINALG_EXPECTED);
+        })
+        .expect("spawn linalg-simd-parity")
+        .join()
+        .expect("linalg-simd-parity thread");
 }
 
 #[test]
