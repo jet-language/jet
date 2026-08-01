@@ -32,7 +32,7 @@ coverage in `tests/corelib.rs`.
 | Surface | Status | Notes |
 |---------|--------|-------|
 | `core.db` connection + parameter binding | shipped | parameter-only queries (no string concat) |
-| `Driver` trait + `DBConnection` impl | shipped | D-DBDRIVER1=A: `T: Driver` bounds; SQLite first backend |
+| `Driver` trait + `DBConnection` impl | shipped | D-DBDRIVER1=A: `T: Driver` bounds; SQLite first backend; AOT + default `jet run` |
 | ORM / query builder | non-goal | one mechanism: typed SQL + params |
 
 Evidence: `docs/reference/core-library.md` DB section; `tests/corelib.rs` DB cases

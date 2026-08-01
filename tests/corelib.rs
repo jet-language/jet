@@ -8752,10 +8752,7 @@ fn core_db_implements_driver_trait() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_db_driver_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "db_driver_trait",
-        r#"
+    let src = r#"
 use core.db as db
 
 fn count_people<T: Driver>(&conn: T) => Int ? DBError {
@@ -8778,12 +8775,32 @@ fn run() {
     print(n)
     _closed :: conn.close()
 }
-"#,
+"#;
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "db_driver_trait",
+        src,
         &[],
         None,
     );
-    assert_eq!(code, 0, "db Driver trait test failed: {stderr}");
+    assert_eq!(code, 0, "db Driver trait AOT failed: {stderr}");
     assert_eq!(stdout, "1\n");
+
+    // I9: default `jet run` (Cranelift) must share the same Driver meaning.
+    let jet = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/jet");
+    let path = dir.join("db_driver_trait_jit.jet");
+    fs::write(&path, src).unwrap();
+    let out = Command::new(&jet)
+        .arg("run")
+        .arg(&path)
+        .output()
+        .expect("spawn jet run for Driver JIT");
+    assert!(
+        out.status.success(),
+        "db Driver trait JIT failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "1\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
