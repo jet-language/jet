@@ -2945,7 +2945,12 @@ for one crossing. Narrowing is never implicit.
 ## `core.net` — sockets and DNS
 
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
-surface. On Unix, TCP, UDP, and Unix-socket operations park through the shared
+surface and share one Prelude path for AOT, default `jet run` (Cranelift), and
+interpreter ambient (I9). Example: `examples/features/net/socket_echo.jet`
+(TCP/UDP/Unix listen+echo). Linux is the Epoch 3 proof platform; macOS/Windows
+native socket execution remains Epoch 9. AOT emission pulls Process helpers
+whenever FS runtime is needed so subprocess-backed net fixtures link cleanly.
+On Unix, TCP, UDP, and Unix-socket operations park through the shared
 scheduler readiness backend and observe task cancellation and available
 `#Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
@@ -3049,6 +3054,11 @@ Checked `SQL` literals feed that path through `db.params(sql)`, so holes become
 bound parameters, not string interpolation. The runtime uses SQLite's prepared
 statement cache under that same path; there is no separate unsafe raw-query or
 prepare-only API.
+
+D-DBDRIVER1=A: `Driver` is the backend-neutral trait for that parameterized
+surface (`query` / `query_one` / `execute` / `begin` / `commit` / `rollback`).
+`DBConnection` is the first implementation. Call sites can take `T: Driver`
+without naming SQLite. Cleanup stays on `Close` via `close(...)`.
 
 | API | Returns | Notes |
 |-----|---------|-------|

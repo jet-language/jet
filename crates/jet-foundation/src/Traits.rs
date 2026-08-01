@@ -1603,6 +1603,128 @@ impl TraitRegistry {
             .insert(("Id".to_string(), Syntax::TRAIT_EQUATABLE.to_string()));
     }
 
+    /// D-DBDRIVER1=A: one nominal parameterized SQL driver contract. SQLite's
+    /// `DBConnection` is the first compiler-owned implementation. Methods take
+    /// SQL text plus a separate `[DBValue]` bind list — there is no raw-execute
+    /// escape. Cleanup stays on `Close` (not duplicated here).
+    pub fn register_synthetic_driver(&mut self) {
+        let dummy = Span { start: 0, end: 0 };
+        let db_error = Type::Named("DBError".to_string());
+        let db_value = Type::Named(Syntax::TYPE_DB_VALUE.to_string());
+        let params = Type::List(Box::new(db_value));
+        let row = Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
+        };
+        let write_self = crate::AST::Param {
+            name: Syntax::KW_SELF.to_string(),
+            name_span: dummy,
+            ty: Type::Named(String::new()),
+            ty_span: dummy,
+            convention: AccessConvention::Write,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+        };
+        let sql_param = |name: &str| crate::AST::Param {
+            name: name.to_string(),
+            name_span: dummy,
+            ty: Type::String,
+            ty_span: dummy,
+            convention: AccessConvention::Move,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+        };
+        let params_param = crate::AST::Param {
+            name: "params".to_string(),
+            name_span: dummy,
+            ty: params,
+            ty_span: dummy,
+            convention: AccessConvention::Move,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+        };
+        if !self.traits.contains_key(Syntax::TRAIT_DRIVER) {
+            let mut methods = HashMap::new();
+            let sql_methods: [(&str, Type); 3] = [
+                (
+                    "query",
+                    Type::Result {
+                        ok: Box::new(Type::List(Box::new(row.clone()))),
+                        err: Box::new(db_error.clone()),
+                    },
+                ),
+                (
+                    "query_one",
+                    Type::Result {
+                        ok: Box::new(Type::Option(Box::new(row))),
+                        err: Box::new(db_error.clone()),
+                    },
+                ),
+                (
+                    "execute",
+                    Type::Result {
+                        ok: Box::new(Type::Int),
+                        err: Box::new(db_error),
+                    },
+                ),
+            ];
+            for (name, ret) in sql_methods {
+                methods.insert(
+                    name.to_string(),
+                    TraitMethodSig {
+                        name: name.to_string(),
+                        name_span: dummy,
+                        params: vec![write_self.clone(), sql_param("sql"), params_param.clone()],
+                        return_type: Some(ret),
+                        span: dummy,
+                        default_body: None,
+                        is_pure: false,
+                        declared_effects: None,
+                        return_view_provenance: Default::default(),
+                        declared_return_view_provenance: None,
+                    },
+                );
+            }
+            for name in ["begin", "commit", "rollback"] {
+                methods.insert(
+                    name.to_string(),
+                    TraitMethodSig {
+                        name: name.to_string(),
+                        name_span: dummy,
+                        params: vec![write_self.clone()],
+                        return_type: Some(Type::Bool),
+                        span: dummy,
+                        default_body: None,
+                        is_pure: false,
+                        declared_effects: None,
+                        return_view_provenance: Default::default(),
+                        declared_return_view_provenance: None,
+                    },
+                );
+            }
+            self.local_traits.insert(Syntax::TRAIT_DRIVER.to_string());
+            self.traits.insert(
+                Syntax::TRAIT_DRIVER.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: Vec::new(),
+                    span: dummy,
+                },
+            );
+        }
+        self.trait_impls.insert((
+            "DBConnection".to_string(),
+            Syntax::TRAIT_DRIVER.to_string(),
+        ));
+    }
+
     /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the
     /// compiler-owned stream implementations. Runtime methods live on the same
     /// opaque handles; this metadata is the sema half of those implementations.

@@ -594,6 +594,7 @@ fn expand_nested_generics_in_code_module(
     traits.register_synthetic_operators();
     traits.register_synthetic_iter_index();
     traits.register_synthetic_io();
+    traits.register_synthetic_driver();
     traits.register_items(items, &mut Vec::new());
     for def in &nested_defs { traits.register_items(&def.body, &mut Vec::new()); }
 
@@ -1531,6 +1532,7 @@ fn expand_alias(
         nested_traits.register_synthetic_operators();
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
+        nested_traits.register_synthetic_driver();
         for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
         let nested_enums: HashMap<String, bool> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
             let Item::Enum(def) = item else { return None };
@@ -1833,6 +1835,7 @@ pub(crate) fn expand_generic_module_aliases(
             traits.register_synthetic_operators();
             traits.register_synthetic_iter_index();
             traits.register_synthetic_io();
+            traits.register_synthetic_driver();
             traits.register_items(&module.items, &mut Vec::new());
             let enums: HashMap<String, bool> = module
                 .items
@@ -1949,6 +1952,7 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_operators();
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
+        traits.register_synthetic_driver();
         traits.register_items(&module.items,&mut Vec::new());
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();

@@ -32,10 +32,11 @@ coverage in `tests/corelib.rs`.
 | Surface | Status | Notes |
 |---------|--------|-------|
 | `core.db` connection + parameter binding | shipped | parameter-only queries (no string concat) |
-| Driver conformance | shipped | D-DBDRIVER1=A: parameterized interface; string-concat SQL structurally rejected |
+| `Driver` trait + `DBConnection` impl | shipped | D-DBDRIVER1=A: `T: Driver` bounds; SQLite first backend |
 | ORM / query builder | non-goal | one mechanism: typed SQL + params |
 
-Evidence: `docs/reference/core-library.md` DB section; `tests/corelib.rs` DB cases.
+Evidence: `docs/reference/core-library.md` DB section; `tests/corelib.rs` DB cases
+(`db_checked_sql_params_feed_parameterized_execute`, `core_db_implements_driver_trait`).
 
 ## Rubric / parity closeout (#1119)
 

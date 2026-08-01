@@ -8743,6 +8743,51 @@ fn run() {
 }
 
 #[test]
+fn core_db_implements_driver_trait() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping db Driver trait test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_db_driver_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "db_driver_trait",
+        r#"
+use core.db as db
+
+fn count_people<T: Driver>(&conn: T) => Int ? DBError {
+    row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])?
+    found :: row ?? panic("missing")
+    return .Ok(db.row_int(found, "n") ?? 0)
+}
+
+fn run() {
+    conn := db.open_memory()
+    _ :: conn.execute(
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)",
+        []
+    ) ?? panic("create")
+    _ :: conn.execute(
+        "INSERT INTO person (id, name) VALUES (?, ?)",
+        [DBValue.Int(1), DBValue.Text("Ada")]
+    ) ?? panic("insert")
+    n :: count_people(&conn) ?? panic("count")
+    print(n)
+    _closed :: conn.close()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "db Driver trait test failed: {stderr}");
+    assert_eq!(stdout, "1\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_fmt_human_formatting_surface_runs() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

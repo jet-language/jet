@@ -563,14 +563,17 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     if needs_text {
         // Text/Unicode already in kernel closure.
     }
+    // Process helpers are also used by FSIoEnvOsTesting (`jet_process_command` /
+    // `jet_process_spec_run_inner`) — emit whenever either surface is needed (I9).
+    // Process must come before FSIoEnvOsTesting so those symbols are in scope.
+    if needs_process || needs_fs_runtime {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
+    }
     if needs_fs_runtime {
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
     }
     if needs_crypto {
         // CryptoEntropy already in kernel closure (TLS identity + JetStd).
-    }
-    if needs_process {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_math {
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
