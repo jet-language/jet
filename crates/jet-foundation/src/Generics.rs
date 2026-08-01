@@ -27,6 +27,7 @@ pub const DECODE: &str = "Decode";
 pub const RENDERABLE: &str = "Renderable";
 pub const IO_READER: &str = "Reader";
 pub const IO_WRITER: &str = "Writer";
+pub const DRIVER: &str = "Driver";
 pub const CLOSE: &str = "Close";
 pub const ADD: &str = "Add";
 pub const SUB: &str = "Sub";
@@ -70,6 +71,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         RENDERABLE => Some("JetDisplay"),
         IO_READER => Some("JetIOReader"),
         IO_WRITER => Some("JetIOWriter"),
+        DRIVER => Some("JetDBDriver"),
         CLOSE => Some("user_Close"),
         ADD => Some("user_Add"),
         SUB => Some("user_Sub"),
@@ -286,7 +288,7 @@ pub fn rust_type_param_list(
                 .filter_map(|b| {
                     if is_quantity_bound(b) {
                         Some("crate::JetQuantity".to_string())
-                    } else if matches!(b.as_str(), IO_READER | IO_WRITER) {
+                    } else if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) {
                         rust_trait_bound(b).map(str::to_string)
                     } else if is_builtin_trait(b) {
                         rust_trait_bound(b).map(str::to_string)
@@ -301,7 +303,7 @@ pub fn rust_type_param_list(
                         "Clone" | "JetShow" | "JetDebug" | "PartialEq" | "PartialOrd" => {
                             b.clone()
                         }
-                        _ if matches!(b.as_str(), IO_READER | IO_WRITER) => {
+                        _ if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) => {
                             rust_trait_bound(b).unwrap_or("").to_string()
                         }
                         _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),

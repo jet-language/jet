@@ -57,14 +57,28 @@ pub(crate) fn method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
-    // D-NETIO-CONTRACT2=B: sema resolves a method on a bounded type parameter
-    // to the synthetic Reader/Writer contract and records that type parameter
-    // in `recv_type`. Rust emits the real trait-bound call.
+    // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves a method on a bounded
+    // type parameter to the synthetic Reader/Writer/Driver contract and records
+    // that type parameter in `recv_type`. Rust emits the real trait-bound call.
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
     }) && matches!(
         method,
-        "read" | "write" | "write_all" | "add" | "sub" | "mul" | "div" | "equal" | "compare"
+        "read"
+            | "write"
+            | "write_all"
+            | "add"
+            | "sub"
+            | "mul"
+            | "div"
+            | "equal"
+            | "compare"
+            | "query"
+            | "query_one"
+            | "execute"
+            | "begin"
+            | "commit"
+            | "rollback"
     ) {
         return args.iter().all(|arg| {
             arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals)

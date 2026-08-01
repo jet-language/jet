@@ -1322,7 +1322,36 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         }
     }
     if uses("jet.db") {
+        // D-DBDRIVER1=A: nominal Driver contract for `T: Driver` generics.
+        // Concrete `DBConnection` calls still go through THandleOp; this trait
+        // is the Rust half of the same parameterized surface.
+        out.push_str(&format!(
+            "trait JetDBDriver {{\n\
+             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError>;\n\
+             \tfn begin(&mut self) -> bool;\n\
+             \tfn commit(&mut self) -> bool;\n\
+             \tfn rollback(&mut self) -> bool;\n\
+             }}\n"
+        ));
         if let Some(ffi) = &cx.ffi_crate {
+            out.push_str(&format!(
+                "impl JetDBDriver for {root}JetDbConnection {{\n\
+                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t}}\n\
+                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params))).map(|__rows| __rows.into_iter().next())\n\
+                 \t}}\n\
+                 \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t}}\n\
+                 \tfn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.handle) }}\n\
+                 \tfn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.handle) }}\n\
+                 \tfn rollback(&mut self) -> bool {{ {ffi}::jet_db_rollback(self.handle) }}\n\
+                 }}\n"
+            ));
             out.push_str(&format!(
                 "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));

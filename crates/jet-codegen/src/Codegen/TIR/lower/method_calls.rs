@@ -545,19 +545,56 @@ pub(crate) fn lower_method_call(
         cx.current_type_params.borrow().contains(name.as_str())
     }) && matches!(
         method,
-        "read" | "write" | "write_all" | "add" | "sub" | "mul" | "div" | "equal" | "compare"
+        "read"
+            | "write"
+            | "write_all"
+            | "add"
+            | "sub"
+            | "mul"
+            | "div"
+            | "equal"
+            | "compare"
+            | "query"
+            | "query_one"
+            | "execute"
+            | "begin"
+            | "commit"
+            | "rollback"
     ) {
-        let arg_ty = match method {
-            "read" => Type::Int,
-            "write" | "write_all" => {
-                Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))
-            }
-            _ => Type::Named(recv_type.clone().unwrap_or_default()),
-        };
+        let db_params_ty = Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())));
         let recv = lower_expr(receiver, cx, env);
-        let targs = args.iter().map(|arg| {
-            lower_one_call_arg(arg, Some((arg.convention, arg_ty.clone())), env, cx)
-        }).collect();
+        let targs: Vec<_> = match method {
+            "query" | "query_one" | "execute" => args
+                .iter()
+                .enumerate()
+                .map(|(i, arg)| {
+                    let arg_ty = if i == 0 {
+                        Type::String
+                    } else {
+                        db_params_ty.clone()
+                    };
+                    lower_one_call_arg(arg, Some((arg.convention, arg_ty)), env, cx)
+                })
+                .collect(),
+            "begin" | "commit" | "rollback" => args
+                .iter()
+                .map(|arg| lower_one_call_arg(arg, None, env, cx))
+                .collect(),
+            _ => {
+                let arg_ty = match method {
+                    "read" => Type::Int,
+                    "write" | "write_all" => {
+                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))
+                    }
+                    _ => Type::Named(recv_type.clone().unwrap_or_default()),
+                };
+                args.iter()
+                    .map(|arg| {
+                        lower_one_call_arg(arg, Some((arg.convention, arg_ty.clone())), env, cx)
+                    })
+                    .collect()
+            }
+        };
         return TExpr {
             ty: resolved_ret.cloned().unwrap_or_else(unit_type),
             kind: TExprKind::MethodCall {
