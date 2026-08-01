@@ -1,0 +1,12 @@
+// D-COMPUTE-KERNEL1 (#1139/#1140): safe bounds proof + raw kernel contract under #Unsafe.
+use core.compute as compute
+
+fn run() {
+    ok :: compute.kernel_bounds_ok([2, 3], [1, 2]) ?? panic("bounds")
+    print("bounds:{ok}")
+
+    #Unsafe("raw compute kernel contract label for audited expert path") {
+        label :: compute.raw_kernel_contract("demo-kernel", 2) ?? panic("raw")
+        print("raw:{label}")
+    }
+}

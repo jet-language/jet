@@ -1,0 +1,19 @@
+// D-COMPUTE-PLACE1=D (#1138): device, stream, placement, transfer receipts.
+use core.compute as compute
+
+fn run() {
+    t :: compute.ones([2, 2]) ?? panic("ones")
+    print("device:{compute.device(t)}")
+    print("placement:{compute.placement(t)}")
+
+    cpu :: compute.device_cpu()
+    moved :: compute.on_device(t, cpu) ?? panic("on_device")
+    print("moved:{compute.device(moved)}")
+
+    stream :: compute.stream_new()
+    compute.stream_sync(stream) ?? panic("sync")
+    print("stream:ok")
+
+    xfer :: compute.transfer(moved, compute.device_auto()) ?? panic("transfer")
+    print("transfer:{compute.transfer_show(xfer)}")
+}

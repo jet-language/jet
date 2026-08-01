@@ -1,4 +1,4 @@
-// D-LIVEQUERY1=A (#505): app.live footprint tracking + invalidate → Signal payload.
+// D-LIVEQUERY1=A (#505): app.live footprint tracking + #Transact-driven invalidate → Signal.
 use app
 
 fn run() {
@@ -11,8 +11,16 @@ fn run() {
     print(app.live_stats())
     expert :: app.subscribe("metrics")
     print(app.live_show(expert))
-    tx :: app.transact_invalidate("users,orders")
-    print("tx:{tx}")
+    // Commit hook runs after `#Transact` succeeds — write-set invalidation into live registry.
+    #Transact(tx) {
+        tx.on_commit(() => {
+            app.transact_invalidate("users,orders")
+            print("commit:invalidate")
+        })
+        print("in-txn")
+    }
+    print("value:{app.live_get(q)}")
+    print(app.live_stats())
     q2 :: app.signal_push(q, "signal:users")
     print("value:{app.live_get(q2)}")
 }

@@ -1097,12 +1097,61 @@ fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String {
 }
 
 /// Named CPU-SIMD profile path; math matches scalar matmul (D-COMPUTE-BACKEND1).
+/// CPU-SIMD profile path (#1143): blocked matmul in f32 arithmetic with a fixed
+/// tile size. Same numeric contract as `matmul` for modest shapes; distinct
+/// algorithm (tiled accumulation, f32 cast) so the SIMD profile is not a
+/// facade over the f64 triple loop.
 fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
-    jet_compute_matmul(a, b)
+    if a.shape.len() != 2 || b.shape.len() != 2 {
+        return Err(JetComputeError::RankMismatch(
+            "matmul_f32_tile requires rank-2 tensors".to_string(),
+        ));
+    }
+    let (m, k) = (a.shape[0], a.shape[1]);
+    let (k2, n) = (b.shape[0], b.shape[1]);
+    if k != k2 {
+        return Err(JetComputeError::RankMismatch(format!(
+            "matmul_f32_tile inner dims {} and {} disagree",
+            k, k2
+        )));
+    }
+    const TILE: i64 = 8;
+    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Auto)?;
+    let mut i0 = 0i64;
+    while i0 < m {
+        let i1 = (i0 + TILE).min(m);
+        let mut j0 = 0i64;
+        while j0 < n {
+            let j1 = (j0 + TILE).min(n);
+            let mut t0 = 0i64;
+            while t0 < k {
+                let t1 = (t0 + TILE).min(k);
+                for i in i0..i1 {
+                    for j in j0..j1 {
+                        let mut acc = jet_compute_get(&out, &vec![i, j])? as f32;
+                        for t in t0..t1 {
+                            let av = jet_compute_get(a, &vec![i, t])? as f32;
+                            let bv = jet_compute_get(b, &vec![t, j])? as f32;
+                            acc += av * bv;
+                        }
+                        jet_compute_set(&mut out, &vec![i, j], acc as f64)?;
+                    }
+                }
+                t0 = t1;
+            }
+            j0 = j1;
+        }
+        i0 = i1;
+    }
+    out.last_placement.reason = format!(
+        "matmul_f32_tile TILE={TILE} profile={}",
+        jet_compute_profile_f32_strict()
+    );
+    Ok(out)
 }
 
 fn jet_compute_profile_f32_strict() -> String {
-    "F32Strict+Reproducible".to_string()
+    "F32Strict+Reproducible+Tile8".to_string()
 }
 
 fn jet_compute_profile_show() -> String {

@@ -3200,6 +3200,12 @@ the hidden bridge without a second copy.
 | Example | Shows |
 |---------|-------|
 | `examples/features/tooling/compute_tensor.jet` | `core.compute` Tensor / Vec / Matrix CPU oracle |
+| `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
+| `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
+| `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |
+| `examples/features/tooling/app_live.jet` | live queries + `#Transact` invalidate |
+| `docs/reference/framework-transplant-closeout.md` | framework transplant shipped-law ledger |
+| `docs/reference/language-shape-conformance.md` | #560 cross-surface conformance ledger |
 | `examples/features/io/files.jet` | Read, transform, write with errors |
 | `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/io/cli.jet` | Args, environment, exit codes |
