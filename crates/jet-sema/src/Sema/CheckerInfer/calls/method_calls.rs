@@ -3171,6 +3171,19 @@ impl<'a> Checker<'a> {
                     return result;
                 }
             }
+            if let Type::Apply { name, .. } = &recv_ty {
+                if name == crate::Syntax::TYPE_SHARED_WEAK {
+                    if let Some(ret) =
+                        Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                    {
+                        let result = self.finish_builtin_method(
+                            receiver, method, &recv_ty, args, span, ret,
+                        );
+                        *recv_type_out = Some(crate::Syntax::TYPE_SHARED_WEAK.to_string());
+                        return result;
+                    }
+                }
+            }
             let shared_guard_ty = match &recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(

@@ -229,6 +229,8 @@ pub fn is_db_value_variant(variant: &str) -> bool {
 pub const TYPE_SHARED: &str = "Shared";
 /// D-SHAREDGUARD2=A: named expert lock token returned by Shared.guard_*.
 pub const TYPE_SHARED_GUARD: &str = "SharedGuard";
+/// D-SHARED-CYCLE1=C: expert weak Shared handle for intentional cycles that free.
+pub const TYPE_SHARED_WEAK: &str = "Shared.Weak";
 /// D-SHAREDGUARD2=A: explicit wait/notification handle for Shared guards.
 pub const TYPE_CONDITION: &str = "Condition";
 

@@ -1,0 +1,7 @@
+Error [E0221]: field `next` on `Node` can form a strong `Shared` cycle
+  --> tests/ui/shared_strong_cycle.jet:3:5
+    |
+  3 |     next: Shared<Node>?
+    |     ^^^^
+ Why: a strong `Shared` edge through `Node` can point back at `Node`, so reference counting alone cannot free the graph
+ Fix: use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle

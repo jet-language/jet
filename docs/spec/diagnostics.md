@@ -263,6 +263,7 @@ renumbered, and no new `W` code may be allocated.
 | E0218 | sema  | `mem.pin` was given a value instead of a write window into a place (D-PIN1=A) |
 | E0219 | sema  | a pinned place is moved, replaced, or resized while a pin is still live (D-PIN1=A) |
 | E0220 | sema  | a place is read through its owner while an exclusive write window / pin into it is still live (card #1361, I2) |
+| E0221 | sema  | a struct field’s strong `Shared` edge can form a reference cycle (D-SHARED-CYCLE1=C) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
@@ -991,6 +992,7 @@ named cell.
 | E0218 | `mem.pin` needs a write window into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with write access instead of a copied value. | Write `mem.pin(&place)`. |
 | E0219 | A pinned place is moved, replaced, or resized while a pin is still live. | The pin promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place. | Finish using the pin before changing the place, or narrow the pin's scope. |
 | E0220 | A place is read through its owner while an exclusive write window into it is still live. | An exclusive window (a pin or a mutable view) already holds that storage; reading the owner beside it would be rejected after lowering. | Read or edit through the live window name instead of the owner. |
+| E0221 | A struct field’s strong `Shared` edge can form a reference cycle. | Strong `Shared` handles keep each other alive; a cycle through them never frees. | Use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong handle. |
 
 ## Library authoring diagnostics (E2-M6)
 

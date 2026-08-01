@@ -19,6 +19,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_ITER,
     Syntax::TYPE_RANGE,
     Syntax::TYPE_SHARED_GUARD,
+    Syntax::TYPE_SHARED_WEAK,
     Syntax::TYPE_CONDITION,
     "Bag",
     Syntax::TYPE_DEQUE,
@@ -267,6 +268,11 @@ pub fn builtin_method_return(
         // placeholder-gate note as `Pool` above — `finish_shared_read`/
         // `finish_shared_edit` compute the real (closure-derived) return type.
         Type::Shared(inner) => shared_method_return(inner, method, arg_count),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 =>
+        {
+            shared_weak_method_return(&args[0], method, arg_count)
+        }
         Type::Apply { name, args }
             if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
         {
@@ -1020,6 +1026,21 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
             inner.clone(),
             crate::AST::SHARED_GUARD_EDIT_MARKER,
         ))),
+        // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
+        ("downgrade", 0) => Some(Some(Type::Apply {
+            name: Syntax::TYPE_SHARED_WEAK.to_string(),
+            args: vec![inner.clone()],
+        })),
+        ("strong_count", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+fn shared_weak_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("upgrade", 0) => Some(Some(Type::Option(Box::new(Type::Shared(Box::new(
+            inner.clone(),
+        )))))),
         _ => None,
     }
 }

@@ -1871,6 +1871,15 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 =>
+            {
+                format!(
+                    "{}jet_std::JetSharedWeak<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // D-PENDING1=B: Loadable<T,E> → JetLoadable<T,E>.
             Type::Apply { name, args } if name == "Loadable" && args.len() == 2 => {
                 format!(
@@ -3869,7 +3878,10 @@ fn walk_type_edge(
             }
             stack.pop();
         }
-        Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => {
+        // D-SHARED-CYCLE1=C: `Shared<T>` is already a sized Arc handle. Do not
+        // invent recursive `Box` edges through Shared — strong Shared cycles are
+        // rejected in sema (E0221); expert cycles use `Shared.Weak<T>`.
+        Type::Option(inner) | Type::List(inner) => {
             walk_type_edge(owner, edge, inner, stack, cx, boxed);
         }
         Type::Map { key, value, .. } => {

@@ -1764,6 +1764,9 @@ fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
+        // D-SHARED-CYCLE1=C: strong Shared cycles are beginner-rejected (E0221);
+        // expert cycles use Shared.Weak and are admitted.
+        check_strong_shared_cycles(&st.registry, &mut diags);
     }
     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle);
     for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {

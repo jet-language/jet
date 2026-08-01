@@ -350,6 +350,30 @@ extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
     }
 }
 
+/// D-SHARED-CYCLE1=C: weak handle is the same slot index; upgrade packs
+/// Option as `0` (None) or `handle + 1` (Some).
+extern "C" fn jet_jit_shared_downgrade(handle: i64) -> i64 {
+    handle
+}
+
+extern "C" fn jet_jit_shared_strong_count(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        shared(rt, handle)
+            .map(|state| Arc::strong_count(&state) as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_shared_weak_upgrade(weak: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if shared(rt, weak).is_some() {
+            weak.wrapping_add(1)
+        } else {
+            0
+        }
+    })
+}
+
 extern "C" fn jet_jit_condition_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.conditions.push(Arc::new(ConditionState::new()));
@@ -629,6 +653,9 @@ pub(crate) struct MemoryHostFns {
     pub shared_begin: cranelift_module::FuncId,
     pub shared_end_read: cranelift_module::FuncId,
     pub shared_end_write: cranelift_module::FuncId,
+    pub shared_downgrade: cranelift_module::FuncId,
+    pub shared_strong_count: cranelift_module::FuncId,
+    pub shared_weak_upgrade: cranelift_module::FuncId,
     pub condition_new: cranelift_module::FuncId,
     pub condition_notify_one: cranelift_module::FuncId,
     pub condition_notify_all: cranelift_module::FuncId,
@@ -671,6 +698,18 @@ pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol(
         "jet_jit_shared_end_write",
         jet_jit_shared_end_write as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_downgrade",
+        jet_jit_shared_downgrade as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_strong_count",
+        jet_jit_shared_strong_count as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_weak_upgrade",
+        jet_jit_shared_weak_upgrade as *const u8,
     );
     builder.symbol("jet_jit_condition_new", jet_jit_condition_new as *const u8);
     builder.symbol(
@@ -766,6 +805,9 @@ pub(crate) fn declare_memory_host_fns(
         shared_begin: import("jet_jit_shared_begin", &unary)?,
         shared_end_read: import("jet_jit_shared_end_read", &unary_void)?,
         shared_end_write: import("jet_jit_shared_end_write", &binary_void)?,
+        shared_downgrade: import("jet_jit_shared_downgrade", &unary)?,
+        shared_strong_count: import("jet_jit_shared_strong_count", &unary)?,
+        shared_weak_upgrade: import("jet_jit_shared_weak_upgrade", &unary)?,
         condition_new: import("jet_jit_condition_new", &noarg_i64)?,
         condition_notify_one: import("jet_jit_condition_notify_one", &unary_void)?,
         condition_notify_all: import("jet_jit_condition_notify_all", &unary_void)?,

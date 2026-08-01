@@ -6390,6 +6390,38 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(result)
             }
+            // D-SHARED-CYCLE1=C: Shared.downgrade / strong_count.
+            THostCall::Method { recv, method, args }
+                if matches!(&recv.ty, Type::Shared(_))
+                    && matches!(method.as_str(), "downgrade" | "strong_count")
+                    && args.is_empty() =>
+            {
+                let handle = self.lower_expr(recv)?;
+                let host_id = if method == "downgrade" {
+                    self.host.memory.shared_downgrade
+                } else {
+                    self.host.memory.shared_strong_count
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host_ref, &[handle]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            // D-SHARED-CYCLE1=C: Shared.Weak.upgrade → packed Option<Shared>.
+            THostCall::Method { recv, method, args }
+                if matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_WEAK
+                ) && method == "upgrade"
+                    && args.is_empty() =>
+            {
+                let weak = self.lower_expr(recv)?;
+                let host_ref = self.module.declare_func_in_func(
+                    self.host.memory.shared_weak_upgrade,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host_ref, &[weak]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THostCall::Method { recv, method, args }
                 if (matches!(&recv.ty, Type::Apply { name, .. } if name == "ExpiringSecret")
                     || matches!(
@@ -15871,7 +15903,15 @@ impl LowerCtx<'_, '_> {
             Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
             Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, payload),
             Some(ty) if ty == types::I64 => payload,
-            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String) => payload,
+            _ if matches!(
+                inner,
+                Type::Named(_) | Type::Tuple(_) | Type::String | Type::Shared(_)
+            ) || matches!(
+                inner,
+                Type::Apply { name, .. }
+                    if name == jet_foundation::Syntax::TYPE_SHARED_WEAK
+                        || name == jet_foundation::Syntax::TYPE_SHARED_GUARD
+            ) => payload,
             other => {
                 return Err(format!("jit Option payload unsupported: {inner:?} ({other:?})"));
             }
@@ -15899,7 +15939,16 @@ impl LowerCtx<'_, '_> {
             Some(ty) if ty == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
             Some(ty) if ty == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
             Some(ty) if ty == types::I64 => Ok(bits),
-            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String) => Ok(bits),
+            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String | Type::Shared(_))
+                || matches!(
+                    inner,
+                    Type::Apply { name, .. }
+                        if name == jet_foundation::Syntax::TYPE_SHARED_WEAK
+                            || name == jet_foundation::Syntax::TYPE_SHARED_GUARD
+                ) =>
+            {
+                Ok(bits)
+            }
             other => Err(format!(
                 "jit Option payload unsupported: {inner:?} ({other:?})"
             )),

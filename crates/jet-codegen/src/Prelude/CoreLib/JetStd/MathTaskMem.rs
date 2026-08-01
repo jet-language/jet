@@ -790,12 +790,52 @@
             JetShared(self.0.clone())
         }
     }
+    impl<T: 'static> JetShared<T> {
+        /// D-SHARED-CYCLE1=C: expert weak edge. Strong Shared cycles are
+        /// rejected in sema (E0221); intentional graphs use Weak back-edges.
+        pub fn downgrade(&self) -> JetSharedWeak<T> {
+            JetSharedWeak(std::sync::Arc::downgrade(&self.0))
+        }
+        pub fn strong_count(&self) -> i64 {
+            std::sync::Arc::strong_count(&self.0) as i64
+        }
+    }
     // D-MEM1 S6: an opaque-handle placeholder, mirroring `JetTCPListener`'s
     // `JetShow` (Prelude/CoreLib.rs) — `Shared<T>`'s point is the lock-guarded
     // access methods, not a direct print of the handle itself.
     impl<T> super::JetShow for JetShared<T> {
         fn jet_show(&self) -> String {
             "Shared(..)".to_string()
+        }
+    }
+
+    /// D-SHARED-CYCLE1=C: weak Shared handle (`Shared.Weak<T>`). Does not keep
+    /// the payload alive; `upgrade` restores a strong handle when still live.
+    pub struct JetSharedWeak<T>(std::sync::Weak<JetSharedCell<T>>);
+    impl<T: 'static> JetSharedWeak<T> {
+        pub fn upgrade(&self) -> Option<JetShared<T>> {
+            self.0.upgrade().map(JetShared)
+        }
+    }
+    impl<T> Clone for JetSharedWeak<T> {
+        fn clone(&self) -> Self {
+            JetSharedWeak(self.0.clone())
+        }
+    }
+    impl<T> PartialEq for JetSharedWeak<T> {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.ptr_eq(&other.0)
+        }
+    }
+    impl<T> Eq for JetSharedWeak<T> {}
+    impl<T> std::fmt::Debug for JetSharedWeak<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("Shared.Weak(..)")
+        }
+    }
+    impl<T> super::JetShow for JetSharedWeak<T> {
+        fn jet_show(&self) -> String {
+            "Shared.Weak(..)".to_string()
         }
     }
 

@@ -10,6 +10,7 @@ use crate::Codegen::TIR::is_covered_fallible_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
 use crate::Codegen::TIR::is_covered_shared_guard_ty;
+use crate::Codegen::TIR::is_covered_shared_weak_ty;
 use crate::Codegen::TIR::is_covered_shared_ty;
 use crate::Codegen::TIR::is_type_var_param_ty;
 use std::collections::HashSet;
@@ -153,7 +154,9 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         }
         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` enum payload.
         Type::Apply { .. } => {
-            is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx)
+            is_covered_pool_ty(ty, cx)
+                || is_covered_shared_guard_ty(ty, cx)
+                || is_covered_shared_weak_ty(ty, cx)
         }
         Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,
@@ -412,6 +415,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         Type::Apply { .. } => {
             is_covered_pool_ty(ty, cx)
                 || is_covered_shared_guard_ty(ty, cx)
+                || is_covered_shared_weak_ty(ty, cx)
                 || is_covered_cell_ty(ty, cx)
         }
         Type::Shared(_) => is_covered_shared_ty(ty, cx),

@@ -85,6 +85,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_event_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
         || is_covered_shared_guard_ty(&ty, cx)
+        || is_covered_shared_weak_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_cell_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
@@ -205,6 +206,22 @@ pub(crate) fn is_covered_shared_guard_ty(ty: &Type, cx: &Cx) -> bool {
                 && args.len() == 1
                 && is_subset_param_ty(&args[0], cx)
     )
+}
+
+pub(crate) fn is_covered_shared_weak_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
+    if name != crate::Syntax::TYPE_SHARED_WEAK || args.len() != 1 {
+        return false;
+    }
+    match &args[0] {
+        // D-SHARED-CYCLE1=C: Weak of a user struct is always a sized handle.
+        // Do not recurse into that struct's fields — a `Shared.Weak<Node>` field
+        // on `Node` would otherwise loop forever through is_subset_param_ty.
+        Type::Named(n) if cx.struct_fields.contains_key(n) => true,
+        other => is_subset_param_ty(other, cx),
+    }
 }
 
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: a concurrency handle type `Task<T>` /
@@ -580,6 +597,8 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         // `Id<Node>` — the parent-pointer-tree shape D-POOLID-API1's ballot named).
         || is_covered_pool_ty(ty, cx)
         || is_covered_shared_ty(ty, cx)
+        || is_covered_shared_guard_ty(ty, cx)
+        || is_covered_shared_weak_ty(ty, cx)
 }
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K: V]` the subset can lower. The
@@ -642,4 +661,6 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // parent-pointer tree's `children` field, or `.ids()`'s `[Id<T>]` result).
         || is_covered_pool_ty(ty, cx)
         || is_covered_shared_ty(ty, cx)
+        || is_covered_shared_guard_ty(ty, cx)
+        || is_covered_shared_weak_ty(ty, cx)
 }

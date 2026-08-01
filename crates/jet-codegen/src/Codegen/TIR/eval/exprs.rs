@@ -1,5 +1,6 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
+use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
@@ -3013,6 +3014,36 @@ impl<'a> EvalCtx<'a> {
                         let result = self.eval_tlambda(lambda, vec![value], scope)?;
                         return Ok(CtValue::ResOk(Box::new(result)));
                     }
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirSharedWeak")
+                        && method == "upgrade"
+                        && args.is_empty()
+                    {
+                        let CtValue::Struct { fields, .. } = &r else {
+                            unreachable!();
+                        };
+                        let index = fields
+                            .iter()
+                            .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("index", CtValue::Int(index)) => Some(*index as usize),
+                                _ => None,
+                            })
+                            .ok_or_else(|| unsupported("shared weak handle", self.span()))?;
+                        let alive = self
+                            .runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
+                            .shared_values
+                            .get(index)
+                            .is_some();
+                        return Ok(if alive {
+                            CtValue::Some(Box::new(CtValue::Struct {
+                                type_name: "__JetTirShared".to_string(),
+                                fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            }))
+                        } else {
+                            CtValue::None(Type::Shared(Box::new(Type::Int)))
+                        });
+                    }
                     if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared") {
                         let CtValue::Struct { fields, .. } = &r else {
                             unreachable!();
@@ -3024,6 +3055,24 @@ impl<'a> EvalCtx<'a> {
                                 _ => None,
                             })
                             .ok_or_else(|| unsupported("shared handle", self.span()))?;
+                        // D-SHARED-CYCLE1=C: weak-handle methods (no lambda).
+                        if method == "downgrade" && args.is_empty() {
+                            return Ok(CtValue::Struct {
+                                type_name: "__JetTirSharedWeak".to_string(),
+                                fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            });
+                        }
+                        if method == "strong_count" && args.is_empty() {
+                            let count = self
+                                .runtime
+                                .lock()
+                                .expect("evaluator runtime poisoned")
+                                .shared_values
+                                .get(index)
+                                .map(|shared| Arc::strong_count(shared) as i64)
+                                .unwrap_or(0);
+                            return Ok(CtValue::Int(count));
+                        }
                         let transactional = method == "edit_txn";
                         if matches!(method.as_str(), "guard_read" | "guard_edit") {
                             let editable = method == "guard_edit";

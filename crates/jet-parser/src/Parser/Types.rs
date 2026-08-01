@@ -566,10 +566,37 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Syntax::TYPE_SHARED => {
-                        self.expect_type_args_open("Shared")?;
-                        let (inner, _) = self.type_generic_arg("Shared")?;
-                        self.maybe_close_type_args("after a shared element type")?;
-                        Type::Shared(Box::new(inner))
+                        // D-SHARED-CYCLE1=C: `Shared.Weak<T>` is the expert weak
+                        // handle; ordinary `Shared<T>` stays the strong form.
+                        if matches!(self.peek().kind, TokKind::Dot) {
+                            self.bump();
+                            let (seg, seg_span) = self.expect_ident("after `Shared.`")?;
+                            if seg != "Weak" {
+                                self.diags.push(Diagnostic::error(
+                                    "E0107",
+                                    format!("nothing named `Shared.{seg}` exists here"),
+                                    "`Shared` only names the strong handle `Shared<T>` and the expert weak handle `Shared.Weak<T>`"
+                                        .to_string(),
+                                    "write `Shared.Weak<T>` for a weak shared handle".to_string(),
+                                    Some(seg_span),
+                                ));
+                            }
+                            self.expect_type_args_open(Syntax::TYPE_SHARED_WEAK)?;
+                            let (inner, _) =
+                                self.type_generic_arg(Syntax::TYPE_SHARED_WEAK)?;
+                            self.maybe_close_type_args(
+                                "after a shared weak element type",
+                            )?;
+                            Type::Apply {
+                                name: Syntax::TYPE_SHARED_WEAK.to_string(),
+                                args: vec![inner],
+                            }
+                        } else {
+                            self.expect_type_args_open("Shared")?;
+                            let (inner, _) = self.type_generic_arg("Shared")?;
+                            self.maybe_close_type_args("after a shared element type")?;
+                            Type::Shared(Box::new(inner))
+                        }
                     }
                     // D-CAP9: `Ptr<T>` is a deprecated alias for the canonical
                     // raw-pointer type `*T`. Still parses to the same internal

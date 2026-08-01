@@ -1280,9 +1280,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     ),
                     Type::Shared(_) => matches!(
                         (method.as_str(), args.len()),
-                        ("guard_read" | "guard_edit", 0)
+                        ("guard_read" | "guard_edit" | "downgrade" | "strong_count", 0)
                             | ("read" | "edit" | "edit_txn", 1)
                     ),
+                    Type::Apply { name, .. }
+                        if name == jet_foundation::Syntax::TYPE_SHARED_WEAK =>
+                    {
+                        matches!((method.as_str(), args.len()), ("upgrade", 0))
+                    }
                     _ => !matches!(method.as_str(), "guard_read" | "guard_edit"),
                 };
                 let cell_value_supported = match &recv.ty {

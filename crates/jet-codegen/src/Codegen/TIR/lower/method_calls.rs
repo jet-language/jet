@@ -2824,6 +2824,53 @@ pub(crate) fn lower_method_call(
                 })),
             };
         }
+        // D-SHARED-CYCLE1=C: Shared.downgrade / strong_count → inherent JetShared methods.
+        if is_shared && matches!(method, "downgrade" | "strong_count") && args.is_empty() {
+            let inner = match &recv_peek {
+                Some(Type::Shared(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let ty = resolved_ret.cloned().unwrap_or_else(|| {
+                if method == "strong_count" {
+                    Type::Int
+                } else {
+                    Type::Apply {
+                        name: Syntax::TYPE_SHARED_WEAK.to_string(),
+                        args: vec![inner],
+                    }
+                }
+            });
+            return TExpr {
+                ty,
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    method: method.to_string(),
+                    args: Vec::new(),
+                })),
+            };
+        }
+        let is_shared_weak = recv_type.as_deref() == Some(Syntax::TYPE_SHARED_WEAK)
+            || matches!(
+                &recv_peek,
+                Some(Type::Apply { name, .. }) if name == Syntax::TYPE_SHARED_WEAK
+            );
+        if is_shared_weak && method == "upgrade" && args.is_empty() {
+            let inner = match &recv_peek {
+                Some(Type::Apply { args, .. }) if !args.is_empty() => args[0].clone(),
+                _ => Type::Int,
+            };
+            let ty = resolved_ret.cloned().unwrap_or_else(|| {
+                Type::Option(Box::new(Type::Shared(Box::new(inner))))
+            });
+            return TExpr {
+                ty,
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    method: method.to_string(),
+                    args: Vec::new(),
+                })),
+            };
+        }
         if let Some(cell_receiver) = cell_receiver {
             let recv_t = lower_expr(receiver, cx, env);
             let inner = match &recv_t.ty {

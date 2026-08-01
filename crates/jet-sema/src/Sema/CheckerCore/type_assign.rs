@@ -304,6 +304,7 @@ impl<'a> Checker<'a> {
                             // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
                             // secret-lifetime wrapper.
                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
+                            | Syntax::TYPE_SHARED_WEAK
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
                     ) || is_core_view_generic(ty);
                     if name == "ExpiringSecret"

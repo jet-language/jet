@@ -5350,3 +5350,10 @@ may register the handler without firing it. Spelling uses the existing labeled
 argument surface (S61); no new Syntax.rs keyword. Flagship:
 `examples/features/web/ui_web_click.jet`. GTK folds into the same node-carried
 handler (I8). Card #1311.
+
+**2026-07-31 — D-SHARED-CYCLE1=C**: strong `Shared<T>` fields that can form a
+reference cycle are rejected at sema (E0221). Expert intentional cycles use
+`Shared.Weak<T>` — a weak handle with `.downgrade()` / `.upgrade()` /
+`.strong_count()` — and free when strong roots drop. One Shared mechanism (I8);
+full I9; no follow-on card. Flagship: `examples/features/memory/shared_weak_cycle.jet`.
+Card #1372.

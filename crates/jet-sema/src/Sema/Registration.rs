@@ -12,7 +12,7 @@ mod Items;
 mod Serde;
 
 pub(crate) use Items::{
-    comptime_context_from_items, eval_comptime_items, name_defined,
+    check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,
     register_const, register_distinct, register_enum, register_impl_methods, register_struct,
     register_type_alias, register_type_methods,
 };

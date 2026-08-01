@@ -216,9 +216,12 @@ pub(crate) fn method_call_in_subset(
                 args.len() == 1
                     && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
             }
-            "guard_read" | "guard_edit" => args.is_empty(),
+            "guard_read" | "guard_edit" | "downgrade" | "strong_count" => args.is_empty(),
             _ => false,
         };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_SHARED_WEAK) {
+        return method == "upgrade" && args.is_empty();
     }
     if recv_type.as_deref() == Some(Syntax::TYPE_SHARED_GUARD) {
         return match method {

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1373,
-    "rev": 21254,
+    "rev": 21272,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61201,12 +61201,36 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "done",
       "priority": "P2",
-      "plan": "## Goal\nResolve Shared-in-Shared / cyclic Shared after #1353: either reject with a named diagnostic or execute with full I9 and free-or-leak proof.\n\n## Gate\nOwner ballot D-SHARED-CYCLE1 (reject vs execute vs hybrid). No code until ratified.\n\n## After ratification\n- If A or C (reject / hybrid default): implement sema diagnostic + UI snapshot + example; I9 refuse on all tiers; docs.\n- If B (execute): close Items.rs / quick-run gaps; Prelude cycle lifetime; free-or-leak measurement; full I9.\n- If C expert follow-on: file blocked child card for Weak / allow-cycle with B acceptance law.\n\n## Out\nNo weakref on this card unless B/C follow-on is explicitly in scope after ratification.",
+      "plan": "## Goal\nD-SHARED-CYCLE1=C: beginner strong Shared cycles → E0221; expert Shared.Weak cycles ship now with full I9 + free-or-leak proof.\n\n## Done shape\n- Sema rejects strong Shared-in-Shared cycles (E0221 + UI snapshot).\n- Shared.Weak<T>, .downgrade/.upgrade/.strong_count in parser/sema/Prelude/TIR/JIT.\n- Example `examples/features/memory/shared_weak_cycle.jet` golden identical on AOT and default `jet run`.\n- Free-or-leak proved by `tests/shared_weak.rs` Arc Weak cycle + orphan upgrade tests.\n- No jit_gaps parking.\n\n## Out\nNo follow-on Weak card. No AOT-only close.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-review",
+          "text": "verified: E0221 + Shared.Weak I9 parity + free-or-leak; closed"
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-grok",
+          "text": "criteria met; awaiting independent verify then done"
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-grok",
+          "text": "implemented D-SHARED-CYCLE1=C: E0221 + Shared.Weak I9 + free-or-leak tests; AOT/JIT example green"
+        },
+        {
+          "at": "2026-07-31",
+          "by": "cursor-grok",
+          "text": "implementing D-SHARED-CYCLE1=C: beginner-safe Shared + expert Weak cycles now"
+        },
+        {
+          "at": "2026-07-31",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -61218,15 +61242,58 @@
           "text": "needs owner ballot: reject vs execute Shared cycles"
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "E0221 rejects beginner strong Shared cycles (UI snapshot green)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "JET_UI_FILTER=tests/ui/shared_strong_cycle.jet cargo test --test diagnostic_snapshots -- ui_snapshots --exact: 1 passed; jet check tests/ui/shared_strong_cycle.jet: E0221 on field next",
+          "at": "2026-08-01T00:20:59.008Z"
+        },
+        {
+          "n": 2,
+          "text": "Shared.Weak surface ships: downgrade/upgrade/strong_count across AOT + default jet run",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "jet run + jet run --release shared_weak_cycle.jet: while-alive:b/strong:1/upgrade-ok; cargo test --test shared_weak: 4 passed",
+          "at": "2026-08-01T00:20:59.227Z"
+        },
+        {
+          "n": 3,
+          "text": "Example golden identical on AOT and default jet run; free-or-leak proved in tests/shared_weak.rs",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "expected/memory/shared_weak_cycle.out matches both tiers; weak_only_cycle_frees + orphan_weak_upgrade tests green",
+          "at": "2026-08-01T00:20:59.435Z"
+        },
+        {
+          "n": 4,
+          "text": "No jit_gaps entry; I9 adapters only (Prelude owns semantics)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "rg shared_weak_cycle tests/jit_gaps.txt: no match; JIT Memory downgrade/strong_count/weak_upgrade are marshalling adapters",
+          "at": "2026-08-01T00:20:59.647Z"
+        }
+      ],
+      "refs": [
+        "docs/spec/diagnostics.md",
+        "docs/spec/syntax-decisions.md",
+        "examples/features/memory/shared_weak_cycle.jet",
+        "tests/ui/shared_strong_cycle.jet",
+        "tests/shared_weak.rs"
+      ],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T21:15:34.975Z",
-      "updated": "2026-07-31T23:44:22.218Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T23:15:45.636Z"
+      "updated": "2026-08-01T00:20:59.897Z",
+      "updatedBy": "cursor-review",
+      "completedAt": "2026-08-01T00:20:59.897Z"
     }
   ],
   "decisions": [
@@ -81026,8 +81093,10 @@
       },
       "checkInstructions": "Pick A/B/C/D. Guidance already recorded: both beginner magic and full expert control now — no later. Recommended revised C. After ratify: implement the whole dual surface on this card (I9 + free-or-leak); do not split expert to a follow-on.",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-31T23:15:45.377Z"
+      "status": "ratified",
+      "created": "2026-07-31T23:15:45.377Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-31"
     }
   ],
   "questions": [
@@ -82258,6 +82327,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-01T00:20:59.897Z",
+      "by": "cursor-review",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:20:59.648Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0uhvn0v",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-01T00:20:59.435Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0uhvn0v",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:20:59.227Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0uhvn0v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:20:59.008Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0uhvn0v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:20:00.212Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:19:59.958Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0uhvn0v",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-01T00:19:59.745Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0uhvn0v",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:19:59.532Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0uhvn0v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:19:59.323Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0uhvn0v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:19:59.111Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0uhvn0v",
+      "note": "#4 No jit_gaps entry; I9 adapters only (Prelude owns semantics)"
+    },
+    {
+      "at": "2026-08-01T00:19:58.893Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0uhvn0v",
+      "note": "#3 Example golden identical on AOT and default jet run; free-or"
+    },
+    {
+      "at": "2026-08-01T00:19:58.677Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0uhvn0v",
+      "note": "#2 Shared.Weak surface ships: downgrade/upgrade/strong_count ac"
+    },
+    {
+      "at": "2026-08-01T00:19:58.461Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0uhvn0v",
+      "note": "#1 E0221 rejects beginner strong Shared cycles (UI snapshot gre"
+    },
+    {
+      "at": "2026-08-01T00:19:58.252Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-31T23:51:12.697Z",
+      "by": "cursor-grok",
+      "action": "card.claim",
+      "ref": "c0uhvn0v",
+      "note": ""
+    },
+    {
+      "at": "2026-07-31T23:47:54.721Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0uhvn0v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-31T23:47:09.030Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SHARED-CYCLE1",
+      "note": "C"
+    },
     {
       "at": "2026-07-31T23:44:22.218Z",
       "by": "cursor-grok",
@@ -85630,132 +85825,6 @@
       "by": "cursor-sol",
       "action": "card.criteria-verify",
       "ref": "c0s2y2en",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:34:17.671Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0s2y2en",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T17:34:17.443Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0s2y2en",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T17:34:17.230Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0s2y2en",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:29:09.367Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-07-31T17:29:09.367Z"
-    },
-    {
-      "at": "2026-07-31T17:15:17.763Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0s2y2en",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:15:17.529Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0s2y2en",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:15:17.294Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c0s2y2en",
-      "note": "#3 No regression: rest of tests/canvas.rs canvas_project_ filte"
-    },
-    {
-      "at": "2026-07-31T17:15:17.087Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c0s2y2en",
-      "note": "#2 native_cancellation_closes_group_before_caller_continues in "
-    },
-    {
-      "at": "2026-07-31T17:15:16.873Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c0s2y2en",
-      "note": "#1 canvas_project_* family (4 tests named in card) pass without"
-    },
-    {
-      "at": "2026-07-31T17:15:09.468Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0s2y2en",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T17:15:09.241Z",
-      "by": "cursor-grok",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-31T17:15:01.847Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T17:14:56.893Z",
-      "by": "cursor-sol",
-      "action": "card.update",
-      "ref": "c0qxofha",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:14:56.641Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0qxofha",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:14:56.366Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0qxofha",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T17:14:56.138Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0qxofha",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T17:14:55.912Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0qxofha",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T17:14:55.678Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0qxofha",
       "note": "#1"
     }
   ],

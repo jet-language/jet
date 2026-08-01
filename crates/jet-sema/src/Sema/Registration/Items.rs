@@ -599,6 +599,139 @@ pub(crate) fn register_struct(
     }
 }
 
+/// D-SHARED-CYCLE1=C: reject strong `Shared` fields that can form a reference
+/// cycle. Expert cycles use `Shared.Weak<T>` (weak edges do not count).
+pub(crate) fn check_strong_shared_cycles(
+    registry: &TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let struct_names: Vec<String> = registry
+        .types
+        .iter()
+        .filter_map(|(name, def)| match def {
+            TypeDef::Struct { .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    for owner in &struct_names {
+        let Some(TypeDef::Struct { fields, .. }) = registry.types.get(owner) else {
+            continue;
+        };
+        let fields = fields.clone();
+        for (fname, fspan, fty, _) in &fields {
+            if let Some(through) =
+                strong_shared_cycle_witness(owner, fty, registry, &mut Vec::new())
+            {
+                diags.push(Diagnostic::error(
+                    "E0221",
+                    format!(
+                        "field `{fname}` on `{owner}` can form a strong `Shared` cycle"
+                    ),
+                    format!(
+                        "a strong `Shared` edge through `{through}` can point back at `{owner}`, so reference counting alone cannot free the graph"
+                    ),
+                    "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle".to_string(),
+                    Some(*fspan),
+                ));
+            }
+        }
+    }
+}
+
+/// Returns the payload type name that closes a strong Shared cycle, if any.
+fn strong_shared_cycle_witness(
+    owner: &str,
+    ty: &Type,
+    registry: &TypeRegistry,
+    stack: &mut Vec<String>,
+) -> Option<String> {
+    match ty {
+        Type::Shared(inner) => {
+            if payload_can_reach_owner(owner, inner, registry, &mut HashSet::new()) {
+                Some(inner.name())
+            } else {
+                None
+            }
+        }
+        Type::Option(inner) | Type::List(inner) | Type::Tagged { inner, .. } => {
+            strong_shared_cycle_witness(owner, inner, registry, stack)
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            strong_shared_cycle_witness(owner, key, registry, stack)
+                .or_else(|| strong_shared_cycle_witness(owner, value, registry, stack))
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .find_map(|(_, fty)| strong_shared_cycle_witness(owner, fty, registry, stack)),
+        Type::Union(members) => members
+            .iter()
+            .find_map(|m| strong_shared_cycle_witness(owner, m, registry, stack)),
+        // Weak edges never contribute to a strong cycle.
+        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => None,
+        Type::Apply { args, .. } => args
+            .iter()
+            .find_map(|m| strong_shared_cycle_witness(owner, m, registry, stack)),
+        Type::Named(n) if registry.is_user_struct(n) => {
+            if stack.iter().any(|s| s == n) {
+                return None;
+            }
+            stack.push(n.clone());
+            let hit = match registry.types.get(n) {
+                Some(TypeDef::Struct { fields, .. }) => fields
+                    .iter()
+                    .find_map(|(_, _, fty, _)| {
+                        strong_shared_cycle_witness(owner, fty, registry, stack)
+                    }),
+                _ => None,
+            };
+            stack.pop();
+            hit
+        }
+        _ => None,
+    }
+}
+
+fn payload_can_reach_owner(
+    owner: &str,
+    ty: &Type,
+    registry: &TypeRegistry,
+    seen: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Type::Named(n) if n == owner => true,
+        Type::Named(n) if registry.is_user_struct(n) => {
+            if !seen.insert(n.clone()) {
+                return false;
+            }
+            match registry.types.get(n) {
+                Some(TypeDef::Struct { fields, .. }) => fields
+                    .iter()
+                    .any(|(_, _, fty, _)| payload_can_reach_owner(owner, fty, registry, seen)),
+                _ => false,
+            }
+        }
+        Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::List(inner)
+        | Type::Tagged { inner, .. } => payload_can_reach_owner(owner, inner, registry, seen),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            payload_can_reach_owner(owner, key, registry, seen)
+                || payload_can_reach_owner(owner, value, registry, seen)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, fty)| payload_can_reach_owner(owner, fty, registry, seen)),
+        Type::Union(members) => members
+            .iter()
+            .any(|m| payload_can_reach_owner(owner, m, registry, seen)),
+        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => false,
+        Type::Apply { args, .. } => args
+            .iter()
+            .any(|m| payload_can_reach_owner(owner, m, registry, seen)),
+        _ => false,
+    }
+}
+
 pub(crate) fn register_enum(
     e: &EnumDef,
     registry: &mut TypeRegistry,
