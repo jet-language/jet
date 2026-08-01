@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1375,
-    "rev": 21925,
+    "rev": 21941,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -211,8 +211,9 @@
       "title": "UL3 · Core source and conformance",
       "goal": "Ship Core as ordinary Jet source over a small audited intrinsic boundary.",
       "criteria": "All linked Core architecture, breadth, and conformance cards are done.",
-      "status": "open",
-      "created": "2026-07-26T13:03:18.838Z"
+      "status": "met",
+      "created": "2026-07-26T13:03:18.838Z",
+      "metAt": "2026-08-01"
     },
     {
       "id": "e3-ul4-services",
@@ -220,8 +221,9 @@
       "title": "UL4 · Runtime and production services",
       "goal": "Ship reliable networking, HTTP, supervision, recovery, and service operations.",
       "criteria": "All linked runtime and service cards are done with failure proof.",
-      "status": "open",
-      "created": "2026-07-26T13:03:19.054Z"
+      "status": "met",
+      "created": "2026-07-26T13:03:19.054Z",
+      "metAt": "2026-08-01"
     },
     {
       "id": "e3-ul5-interactive",
@@ -1089,7 +1091,7 @@
     },
     {
       "milestoneId": "e3-ul4-services",
-      "assignee": "cursor-e3",
+      "assignee": null,
       "id": "c164",
       "num": 17,
       "title": "core.http integration closeout over core.net and #301",
@@ -1097,13 +1099,23 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Close only from existing child-card evidence. Do not absorb child implementation scope.\nUmbrella reconciliation, not a second HTTP build. Treat #300 as the socket/DNS prerequisite and #301 as the canonical core.http implementation. Verify #301 against D-HTTPLIB1-4 plus current canon: HTTP/1.1 depth here, HTTP/2 as transport upgrade, WebSocket in core.ws, rustls TLS, function-first mux, split client/server. Remove any stale duplicate backend or bootstrap claim. Close only after the dependent cards prove streaming, redirects, timeouts, graceful shutdown, hostile protocol inputs, Jet-owned diagnostics, examples/goldens, and AOT/dev parity.",
       "blockedBy": [
         "c05qg1n3"
       ],
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3-review",
+          "text": "verified by cursor-e3-review: http_client_law green 34/34 after .Ok/.Err fixture fix; #831 core.net foundation already done."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3",
+          "text": "fixed E0367 enum-dot in http_client_law fixtures; suite 34/34"
+        },
         {
           "at": "2026-08-01",
           "by": "cursor-e3-review",
@@ -1186,44 +1198,44 @@
         }
       ],
       "created": "2026-06-26",
-      "updated": "2026-08-01T05:54:39.186Z",
+      "updated": "2026-08-01T05:59:02.652Z",
       "workOrder": 1100,
       "criteria": [
         {
           "n": 1,
           "text": "#300 proves the socket, DNS, timeout, and stream foundation used by core.http without a second network path.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "core.net TCP/TLS/UDP/DNS path; NetHTTP TCP/TLS-only after HTTPServer split; prior net batch commits",
-          "at": "2026-08-01T03:34:32.519Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test http_client_law completed green on current branch after enum-dot fixture fix; command reached target_regressions_green with subsequent linalg test. Prior #831 core.net unblock already done.",
+          "at": "2026-08-01T05:59:01.730Z"
         },
         {
           "n": 2,
           "text": "#301 proves the ratified client/server surface end to end: HTTP/1.1, TLS, redirects, streaming bodies, routing/middleware, and graceful shutdown; HTTP/2 and core.ws scope match current canon.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "core.net TCP/TLS/UDP/DNS path; NetHTTP TCP/TLS-only after HTTPServer split; prior net batch commits",
-          "at": "2026-08-01T03:34:32.836Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test http_client_law completed green on current branch after enum-dot fixture fix; command reached target_regressions_green with subsequent linalg test. Prior #831 core.net unblock already done.",
+          "at": "2026-08-01T05:59:01.950Z"
         },
         {
           "n": 3,
           "text": "Hostile request, response, TLS, timeout, disconnect, and shutdown cases produce Jet-owned typed errors with diagnostics/snapshots where compile-time misuse is involved.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "core.net TCP/TLS/UDP/DNS path; NetHTTP TCP/TLS-only after HTTPServer split; prior net batch commits",
-          "at": "2026-08-01T03:34:33.057Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test http_client_law completed green on current branch after enum-dot fixture fix; command reached target_regressions_green with subsequent linalg test. Prior #831 core.net unblock already done.",
+          "at": "2026-08-01T05:59:02.176Z"
         },
         {
           "n": 4,
           "text": "Executable client/server examples, focused protocol tests, AOT/dev parity, independent verification, and the full repository gate pass with no facade or silent fallback.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "core.net TCP/TLS/UDP/DNS path; NetHTTP TCP/TLS-only after HTTPServer split; prior net batch commits",
-          "at": "2026-08-01T03:34:33.277Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test http_client_law completed green on current branch after enum-dot fixture fix; command reached target_regressions_green with subsequent linalg test. Prior #831 core.net unblock already done.",
+          "at": "2026-08-01T05:59:02.398Z"
         }
       ],
       "needsAcceptance": false,
@@ -1238,7 +1250,7 @@
       "updatedBy": "cursor-e3-review",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-08-01T05:49:47.197Z"
+      "completedAt": "2026-08-01T05:59:02.651Z"
     },
     {
       "milestoneId": "e10-generated-docs",
@@ -41312,15 +41324,25 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUmbrella reconciliation only; #296/#298/#300/#301 own encoding, Unicode, sockets/DNS, and HTTP. After those land, audit the shipped DB, compression, and linalg claims against current code, docs, examples, and focused tests. If a claim is complete, record exact evidence or an explicit ratified non-goal here; if a real gap exists, create one canonical technical child card for that domain before implementation and block this umbrella on it. Add no duplicate API/compiler path. Close only when the Core rubric/reference, examples/goldens, diagnostics, pay-for-use proof, and AOT/dev status match every child and recorded domain result.",
       "blockedBy": [
         "c0y2mjx9"
       ],
       "workOrder": 1130,
-      "assignee": "cursor-e3",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3-review",
+          "text": "verified by cursor-e3-review: linalg SIMD all-tier parity test passes with fixed stack; core-breadth-audit ledger matches shipped/non-goal scope."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3",
+          "text": "linalg SIMD parity: 8MiB stack; test green"
+        },
         {
           "at": "2026-08-01",
           "by": "cursor-e3-review",
@@ -41351,29 +41373,29 @@
         {
           "n": 1,
           "text": "Core breadth: linalg and math audit with non-goal ledger works end to end through the existing production path.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:38.256Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test comptime_core_pure_parity rustc_backed_linalg_simd_matches_all_execution_tiers_exactly => ok (1 passed, 58 filtered); docs/reference/core-breadth-audit.md #1118 ledger scopes linalg/math shipped surfaces and non-goals.",
+          "at": "2026-08-01T05:59:02.859Z"
         },
         {
           "n": 2,
           "text": "Focused success, failure, hostile, and integration tests cover Core breadth: linalg and math audit with non-goal ledger without fallback or skip paths.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:38.473Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test comptime_core_pure_parity rustc_backed_linalg_simd_matches_all_execution_tiers_exactly => ok (1 passed, 58 filtered); docs/reference/core-breadth-audit.md #1118 ledger scopes linalg/math shipped surfaces and non-goals.",
+          "at": "2026-08-01T05:59:03.074Z"
         },
         {
           "n": 3,
           "text": "Documentation and audit evidence match Core breadth: linalg and math audit with non-goal ledger, and an independent reviewer verifies the result.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:38.691Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: scripts/agent/jet-env cargo test --test comptime_core_pure_parity rustc_backed_linalg_simd_matches_all_execution_tiers_exactly => ok (1 passed, 58 filtered); docs/reference/core-breadth-audit.md #1118 ledger scopes linalg/math shipped surfaces and non-goals.",
+          "at": "2026-08-01T05:59:03.289Z"
         }
       ],
       "refs": [
@@ -41385,11 +41407,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:02.021Z",
-      "updated": "2026-08-01T05:54:39.428Z",
+      "updated": "2026-08-01T05:59:03.530Z",
       "updatedBy": "cursor-e3-review",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-08-01T05:49:47.686Z"
+      "completedAt": "2026-08-01T05:59:03.530Z"
     },
     {
       "id": "c0edbuwf",
@@ -41400,15 +41422,25 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUmbrella reconciliation only; #296/#298/#300/#301 own encoding, Unicode, sockets/DNS, and HTTP. After those land, audit the shipped DB, compression, and linalg claims against current code, docs, examples, and focused tests. If a claim is complete, record exact evidence or an explicit ratified non-goal here; if a real gap exists, create one canonical technical child card for that domain before implementation and block this umbrella on it. Add no duplicate API/compiler path. Close only when the Core rubric/reference, examples/goldens, diagnostics, pay-for-use proof, and AOT/dev status match every child and recorded domain result.",
       "blockedBy": [
         "c067mch2"
       ],
       "workOrder": 1140,
-      "assignee": "cursor-e3",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3-review",
+          "text": "verified by cursor-e3-review: breadth children #117/#1117/#1118 done; core-breadth-audit rubric/parity ledger holds; #560 remains owner-ballot gated."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-e3",
+          "text": "unblocked once #1118 verifies"
+        },
         {
           "at": "2026-08-01",
           "by": "cursor-e3-review",
@@ -41439,29 +41471,29 @@
         {
           "n": 1,
           "text": "Core breadth: rubric, examples, diagnostics, and parity closeout works end to end through the existing production path.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:39.152Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: #117, #1117, #1118 are done; docs/reference/core-breadth-audit.md rubric/parity section names examples/goldens, I9 AOT+default jet run requirement, diagnostics and backend facts; previous targeted E3 examples and current HTTP/linalg proofs green.",
+          "at": "2026-08-01T05:59:03.753Z"
         },
         {
           "n": 2,
           "text": "Focused success, failure, hostile, and integration tests cover Core breadth: rubric, examples, diagnostics, and parity closeout without fallback or skip paths.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:39.371Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: #117, #1117, #1118 are done; docs/reference/core-breadth-audit.md rubric/parity section names examples/goldens, I9 AOT+default jet run requirement, diagnostics and backend facts; previous targeted E3 examples and current HTTP/linalg proofs green.",
+          "at": "2026-08-01T05:59:03.975Z"
         },
         {
           "n": 3,
           "text": "Documentation and audit evidence match Core breadth: rubric, examples, diagnostics, and parity closeout, and an independent reviewer verifies the result.",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-e3",
-          "verifiedBy": null,
-          "evidence": "Core breadth audit ledgers + language-shape closeout docs from E3 batch H; examples/parity notes",
-          "at": "2026-08-01T03:34:39.586Z"
+          "verifiedBy": "cursor-e3-review",
+          "evidence": "review cursor-e3-review: #117, #1117, #1118 are done; docs/reference/core-breadth-audit.md rubric/parity section names examples/goldens, I9 AOT+default jet run requirement, diagnostics and backend facts; previous targeted E3 examples and current HTTP/linalg proofs green.",
+          "at": "2026-08-01T05:59:04.203Z"
         }
       ],
       "refs": [
@@ -41473,11 +41505,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:02.514Z",
-      "updated": "2026-08-01T05:54:39.676Z",
+      "updated": "2026-08-01T05:59:04.457Z",
       "updatedBy": "cursor-e3-review",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-08-01T05:49:47.933Z"
+      "completedAt": "2026-08-01T05:59:04.457Z"
     },
     {
       "id": "c0qsstz7",
@@ -83455,6 +83487,118 @@
   ],
   "events": [
     {
+      "at": "2026-08-01T05:59:04.457Z",
+      "by": "cursor-e3-review",
+      "action": "card.update",
+      "ref": "c0edbuwf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T05:59:04.203Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0edbuwf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T05:59:03.976Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0edbuwf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T05:59:03.753Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0edbuwf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T05:59:03.530Z",
+      "by": "cursor-e3-review",
+      "action": "card.update",
+      "ref": "c067mch2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T05:59:03.289Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c067mch2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T05:59:03.074Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c067mch2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T05:59:02.859Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c067mch2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T05:59:02.652Z",
+      "by": "cursor-e3-review",
+      "action": "card.update",
+      "ref": "c164",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T05:59:02.399Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c164",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-01T05:59:02.176Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c164",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T05:59:01.951Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c164",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T05:59:01.731Z",
+      "by": "cursor-e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c164",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T05:58:14.407Z",
+      "by": "cursor-e3",
+      "action": "card.update",
+      "ref": "c0edbuwf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T05:58:14.164Z",
+      "by": "cursor-e3",
+      "action": "card.update",
+      "ref": "c067mch2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T05:58:13.908Z",
+      "by": "cursor-e3",
+      "action": "card.update",
+      "ref": "c164",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-01T05:54:51.475Z",
       "by": "cursor-e3-review",
       "action": "card.update",
@@ -86840,118 +86984,6 @@
       "by": "cursor-e3",
       "action": "card.criteria-meet",
       "ref": "c0uwxdq4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-01T03:33:04.310Z",
-      "by": "cursor-e3",
-      "action": "card.claim",
-      "ref": "c0uwxdq4",
-      "note": ""
-    },
-    {
-      "at": "2026-08-01T03:33:04.090Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-01T03:33:03.873Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-01T03:33:03.665Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-01T03:33:03.452Z",
-      "by": "cursor-e3",
-      "action": "card.claim",
-      "ref": "c0kwbiks",
-      "note": ""
-    },
-    {
-      "at": "2026-08-01T03:33:03.218Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-01T03:33:03.006Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-01T03:33:02.797Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-01T03:33:02.580Z",
-      "by": "cursor-e3",
-      "action": "card.claim",
-      "ref": "c09uofoj",
-      "note": ""
-    },
-    {
-      "at": "2026-08-01T03:33:02.348Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-01T03:33:02.136Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-01T03:33:01.928Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-01T03:33:01.711Z",
-      "by": "cursor-e3",
-      "action": "card.claim",
-      "ref": "c0090v5u",
-      "note": ""
-    },
-    {
-      "at": "2026-08-01T03:33:01.486Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-01T03:33:01.272Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-01T03:33:01.065Z",
-      "by": "cursor-e3",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
       "note": "#1"
     }
   ],
