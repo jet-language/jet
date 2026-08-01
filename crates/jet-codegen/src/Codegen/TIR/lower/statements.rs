@@ -770,7 +770,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // D-FIXARR1: `[T#N]` must emit a Rust array. `CtValue::serialize` always
             // prints lists as `vec![…]`, so skip the comptime shortcut and lower the
             // source literal (retag below) instead of baking a CtLit.
-            if b.ct.is_some() && !matches!(b.ty.as_ref(), Some(Type::FixedList { .. })) {
+            // D-SG9: same for `[U8]`/`[I32]`/… — serialize always suffixes `i64`, which
+            // rustc rejects against `Vec<u8>` (I2). Lower + preserve_typed_list_shape.
+            let skip_ct_list_bake = matches!(b.ty.as_ref(), Some(Type::FixedList { .. }))
+                || matches!(
+                    b.ty.as_ref(),
+                    Some(Type::List(elem)) if matches!(elem.as_ref(), Type::IntN { .. })
+                );
+            if b.ct.is_some() && !skip_ct_list_bake {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),

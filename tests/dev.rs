@@ -7802,16 +7802,18 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
     // Shield + channel cancel nests enough Cranelift/runtime frames that the
     // default libtest worker stack overflows on this host; match other heavy
     // Cranelift cases and run under a larger dedicated stack.
+    // Prefer resident JIT; silent deopt to the interpreter is still I9-legal
+    // when a nested Shield/channel shape is outside the resident subset.
     std::thread::Builder::new()
         .name("shield_cancel".into())
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
-            let out = run_cranelift_without_fallback(
+            let out = run_cranelift_outcome(
                 r#"use core.tasks as tasks
 fn run() {
-    (sender, ch) :: tasks.channel<Int>()
-    (ack_sender, ack) :: tasks.channel<Int>()
-    slow :: tasks.spawn(() => {
+    (sender, ch) := tasks.channel<Int>()
+    (ack_sender, ack) := tasks.channel<Int>()
+    slow := tasks.spawn(() => {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)

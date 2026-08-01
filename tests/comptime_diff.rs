@@ -306,9 +306,9 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
 
 fn codec_probe() => String {
     bytes :: [U8].{ 72, 101, 108, 108, 111 }
-    gz :: [U8].{ gzip.decompress(gzip.compress(bytes)) ?? [] }
-    golden :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [] }
-    bad_size :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255] }
+    gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8].{}
+    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8].{}
+    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8].{ 255 }
     h :: U8.{ 72 }
     lower_h :: U8.{ 104 }
     o :: U8.{ 111 }
@@ -335,12 +335,12 @@ fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     }
     let src = r#"use core.compress.zstd as zstd
 
-#Known bytes :: [72, 101, 108, 108, 111]
+#Known bytes :: [U8].{ 72, 101, 108, 108, 111 }
 #Known encoded :: zstd.compress(bytes)
-#Known expected :: zstd.decompress(encoded) ?? []
+#Known expected :: zstd.decompress(encoded) ?? [U8].{}
 
 fn run() {
-    restored :: [U8].{ zstd.decompress(encoded) ?? [] }
+    restored :: zstd.decompress(encoded) ?? [U8].{}
     print("{expected}")
     print("{restored}")
 }
@@ -356,10 +356,10 @@ fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
     }
     let src = r#"use core.compress.zstd as zstd
 
-#Known expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+#Known expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
 
 fn run() {
-    actual :: [U8].{ zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255] }
+    actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
     print("{expected}")
     print("{actual}")
 }

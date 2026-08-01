@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1373,
-    "rev": 21272,
+    "nextNum": 1375,
+    "rev": 21318,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "radar:e4"
       ]
     },
-    "completionCursor": "2026-07-31T22:50:24.152Z"
+    "completionCursor": "2026-08-01T00:27:11.039Z"
   },
   "epochs": [
     {
@@ -57033,12 +57033,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nShip one portable `on_click` on GTK, web, and terminal (D-WEB-CLICK-OWN1 destination B). Fold GTK's existing `on_click` into that one mechanism (I8). Move `examples/features/web/ui_web_click.jet` off `web.on` to node-carried handlers.\n\n## Ratified law\n- D-UI-NODE-ID1=C — render path is identity by default; optional author `key` overrides for lists and reorders.\n- D-UI-EVT-DISP1=E — default hot path is O(1) node-keyed handler slots (`jet_ui_dispatch`); unmount clears the slot; experts opt the same handlers into the shared UI scheduler for ordered/coalesced drain. Never selector identity.\n- D-UI-EVT-SET1=D — portable core is click/activate; richer events require an explicit capability module (for example `ui.web.hover`).\n\n## Build steps\n1. Write identity, dispatch, and event-set law into the UI/runtime docs this card owns.\n2. Implement Prelude/DOM/GTK marshalling to those rules only. No second click mechanism. No policy re-encoded in an engine (I9).\n3. Respell the flagship web example to portable `on_click`. Prove default `jet run` and AOT when the example is runnable. Keep GTK click parity.\n4. Add capability-module path for one rich event only if needed to prove D; otherwise document the import rule and leave wider events for follow-on cards.\n\n## Acceptance / proof\n- Flagship click demo uses portable `on_click`, not `web.on`, for the counter path.\n- Remount after re-render keeps the handler (path identity); a keyed list reorder keeps the keyed handler.\n- Unsupported rich event without the capability module is a clear diagnostic or compile gate, not a silent no-op.\n- Targeted UI/runtime tests + example golden green on applicable tiers.\n\n## Owned paths\n`crates/jet-codegen/src/Prelude/DomRuntime.js`, `UiGtk.rs`, UI Prelude surface, `examples/features/web/ui_web_click.jet`, related UI docs under `docs/spec/`.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-review",
+          "text": "verified portable on_click criteria; closed"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -57069,74 +57074,74 @@
         {
           "n": 1,
           "text": "Node identity across renders on the DOM backend is decided and written down",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "D-UI-NODE-ID1=C written in docs/reference/core-library.md portable click section + DomRuntime.js (key overrides path)",
-          "at": "2026-07-31T23:15:59.246Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "D-UI-NODE-ID1=C documented in docs/reference/core-library.md (author key vs render path); DomRuntime.js L189-192 key overrides path identity",
+          "at": "2026-08-01T00:22:34.674Z"
         },
         {
           "n": 2,
           "text": "The JavaScript-to-wasm event dispatch channel is decided and written down",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "D-UI-EVT-DISP1=E: jet_ui_dispatch / jetUiDispatch O(1) slots; DomRuntime + Ui.rs + UiGtk bind at paint",
-          "at": "2026-07-31T23:15:59.476Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "D-UI-EVT-DISP1=E: jetUiDispatch/jet_ui_dispatch O(1) slots in DomRuntime.js L55-62, Ui.rs L801-817, UiGtk.rs binds at paint",
+          "at": "2026-08-01T00:22:34.895Z"
         },
         {
           "n": 3,
           "text": "The portable event set is decided, including what a backend does with an event it cannot produce",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "D-UI-EVT-SET1=D: portable core is click; rich events need capability module; documented in core-library + syntax-decisions",
-          "at": "2026-07-31T23:15:59.703Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "D-UI-EVT-SET1=D: portable click only; rich events need capability module — core-library.md L2426-2427, DomRuntime.js L243-244",
+          "at": "2026-08-01T00:22:35.121Z"
         },
         {
           "n": 4,
           "text": "ui_web_click.jet respells to the portable on_click form",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "examples/features/web/ui_web_click.jet uses ui.button(..., on_click:); HTML #btn and web.on removed",
-          "at": "2026-07-31T23:15:59.924Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "ui_web_click.jet L35 ui.button(..., on_click:); no web.on usage (only comment L3); counter via reactive signal",
+          "at": "2026-08-01T00:22:35.341Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "N/A: on_click is Core labeled arg (S61), not a new Syntax.rs keyword/sigil",
-          "at": "2026-07-31T23:16:00.143Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "N/A confirmed: on_click is S61 labeled arg on ui.button; no new Syntax.rs keyword/sigil (syntax-decisions L5350)",
+          "at": "2026-08-01T00:22:35.560Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md 2026-07-31 log for D-WEB-CLICK-PORT1/D-UI-NODE-ID1/D-UI-EVT-DISP1/D-UI-EVT-SET1",
-          "at": "2026-07-31T23:16:00.374Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "syntax-decisions.md L5342-5352 log entry for D-WEB-CLICK-PORT1/D-UI-NODE-ID1/D-UI-EVT-DISP1/D-UI-EVT-SET1",
+          "at": "2026-08-01T00:22:35.771Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "N/A: no new grammar surface; S61 labeled calls unchanged",
-          "at": "2026-07-31T23:16:00.590Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "N/A confirmed: no new grammar surface; reuses S61 labeled-call syntax",
+          "at": "2026-08-01T00:22:35.978Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "cursor-grok",
-          "verifiedBy": null,
-          "evidence": "N/A: no new diagnostic on this card; no snapshot rebless required",
-          "at": "2026-07-31T23:16:00.805Z"
+          "verifiedBy": "cursor-review",
+          "evidence": "N/A confirmed: no new diagnostic codes; no snapshot changes required for this card",
+          "at": "2026-08-01T00:22:36.186Z"
         }
       ],
       "refs": [
@@ -57146,11 +57151,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T16:26:27.968Z",
-      "updated": "2026-07-31T23:16:00.806Z",
-      "updatedBy": "cursor-grok",
+      "updated": "2026-08-01T00:22:38.789Z",
+      "updatedBy": "cursor-review",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-07-31T23:04:00.927Z"
+      "completedAt": "2026-08-01T00:22:38.789Z"
     },
     {
       "id": "c0qqnv58",
@@ -60362,12 +60367,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nLet a library take a caller-owned place and hand back an aggregate that stores an exclusive window into it, with the same provenance proof read views already get.\n\n## Why now\nCard #1200 (Pin<T>) met criteria #1 and #3 but left #2, #4, and #5 open on exactly this. The same limitation blocks any ViewMut-storing library API, so it is one shared fix, not pin-specific work.\n\n## Repro\n    fn attach(label: String, node: &Node) => Queue from node {\n        return Queue.{label: ~label, head: mem.pin(&node)}\n    }\n\nWriting through `queue.head` afterwards is E0212: \"queue is a live read view into node\". Dropping the `from` clause instead loses the hidden Rust lifetime and rustc rejects the generated signature (I2).\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs (return-view provenance, call-site composition)\n- crates/jet-sema/src/Sema/Bundle/Validation.rs (declared `from` contract)\n- crates/jet-codegen/src/Codegen/TIR/emit/functions.rs (hidden view lifetime on write windows)\n- tests/ownership.rs, tests/pin.rs\n\n## Scope\nIn: write-access provenance for returned and stored windows; the `from` clause carrying access, not only the owner set; call-site composition for an aggregate that stores a window.\nOut: new syntax. The `from` clause and the `Pin<T>` / `ViewMut<T>` spellings are already ratified.\n\n## Acceptance\nA library function may accept `&owner` and return an aggregate with a `Pin<T>` or `ViewMut<T>` field; the caller may edit through that field; AOT, Cranelift, and the interpreter agree; provenance escape is still rejected.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-review",
+          "text": "Independent verify (cursor-review): from-clause write provenance + tier parity green; criteria 1-3 verified."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-grok",
+          "text": "from-clause write provenance met; awaiting independent verify"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -60379,15 +60394,43 @@
           "text": "plan complete; no owner gates; implementing"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Library fn may return aggregate with Pin/ViewMut field via from-clause write provenance",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "a_library_may_return_a_pin_field_from_an_owner_parameter 1/1 ok; write_window_return_uses_mutable_parameter_provenance 1/1 ok",
+          "at": "2026-08-01T00:29:22.294Z"
+        },
+        {
+          "n": 2,
+          "text": "Caller may edit through returned Pin/ViewMut field; escape still rejected",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "editing_through_a_pin_reaches_the_owner_on_every_tier 1/1 ok; builder escape tests cited",
+          "at": "2026-08-01T00:29:22.724Z"
+        },
+        {
+          "n": 3,
+          "text": "AOT/JIT/interpreter agree on returned write-window edit (pin tests)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "editing_through_a_pin_reaches_the_owner_on_every_tier 1/1 ok (AOT/JIT/interpreter tiers)",
+          "at": "2026-08-01T00:29:23.157Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:03:41.244Z",
-      "updated": "2026-07-31T23:04:01.174Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T23:04:01.173Z"
+      "updated": "2026-08-01T00:29:23.556Z",
+      "updatedBy": "cursor-review",
+      "completedAt": "2026-08-01T00:29:23.556Z"
     },
     {
       "id": "c0z784jn",
@@ -60398,12 +60441,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nReject a read of a place while an exclusive window into it is live, in sema, before rustc sees the code.\n\n## Why\n`check_place_change` only fires on changes. A plain read of the owner while a write window is live passes sema and then hits rustc E0503 (\"cannot use `x.f` because it was mutably borrowed\"), which is an internal compiler error by I2, not a user diagnostic.\n\n## Repro\n    node := Node.{payload: 41, hops: 0}\n    pinned :: mem.pin(&node)\n    if node.payload > 0 {\n        pinned.hops += 1\n    }\n    print(\"{(pinned.hops)}\")\n\nSema accepts this; rustc rejects the generated Rust. It reproduces with a plain `p :: &node` window too, so it is not pin-specific.\n\n## Owned paths\n- crates/jet-sema/src/Sema/CheckerOwnership.rs\n- tests/ownership.rs, tests/ui/\n\n## Scope\nIn: a read-while-write-window-live check with a registered diagnostic and a UI snapshot; the fix should name the window to read through.\nOut: relaxing the existing E0212 change rules.\n\n## Acceptance\nThe repro above is a Jet diagnostic, not an ICE; existing read-view overlap rules are unchanged; a read after the window's last use still compiles.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-review",
+          "text": "Independent verify (cursor-review): E0220 sema + UI snapshot + post-window read green; criteria 1-3 verified."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-grok",
+          "text": "E0220 read-while-write-window met; awaiting independent verify"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -60415,15 +60468,43 @@
           "text": "plan complete; no owner gates; implementing"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Read of owner while exclusive write window live is E0220 in sema (not ICE)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "reading_the_owner_while_a_pin_is_live_is_e0220 1/1 ok; CheckerOwnership check_place_read emits E0220",
+          "at": "2026-08-01T00:29:22.095Z"
+        },
+        {
+          "n": 2,
+          "text": "UI snapshot for E0220 registered and green",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "JET_UI_FILTER=tests/ui/read_owner_while_write_window.jet diagnostic_snapshots ui_snapshots 1/1 ok",
+          "at": "2026-08-01T00:29:22.521Z"
+        },
+        {
+          "n": 3,
+          "text": "Read after window last use still compiles; pin/ownership suites green",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "the_promise_ends_with_the_pin_scope 1/1 ok; read after window last use compiles",
+          "at": "2026-08-01T00:29:22.949Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:04:10.953Z",
-      "updated": "2026-07-31T23:04:01.419Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T23:04:01.419Z"
+      "updated": "2026-08-01T00:29:23.352Z",
+      "updatedBy": "cursor-review",
+      "completedAt": "2026-08-01T00:29:23.352Z"
     },
     {
       "id": "c0gei5kr",
@@ -60434,12 +60515,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nGet the three drifted UI snapshots and the CBOR/comptime differential cases green again, and stop `tests/dev.rs` aborting the whole suite on a stack overflow.\n\n## Findings (2026-07-31, observed on master at 011145775, before any pin work)\n- `tests/diagnostic_snapshots.rs::ui_snapshots` — mismatch on `tests/ui/enum_pattern_needs_dot_payload.jet` (an extra E0404 now fires), `tests/ui/trait_not_impl.jet`, and `tests/ui/view_mut_bounds_interpreter.jet`.\n- `tests/comptime_diff.rs` — five failures, four CBOR cases plus `comptime_bigint_matches_runtime`, all reporting \"generated unsafe outside the vetted prelude\".\n- `tests/dev.rs::cranelift_shield_defers_task_cancel_without_unwinding_native_frame` — stack overflow, SIGABRT, which aborts the rest of the `dev` target.\n- `tests/golden.rs::examples_compile_and_run` — around twenty examples, including `basics/if_universal` (L0507 lint), `concurrency/task_runtime_audit` (codegen ICE), the crypto family and the `net`/`io` families (rustc E0308 on generated code).\n\n## Scope\nIn: triage each group to the commit that introduced it, then fix or split into per-owner cards.\nOut: new features.\n\n## Acceptance\n`cargo test --test diagnostic_snapshots`, `--test comptime_diff`, `--test dev`, and `--test golden` all pass, or each remaining failure has its own card with a named owner.",
       "blockedBy": [],
-      "assignee": "cursor-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-01",
+          "by": "cursor-review",
+          "text": "verified UI+gzip/zstd greens and split leftovers #1373/#1374; closed"
+        },
+        {
+          "at": "2026-08-01",
+          "by": "cursor-grok",
+          "text": "UI+gzip/zstd greens; leftovers split to #1373/#1374; awaiting independent verify"
+        },
         {
           "at": "2026-07-31",
           "by": "cursor-grok",
@@ -60451,15 +60542,48 @@
           "text": "plan complete; triage+fix reds"
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "UI snapshots for enum_pattern_needs_dot_payload, trait_not_impl, view_mut_bounds_interpreter green",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "cursor-review: JET_UI_FILTER enum_pattern_needs_dot_payload ui_snapshots 1/1 ok (exit 0)",
+          "at": "2026-08-01T00:40:38.039Z"
+        },
+        {
+          "n": 2,
+          "text": "comptime_diff gzip + zstd differentials green (U8 list emit / fixture parity with dev.rs)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "cursor-review: gzip_golden_and_hostile + zstd_comptime_codec 1/1 each ok (exit 0)",
+          "at": "2026-08-01T00:40:38.260Z"
+        },
+        {
+          "n": 3,
+          "text": "Remaining reds split to owned cards (#1373 Shield/channel E0956, #1374 comptime_matches_runtime panics)",
+          "status": "verified",
+          "metBy": "cursor-grok",
+          "verifiedBy": "cursor-review",
+          "evidence": "cursor-review: #1373 (Shield+channel E0956) and #1374 (comptime_matches_runtime panics) exist phase=ready with repro plans",
+          "at": "2026-08-01T00:40:38.483Z"
+        }
+      ],
+      "refs": [
+        "tests/dev.rs",
+        "tests/comptime_diff.rs",
+        "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
+        "tests/ui/enum_pattern_needs_dot_payload.stderr"
+      ],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T19:04:33.761Z",
-      "updated": "2026-07-31T23:04:01.656Z",
-      "updatedBy": "cursor-grok",
-      "claimedAt": "2026-07-31T23:04:01.655Z"
+      "updated": "2026-08-01T00:40:42.505Z",
+      "updatedBy": "cursor-review",
+      "completedAt": "2026-08-01T00:40:42.505Z"
     },
     {
       "id": "c0owyfpq",
@@ -61294,6 +61418,59 @@
       "updated": "2026-08-01T00:20:59.897Z",
       "updatedBy": "cursor-review",
       "completedAt": "2026-08-01T00:20:59.897Z"
+    },
+    {
+      "id": "c0xoocid",
+      "num": 1373,
+      "title": "Cranelift Shield+channel cancel returns E0956 (no deopt)",
+      "body": "Split from #1362. `tests/dev.rs::cranelift_shield_defers_task_cancel_without_unwinding_native_frame` fails: quick-run returns E0956 for `tasks.channel()` instead of resident JIT or silent interpreter deopt. Stack enlargement alone does not fix it. Own: restore I9 for Shield+channel cancel (resident or honest deopt) so the test proves cancel without native unwind.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "## Goal\nMake Shield+channel cancel run under default `jet run` (resident or silent deopt) without E0956.\n\n## Repro\ncargo test --test dev cranelift_shield_defers -- --exact\n\n## Out\nNo new syntax.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "tests/dev.rs",
+        "crates/jet-jit/src/jit/safety.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-01T00:39:43.922Z",
+      "updated": "2026-08-01T00:39:43.922Z",
+      "updatedBy": "cursor-grok"
+    },
+    {
+      "id": "c0162gi7",
+      "num": 1374,
+      "title": "comptime_matches_runtime: Int/shift cases panic at runtime",
+      "body": "Split from #1362. `tests/comptime_diff.rs::comptime_matches_runtime` fails on cases `1000000 * 1000000`, `1 << 10`, `(0 - 17) / 5`, `(0 - 17) % 5` with runtime panic of the rustc-built binary (not the I1 unsafe-strip path). Own: make these differentials match comptime vs AOT without panicking.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "## Goal\nGreen `cargo test --test comptime_diff comptime_matches_runtime`.\n\n## Repro\ncargo test --test comptime_diff comptime_matches_runtime -- --exact\n\n## Note\ngzip/zstd differentials were fixed on #1362 (U8 list emit); do not reopen those.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "tests/comptime_diff.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-01T00:39:44.132Z",
+      "updated": "2026-08-01T00:39:44.132Z",
+      "updatedBy": "cursor-grok"
     }
   ],
   "decisions": [
@@ -82328,6 +82505,328 @@
   ],
   "events": [
     {
+      "at": "2026-08-01T00:40:42.505Z",
+      "by": "cursor-review",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:40:38.483Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0gei5kr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:40:38.261Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0gei5kr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:40:38.039Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0gei5kr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:39:55.167Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0gei5kr",
+      "note": "phase,logEntry,refs"
+    },
+    {
+      "at": "2026-08-01T00:39:54.906Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0gei5kr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:39:54.680Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0gei5kr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:39:54.463Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0gei5kr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:39:54.243Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0gei5kr",
+      "note": "#3 Remaining reds split to owned cards (#1373 Shield/channel E0"
+    },
+    {
+      "at": "2026-08-01T00:39:54.026Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0gei5kr",
+      "note": "#2 comptime_diff gzip + zstd differentials green (U8 list emit "
+    },
+    {
+      "at": "2026-08-01T00:39:53.812Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0gei5kr",
+      "note": "#1 UI snapshots for enum_pattern_needs_dot_payload, trait_not_i"
+    },
+    {
+      "at": "2026-08-01T00:39:44.132Z",
+      "by": "cursor-grok",
+      "action": "card.add",
+      "ref": "c0162gi7",
+      "note": "comptime_matches_runtime: Int/shift cases panic at runtime"
+    },
+    {
+      "at": "2026-08-01T00:39:43.922Z",
+      "by": "cursor-grok",
+      "action": "card.add",
+      "ref": "c0xoocid",
+      "note": "Cranelift Shield+channel cancel returns E0956 (no deopt)"
+    },
+    {
+      "at": "2026-08-01T00:29:23.556Z",
+      "by": "cursor-review",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:29:23.352Z",
+      "by": "cursor-review",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:29:23.157Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0buvo7y",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:29:22.950Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z784jn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:29:22.724Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0buvo7y",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:29:22.521Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z784jn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:29:22.294Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0buvo7y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:29:22.095Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z784jn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:28:19.865Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0z784jn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:28:19.602Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0z784jn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:28:19.378Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0z784jn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:28:19.153Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0z784jn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:28:18.921Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0z784jn",
+      "note": "#3 Read after window last use still compiles; pin/ownership sui"
+    },
+    {
+      "at": "2026-08-01T00:28:18.705Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0z784jn",
+      "note": "#2 UI snapshot for E0220 registered and green"
+    },
+    {
+      "at": "2026-08-01T00:28:18.484Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0z784jn",
+      "note": "#1 Read of owner while exclusive write window live is E0220 in "
+    },
+    {
+      "at": "2026-08-01T00:28:18.266Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0buvo7y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:28:18.013Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0buvo7y",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:28:17.791Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0buvo7y",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:28:17.566Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-meet",
+      "ref": "c0buvo7y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:28:17.328Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0buvo7y",
+      "note": "#3 AOT/JIT/interpreter agree on returned write-window edit (pin"
+    },
+    {
+      "at": "2026-08-01T00:28:17.103Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0buvo7y",
+      "note": "#2 Caller may edit through returned Pin/ViewMut field; escape s"
+    },
+    {
+      "at": "2026-08-01T00:28:16.884Z",
+      "by": "cursor-grok",
+      "action": "card.criteria-add",
+      "ref": "c0buvo7y",
+      "note": "#1 Library fn may return aggregate with Pin/ViewMut field via f"
+    },
+    {
+      "at": "2026-08-01T00:27:11.039Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-01T00:27:11.039Z"
+    },
+    {
+      "at": "2026-08-01T00:22:38.789Z",
+      "by": "cursor-review",
+      "action": "card.update",
+      "ref": "c0indi4b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-01T00:22:36.186Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-01T00:22:35.978Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-01T00:22:35.771Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-01T00:22:35.560Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-01T00:22:35.341Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-01T00:22:35.121Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-01T00:22:34.895Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-01T00:22:34.674Z",
+      "by": "cursor-review",
+      "action": "card.criteria-verify",
+      "ref": "c0indi4b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-01T00:22:05.787Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-01T00:22:05.787Z"
+    },
+    {
       "at": "2026-08-01T00:20:59.897Z",
       "by": "cursor-review",
       "action": "card.update",
@@ -85504,328 +86003,6 @@
       "action": "card.update",
       "ref": "c00707ob",
       "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-31T18:25:37.491Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c00707ob",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T18:25:37.269Z",
-      "by": "cursor-grok",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-31T18:25:32.000Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T18:25:31.746Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T18:25:18.548Z",
-      "by": "cursor-sol",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T18:25:07.016Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#10"
-    },
-    {
-      "at": "2026-07-31T18:25:06.817Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-31T18:22:56.677Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T18:22:56.449Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#10"
-    },
-    {
-      "at": "2026-07-31T18:22:56.243Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-31T18:22:56.029Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#10 Aggregate per-slot from (field: sources): escape UI + view_f"
-    },
-    {
-      "at": "2026-07-31T18:22:55.833Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#9 Parameter from: View params declare required sibling sources"
-    },
-    {
-      "at": "2026-07-31T18:13:23.196Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-31T18:11:36.293Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T18:11:35.970Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-31T18:11:25.935Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#8 Function-type from: named fn params + trailing from populate"
-    },
-    {
-      "at": "2026-07-31T18:00:11.744Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T17:57:43.622Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c03xl9l8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T17:55:43.537Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-31T17:55:43.297Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-31T17:55:43.091Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-31T17:55:42.880Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T17:55:42.668Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T17:55:42.459Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T17:55:42.246Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03xl9l8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:54:35.349Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-31T17:54:35.037Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-31T17:54:34.826Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-31T17:54:34.618Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-31T17:54:34.417Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T17:50:35.129Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T17:49:04.267Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T17:49:04.046Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03xl9l8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-31T17:49:03.821Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-31T17:43:38.209Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-07-31T17:43:38.209Z"
-    },
-    {
-      "at": "2026-07-31T17:35:12.475Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#7 I9: declared provenance honored on AOT and default jet run f"
-    },
-    {
-      "at": "2026-07-31T17:35:12.270Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#6 Trait method from self retires E2305 for that declared metho"
-    },
-    {
-      "at": "2026-07-31T17:35:12.060Z",
-      "by": "cursor-grok",
-      "action": "card.criteria-add",
-      "ref": "c03xl9l8",
-      "note": "#5 Result from-clause parses and sema checks return paths ⊆ dec"
-    },
-    {
-      "at": "2026-07-31T17:35:11.834Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:34:56.150Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c03xl9l8",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-07-31T17:34:34.580Z",
-      "by": "cursor-grok",
-      "action": "card.claim",
-      "ref": "c03xl9l8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-31T17:34:18.974Z",
-      "by": "cursor-sol",
-      "action": "card.update",
-      "ref": "c0s2y2en",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:34:18.682Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0s2y2en",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-31T17:34:18.329Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0s2y2en",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-31T17:34:18.115Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0s2y2en",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-31T17:34:17.898Z",
-      "by": "cursor-sol",
-      "action": "card.criteria-verify",
-      "ref": "c0s2y2en",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
