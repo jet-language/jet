@@ -565,6 +565,142 @@ pub fn core_fixed_sig(
                 Some((args, Some(Type::Float)))
             }
         }
+        // D-COMPUTE1=D / D-COMPUTE-TYPE1=D (#443): Tensor storage and aliases.
+        ("core.compute", "zeros" | "ones") => Some((
+            vec![(read, Type::List(Box::new(Type::Int)))],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "full") => Some((
+            vec![(read, Type::List(Box::new(Type::Int))), (read, Type::Float)],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "from_list") => Some((
+            vec![(read, Type::List(Box::new(Type::Float)))],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "matrix") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::Float)],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "vec") => Some((
+            vec![(read, Type::Int), (read, Type::Float)],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "add" | "mul" | "matmul") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "reshape") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::List(Box::new(Type::Int))),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "get") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::List(Box::new(Type::Int))),
+            ],
+            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "set") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("Tensor".to_string())),
+                (read, Type::List(Box::new(Type::Int))),
+                (read, Type::Float),
+            ],
+            Some(result_ty(Type::Named("Unit".into()), Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "shape") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::List(Box::new(Type::Int))),
+        )),
+        ("core.compute", "to_list") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::List(Box::new(Type::Float))),
+        )),
+        ("core.compute", "rank" | "numel") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.compute", "device" | "placement") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.compute", "device_cpu" | "device_auto") => Some((vec![], Some(Type::Named("ComputeDevice".to_string())))),
+        ("core.compute", "on_device") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("ComputeDevice".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        // #1136 ndarray ops — same Tensor substrate (D-COMPUTE-TYPE1).
+        ("core.compute", "broadcast_to") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::List(Box::new(Type::Int))),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "transpose" | "negate" | "abs" | "exp" | "log" | "sqrt") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "sum_axis") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "sub" | "div" | "maximum" | "minimum") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
         ("core.data", "quantile") => {
             let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)];
             if super::super::Edition::edition_at_least("2027") {

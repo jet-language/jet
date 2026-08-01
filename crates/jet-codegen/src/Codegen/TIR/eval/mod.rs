@@ -3,6 +3,7 @@
 mod builtins;
 mod browser;
 mod closure_ops;
+mod compute_calls;
 mod data_calls;
 mod event_ops;
 mod exprs;

@@ -870,6 +870,98 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
+        // D-COMPUTE1=D (#443): Tensor CPU oracle — one Prelude symbol per call.
+        ("core.compute", "zeros") => format!("{}(&({}))", helper("jet_compute_zeros"), arg(0)),
+        ("core.compute", "ones") => format!("{}(&({}))", helper("jet_compute_ones"), arg(0)),
+        ("core.compute", "full") => {
+            format!("{}(&({}), {})", helper("jet_compute_full"), arg(0), arg(1))
+        }
+        ("core.compute", "from_list") => {
+            format!("{}(&({}))", helper("jet_compute_from_list"), arg(0))
+        }
+        ("core.compute", "matrix") => format!(
+            "{}({}, {}, {})",
+            helper("jet_compute_matrix"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.compute", "vec") => {
+            format!("{}({}, {})", helper("jet_compute_vec"), arg(0), arg(1))
+        }
+        ("core.compute", "add") => {
+            format!("{}(&({}), &({}))", helper("jet_compute_add"), arg(0), arg(1))
+        }
+        ("core.compute", "mul") => {
+            format!("{}(&({}), &({}))", helper("jet_compute_mul"), arg(0), arg(1))
+        }
+        ("core.compute", "matmul") => {
+            format!("{}(&({}), &({}))", helper("jet_compute_matmul"), arg(0), arg(1))
+        }
+        ("core.compute", "reshape") => {
+            format!("{}(&({}), &({}))", helper("jet_compute_reshape"), arg(0), arg(1))
+        }
+        ("core.compute", "get") => {
+            format!("{}(&({}), &({}))", helper("jet_compute_get"), arg(0), arg(1))
+        }
+        ("core.compute", "set") => format!(
+            "{}(&mut ({}), &({}), {})",
+            helper("jet_compute_set"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.compute", "shape") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_shape"), arg(0))
+        }
+        ("core.compute", "rank") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_rank"), arg(0))
+        }
+        ("core.compute", "numel") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_numel"), arg(0))
+        }
+        ("core.compute", "to_list") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_to_list"), arg(0))
+        }
+        ("core.compute", "device") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_device"), arg(0))
+        }
+        ("core.compute", "placement") => {
+            format!("{}(&({}))", helper("jet_compute_tensor_placement"), arg(0))
+        }
+        ("core.compute", "device_cpu") => format!("{}()", helper("jet_compute_device_cpu")),
+        ("core.compute", "device_auto") => format!("{}()", helper("jet_compute_device_auto")),
+        ("core.compute", "on_device") => format!(
+            "{}(&({}), {})",
+            helper("jet_compute_on_device"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "broadcast_to") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_broadcast_to"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "transpose") => {
+            format!("{}(&({}))", helper("jet_compute_transpose"), arg(0))
+        }
+        ("core.compute", "sum_axis") => format!(
+            "{}(&({}), {})",
+            helper("jet_compute_sum_axis"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.compute", "negate" | "abs" | "exp" | "log" | "sqrt") => {
+            format!("{}(\"{}\", &({}))", helper("jet_compute_unary"), method, arg(0))
+        }
+        ("core.compute", "sub" | "div" | "maximum" | "minimum") => format!(
+            "{}(\"{}\", &({}), &({}))",
+            helper("jet_compute_binary"),
+            method,
+            arg(0),
+            arg(1)
+        ),
         ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
         ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
         ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),

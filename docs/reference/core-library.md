@@ -3031,6 +3031,43 @@ prepare-only API.
 
 ---
 
+## `core.compute` — Tensor CPU oracle
+
+D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns ranked
+multidimensional storage. `Tensor` is the owner type; `vec` and `matrix` are
+rank-1 / rank-2 aliases over the same substrate. Placement defaults to the CPU
+oracle and emits an inspectable receipt (`device` / `placement`).
+
+```jet
+use core.compute as compute
+
+fn run() {
+    t :: compute.zeros([2, 3]) ?? panic("zeros")
+    print(compute.rank(t))
+    u :: compute.ones([2, 3]) ?? panic("ones")
+    s :: compute.add(t, u) ?? panic("add")
+    print(compute.to_list(s))
+}
+```
+
+| API | Result |
+|-----|--------|
+| `zeros` / `ones` / `full` / `from_list` | `Tensor ? ComputeError` |
+| `vec` / `matrix` | rank-1 / rank-2 `Tensor` aliases |
+| `add` / `mul` / `sub` / `div` / `maximum` / `minimum` | elementwise (broadcasting) |
+| `matmul` / `reshape` / `broadcast_to` / `transpose` | shape ops |
+| `negate` / `abs` / `exp` / `log` / `sqrt` | unary ufuncs |
+| `sum_axis` | reduce one axis |
+| `get` / `set` | indexed access (`set` takes `&Tensor`) |
+| `shape` / `rank` / `numel` / `to_list` | inspection |
+| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
+
+Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
+AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
+symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
+
+---
+
 ## Compression and archives
 
 D-CORE-COMPRESS1=A assigns each operation one public home:
@@ -3059,7 +3096,7 @@ exact automatic promotion sites to migrate back to ownership.
 
 `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
 `core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
-`core.solve`, `core.data`, `core.files`, `core.path`, `core.url`, `core.mime`,
+`core.solve`, `core.data`, `core.compute`, `core.files`, `core.path`, `core.url`, `core.mime`,
 `core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
 `core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
 `core.encoding.csv`, `core.encoding.toml`, `core.encoding.yaml`,
@@ -3079,11 +3116,16 @@ exact automatic promotion sites to migrate back to ownership.
 
 ---
 
-## Writing Core in Jet (future)
+## Writing Core in Jet
 
-Today, Core lives in the compiler as typed signatures plus Rust prelude templates
-(`Source/Prelude/Std.rs`). The **API** is Jet; the **implementation** is Rust until
-the package system fully stabilizes.
+Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` are the
+canonical source for compiler-known Core behavior (R10). Sema records helpers a
+program can call; codegen emits only reachable Top modules (`push_corelib_prelude`).
+
+First-party packages with a separately buildable source tree must not keep a
+copied fallback template. `core.archive` is the concrete model:
+`corelib/core.archive/pkgs/archive/src/lib.rs` is consumed by CoreProvider and
+the hidden bridge without a second copy.
 
 ---
 
@@ -3091,6 +3133,7 @@ the package system fully stabilizes.
 
 | Example | Shows |
 |---------|-------|
+| `examples/features/tooling/compute_tensor.jet` | `core.compute` Tensor / Vec / Matrix CPU oracle |
 | `examples/features/io/files.jet` | Read, transform, write with errors |
 | `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/io/cli.jet` | Args, environment, exit codes |

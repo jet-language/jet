@@ -579,6 +579,16 @@ pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-COMPUTE1=D: compute opaque types map to top-level prelude structs.
+pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Tensor" => Some("JetTensor"),
+        "ComputeError" => Some("JetComputeError"),
+        "ComputeDevice" => Some("JetComputeDevice"),
+        _ => None,
+    }
+}
+
 /// E2-M10: networking opaque types map to top-level prelude structs.
 pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
@@ -1511,6 +1521,19 @@ impl Cx {
                     self.root_prefix,
                     net_handle_rust_type(name).unwrap()
                 )
+            }
+            // D-COMPUTE1=D: Tensor / compute error / device handles.
+            Type::Named(name) if compute_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    compute_handle_rust_type(name).unwrap()
+                )
+            }
+            Type::Apply { name, args }
+                if name == "Tensor" && args.len() <= 1 && compute_handle_rust_type(name).is_some() =>
+            {
+                format!("{}JetTensor", self.root_prefix)
             }
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {

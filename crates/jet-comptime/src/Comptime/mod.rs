@@ -27,6 +27,7 @@ mod EventLite;
 mod CryptoLite;
 mod ArchiveLite;
 mod ZstdEntropy;
+pub mod ComputeLite;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;

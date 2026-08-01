@@ -2004,6 +2004,9 @@ impl<'a> EvalCtx<'a> {
                 if module == "core.data" {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
+                if module == "core.compute" {
+                    return self.eval_core_compute_call(method, args, *source_span, scope);
+                }
                 if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
                     let pointer = self.eval_expr(&args[0], scope)?;
                     let value = self.eval_expr(&args[1], scope)?;

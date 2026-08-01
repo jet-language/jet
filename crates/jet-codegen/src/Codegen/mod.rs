@@ -362,6 +362,36 @@ fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str
 }
 
 fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // R10 / #1133: record emission identity beside the templates so cache
+    // keys and audits can see which Top-module set was selected.
+    let mut body = String::new();
+    push_corelib_prelude_body(&mut body, used_core);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in body.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    out.push_str(&format!(
+        "/* jet-corelib-r10 len={} fp={hash:016x} */\n",
+        body.len()
+    ));
+    out.push_str(&body);
+}
+
+/// R10 / #1133: content identity of the Core templates a program will link.
+#[cfg(test)]
+pub(crate) fn corelib_emission_fingerprint(
+    used_core: &std::collections::HashSet<String>,
+) -> String {
+    let mut out = String::new();
+    push_corelib_prelude(&mut out, used_core);
+    out.lines()
+        .next()
+        .unwrap_or("/* jet-corelib-r10 missing */")
+        .to_string()
+}
+
+fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::HashSet<String>) {
     let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
     let needs_base = core_usage_matches(
         used_core,
@@ -450,11 +480,11 @@ fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<
             "core.sketch.tdigest",
             "core.sketch.cms",
             "core.sketch.reservoir",
-            "core.compute",
             "jet.db",
             "core.db",
         ],
     );
+    let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
         &[
@@ -539,6 +569,9 @@ fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<
     if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+    }
+    if needs_compute {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
     }
     if needs_net {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
@@ -1555,6 +1588,31 @@ mod tests {
         assert!(
             http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
             "http usage must emit HTTP templates"
+        );
+
+        let files_fp = corelib_emission_fingerprint(&files_only);
+        let net_fp = corelib_emission_fingerprint(&net_only);
+        assert_ne!(
+            files_fp, net_fp,
+            "R10 cache identity must differ when Top-module reachability differs"
+        );
+        assert_eq!(
+            files_fp,
+            corelib_emission_fingerprint(&files_only),
+            "R10 fingerprint must be stable for the same used_core set"
+        );
+
+        let compute_only = HashSet::from(["core.compute::zeros".to_string()]);
+        let mut compute_out = String::new();
+        push_corelib_prelude(&mut compute_out, &compute_only);
+        assert!(
+            compute_out.contains("fn jet_compute_zeros")
+                && compute_out.contains("struct JetTensor"),
+            "core.compute usage must emit Compute.rs"
+        );
+        assert!(
+            !compute_out.contains("JetHTTPServer") && !compute_out.contains("struct JetBrowser"),
+            "compute-only Core must not emit HTTP/Browser templates"
         );
     }
 
