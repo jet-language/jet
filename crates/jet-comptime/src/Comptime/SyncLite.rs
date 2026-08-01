@@ -25,10 +25,13 @@ fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
                 c.counts
                     .iter()
                     .map(|(replica, value)| {
-                        CtValue::Tuple(vec![
-                            CtValue::Str(replica.clone()),
-                            CtValue::Int(*value),
-                        ])
+                        CtValue::Struct {
+                            type_name: "SyncCounterEntry".to_string(),
+                            fields: vec![
+                                ("replica".to_string(), CtValue::Str(replica.clone())),
+                                ("value".to_string(), CtValue::Int(*value)),
+                            ],
+                        }
                     })
                     .collect(),
             ),
@@ -107,7 +110,29 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
                 let mut counts = Vec::new();
                 for entry in entries {
                     match entry {
-                        CtValue::Tuple(parts) if parts.len() == 2 => {
+                        CtValue::Struct {
+                            type_name,
+                            fields: entry_fields,
+                        } if type_name == "SyncCounterEntry" => {
+                            let replica = entry_fields
+                                .iter()
+                                .find(|(n, _)| n == "replica")
+                                .and_then(|(_, v)| match v {
+                                    CtValue::Str(s) => Some(s.clone()),
+                                    _ => None,
+                                })
+                                .ok_or_else(|| unsupported("SyncCounter replica", span))?;
+                            let value = entry_fields
+                                .iter()
+                                .find(|(n, _)| n == "value")
+                                .and_then(|(_, v)| match v {
+                                    CtValue::Int(n) => Some(*n),
+                                    _ => None,
+                                })
+                                .ok_or_else(|| unsupported("SyncCounter value", span))?;
+                            counts.push((replica, value));
+                        }
+                        CtValue::List(parts) if parts.len() == 2 => {
                             let replica = match &parts[0] {
                                 CtValue::Str(s) => s.clone(),
                                 _ => return Err(unsupported("SyncCounter replica", span)),

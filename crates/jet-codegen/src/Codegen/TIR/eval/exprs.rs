@@ -2214,8 +2214,10 @@ impl<'a> EvalCtx<'a> {
                     return apply_core_call(module, method, argv, *source_span, self.repl_mode);
                 }
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
-                // ambient I/O matches AOT (env/fs/process). Pure comptime
-                // keeps depth 0 and stays on apply_core_call (E3410).
+                // ambient I/O matches AOT (env/fs/process/auth store). Pure
+                // comptime keeps depth 0 and must reject — never fall through
+                // to `apply_core_call`, which still hosts AuthLite/SyncLite
+                // and would const-fold storeful Ok(literals) (I9).
                 if self.impure_depth > 0 && self.allow_impure {
                     let mut sink = self
                         .sink
@@ -2233,7 +2235,19 @@ impl<'a> EvalCtx<'a> {
                         None,
                     )
                 } else if self.impure_depth == 0 {
-                    apply_core_call(module, method, argv, *source_span, self.repl_mode)
+                    Err(Diagnostic::error(
+                        "E3410",
+                        format!(
+                            "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                        ),
+                        "ambient I/O and storeful Core APIs are not allowed in \
+                         pure comptime evaluation"
+                            .to_string(),
+                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
+                         pass `--allow-impure` to the build, or keep the call at runtime"
+                            .to_string(),
+                        Some(*source_span),
+                    ))
                 } else {
                     Err(Diagnostic::error(
                         "E3411",
