@@ -414,6 +414,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         ],
     );
     let _needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
+    // needs_xml / needs_base still drive encoding Top reachability below.
 
     for part in CORELIB_KERNEL_PARTS {
         out.push_str(part);
@@ -641,20 +642,20 @@ const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
 
 fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
     // WebApp/DevServer call into HTTPServer helpers. Emit them only when the
-    // program actually uses web/HTTP/app surfaces so R10 files/mem programs
-    // stay free of those symbols.
-    let needs_web = core_usage_matches(
+    // program uses web/HTTP surfaces — bare `app.live` / `app.auth` must not
+    // drag the full HTTP server templates (R10).
+    let needs_webapp = core_usage_matches(
         used_core,
         &[
             "core.web",
             "core.http",
             "core.http.server",
             "core.http.client",
-            "app",
+            "core.web.devserver",
         ],
     );
     let needs_live = core_usage_matches(used_core, &["app", "core.web"]);
-    if needs_web {
+    if needs_webapp {
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
     }
@@ -1613,7 +1614,11 @@ mod tests {
             !files_out.contains("JetHTTPServer")
                 && !files_out.contains("struct JetBrowser")
                 && !files_out.contains("fn jet_game_"),
-            "files-only Core must not emit HTTP/Browser/Game templates"
+            "files-only Core must not emit HTTP server/Browser/Game templates"
+        );
+        assert!(
+            files_out.contains("struct JetTCPStream"),
+            "JetStd kernel closure always needs JetTCPStream"
         );
 
         let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);

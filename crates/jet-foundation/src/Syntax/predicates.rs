@@ -207,6 +207,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.auth",
     // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + typed row policies.
     "core.sync",
+    // D-COMPUTE1=D: ranked Tensor / Vec / Matrix CPU oracle (+ accelerators).
+    "core.compute",
+    // D-SERVICES1: long-running service runtime surface.
+    "core.services",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
