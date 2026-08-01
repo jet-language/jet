@@ -1,0 +1,21 @@
+// D-SERVICE1=D (#444): service tree, mailboxes, OneForOne restart.
+use core.services as services
+
+fn run() {
+    // `:=` — worker/group/send/receive/fail mutate the tree place (Write).
+    tree := services.tree("demo")
+    worker :: services.worker(&tree, "echo", 2) ?? panic("worker")
+    services.group(&tree, "front", ["echo"]) ?? panic("group")
+    services.start(&tree) ?? panic("start")
+    print(services.tree_show(tree))
+    print(services.endpoint_show(worker))
+
+    services.send(&tree, worker, "hello") ?? panic("send")
+    print("depth:{services.mailbox_depth(tree, worker) ?? panic("depth")}")
+    msg :: services.receive(&tree, worker) ?? panic("receive")
+    print("msg:{msg}")
+
+    services.fail_worker(&tree, worker) ?? panic("fail")
+    print("restarts:{services.restarts(tree, worker) ?? panic("restarts")}")
+    services.stop(&tree) ?? panic("stop")
+}

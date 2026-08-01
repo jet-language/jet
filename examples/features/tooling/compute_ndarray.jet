@@ -1,0 +1,19 @@
+// D-COMPUTE1=D / #1136: ndarray broadcast, ufuncs, and axis reduction on Tensor.
+use core.compute as compute
+
+fn run() {
+    row :: compute.vec(3, 2.0) ?? panic("vec")
+    wide :: compute.broadcast_to(row, [2, 3]) ?? panic("broadcast")
+    print("broadcast:{compute.to_list(wide)}")
+
+    a :: compute.full([2, 3], 3.0) ?? panic("full")
+    b :: compute.full([2, 3], 1.0) ?? panic("full2")
+    diff :: compute.sub(a, b) ?? panic("sub")
+    print("sub:{compute.to_list(diff)}")
+
+    t :: compute.matrix(2, 3, 1.0) ?? panic("matrix")
+    tt :: compute.transpose(t) ?? panic("transpose")
+    print("transpose_shape:{compute.shape(tt)}")
+    summed :: compute.sum_axis(tt, 0) ?? panic("sum_axis")
+    print("sum_axis:{compute.to_list(summed)}")
+}

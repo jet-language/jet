@@ -1725,6 +1725,7 @@ fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_operators();
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
+        st.trait_reg.register_synthetic_driver();
         st.trait_reg.register_items(&module.items, &mut diags);
         for type_name in &st.registry.unit_types {
             st.trait_reg

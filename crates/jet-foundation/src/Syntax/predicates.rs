@@ -168,6 +168,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.ui",
     // D-FLAGSHIP-WEBAPI1=A: browser events, element reads, and storage for web slices.
     "core.web",
+    // D-LIVEQUERY1=A: application live-query surface (`app.live` / subscribe /
+    // invalidate). Shares the web/app graph Prelude.
+    "app",
     "core.web.storage",
     "core.web.storage.local",
     "core.web.storage.session",
@@ -200,7 +203,14 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-AUTH-TOKENPOLICY1=A (ratified 2026-07-18): strict standalone JWT/PASETO
     // verification. Callers name key and audience; exp+aud are required, and
     // unknown algorithms, versions, and purposes fail closed.
+    // D-AUTH1=A: session batteries share this module.
     "core.auth",
+    // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + typed row policies.
+    "core.sync",
+    // D-COMPUTE1=D: ranked Tensor / Vec / Matrix CPU oracle (+ accelerators).
+    "core.compute",
+    // D-SERVICES1: long-running service runtime surface.
+    "core.services",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
@@ -233,6 +243,10 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     }
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
+    }
+    // D-LIVEQUERY1=A: `app` is a first-class Core surface for live queries.
+    if name == "app" {
+        return Some("app".to_string());
     }
     // Some ring modules still use internal `jet.<ring>` keys until their
     // package cleanup lands. Canonicalized modules stay `core.*` end to end.

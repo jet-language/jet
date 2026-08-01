@@ -519,7 +519,7 @@ Card 301 audit state:
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Typed JSON both ways | Shipped (D-HTTP-JSON1=A): `resp.json<T>(limit)` on the client, `req.json<T>()` on the server, and `server.json(status, value)` for answers. All three ride the `#Codable` path. The two readers return one Result; `server.json` returns an `HTTPResponse` with `Content-Type: application/json; charset=utf-8` set. The raw text and byte paths stay unchanged for experts. |
-| Middleware engine | Partial: the one Handler wrapper chain is declaration-order outermost-first, supports request/response mutation and short-circuiting, and runs routed responses plus automatic 400/404/405 and redacted 500 recovery responses through the same boundary. Each composed layer is total: handler errors/panics and middleware factory/runtime errors/panics become bounded responses that reached outer wrappers can observe. An outer short-circuit does not run inner middleware. The boundary is shared by plaintext pipelines and TLS-backed HTTP/1.1 or HTTP/2. The real Jet AOT example is executable; the dev/JIT status remains listed in `tests/jit_gaps.txt`. |
+| Middleware engine | Partial: the one Handler wrapper chain is declaration-order outermost-first, supports request/response mutation and short-circuiting, and runs routed responses plus automatic 400/404/405 and redacted 500 recovery responses through the same boundary. Each composed layer is total: handler errors/panics and middleware factory/runtime errors/panics become bounded responses that reached outer wrappers can observe. An outer short-circuit does not run inner middleware. The boundary is shared by plaintext pipelines and TLS-backed HTTP/1.1 or HTTP/2. The real Jet AOT example is executable; default `jet run` (JIT) and AOT share the Prelude HTTP serve path (I9). |
 | Built-in `request_id` middleware | Shipped on the approved surface as an ordinary declaration-ordered Handler wrapper: `server.request_id(mux)` preserves one 1–128-byte visible-ASCII inbound `x-request-id` or assigns a fresh bounded ID, exposes it to access events, and correlates router and recovery responses that reach its layer unless the response already chose one. Plaintext and TLS-backed HTTP/1.1 or HTTP/2 share the same wrapper. |
 | Built-in `recover` middleware | Partial: the shared dispatch boundary contains handler and middleware factory/runtime failures and maps them to a redacted internal response on every shipped transport. A separately installable `recover` wrapper and incident publication policy have no approved public spelling yet. |
 | Built-in `timeout` / `body_limit` middleware | Open: server transport deadlines and the default 1 MiB framing cap are shipped, but they are not Handler wrappers. Timeout needs task cancellation rather than a detached worker, and route-specific limit/policy spellings remain owner-gated. |
@@ -732,16 +732,25 @@ Examples: `examples/features/crypto/vault_keys.jet` and
 `examples/features/crypto/vault_key_wrap.jet`, plus
 `examples/features/memory/expiring_secret.jet`.
 
-### `core.auth` — strict JWT and PASETO verification
+### `core.auth` — token verification and session batteries
 
-`core.auth` exports two standalone verifiers:
+`core.auth` exports standalone JWT/PASETO verifiers plus D-AUTH1 session
+batteries. `app.auth` reuses the same Prelude symbols (one mechanism):
 
 ```jet
 verify_jwt(token, key:, audience:, issuer:, clock_skew:) => Claims ? AuthError
 verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) => Claims ? AuthError
+
+register_user(user_id, password_hash) => () ? String
+password_login(user_id, password_hash, now_ms, ttl_ms) => Session ? String
+session_validate(session_id, now_ms) => Session ? String
+magic_link_issue(user_id, now_ms, ttl_ms) => String ? String
+magic_link_consume(token, now_ms, ttl_ms) => Session ? String
+oauth_begin(provider) => String ? String
+oauth_finish(state, subject, now_ms, ttl_ms) => Session ? String
 ```
 
-`issuer` and `clock_skew` are optional for both functions; `footer` and
+`issuer` and `clock_skew` are optional for both verifiers; `footer` and
 `implicit` are optional for PASETO. JWT accepts only HS256 and keys of at least
 32 bytes. PASETO accepts only `v4.public`, requires a 32-byte Ed25519 public
 key, and verifies the PAE input including the supplied footer and implicit
@@ -758,10 +767,30 @@ canonical.
 `issuer: String?`, `expires_at: Int`, and `issued_at: Int?`. `AuthError` is an
 inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
 `WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`, `TokenExpired`, and
-`DecodeError` variants. The implementation is compiler-embedded, reuses Jet's
-JSON and crypto mechanisms, and adds no external dependency.
+`DecodeError` variants. Sessions use httponly/secure/samesite cookie defaults.
+The implementation is compiler-embedded, reuses Jet's JSON and crypto
+mechanisms, and adds no external dependency.
 
-Example: `examples/features/crypto/auth_tokens.jet`.
+Examples: `examples/features/crypto/auth_tokens.jet`,
+`examples/features/crypto/auth_sessions.jet`.
+
+### `core.sync` — CRDT values and row policy
+
+`core.sync` ships D-SYNC1 CRDT value types and D-DBPOLICY1 row policies:
+
+```jet
+text_new / text_set / text_merge / text_show
+counter_new / counter_inc / counter_merge / counter_value
+map_new / map_set / map_get / map_merge / map_show
+list_new / list_push / list_merge / list_show
+policy_new(table, expression) => RowPolicy ? String
+policy_allows(policy, user, row_owner) => Bool
+```
+
+Merges are deterministic. Beginner row policies use `owner == user`; expert
+policies may use `true`. Live-query binding uses `app.sync_over(session, doc)`.
+
+Example: `examples/features/tooling/sync_crdt.jet`.
 
 ### `core.watcher` — file/process/port change events
 
@@ -2916,7 +2945,12 @@ for one crossing. Narrowing is never implicit.
 ## `core.net` — sockets and DNS
 
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
-surface. On Unix, TCP, UDP, and Unix-socket operations park through the shared
+surface and share one Prelude path for AOT, default `jet run` (Cranelift), and
+interpreter ambient (I9). Example: `examples/features/net/socket_echo.jet`
+(TCP/UDP/Unix listen+echo). Linux is the Epoch 3 proof platform; macOS/Windows
+native socket execution remains Epoch 9. AOT emission pulls Process helpers
+whenever FS runtime is needed so subprocess-backed net fixtures link cleanly.
+On Unix, TCP, UDP, and Unix-socket operations park through the shared
 scheduler readiness backend and observe task cancellation and available
 `#Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
@@ -2961,10 +2995,14 @@ Beginner calls accept strings; expert calls accept typed
 | `dns_srv(name, ms)` | `[DNSSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
+
 `NetError` has stable variants for input, permission, address, connection,
 closed, timeout, cancellation, unsupported, DNS, TLS, protocol, and other OS
 failures. `error_operation/address/name/message/os_code` expose portable control
-and audit data. Raw OS text is never control-flow law.
+and audit data. Raw OS text is never control-flow law. Linux is the Epoch 3
+proof platform for TCP/UDP/Unix/DNS/TLS/happy-eyeballs (`tcp_connect_happy`);
+native macOS/Windows hostile-matrix execution is deferred to Epoch 9 with the
+same Prelude symbols (I9). Example: `examples/features/net/socket_echo.jet`.
 
 Ordinary A/AAAA lookups use the platform resolver and preserve host files,
 search policy, VPNs, and enterprise DNS. TXT/SRV use configured host name
@@ -3017,6 +3055,11 @@ bound parameters, not string interpolation. The runtime uses SQLite's prepared
 statement cache under that same path; there is no separate unsafe raw-query or
 prepare-only API.
 
+D-DBDRIVER1=A: `Driver` is the backend-neutral trait for that parameterized
+surface (`query` / `query_one` / `execute` / `begin` / `commit` / `rollback`).
+`DBConnection` is the first implementation. Call sites can take `T: Driver`
+without naming SQLite. Cleanup stays on `Close` via `close(...)`.
+
 | API | Returns | Notes |
 |-----|---------|-------|
 | `conn.execute(sql, params)` | `Int ? DBError` | Affected row count |
@@ -3028,6 +3071,76 @@ prepare-only API.
 | `db.migrate(conn, name, statements)` | `Int ? DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
 
 `DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
+
+---
+
+## `core.compute` — Tensor CPU oracle
+
+D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns ranked
+multidimensional storage. `Tensor` is the owner type; `vec` and `matrix` are
+rank-1 / rank-2 aliases over the same substrate. Placement defaults to the CPU
+oracle and emits an inspectable receipt (`device` / `placement`).
+
+```jet
+use core.compute as compute
+
+fn run() {
+    t :: compute.zeros([2, 3]) ?? panic("zeros")
+    print(compute.rank(t))
+    u :: compute.ones([2, 3]) ?? panic("ones")
+    s :: compute.add(t, u) ?? panic("add")
+    print(compute.to_list(s))
+}
+```
+
+| API | Result |
+|-----|--------|
+| `zeros` / `ones` / `full` / `from_list` | `Tensor ? ComputeError` |
+| `vec` / `matrix` | rank-1 / rank-2 `Tensor` aliases |
+| `add` / `mul` / `sub` / `div` / `maximum` / `minimum` | elementwise (broadcasting) |
+| `matmul` / `reshape` / `broadcast_to` / `transpose` | shape ops |
+| `negate` / `abs` / `exp` / `log` / `sqrt` | unary ufuncs |
+| `sum_axis` | reduce one axis |
+| `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
+| `to_sparse` / `sparse_mv` / `sparse_nnz` | CSR sparse view over dense |
+| `value_and_grad_mul` / `jvp_mul` / `grad_*` | reverse default + JVP |
+| `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
+| `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
+| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, kernel tiers |
+| `get` / `set` | indexed access (`set` takes `&Tensor`) |
+| `shape` / `rank` / `numel` / `to_list` | inspection |
+| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
+
+Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
+AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
+symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
+
+Backend facts for Core modules (ownership/effects/failure/platform) live in
+[core-backend-facts.md](core-backend-facts.md).
+
+---
+
+## `core.services` — service trees and mailboxes
+
+D-SERVICE1=D / D-SERVICE-DELIVERY1=D / D-SERVICE-STATE1=D /
+D-SERVICE-WORKFLOW1=D / D-SERVICE-IDENTITY1=D / D-SERVICE-UPGRADE1=D: typed
+service trees over the existing task/channel model. Workers own bounded
+mailboxes; delivery defaults to at-most-once with `Full` under capacity;
+`send_durable` requires DurableAtLeastOnce plus an idempotency key; restart
+policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
+Empty / Snapshot / EventLog; workflows, directory identity, and generation
+handoff/rollback are first-class.
+
+```jet
+use core.services as services
+
+fn run() {
+    tree :: services.tree("app")
+    echo :: services.worker(&tree, "echo", 8) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    services.send(&tree, echo, "hi") ?? panic("send")
+}
+```
 
 ---
 
@@ -3059,7 +3172,7 @@ exact automatic promotion sites to migrate back to ownership.
 
 `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
 `core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
-`core.solve`, `core.data`, `core.files`, `core.path`, `core.url`, `core.mime`,
+`core.solve`, `core.data`, `core.compute`, `core.files`, `core.path`, `core.url`, `core.mime`,
 `core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
 `core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
 `core.encoding.csv`, `core.encoding.toml`, `core.encoding.yaml`,
@@ -3079,11 +3192,16 @@ exact automatic promotion sites to migrate back to ownership.
 
 ---
 
-## Writing Core in Jet (future)
+## Writing Core in Jet
 
-Today, Core lives in the compiler as typed signatures plus Rust prelude templates
-(`Source/Prelude/Std.rs`). The **API** is Jet; the **implementation** is Rust until
-the package system fully stabilizes.
+Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` are the
+canonical source for compiler-known Core behavior (R10). Sema records helpers a
+program can call; codegen emits only reachable Top modules (`push_corelib_prelude`).
+
+First-party packages with a separately buildable source tree must not keep a
+copied fallback template. `core.archive` is the concrete model:
+`corelib/core.archive/pkgs/archive/src/lib.rs` is consumed by CoreProvider and
+the hidden bridge without a second copy.
 
 ---
 
@@ -3091,6 +3209,13 @@ the package system fully stabilizes.
 
 | Example | Shows |
 |---------|-------|
+| `examples/features/tooling/compute_tensor.jet` | `core.compute` Tensor / Vec / Matrix CPU oracle |
+| `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
+| `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
+| `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |
+| `examples/features/tooling/app_live.jet` | live queries + `#Transact` invalidate |
+| `docs/reference/framework-transplant-closeout.md` | framework transplant shipped-law ledger |
+| `docs/reference/language-shape-conformance.md` | #560 cross-surface conformance ledger |
 | `examples/features/io/files.jet` | Read, transform, write with errors |
 | `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/io/cli.jet` | Args, environment, exit codes |

@@ -1,0 +1,24 @@
+// D-COMPUTE1 / #1137: dense linalg + DFT on the Tensor CPU oracle.
+use core.compute as compute
+
+fn run() {
+    a := compute.matrix(2, 2, 0.0) ?? panic("matrix")
+    compute.set(&a, [0, 0], 4.0) ?? panic("set")
+    compute.set(&a, [0, 1], 7.0) ?? panic("set")
+    compute.set(&a, [1, 0], 2.0) ?? panic("set")
+    compute.set(&a, [1, 1], 6.0) ?? panic("set")
+    print("det:{compute.det(a) ?? panic("det")}")
+
+    inv :: compute.inv(a) ?? panic("inv")
+    print("inv:{compute.to_list(inv)}")
+
+    b := compute.matrix(2, 1, 0.0) ?? panic("b")
+    compute.set(&b, [0, 0], 1.0) ?? panic("set")
+    compute.set(&b, [1, 0], 0.0) ?? panic("set")
+    x :: compute.solve(a, b) ?? panic("solve")
+    print("solve:{compute.to_list(x)}")
+
+    signal :: compute.from_list([1.0, 0.0, -1.0, 0.0]) ?? panic("signal")
+    spectrum :: compute.fft(signal) ?? panic("fft")
+    print("fft_len:{compute.numel(spectrum)}")
+}

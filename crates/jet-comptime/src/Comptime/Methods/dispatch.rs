@@ -101,6 +101,32 @@ pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
             | "core.tls"
             | "core.process"
     ) && !is_pure_tier2_call(module, method))
+        || (module == "core.auth"
+            && matches!(
+                method,
+                // Storeful session APIs — must not const-fold into Ok(literals)
+                // while the runtime JET_AUTH_STORE stays empty (I9 / D-AUTH1).
+                "register_user"
+                    | "password_login"
+                    | "session_validate"
+                    | "magic_link_issue"
+                    | "magic_link_consume"
+                    | "oauth_begin"
+                    | "oauth_finish"
+            ))
+        || (matches!(module, "app" | "core.web")
+            && matches!(
+                method,
+                // Storeful live-query registry — same class of I9 fold bug as auth.
+                "live"
+                    | "subscribe"
+                    | "invalidate"
+                    | "transact_invalidate"
+                    | "signal_push"
+                    | "live_get"
+                    | "live_show"
+                    | "live_stats"
+            ))
         || (repl_mode && module == "core.random" && method != "rng")
 }
 

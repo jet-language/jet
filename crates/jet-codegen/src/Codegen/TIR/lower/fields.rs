@@ -206,6 +206,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
         "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
+        "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
+        "Auth" => matches!(member, "users_table"),
         _ => false,
     };
     if known {

@@ -1,0 +1,34 @@
+// D-COMPUTE-AUTODIFF1 / #1141–#1143: VJP/JVP, sparse CSR, SIMD tile, profile.
+use core.compute as compute
+
+fn run() {
+    a :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("a")
+    b :: compute.from_list([4.0, 5.0, 6.0]) ?? panic("b")
+    g :: compute.value_and_grad_mul(a, b) ?? panic("vag")
+    print("grad:{compute.to_list(compute.grad_a(g))}")
+
+    ta :: compute.ones([3]) ?? panic("ta")
+    tb :: compute.ones([3]) ?? panic("tb")
+    j :: compute.jvp_mul(a, b, ta, tb) ?? panic("jvp")
+    print("jvp:{compute.to_list(j)}")
+
+    m := compute.matrix(2, 2, 0.0) ?? panic("m")
+    compute.set(&m, [0, 0], 1.0) ?? panic("set")
+    compute.set(&m, [1, 1], 2.0) ?? panic("set")
+    sp :: compute.to_sparse(m) ?? panic("sparse")
+    print("nnz:{compute.sparse_nnz(sp)}")
+    v :: compute.from_list([3.0, 4.0]) ?? panic("v")
+    mv :: compute.sparse_mv(sp, v) ?? panic("mv")
+    print("mv:{compute.to_list(mv)}")
+
+    tile :: compute.matmul_f32_tile(m, m) ?? panic("tile")
+    print("tile:{compute.numel(tile)}")
+    print("profile:{compute.profile_show()}")
+
+    stream :: compute.stream_new()
+    compute.stream_sync(stream) ?? panic("sync")
+    print(compute.stream_show(stream))
+
+    ok :: compute.kernel_bounds_ok([2, 2], [0, 1]) ?? panic("bounds")
+    print("bounds:{ok}")
+}

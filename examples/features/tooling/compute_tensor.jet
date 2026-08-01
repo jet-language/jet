@@ -1,0 +1,23 @@
+// D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443):
+// `core.compute` owns ranked Tensor storage on the CPU oracle. Vec/Matrix
+// aliases share the same substrate. Auto placement emits a receipt.
+use core.compute as compute
+
+fn run() {
+    zeros :: compute.zeros([2, 3]) ?? panic("zeros")
+    print("rank:{compute.rank(zeros)}")
+    print("shape:{compute.shape(zeros)}")
+    print("device:{compute.device(zeros)}")
+
+    ones :: compute.ones([2, 3]) ?? panic("ones")
+    // `:=` — `compute.set` takes Write access to the tensor place.
+    sum := compute.add(zeros, ones) ?? panic("add")
+    compute.set(&sum, [0, 1], 4.0) ?? panic("set")
+    print("cell:{compute.get(sum, [0, 1]) ?? panic("get")}")
+
+    row :: compute.vec(3, 1.0) ?? panic("vec")
+    mat :: compute.matrix(2, 3, 2.0) ?? panic("matrix")
+    product :: compute.matmul(mat, compute.reshape(row, [3, 1]) ?? panic("reshape")) ?? panic("matmul")
+    print("matmul:{compute.to_list(product)}")
+    print("placement:{compute.placement(product)}")
+}

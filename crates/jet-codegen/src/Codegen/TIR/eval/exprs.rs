@@ -14,6 +14,35 @@ use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
 
+/// Stable place identity for `mem.address_of` under TIR-eval (no real ASLR).
+fn tir_place_address_key(expr: &TExpr) -> String {
+    match &expr.kind {
+        TExprKind::Local(local) => local.name.clone(),
+        TExprKind::Field { recv, field, .. } => {
+            format!("{}.{}", tir_place_address_key(recv), field)
+        }
+        TExprKind::Index { base, index, .. } => {
+            format!("{}[{}]", tir_place_address_key(base), tir_place_address_key(index))
+        }
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => tir_place_address_key(place),
+        _ => format!("ty:{}", expr.ty.show()),
+    }
+}
+
+fn stable_place_address(key: &str) -> i64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in key.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let addr = (hash as i64).wrapping_abs();
+    if addr == 0 {
+        1
+    } else {
+        addr
+    }
+}
+
 fn local_cell_handle(type_name: &str, index: usize) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -2004,6 +2033,21 @@ impl<'a> EvalCtx<'a> {
                 if module == "core.data" {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
+                if module == "core.compute" {
+                    return self.eval_core_compute_call(method, args, *source_span, scope);
+                }
+                if module == "core.services" {
+                    return self.eval_core_services_call(method, args, *source_span, scope);
+                }
+                // D-PIN1 / S58: `mem.address_of(place)` is an inert address cast.
+                // AOT lowers to `(&place as *const _ as usize as i64)`. The
+                // interpreter has no real addresses, so mint a stable non-zero
+                // identity from the place path (I9: same non-zero / inequality
+                // facts a program can observe).
+                if module == "core.mem" && method == "address_of" && args.len() == 1 {
+                    let key = tir_place_address_key(&args[0]);
+                    return Ok(CtValue::Int(stable_place_address(&key)));
+                }
                 if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
                     let pointer = self.eval_expr(&args[0], scope)?;
                     let value = self.eval_expr(&args[1], scope)?;
@@ -2170,8 +2214,10 @@ impl<'a> EvalCtx<'a> {
                     return apply_core_call(module, method, argv, *source_span, self.repl_mode);
                 }
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
-                // ambient I/O matches AOT (env/fs/process). Pure comptime
-                // keeps depth 0 and stays on apply_core_call (E3410).
+                // ambient I/O matches AOT (env/fs/process/auth store). Pure
+                // comptime keeps depth 0 and must reject — never fall through
+                // to `apply_core_call`, which still hosts AuthLite/SyncLite
+                // and would const-fold storeful Ok(literals) (I9).
                 if self.impure_depth > 0 && self.allow_impure {
                     let mut sink = self
                         .sink
@@ -2189,7 +2235,19 @@ impl<'a> EvalCtx<'a> {
                         None,
                     )
                 } else if self.impure_depth == 0 {
-                    apply_core_call(module, method, argv, *source_span, self.repl_mode)
+                    Err(Diagnostic::error(
+                        "E3410",
+                        format!(
+                            "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                        ),
+                        "ambient I/O and storeful Core APIs are not allowed in \
+                         pure comptime evaluation"
+                            .to_string(),
+                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
+                         pass `--allow-impure` to the build, or keep the call at runtime"
+                            .to_string(),
+                        Some(*source_span),
+                    ))
                 } else {
                     Err(Diagnostic::error(
                         "E3411",
@@ -2779,7 +2837,33 @@ impl<'a> EvalCtx<'a> {
                         self.pending_return = Some(CtValue::Unit);
                         Ok(CtValue::Unit)
                     }
-                    crate::Codegen::TIR::TOrFallback::Panic { .. } => {
+                    crate::Codegen::TIR::TOrFallback::Panic { msg, loc } => {
+                        let message = self.eval_expr(msg, scope)?.jet_show();
+                        let file = loc.file.trim_matches('"');
+                        let fn_name = loc.fn_name.trim_matches('"');
+                        let src_line = loc.src_line.trim_matches('"');
+                        let line_s = loc.line.to_string();
+                        let margin = line_s.len();
+                        let pad = " ".repeat(margin);
+                        let col_offset = loc.col.saturating_sub(1) as usize;
+                        let caret = "^".repeat(loc.caret.max(1) as usize);
+                        let rendered = format!(
+                            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+                            loc.line,
+                            " ".repeat(col_offset)
+                        );
+                        if let Some(sink) = self.sink.as_ref() {
+                            let mut sink = sink.lock().expect("evaluator sink poisoned");
+                            sink.stderr.push_str(&rendered);
+                            sink.exit_code = Some(70);
+                            return Err(Diagnostic::error(
+                                "SOFT_EXIT",
+                                "70".to_string(),
+                                "or-fallback panic stop".to_string(),
+                                String::new(),
+                                Some(self.span()),
+                            ));
+                        }
                         Err(unsupported("or-fallback panic", self.span()))
                     }
                     _ => Err(unsupported("or-fallback form", self.span())),

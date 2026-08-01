@@ -158,7 +158,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
-        | "Claims" | "AuthError"
+        | "Claims" | "AuthError" | "Session" | "Auth"
+        | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
         // (`.Stream`/`.Inherit`/`.Capture`, D-ENUMDOT2). `ProcessStdin`/
         // `ProcessStdoutStream`/`ProcessStderrStream` are field-access-only
@@ -205,6 +206,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+        // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
+        | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream"
+        | "GradTriple" | "SparseTensor"
+        // D-SERVICE1=D: structured service tree handles.
+        | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
+        | "ServiceDelivery"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
@@ -271,6 +278,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebPage"
         | "WebContext"
         | "WebMount"
+        | "LiveQuery"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
@@ -365,6 +373,19 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if type_name == "Session" {
+        return match field {
+            "id" | "user_id" | "cookie" => Some(Type::String),
+            "expires_at" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "Auth" {
+        return match field {
+            "users_table" => Some(Type::String),
             _ => None,
         };
     }

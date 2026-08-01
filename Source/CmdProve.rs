@@ -63,7 +63,9 @@ enum ChildOutcome {
 
 pub(crate) fn run_prove(args: &[String], json: bool) {
     let mut positional = Vec::new();
-    let mut _lenses = Vec::new();
+    let mut lenses = Vec::new();
+    let mut capture: Option<crate::ProveReplay::CaptureOpts> = None;
+    let mut replay: Option<String> = None;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
@@ -71,16 +73,42 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             i += 1;
             continue;
         }
+        if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
+            if capture.is_some() || replay.is_some() {
+                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                exit(ExitCodes::USAGE);
+            }
+            capture = Some(opts);
+            i += 1;
+            continue;
+        }
+        if let Some(parsed) = crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str)) {
+            if capture.is_some() || replay.is_some() {
+                eprintln!("error: `jet prove` accepts at most one of `--capture` / `--replay`");
+                exit(ExitCodes::USAGE);
+            }
+            match parsed {
+                Ok(path) => {
+                    replay = Some(path);
+                    i += if arg == "--replay" { 2 } else { 1 };
+                }
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    exit(ExitCodes::USAGE);
+                }
+            }
+            continue;
+        }
         if let Some(value) = arg.strip_prefix("--lens=") {
             validate_lens(value, positional.first().copied().unwrap_or("TARGET"), json);
-            _lenses.push(value.to_string());
+            lenses.push(value.to_string());
             i += 1;
             continue;
         }
         if arg == "--lens" {
             let value = args.get(i + 1).map(String::as_str).unwrap_or("");
             validate_lens(value, positional.first().copied().unwrap_or("TARGET"), json);
-            _lenses.push(value.to_string());
+            lenses.push(value.to_string());
             i += 2;
             continue;
         }
@@ -103,6 +131,19 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+
+    let identity = crate::ProveReplay::ReplayIdentity {
+        entry: target.root.clone(),
+        source_digest: target.input_sha256.clone(),
+        execution_adapter: "dev-tir-v1".to_string(),
+        target_triple: "x86_64-linux".to_string(),
+    };
+    if let Some(opts) = capture {
+        exit(crate::ProveReplay::run_safe_capture(&identity, &opts, json));
+    }
+    if let Some(path) = replay {
+        exit(crate::ProveReplay::run_replay(&identity, &path, json));
+    }
 
     let mut items = Vec::new();
     for member in &target.members {
@@ -139,42 +180,122 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1).count();
     let budgets = budget_projection(&target);
     let budget_failed = budgets.facts.iter().any(|fact| fact.outcome == "fail");
+    let enable_solver = lenses.iter().any(|lens| lens == "solver");
+    let solver_members: Vec<(String, String)> = target
+        .members
+        .iter()
+        .map(|member| {
+            (
+                member.path.clone(),
+                String::from_utf8_lossy(&member.bytes).into_owned(),
+            )
+        })
+        .collect();
+    let solver = match crate::ProveSolver::run_solver_producer(&solver_members, enable_solver) {
+        Ok(items) => items,
+        Err(message) => {
+            eprintln!("error: solver producer failed: {message}");
+            exit(ExitCodes::ICE);
+        }
+    };
+    let solver_disproved = solver
+        .iter()
+        .any(|item| matches!(item.outcome, crate::ProveSolver::SolverOutcome::Disproved { .. }));
     let exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
         ExitCodes::RUNTIME_PANIC
-    } else if failed > 0 || test_failed > 0 || budget_failed {
+    } else if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
         ExitCodes::USER_ERROR
     } else {
         ExitCodes::OK
     };
-    let report = render_report(&target, &items, &tests, &budgets, proved, failed, exit_code);
+    let report = render_report(
+        &target,
+        &items,
+        &tests,
+        &budgets,
+        &solver,
+        &lenses,
+        proved,
+        failed,
+        exit_code,
+    );
+    // D-JPROOF1=A (#1127): persist the exact ProofReport under the canonical
+    // `.jetproof` envelope. `--json` still prints only the ProofReport object.
+    if let Err(message) = write_jetproof(&target, &report) {
+        eprintln!("error: failed to write .jetproof: {message}");
+        exit(ExitCodes::ICE);
+    }
     if json {
         println!("{report}");
     } else {
-        println!("CHECKED  front end: {proved} proved, {failed} failed");
+        let show = |facet: &str| lens_shows(&lenses, facet);
+        if !lenses.is_empty() {
+            let mut uniq = lenses.clone();
+            uniq.sort();
+            uniq.dedup();
+            println!("LENSES   {}", uniq.join(", "));
+        }
+        if show("refinements") || show("all") || show("effects") || show("taint") || lenses.is_empty() {
+            println!("CHECKED  front end: {proved} proved, {failed} failed");
+        }
         for item in &items {
             if let Some(diagnostic) = &item.diagnostic {
                 eprintln!("{}", diagnostic.render(&item.path, &item.source));
             }
         }
-        if !tests.is_empty() {
-            let passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
-            let skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
-            println!("TESTS    unit: {passed} passed, {test_failed} failed, {skipped} skipped");
+        if show("tests") || lenses.is_empty() {
+            if !tests.is_empty() {
+                let passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
+                let skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
+                println!("TESTS    unit: {passed} passed, {test_failed} failed, {skipped} skipped");
+            }
         }
-        if !budgets.facts.is_empty() {
-            let met = budgets.facts.iter().filter(|fact| fact.outcome == "pass").count();
-            let failed = budgets.facts.iter().filter(|fact| fact.outcome == "fail").count();
-            let warned = budgets.facts.len() - met - failed;
-            println!("BUDGETS  {met} met, {failed} failed, {warned} warned · verified canonical reports");
+        if show("budgets") || lenses.is_empty() {
+            if !budgets.facts.is_empty() {
+                let met = budgets.facts.iter().filter(|fact| fact.outcome == "pass").count();
+                let failed = budgets.facts.iter().filter(|fact| fact.outcome == "fail").count();
+                let warned = budgets.facts.len() - met - failed;
+                println!("BUDGETS  {met} met, {failed} failed, {warned} warned · verified canonical reports");
+            }
+        }
+        if enable_solver {
+            let (selected, proved_s, disproved_s, unknown_s, _) =
+                crate::ProveSolver::summarize(&solver);
+            println!(
+                "SOLVER   {selected} selected, {proved_s} proved, {disproved_s} disproved, {unknown_s} unknown"
+            );
+            for item in &solver {
+                if let crate::ProveSolver::SolverOutcome::Disproved { assignment, .. } = &item.outcome
+                {
+                    let values = assignment
+                        .iter()
+                        .map(|(k, v)| format!("{k} = {v}"))
+                        .collect::<Vec<_>>()
+                        .join(" and ");
+                    eprintln!(
+                        "Error [E2950]: solver found a counterexample to {}",
+                        item.obligation.kind
+                    );
+                    eprintln!(" Why: {values} satisfy the assumptions but make the claim false");
+                    eprintln!(
+                        " Fix: change {} so every return satisfies the claim, or correct the contract",
+                        item.obligation.origin
+                    );
+                }
+            }
         }
         let unavailable = tests.iter().filter(|item| item.state == 3).count();
         println!(
             "RESULT   {}",
-            if failed > 0 || test_failed > 0 || budget_failed {
+            if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
                 "fail"
-            } else if unavailable > 0 {
+            } else if unavailable > 0
+                || solver.iter().any(|item| {
+                    matches!(item.outcome, crate::ProveSolver::SolverOutcome::Unknown { .. })
+                })
+            {
                 "pass_incomplete"
             } else {
                 "pass"
@@ -182,6 +303,16 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         );
     }
     exit(exit_code);
+}
+
+fn lens_shows(lenses: &[String], facet: &str) -> bool {
+    if lenses.is_empty() {
+        return true;
+    }
+    if lenses.iter().any(|lens| lens == "all") {
+        return facet != "solver";
+    }
+    lenses.iter().any(|lens| lens == facet)
 }
 
 const PROOF_LENSES: &[&str] = &[
@@ -547,7 +678,17 @@ fn evidence_id(target: &Target, kind: &str, origin: &str, span: &str, claim: &st
     jet::SHA256::sha256_hex(&preimage)
 }
 
-fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], budgets: &jet::BudgetView::BudgetProjection, proved: usize, failed: usize, exit_code: i32) -> String {
+fn render_report(
+    target: &Target,
+    items: &[FrontEndItem],
+    tests: &[TestItem],
+    budgets: &jet::BudgetView::BudgetProjection,
+    solver: &[crate::ProveSolver::SolverEvidence],
+    _lenses: &[String],
+    proved: usize,
+    failed: usize,
+    exit_code: i32,
+) -> String {
     let members = target.members.iter().map(|m| format!("{{\"path\":{},\"sha256\":{}}}", json(&m.path), json(&m.sha256))).collect::<Vec<_>>().join(",");
     let mut diagnostics = items.iter().filter_map(|item| item.diagnostic.as_ref().map(|d| diagnostic_json(&item.path, &item.source, d))).collect::<Vec<_>>();
     let mut diagnostic_index = 0usize;
@@ -581,7 +722,12 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], bu
         let budget = format!("{{\"budgetId\":{},\"enforcement\":{},\"evidenceId\":{},\"reportId\":{},\"statistical\":{}}}", json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence_id), json(&fact.report_id), fact.statistical);
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
     }
+    for item in solver {
+        evidence_rows.push(crate::ProveSolver::evidence_json(item));
+    }
     let evidence = evidence_rows.join(",");
+    let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
+        crate::ProveSolver::summarize(solver);
     let unit_passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
     let unit_failed = tests.iter().filter(|item| item.kind == 0 && item.state == 1).count();
     let unit_skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
@@ -625,6 +771,12 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], bu
         &format!("\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{},\"skipped\":0}}", doctest_passed + doctest_failed),
     )
     .replace(
+        "\"solver\":{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}",
+        &format!(
+            "\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}}"
+        ),
+    )
+    .replace(
         "\"result\":\"pass\"",
         if exit_code != ExitCodes::OK || contract_failed > 0 {
             "\"result\":\"fail\""
@@ -647,4 +799,50 @@ fn json(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
+/// Identical existing bytes are left unchanged; differing bytes refuse.
+fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
+    let report_id = jet::SHA256::sha256_hex(proof_report.as_bytes());
+    let kind = target.kind;
+    let name = {
+        let root = Path::new(&target.root);
+        let stem = root
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(kind)
+            .replace('.', "_");
+        if stem.is_empty() { kind.to_string() } else { stem }
+    };
+    let rel = format!(
+        ".jet/proofs/{kind}/{name}/{}.jetproof",
+        &report_id[..16.min(report_id.len())]
+    );
+    let path = PathBuf::from(&rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let envelope = format!(
+        "{{\"schema\":\"jet.jproof\",\"version\":1,\"report_id\":{},\"artifact\":{{\"path\":{}}},\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"proofReport\":{proof_report}}}\n",
+        json(&report_id),
+        json(&rel)
+    );
+    if path.exists() {
+        let existing = fs::read(&path).map_err(|e| e.to_string())?;
+        if existing == envelope.as_bytes() {
+            return Ok(());
+        }
+        return Err(format!(
+            "refusing to overwrite differing .jetproof at {rel}"
+        ));
+    }
+    let tmp = path.with_extension(format!(
+        "jetproof.tmp.{}.{}",
+        std::process::id(),
+        &report_id[..8]
+    ));
+    fs::write(&tmp, envelope.as_bytes()).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(())
 }

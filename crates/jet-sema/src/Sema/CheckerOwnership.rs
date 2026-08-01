@@ -459,6 +459,16 @@ impl<'a> Checker<'a> {
             {
                 return false;
             }
+            // D-PIN1=A + D-ALLOC2 / D-FIXED-BACKING1: `mem.pin(&alloc)` names the
+            // same exclusive write window the arena/Fixed alloc already opened.
+            // The pin binding adds the address-stability promise; it is not a
+            // second overlapping write into the allocator's storage.
+            if kind == ViewKind::Pin
+                && fact.kind == ViewKind::Arena
+                && fact.place.overlaps(&place)
+            {
+                return false;
+            }
             (fact.access == ViewAccess::Write || access == ViewAccess::Write)
                 && fact.place.overlaps(&place)
         });

@@ -579,6 +579,31 @@ pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-COMPUTE1=D: compute opaque types map to top-level prelude structs.
+pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Tensor" => Some("JetTensor"),
+        "ComputeError" => Some("JetComputeError"),
+        "ComputeDevice" => Some("JetComputeDevice"),
+        "ComputeStream" => Some("JetComputeStream"),
+        "GradTriple" => Some("JetComputeGradTriple"),
+        "SparseTensor" => Some("JetSparseCsr"),
+        _ => None,
+    }
+}
+
+/// D-SERVICE1=D: service topology opaque types.
+pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "ServiceTree" => Some("JetServiceTree"),
+        "ServiceEndpoint" => Some("JetServiceEndpoint"),
+        "ServiceError" => Some("JetServiceError"),
+        "ServiceRestart" => Some("JetServiceRestart"),
+        "ServiceDelivery" => Some("JetServiceDelivery"),
+        _ => None,
+    }
+}
+
 /// E2-M10: networking opaque types map to top-level prelude structs.
 pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
@@ -727,6 +752,13 @@ impl Cx {
             (Some("core.crypto" | "jet.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
+            (Some("core.auth"), "Session") => Some("Session"),
+            (Some("core.auth"), "Auth") => Some("Auth"),
+            (Some("core.sync"), "SyncText") => Some("SyncText"),
+            (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
+            (Some("core.sync"), "SyncMap") => Some("SyncMap"),
+            (Some("core.sync"), "SyncList") => Some("SyncList"),
+            (Some("core.sync"), "RowPolicy") => Some("RowPolicy"),
             (Some("core.http.client"), "Proxy") => Some("HTTPProxy"),
             (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
             (Some("core.http.client"), "RetryPolicy") => Some("HTTPRetryPolicy"),
@@ -1268,6 +1300,27 @@ impl Cx {
             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
                 format!("{}JetAuthError", self.root_prefix)
             }
+            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
+                format!("{}JetAuthSession", self.root_prefix)
+            }
+            Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
+                format!("{}JetAuthApp", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncText" && !self.type_names.contains(name) => {
+                format!("{}JetSyncText", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncCounter" && !self.type_names.contains(name) => {
+                format!("{}JetSyncCounter", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncMap" && !self.type_names.contains(name) => {
+                format!("{}JetSyncMap", self.root_prefix)
+            }
+            Type::Named(name) if name == "SyncList" && !self.type_names.contains(name) => {
+                format!("{}JetSyncList", self.root_prefix)
+            }
+            Type::Named(name) if name == "RowPolicy" && !self.type_names.contains(name) => {
+                format!("{}JetRowPolicy", self.root_prefix)
+            }
             Type::Named(name)
                 if !self.type_names.contains(name)
                     && core_crypto_rust_type_name(name).is_some() =>
@@ -1444,6 +1497,9 @@ impl Cx {
             Type::Named(name) if name == "WebPage" && !self.type_names.contains(name) => {
                 format!("{}JetWebPage", self.root_prefix)
             }
+            Type::Named(name) if name == "LiveQuery" && !self.type_names.contains(name) => {
+                format!("{}JetLiveQuery", self.root_prefix)
+            }
             Type::Named(name)
                 if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) =>
             {
@@ -1511,6 +1567,26 @@ impl Cx {
                     self.root_prefix,
                     net_handle_rust_type(name).unwrap()
                 )
+            }
+            // D-COMPUTE1=D: Tensor / compute error / device handles.
+            Type::Named(name) if compute_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    compute_handle_rust_type(name).unwrap()
+                )
+            }
+            Type::Named(name) if service_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    service_handle_rust_type(name).unwrap()
+                )
+            }
+            Type::Apply { name, args }
+                if name == "Tensor" && args.len() <= 1 && compute_handle_rust_type(name).is_some() =>
+            {
+                format!("{}JetTensor", self.root_prefix)
             }
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
@@ -1580,8 +1656,25 @@ impl Cx {
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
-                if resolved == "Claims" || resolved == "AuthError" {
-                    let rust = if resolved == "Claims" { "JetAuthClaims" } else { "JetAuthError" };
+                if resolved == "Claims" || resolved == "AuthError" || resolved == "Session" || resolved == "Auth"
+                    || resolved == "SyncText"
+                    || resolved == "SyncCounter"
+                    || resolved == "SyncMap"
+                    || resolved == "SyncList"
+                    || resolved == "RowPolicy"
+                {
+                    let rust = match resolved {
+                        "Claims" => "JetAuthClaims",
+                        "AuthError" => "JetAuthError",
+                        "Session" => "JetAuthSession",
+                        "Auth" => "JetAuthApp",
+                        "SyncText" => "JetSyncText",
+                        "SyncCounter" => "JetSyncCounter",
+                        "SyncMap" => "JetSyncMap",
+                        "SyncList" => "JetSyncList",
+                        "RowPolicy" => "JetRowPolicy",
+                        _ => resolved,
+                    };
                     return format!("{}{rust}", self.root_prefix);
                 }
                 if let Some(rust) = core_crypto_rust_type_name(resolved) {

@@ -1,0 +1,19 @@
+// D-COMPUTE-BACKEND1 / #1143: CPU SIMD f32 tiled matmul profile.
+use core.compute as compute
+
+fn run() {
+    print("profile:{compute.profile_show()}")
+    a := compute.matrix(2, 2, 0.0) ?? panic("a")
+    compute.set(&a, [0, 0], 1.0) ?? panic("set")
+    compute.set(&a, [0, 1], 2.0) ?? panic("set")
+    compute.set(&a, [1, 0], 3.0) ?? panic("set")
+    compute.set(&a, [1, 1], 4.0) ?? panic("set")
+    b := compute.matrix(2, 2, 0.0) ?? panic("b")
+    compute.set(&b, [0, 0], 5.0) ?? panic("set")
+    compute.set(&b, [0, 1], 6.0) ?? panic("set")
+    compute.set(&b, [1, 0], 7.0) ?? panic("set")
+    compute.set(&b, [1, 1], 8.0) ?? panic("set")
+    c :: compute.matmul_f32_tile(a, b) ?? panic("tile")
+    print("tile:{compute.to_list(c)}")
+    print("placement:{compute.placement(c)}")
+}

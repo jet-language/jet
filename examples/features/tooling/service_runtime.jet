@@ -1,0 +1,31 @@
+// D-SERVICE1 + delivery/state/workflow/identity/upgrade (#1148–#1153).
+use core.services as services
+
+fn run() {
+    // `:=` — delivery/state/restart/send mutate the tree place (Write).
+    tree := services.tree("app")
+    services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    services.set_state_event_log(&tree) ?? panic("state")
+    a :: services.worker(&tree, "a", 2) ?? panic("a")
+    b :: services.worker(&tree, "b", 2) ?? panic("b")
+    services.set_restart(&tree, services.restart_rest_for_one()) ?? panic("restart")
+    services.start(&tree) ?? panic("start")
+
+    services.send_durable(&tree, a, "ping", "k1") ?? panic("durable")
+    services.append_event(&tree, "pinged") ?? panic("event")
+    print("events:{services.event_count(tree)}")
+
+    run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("wf")
+    services.workflow_step(&tree, run_id, "pay") ?? panic("step")
+    print("hist:{services.workflow_history(tree, run_id) ?? panic("hist")}")
+
+    services.directory_register(&tree, "front", a) ?? panic("dir")
+    resolved :: services.directory_resolve(tree, "front") ?? panic("resolve")
+    print(services.endpoint_show(resolved))
+
+    gen :: services.handoff_generation(&tree) ?? panic("handoff")
+    print("gen:{gen}")
+    services.chaos_fail(&tree) ?? panic("chaos")
+    print(services.observe(tree))
+    services.stop(&tree) ?? panic("stop")
+}

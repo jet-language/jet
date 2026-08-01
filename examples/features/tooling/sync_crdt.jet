@@ -1,0 +1,33 @@
+// D-SYNC1=A / D-DBPOLICY1=A: CRDT values + typed row policy.
+use core.sync as sync
+use app
+
+fn run() {
+    a0 :: sync.text_new("r1", "hello")
+    b :: sync.text_new("r2", "world")
+    a :: sync.text_set(a0, "r1", "hellp")
+    merged :: sync.text_merge(a, b)
+    print(sync.text_show(merged))
+
+    c0 :: sync.counter_new("r1", 2)
+    c2 :: sync.counter_new("r2", 3)
+    c1 :: sync.counter_inc(c0, "r1", 1)
+    print("counter:{sync.counter_value(sync.counter_merge(c1, c2))}")
+
+    m0 :: sync.map_new()
+    m :: sync.map_set(m0, "k", "v1")
+    m2 :: sync.map_set(sync.map_new(), "k", "v2")
+    print(sync.map_show(sync.map_merge(m, m2)))
+
+    l0 :: sync.list_new()
+    l1 :: sync.list_push(l0, "r1", "a")
+    l :: sync.list_push(l1, "r2", "b")
+    print(sync.list_show(l))
+
+    policy :: sync.policy_new("tickets", "owner == user") ?? panic("policy")
+    print(sync.policy_show(policy))
+    print("allow:{sync.policy_allows(policy, "alice", "alice")}")
+    print("deny:{sync.policy_allows(policy, "alice", "bob")}")
+
+    print(app.sync_over("sess-1", sync.text_show(merged)))
+}

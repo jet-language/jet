@@ -327,16 +327,13 @@ fn jet_cov_dump() {
     }
 }
 "#;
-const CORELIB_PRELUDE_PARTS: &[&str] = &[
-    "\nmod jet_xml_pull {\n",
-    include_str!("../../../jet-foundation/src/XmlPull.rs"),
-    "\n}\n",
-    "\nmod jet_base_encoding_strict {\n",
-    include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"),
-    "\n}\n",
-    "\nmod jet_regex_syntax {\n",
-    include_str!("../../../jet-foundation/src/RegexSyntax.rs"),
-    "\n}\n",
+/// R10 / #437 / #1133: Core templates are pay-for-what-you-call.
+///
+/// The JetStd brace chain (`mod jet_std {` … closing `}` in YAML.rs) must stay
+/// contiguous — those files are one module body. Optional Top-level fragments
+/// and satellite mods are selected from `bundle.used_core` so a `core.files`
+/// caller never drags Browser/HTTPServer/Game into generated source.
+const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
@@ -352,42 +349,281 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
-    include_str!("../Prelude/CoreLib/Email.rs"),
-    include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
-    include_str!("../Prelude/CoreLib/Top/Game.rs"),
-    include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),
-    include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"),
-    include_str!("../Prelude/CoreLib/Top/Text.rs"),
-    include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"),
-    include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"),
-    include_str!("../Prelude/CoreLib/Top/Process.rs"),
-    include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"),
-    include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"),
-    include_str!("../Prelude/CoreLib/Top/DataFmt.rs"),
-    include_str!("../Prelude/CoreLib/Top/DataFlow.rs"),
-    include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"),
-    include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"),
-    include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"),
-    include_str!("../Prelude/CoreLib/Top/WsClient.rs"),
-    include_str!("../Prelude/CoreLib/Top/Ws.rs"),
-    include_str!("../Prelude/CoreLib/Top/Browser.rs"),
-    include_str!("../Prelude/CoreLib/Top/Args.rs"),
-    include_str!("../Prelude/CoreLib/Top/Reflect.rs"),
-    // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.
-    include_str!("../Prelude/CoreLib/Top/Auth.rs"),
 ];
 
-fn push_corelib_prelude(out: &mut String) {
-    for part in CORELIB_PRELUDE_PARTS {
+fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str]) -> bool {
+    used.iter().any(|usage| {
+        prefixes.iter().any(|prefix| {
+            usage == prefix
+                || usage.starts_with(&format!("{prefix}::"))
+                || usage.starts_with(&format!("{prefix}."))
+        })
+    })
+}
+
+fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // R10 / #1133: record emission identity beside the templates so cache
+    // keys and audits can see which Top-module set was selected.
+    let mut body = String::new();
+    push_corelib_prelude_body(&mut body, used_core);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in body.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    out.push_str(&format!(
+        "/* jet-corelib-r10 len={} fp={hash:016x} */\n",
+        body.len()
+    ));
+    out.push_str(&body);
+}
+
+/// R10 / #1133: content identity of the Core templates a program will link.
+#[cfg(test)]
+pub(crate) fn corelib_emission_fingerprint(
+    used_core: &std::collections::HashSet<String>,
+) -> String {
+    let mut out = String::new();
+    push_corelib_prelude(&mut out, used_core);
+    out.lines()
+        .next()
+        .unwrap_or("/* jet-corelib-r10 missing */")
+        .to_string()
+}
+
+fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // JetStd Open/CommonTypes + EncodingStream/Codecs name these foundation
+    // modules unconditionally — always emit them with the Core kernel.
+    out.push_str("\nmod jet_xml_pull {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_base_encoding_strict {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_regex_syntax {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
+    out.push_str("\n}\n");
+    let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
+    let needs_base = core_usage_matches(
+        used_core,
+        &[
+            "core.encoding",
+            "core.encoding.hex",
+            "core.encoding.cbor",
+            "core.binary",
+        ],
+    );
+    let _needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
+    // needs_xml / needs_base still drive encoding Top reachability below.
+
+    for part in CORELIB_KERNEL_PARTS {
         out.push_str(part);
+    }
+
+    let needs_email = core_usage_matches(used_core, &["core.email"]);
+    let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
+    let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
+    let needs_files = core_usage_matches(
+        used_core,
+        &["core.files", "core.path", "core.watcher", "core.io", "core.env", "core.os"],
+    );
+    let needs_text = core_usage_matches(
+        used_core,
+        &["core.text", "core.text.unicode", "core.fmt", "core.term"],
+    );
+    let needs_fs_runtime = needs_files
+        || core_usage_matches(used_core, &["core.testing", "core.perf", "core.scope"]);
+    let needs_crypto = core_usage_matches(
+        used_core,
+        &[
+            "core.crypto",
+            "core.crypto.expert",
+            "core.crypto.random",
+            "core.vault",
+            "core.vault.expert",
+            "jet.crypto",
+            "core.uuid",
+        ],
+    );
+    let needs_process = core_usage_matches(used_core, &["core.process"]);
+    let needs_math = core_usage_matches(
+        used_core,
+        &["core.math", "core.random", "core.time", "core.time.date", "core.time.datetime", "core.time.expiring", "core.science.measurement"],
+    );
+    let needs_encoding = core_usage_matches(
+        used_core,
+        &[
+            "core.encoding",
+            "core.encoding.json",
+            "core.encoding.jsonl",
+            "core.encoding.csv",
+            "core.encoding.toml",
+            "core.encoding.yaml",
+            "core.encoding.xml",
+            "core.encoding.cbor",
+            "core.encoding.hex",
+            "core.compress.gzip",
+            "core.compress.zstd",
+            "core.archive",
+            "core.binary",
+        ],
+    ) || needs_xml
+        || needs_base;
+    let needs_data = core_usage_matches(
+        used_core,
+        &[
+            "core.data",
+            "core.sketch.hll",
+            "core.sketch.tdigest",
+            "core.sketch.cms",
+            "core.sketch.reservoir",
+            "jet.db",
+            "core.db",
+        ],
+    );
+    let needs_compute = core_usage_matches(used_core, &["core.compute"]);
+    let needs_net = core_usage_matches(
+        used_core,
+        &[
+            "core.net",
+            "core.tls",
+            "core.http",
+            "core.http.client",
+            "core.http.server",
+            "jet.http",
+            "core.ws",
+            "core.email",
+            "core.browser",
+            "core.web",
+            "core.web.devserver",
+            "core.web.storage",
+            "core.web.storage.local",
+            "core.web.storage.session",
+        ],
+    );
+    let needs_http = core_usage_matches(
+        used_core,
+        &[
+            "core.http",
+            "core.http.client",
+            "core.http.server",
+            "jet.http",
+            "core.web",
+            "core.web.devserver",
+        ],
+    );
+    let needs_ws = core_usage_matches(used_core, &["core.ws"]);
+    let needs_browser = core_usage_matches(
+        used_core,
+        &[
+            "core.browser",
+            "core.web",
+            "core.web.storage",
+            "core.web.storage.local",
+            "core.web.storage.session",
+        ],
+    );
+    let needs_args = core_usage_matches(used_core, &["core.args"]);
+    let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
+    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+    let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app"]);
+    let needs_services = core_usage_matches(used_core, &["core.services"]);
+
+    // Kernel closure: JetStd brace-chain files name these Top symbols
+    // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
+    // NetHTTP is TCP/TLS only — HTTP serve/router lives in HTTPServer (gated).
+    out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+
+    if needs_email {
+        out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
+    }
+    if needs_raylib {
+        // File/DB/Plugin handles already emitted in the kernel closure above;
+        // raylib-only when explicitly used stays a no-op re-include guard via
+        // the same source (idempotent struct defs would conflict). Skip.
+    }
+    if needs_game {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
+    }
+    if needs_files {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+    }
+    if needs_text {
+        // Text/Unicode already in kernel closure.
+    }
+    // Process helpers are also used by FSIoEnvOsTesting (`jet_process_command` /
+    // `jet_process_spec_run_inner`) — emit whenever either surface is needed (I9).
+    // Process must come before FSIoEnvOsTesting so those symbols are in scope.
+    if needs_process || needs_fs_runtime {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
+    }
+    if needs_fs_runtime {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+    }
+    if needs_crypto {
+        // CryptoEntropy already in kernel closure (TLS identity + JetStd).
+    }
+    if needs_math {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
+    }
+    if needs_encoding {
+        // Encoding templates already in kernel closure.
+    }
+    if needs_data {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+    }
+    if needs_compute {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
+    }
+    if needs_net {
+        // DNS + NetHTTP (TCP/TLS) already in kernel closure.
+    }
+    if needs_http {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"));
+    }
+    if needs_ws || needs_http || needs_browser {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/WsClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Ws.rs"));
+    }
+    if needs_browser {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
+    }
+    if needs_args {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
+    }
+    if needs_reflect {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
+    }
+    if needs_auth_tokens {
+        // D-AUTH2=A: JWT/PASETO verify prelude.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+    }
+    if needs_auth_session {
+        // D-AUTH1=A: sessions + `app.auth` prelude.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+    }
+    if needs_sync {
+        // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
+    }
+    if needs_services {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
     }
 }
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
@@ -402,9 +638,34 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-WEBAPP1=D: `core.web.app` full-stack application builder.
 const WEBAPP_PRELUDE: &str = include_str!("../Prelude/WebApp.rs");
+const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
+
+fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // WebApp/DevServer call into HTTPServer helpers. Emit them only when the
+    // program uses web/HTTP surfaces — bare `app.live` / `app.auth` must not
+    // drag the full HTTP server templates (R10).
+    let needs_webapp = core_usage_matches(
+        used_core,
+        &[
+            "core.web",
+            "core.http",
+            "core.http.server",
+            "core.http.client",
+            "core.web.devserver",
+        ],
+    );
+    let needs_live = core_usage_matches(used_core, &["app", "core.web"]);
+    if needs_webapp {
+        out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
+    }
+    if needs_live {
+        out.push_str(LIVEQUERY_PRELUDE);
+    }
+}
 
 fn push_mem_prelude(out: &mut String) {
     out.push_str("mod jet_uninit_semantics {\n");
@@ -1061,7 +1322,36 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         }
     }
     if uses("jet.db") {
+        // D-DBDRIVER1=A: nominal Driver contract for `T: Driver` generics.
+        // Concrete `DBConnection` calls still go through THandleOp; this trait
+        // is the Rust half of the same parameterized surface.
+        out.push_str(&format!(
+            "trait JetDBDriver {{\n\
+             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
+             \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError>;\n\
+             \tfn begin(&mut self) -> bool;\n\
+             \tfn commit(&mut self) -> bool;\n\
+             \tfn rollback(&mut self) -> bool;\n\
+             }}\n"
+        ));
         if let Some(ffi) = &cx.ffi_crate {
+            out.push_str(&format!(
+                "impl JetDBDriver for {root}JetDbConnection {{\n\
+                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t}}\n\
+                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params))).map(|__rows| __rows.into_iter().next())\n\
+                 \t}}\n\
+                 \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
+                 \t\t{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t}}\n\
+                 \tfn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.handle) }}\n\
+                 \tfn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.handle) }}\n\
+                 \tfn rollback(&mut self) -> bool {{ {ffi}::jet_db_rollback(self.handle) }}\n\
+                 }}\n"
+            ));
             out.push_str(&format!(
                 "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
@@ -1339,6 +1629,74 @@ mod tests {
             "{emitted}fn main() {{ jet_gc::runtime_or_exit(jet_gc::initialize_trace()); }}\n"
         ));
         assert!(used.contains("mod jet_gc"));
+    }
+
+    #[test]
+    fn r10_corelib_emits_only_reachable_top_modules() {
+        // R10 / #1133: a files-only program must not drag HTTP/Browser/Game
+        // templates into generated source.
+        let files_only = HashSet::from(["core.files::read".to_string()]);
+        let mut files_out = String::new();
+        push_corelib_prelude(&mut files_out, &files_only);
+        assert!(
+            files_out.contains("struct JetPath"),
+            "files usage must emit PathFiles"
+        );
+        assert!(
+            !files_out.contains("JetHTTPServer")
+                && !files_out.contains("struct JetBrowser")
+                && !files_out.contains("fn jet_game_"),
+            "files-only Core must not emit HTTP server/Browser/Game templates"
+        );
+        assert!(
+            files_out.contains("struct JetTCPStream"),
+            "JetStd kernel closure always needs JetTCPStream"
+        );
+
+        let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);
+        let mut net_out = String::new();
+        push_corelib_prelude(&mut net_out, &net_only);
+        assert!(
+            net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"),
+            "net usage must emit NetHTTP"
+        );
+        assert!(
+            !net_out.contains("JetHTTPServer") && !net_out.contains("struct JetBrowser"),
+            "pure core.net must not emit HTTP server or Browser templates"
+        );
+
+        let http = HashSet::from(["core.http.client::get".to_string()]);
+        let mut http_out = String::new();
+        push_corelib_prelude(&mut http_out, &http);
+        assert!(
+            http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
+            "http usage must emit HTTP templates"
+        );
+
+        let files_fp = corelib_emission_fingerprint(&files_only);
+        let net_fp = corelib_emission_fingerprint(&net_only);
+        assert_ne!(
+            files_fp, net_fp,
+            "R10 cache identity must differ when Top-module reachability differs"
+        );
+        assert_eq!(
+            files_fp,
+            corelib_emission_fingerprint(&files_only),
+            "R10 fingerprint must be stable for the same used_core set"
+        );
+
+        let compute_only = HashSet::from(["core.compute::zeros".to_string()]);
+        let mut compute_out = String::new();
+        push_corelib_prelude(&mut compute_out, &compute_only);
+        assert!(
+            compute_out.contains("fn jet_compute_zeros")
+                && compute_out.contains("struct JetTensor"),
+            "core.compute usage must emit Compute.rs"
+        );
+        assert!(
+            !compute_out.contains("JetHTTPServer") && !compute_out.contains("struct JetBrowser"),
+            "compute-only Core must not emit HTTP/Browser templates"
+        );
     }
 
     #[test]
@@ -2115,14 +2473,13 @@ pub fn emit_bundle_dbg(
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -2295,14 +2652,13 @@ pub fn emit_bundle_tests_cov(
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -2497,14 +2853,13 @@ pub fn emit_bundle_fuzz(
     // property test is present).
     out.push_str(PROP_PRELUDE);
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -2752,14 +3107,13 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
+        push_web_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 

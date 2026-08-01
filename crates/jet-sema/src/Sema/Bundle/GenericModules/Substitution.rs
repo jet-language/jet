@@ -123,6 +123,16 @@ pub(super) fn substitute_expr(
             }
             args.iter_mut()
                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
+            // Rewrite the sema-recorded receiver type through the same subst so
+            // monomorphized JIT/AOT bodies see `DBConnection::query` rather than
+            // a leftover type-parameter owner (`T::query`) after `T` is gone.
+            if let Some(name) = recv_type.as_mut() {
+                match types.get(name) {
+                    Some(Type::Named(resolved)) => *name = resolved.clone(),
+                    Some(Type::Apply { name: resolved, .. }) => *name = resolved.clone(),
+                    _ => {}
+                }
+            }
             let primitive = recv_type
                 .as_ref()
                 .and_then(|name| types.get(name))

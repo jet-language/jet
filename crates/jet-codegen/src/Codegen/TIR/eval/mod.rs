@@ -3,12 +3,14 @@
 mod builtins;
 mod browser;
 mod closure_ops;
+mod compute_calls;
 mod data_calls;
 mod event_ops;
 mod exprs;
 mod handles;
 mod local_cell;
 mod regex_ops;
+mod services_calls;
 mod stmts;
 mod webapp;
 

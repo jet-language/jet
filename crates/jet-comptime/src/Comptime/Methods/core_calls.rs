@@ -1858,6 +1858,65 @@ pub fn apply_core_call(
                 Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
             })
         }
+        // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
+        ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
+        // D-SERVICE1=D / I9: same Prelude as AOT (`ServicesLite` includes Services.rs).
+        ("core.services", method) => super::super::ServicesLite::apply(method, &args, span),
+        // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
+        // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
+        // `evaluate_constant` cannot fold them into Ok(literals) while leaving
+        // the runtime `JET_AUTH_STORE` empty. AuthLite still serves impure /
+        // interpreter ambient via `apply_impure_core_call` → here.
+        ("core.auth", method)
+            if matches!(
+                method,
+                "register_user"
+                    | "password_login"
+                    | "session_validate"
+                    | "session_show"
+                    | "session_user"
+                    | "session_cookie"
+                    | "session_id"
+                    | "magic_link_issue"
+                    | "magic_link_consume"
+                    | "oauth_begin"
+                    | "oauth_finish"
+            ) =>
+        {
+            super::super::AuthLite::apply(method, &args, span)
+        }
+        // D-SYNC1=A / D-DBPOLICY1=A / I9.
+        ("core.sync", method) => super::super::SyncLite::apply(method, &args, span),
+        // D-LIVEQUERY1=A / I9: same Prelude as AOT (`AppLite` includes LiveQuery.rs).
+        ("app" | "core.web", method)
+            if matches!(
+                method,
+                "live"
+                    | "subscribe"
+                    | "invalidate"
+                    | "transact_invalidate"
+                    | "signal_push"
+                    | "live_get"
+                    | "live_show"
+                    | "live_stats"
+                    | "auth"
+                    | "auth_oauth"
+                    | "auth_routes"
+                    | "auth_show"
+                    | "sync_over"
+            ) =>
+        {
+            if matches!(
+                method,
+                "auth" | "auth_oauth" | "auth_routes" | "auth_show"
+            ) {
+                super::super::AuthLite::apply(method, &args, span)
+            } else if method == "sync_over" {
+                super::super::SyncLite::apply(method, &args, span)
+            } else {
+                super::super::AppLite::apply(method, &args, span)
+            }
+        }
         // --- D-DATA-SURFACE1/PLOT1/STATUS1: core.data's fixed-signature
         // stats + plot surface (pure, ported verbatim from AOT's
         // `jet_data_*` — see `DataLite.rs`). The generic call-site-typed
@@ -2702,6 +2761,11 @@ pub fn apply_impure_core_call(
         | ("core.measurement", _)
         | ("core.testing", _)
         | ("core.data", _)
+        | ("core.compute", _)
+        | ("core.services", _)
+        | ("core.auth", _)
+        | ("core.sync", _)
+        | ("app", _)
         | ("core.ui", _)
         | ("core.crypto", _)
         | ("core.crypto.expert", _)
