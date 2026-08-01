@@ -358,6 +358,32 @@ pub fn apply(
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
+        "eye" => Ok(match jet_compute_eye(as_int(one(0)?, span)?) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "det" => Ok(match jet_compute_det(&ct_to_tensor(one(0)?, span)?) {
+            Ok(v) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Err(e) => err_compute(e),
+        }),
+        "inv" | "fft" => {
+            let tensor = ct_to_tensor(one(0)?, span)?;
+            Ok(match if method == "inv" {
+                jet_compute_inv(&tensor)
+            } else {
+                jet_compute_fft(&tensor)
+            } {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            })
+        }
+        "solve" => Ok(match jet_compute_solve(
+            &ct_to_tensor(one(0)?, span)?,
+            &ct_to_tensor(one(1)?, span)?,
+        ) {
+            Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
         _ => Err(unsupported(
             &format!("`core.compute.{method}()`"),
             span,

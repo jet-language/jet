@@ -589,6 +589,17 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-SERVICE1=D: service topology opaque types.
+pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "ServiceTree" => Some("JetServiceTree"),
+        "ServiceEndpoint" => Some("JetServiceEndpoint"),
+        "ServiceError" => Some("JetServiceError"),
+        "ServiceRestart" => Some("JetServiceRestart"),
+        _ => None,
+    }
+}
+
 /// E2-M10: networking opaque types map to top-level prelude structs.
 pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
@@ -1528,6 +1539,13 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     compute_handle_rust_type(name).unwrap()
+                )
+            }
+            Type::Named(name) if service_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    service_handle_rust_type(name).unwrap()
                 )
             }
             Type::Apply { name, args }

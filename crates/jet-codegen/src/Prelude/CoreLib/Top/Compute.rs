@@ -588,3 +588,137 @@ fn jet_compute_binary(
         last_placement: receipt,
     })
 }
+
+// ── #1137 / D-COMPUTE1: dense linalg on the Tensor CPU oracle ───────────────
+
+fn jet_compute_eye(n: i64) -> Result<JetTensor, JetComputeError> {
+    if n < 0 {
+        return Err(JetComputeError::InvalidShape(
+            "eye size must be non-negative".to_string(),
+        ));
+    }
+    let mut out = jet_compute_tensor_from_shape(vec![n, n], 0.0, JetComputeDevice::Auto)?;
+    for i in 0..n {
+        jet_compute_set(&mut out, &vec![i, i], 1.0)?;
+    }
+    Ok(out)
+}
+
+fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
+        return Err(JetComputeError::RankMismatch(
+            "det requires a square rank-2 tensor".to_string(),
+        ));
+    }
+    let n = tensor.shape[0] as usize;
+    let mut a = tensor.data.clone();
+    let mut det = 1.0;
+    for i in 0..n {
+        let mut pivot = i;
+        for r in i..n {
+            if a[r * n + i].abs() > a[pivot * n + i].abs() {
+                pivot = r;
+            }
+        }
+        if a[pivot * n + i].abs() < 1e-15 {
+            return Ok(0.0);
+        }
+        if pivot != i {
+            for c in 0..n {
+                a.swap(i * n + c, pivot * n + c);
+            }
+            det = -det;
+        }
+        let piv = a[i * n + i];
+        det *= piv;
+        for r in (i + 1)..n {
+            let factor = a[r * n + i] / piv;
+            for c in i..n {
+                a[r * n + c] -= factor * a[i * n + c];
+            }
+        }
+    }
+    Ok(det)
+}
+
+fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
+        return Err(JetComputeError::RankMismatch(
+            "inv requires a square rank-2 tensor".to_string(),
+        ));
+    }
+    let n = tensor.shape[0] as usize;
+    let mut a = vec![0.0; n * n * 2];
+    for i in 0..n {
+        for j in 0..n {
+            a[i * (2 * n) + j] = jet_compute_get(tensor, &vec![i as i64, j as i64])?;
+            a[i * (2 * n) + n + j] = if i == j { 1.0 } else { 0.0 };
+        }
+    }
+    for i in 0..n {
+        let mut pivot = i;
+        for r in i..n {
+            if a[r * (2 * n) + i].abs() > a[pivot * (2 * n) + i].abs() {
+                pivot = r;
+            }
+        }
+        if a[pivot * (2 * n) + i].abs() < 1e-15 {
+            return Err(JetComputeError::InvalidShape(
+                "matrix is singular".to_string(),
+            ));
+        }
+        if pivot != i {
+            for c in 0..(2 * n) {
+                a.swap(i * (2 * n) + c, pivot * (2 * n) + c);
+            }
+        }
+        let piv = a[i * (2 * n) + i];
+        for c in 0..(2 * n) {
+            a[i * (2 * n) + c] /= piv;
+        }
+        for r in 0..n {
+            if r == i {
+                continue;
+            }
+            let factor = a[r * (2 * n) + i];
+            for c in 0..(2 * n) {
+                a[r * (2 * n) + c] -= factor * a[i * (2 * n) + c];
+            }
+        }
+    }
+    let mut out = jet_compute_tensor_from_shape(vec![n as i64, n as i64], 0.0, JetComputeDevice::Auto)?;
+    for i in 0..n {
+        for j in 0..n {
+            jet_compute_set(&mut out, &vec![i as i64, j as i64], a[i * (2 * n) + n + j])?;
+        }
+    }
+    Ok(out)
+}
+
+fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    let inv = jet_compute_inv(a)?;
+    jet_compute_matmul(&inv, b)
+}
+
+/// Naive DFT on a rank-1 real tensor → interleaved [re, im, re, im, …] length 2n.
+fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if tensor.shape.len() != 1 {
+        return Err(JetComputeError::RankMismatch(
+            "fft requires a rank-1 tensor".to_string(),
+        ));
+    }
+    let n = tensor.data.len();
+    let mut out = jet_compute_tensor_from_shape(vec![(n * 2) as i64], 0.0, JetComputeDevice::Auto)?;
+    for k in 0..n {
+        let mut re = 0.0;
+        let mut im = 0.0;
+        for t in 0..n {
+            let angle = -2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
+            re += tensor.data[t] * angle.cos();
+            im += tensor.data[t] * angle.sin();
+        }
+        jet_compute_set(&mut out, &vec![(2 * k) as i64], re)?;
+        jet_compute_set(&mut out, &vec![(2 * k + 1) as i64], im)?;
+    }
+    Ok(out)
+}

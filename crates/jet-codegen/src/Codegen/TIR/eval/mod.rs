@@ -10,6 +10,7 @@ mod exprs;
 mod handles;
 mod local_cell;
 mod regex_ops;
+mod services_calls;
 mod stmts;
 mod webapp;
 

@@ -962,6 +962,86 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.compute", "eye") => format!("{}({})", helper("jet_compute_eye"), arg(0)),
+        ("core.compute", "det") => format!("{}(&({}))", helper("jet_compute_det"), arg(0)),
+        ("core.compute", "inv") => format!("{}(&({}))", helper("jet_compute_inv"), arg(0)),
+        ("core.compute", "fft") => format!("{}(&({}))", helper("jet_compute_fft"), arg(0)),
+        ("core.compute", "solve") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_compute_solve"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
+        ("core.services", "restart_one_for_one") => {
+            format!("{}()", helper("jet_services_restart_one_for_one"))
+        }
+        ("core.services", "restart_one_for_all") => {
+            format!("{}()", helper("jet_services_restart_one_for_all"))
+        }
+        ("core.services", "set_restart") => format!(
+            "{}(&mut ({}), {})",
+            helper("jet_services_set_restart"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "worker") => format!(
+            "{}(&mut ({}), ({}).clone(), {})",
+            helper("jet_services_worker"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "group") => format!(
+            "{}(&mut ({}), ({}).clone(), ({}).clone())",
+            helper("jet_services_group"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "start") => {
+            format!("{}(&mut ({}))", helper("jet_services_start"), arg(0))
+        }
+        ("core.services", "stop") => {
+            format!("{}(&mut ({}))", helper("jet_services_stop"), arg(0))
+        }
+        ("core.services", "send") => format!(
+            "{}(&mut ({}), &({}), ({}).clone())",
+            helper("jet_services_send"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.services", "receive") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_services_receive"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "mailbox_depth") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_services_mailbox_depth"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "fail_worker") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_services_fail_worker"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "restarts") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_services_restarts"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "endpoint_show") => {
+            format!("{}(&({}))", helper("jet_services_endpoint_show"), arg(0))
+        }
+        ("core.services", "tree_show") => {
+            format!("{}(&({}))", helper("jet_services_tree_show"), arg(0))
+        }
         ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
         ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
         ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),

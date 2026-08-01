@@ -674,6 +674,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 // marshal the same Prelude symbols (I9 deopt path).
                 return false;
             }
+            if module == "core.services" {
+                // ServiceTree mutates through Prelude; deopt to ambient (I9).
+                return false;
+            }
             if module == "core.tasks" && method == "channel" {
                 return args.len() <= 1 && args.iter().all(|a| resident_safe_expr(a, callees));
             }

@@ -1860,6 +1860,8 @@ pub fn apply_core_call(
         }
         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
         ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
+        // D-SERVICE1=D / I9: same Prelude as AOT (`ServicesLite` includes Services.rs).
+        ("core.services", method) => super::super::ServicesLite::apply(method, &args, span),
         // --- D-DATA-SURFACE1/PLOT1/STATUS1: core.data's fixed-signature
         // stats + plot surface (pure, ported verbatim from AOT's
         // `jet_data_*` — see `DataLite.rs`). The generic call-site-typed
@@ -2705,6 +2707,7 @@ pub fn apply_impure_core_call(
         | ("core.testing", _)
         | ("core.data", _)
         | ("core.compute", _)
+        | ("core.services", _)
         | ("core.ui", _)
         | ("core.crypto", _)
         | ("core.crypto.expert", _)

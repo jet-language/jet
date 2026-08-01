@@ -701,6 +701,125 @@ pub fn core_fixed_sig(
                 Type::Named("ComputeError".to_string()),
             )),
         )),
+        ("core.compute", "eye") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "det") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+        )),
+        ("core.compute", "inv" | "fft") => Some((
+            vec![(read, Type::Named("Tensor".to_string()))],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "solve") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        // D-SERVICE1=D (#444): service tree topology + mailboxes.
+        ("core.services", "tree") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("ServiceTree".to_string())),
+        )),
+        ("core.services", "restart_one_for_one" | "restart_one_for_all") => Some((
+            vec![],
+            Some(Type::Named("ServiceRestart".to_string())),
+        )),
+        ("core.services", "set_restart") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceRestart".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "worker") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("ServiceEndpoint".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "group") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::String),
+                (read, Type::List(Box::new(Type::String))),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "start" | "stop") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "send") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "receive") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+            ],
+            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "mailbox_depth" | "restarts") => Some((
+            vec![
+                (read, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+            ],
+            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "fail_worker") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceEndpoint".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "endpoint_show") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.services", "tree_show") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(Type::String),
+        )),
         ("core.data", "quantile") => {
             let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)];
             if super::super::Edition::edition_at_least("2027") {

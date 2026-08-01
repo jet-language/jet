@@ -529,6 +529,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
     let needs_auth = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+    let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     if needs_email {
         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
@@ -599,6 +600,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     if needs_auth {
         // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+    }
+    if needs_services {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
     }
 }
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
