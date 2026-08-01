@@ -453,6 +453,264 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     })
 }
 
+/// Return the Jet declarations that live beside the manifest blocks in
+/// `pkg.jet`, preserving their original byte offsets.  D-BUILDSCOPE1 makes
+/// `pkg.jet` a valid home for the package's single `fn build`; the manifest
+/// reader must therefore expose that source without teaching the manifest
+/// grammar how to parse ordinary Jet items.
+///
+/// Known manifest blocks are blanked with spaces (newlines are retained), so
+/// diagnostics from the later compiler parse still point at `pkg.jet`.  The
+/// result is `None` when the remaining top-level source has no `fn build`.
+pub fn build_entry_source(text: &str) -> Option<String> {
+    let mut masked = text.as_bytes().to_vec();
+    mask_manifest_blocks(text, &mut masked);
+    let source = String::from_utf8(masked).ok()?;
+    has_top_level_build_function(&source).then_some(source)
+}
+
+const MANIFEST_BLOCKS: &[&str] = &[
+    Syntax::MANIFEST_BLOCK_PAYLOAD,
+    "identity",
+    "deps",
+    Syntax::MANIFEST_BLOCK_PACKAGES,
+    Syntax::MANIFEST_BLOCK_BUILD,
+    Syntax::MANIFEST_BLOCK_EFFECTS,
+    Syntax::MANIFEST_BLOCK_GRANTS,
+    Syntax::MANIFEST_BLOCK_POLICY,
+    "dev_deps",
+    "patch",
+    "workspace",
+];
+
+fn mask_manifest_blocks(text: &str, masked: &mut [u8]) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < bytes.len() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if bytes[i] == b'\\' {
+                escaped = true;
+            } else if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
+            if let Some((start, open)) = manifest_block_start(bytes, i) {
+                if let Some(end) = balanced_block_end(text, open) {
+                    blank_range(masked, start, end);
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = skip_block_comment(bytes, i);
+            continue;
+        }
+        match bytes[i] {
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth = brace_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+fn manifest_block_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
+    for key in MANIFEST_BLOCKS {
+        let end = at.checked_add(key.len())?;
+        if bytes.get(at..end) != Some(key.as_bytes()) {
+            continue;
+        }
+        let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
+        let after_ok = end == bytes.len() || !is_ident_byte(bytes[end]);
+        if !before_ok || !after_ok {
+            continue;
+        }
+        let mut cursor = end;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b':') {
+            continue;
+        }
+        cursor += 1;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'.') {
+            cursor += 1;
+            while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+        }
+        if bytes.get(cursor) == Some(&b'{') {
+            return Some((at, cursor));
+        }
+    }
+    None
+}
+
+fn balanced_block_end(text: &str, open: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut i = open;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < bytes.len() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if bytes[i] == b'\\' {
+                escaped = true;
+            } else if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            in_string = true;
+        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = skip_block_comment(bytes, i);
+            continue;
+        } else if bytes[i] == b'{' {
+            depth += 1;
+        } else if bytes[i] == b'}' {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(i + 1);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn blank_range(masked: &mut [u8], start: usize, end: usize) {
+    for byte in masked.get_mut(start..end).into_iter().flatten() {
+        if *byte != b'\n' && *byte != b'\r' {
+            *byte = b' ';
+        }
+    }
+}
+
+fn has_top_level_build_function(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < bytes.len() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if bytes[i] == b'\\' {
+                escaped = true;
+            } else if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = skip_block_comment(bytes, i);
+            continue;
+        }
+        if depth == 0 && word_at(bytes, i, b"fn") {
+            let mut cursor = i + 2;
+            while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+            if word_at(bytes, cursor, b"build") {
+                return true;
+            }
+        }
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+fn skip_block_comment(bytes: &[u8], start: usize) -> usize {
+    let mut depth = 1usize;
+    let mut i = start.saturating_add(2);
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            depth = depth.saturating_add(1);
+            i += 2;
+        } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+            depth = depth.saturating_sub(1);
+            i += 2;
+            if depth == 0 {
+                return i;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    bytes.len()
+}
+
+fn word_at(bytes: &[u8], at: usize, word: &[u8]) -> bool {
+    let end = at.saturating_add(word.len());
+    end <= bytes.len()
+        && &bytes[at..end] == word
+        && (at == 0 || !is_ident_byte(bytes[at - 1]))
+        && (end == bytes.len() || !is_ident_byte(bytes[end]))
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
 /// D-UNSAFE-OBLIG1=A: parse the manifest-shaped admin policy document without
 /// requiring package identity. It accepts exactly the ordinary `policy` block.
 pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, ManifestError> {
@@ -1297,6 +1555,44 @@ build: { fast: Build.{ optimize: full, bogus: true } }
             matches!(err, ManifestError::BadBuildProfile { ref name, .. } if name == "fast"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn package_build_entry_source_masks_manifest_but_keeps_jet_items() {
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+build: { allow: #(FS) }
+fn helper() => String { return "ok" }
+fn build(b: BuildContext) => BuildPlan ? {
+    return b.plan()
+}
+"#;
+        let source = build_entry_source(src).expect("package build entry should be found");
+        assert!(source.contains("fn helper"));
+        assert!(source.contains("fn build"));
+        assert!(!source.contains("payload:"));
+        assert!(!source.contains("allow: #(FS)"));
+        assert_eq!(source.len(), src.len());
+    }
+
+    #[test]
+    fn package_build_entry_source_ignores_manifest_text_and_comments() {
+        let src = r#"
+payload: { name: "p", version: "0.1.0", description: "fn build()" }
+// fn build() in a comment is not an entry.
+"#;
+        assert!(build_entry_source(src).is_none());
+    }
+
+    #[test]
+    fn package_build_entry_source_handles_nested_comments_and_utf8() {
+        let src = r#"/* π /* fn build() is still a comment */ */
+payload: { name: "p", version: "0.1.0" }
+fn build(b: BuildContext) => BuildPlan ? { return b.plan() }
+"#;
+        let source = build_entry_source(src).expect("real build entry should survive comments");
+        assert!(source.contains("fn build"));
+        assert!(!source.contains("payload:"));
     }
 
     #[test]

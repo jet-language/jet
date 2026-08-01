@@ -76,6 +76,74 @@ pub fn select_members(
         .collect())
 }
 
+/// Return selected workspace members in deterministic local-dependency order.
+///
+/// The workspace index remains the source-order tie breaker.  A member is
+/// ordered after any selected member named by its `pkg.jet` dependency list;
+/// external dependencies do not affect this order.  Package resolution owns
+/// dependency-cycle diagnostics, so a malformed cycle keeps the stable source
+/// order here instead of inventing a second diagnostic authority in the
+/// workspace runner.
+pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<WorkspaceMember> {
+    let names: HashMap<&str, usize> = members
+        .iter()
+        .enumerate()
+        .map(|(index, member)| (member.name.as_str(), index))
+        .collect();
+    let mut dependents = vec![Vec::<usize>::new(); members.len()];
+    let mut indegree = vec![0usize; members.len()];
+
+    for (index, member) in members.iter().enumerate() {
+        let manifest = std::fs::read_to_string(member_abs(root, member).join(Syntax::PAYLOAD_FILE))
+            .ok()
+            .and_then(|source| PackageManifest::parse(&source).ok());
+        let Some(manifest) = manifest else {
+            continue;
+        };
+        let mut seen = HashSet::new();
+        for dependency in manifest.deps {
+            let Some(&dependency_index) = names.get(dependency.name.as_str()) else {
+                continue;
+            };
+            if dependency_index == index || !seen.insert(dependency_index) {
+                continue;
+            }
+            dependents[dependency_index].push(index);
+            indegree[index] += 1;
+        }
+    }
+
+    // `(source position, member index)` makes ready-node selection stable even
+    // when future callers construct a plan with duplicate names.
+    let mut ready = BTreeSet::new();
+    for (index, degree) in indegree.iter().enumerate() {
+        if *degree == 0 {
+            ready.insert((index, index));
+        }
+    }
+    let mut ordered = Vec::with_capacity(members.len());
+    let mut emitted = vec![false; members.len()];
+    while let Some((_, index)) = ready.pop_first() {
+        emitted[index] = true;
+        ordered.push(members[index].clone());
+        for dependent in &dependents[index] {
+            indegree[*dependent] -= 1;
+            if indegree[*dependent] == 0 {
+                ready.insert((*dependent, *dependent));
+            }
+        }
+    }
+
+    // Keep a malformed dependency cycle deterministic and let the package
+    // resolver report the actual cycle when realization runs.
+    for (index, member) in members.iter().enumerate() {
+        if !emitted[index] {
+            ordered.push(member.clone());
+        }
+    }
+    ordered
+}
+
 /// Persist member input hashes after a successful workspace build so the next
 /// `--affected` run can diff against them (action-cache input keys).
 pub fn record_member_input_hashes(root: &Path, members: &[WorkspaceMember]) {
@@ -416,7 +484,7 @@ mod tests {
         std::fs::create_dir_all(&abs).unwrap();
         let dep_lines: String = deps
             .iter()
-            .map(|d| format!("    {d}: \"1.0.0\",\n"))
+            .map(|d| format!("    {d}: {d}#1.0.0,\n"))
             .collect();
         let deps_block = if deps.is_empty() {
             String::new()
@@ -452,6 +520,17 @@ mod tests {
         ]);
         let got = select_members(&root, &plan, &SelectRequest::default()).unwrap();
         assert_eq!(got.len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dependency_order_places_local_dependencies_first() {
+        let root = unique_dir("dependency-order");
+        let dependent = write_member(&root, "app", "packages/app", &["shared"]);
+        let dependency = write_member(&root, "shared", "packages/shared", &[]);
+        let ordered = dependency_order(&root, &[dependent, dependency]);
+        let names: Vec<_> = ordered.iter().map(|member| member.name.as_str()).collect();
+        assert_eq!(names, ["shared", "app"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

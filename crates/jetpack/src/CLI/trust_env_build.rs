@@ -409,7 +409,8 @@ fn run_workspace_members(
     let roots = Store::resolve();
     let mut ok = true;
     let mut built: Vec<WorkspaceMember> = Vec::new();
-    for (idx, member) in plan_members.iter().enumerate() {
+    let ordered_members = MemberSelect::dependency_order(dir, plan_members);
+    for (idx, member) in ordered_members.iter().enumerate() {
         let abs = if std::path::Path::new(&member.path).is_absolute() {
             std::path::PathBuf::from(&member.path)
         } else {
@@ -422,11 +423,11 @@ fn run_workspace_members(
             ProviderKind::Core,
         )]);
         let raw = format!("{}@{}", member.name, member.name);
-        if plan_members.len() > 1 {
+        if ordered_members.len() > 1 {
             theme.progress_chain(
                 action,
                 idx + 1,
-                plan_members.len(),
+                ordered_members.len(),
                 &member.name,
                 "workspace",
             );
@@ -458,7 +459,7 @@ fn run_workspace_members(
         MemberSelect::record_member_input_hashes(dir, &built);
         theme.status(&format!(
             "{action} {} workspace member(s).",
-            plan_members.len()
+            ordered_members.len()
         ));
         0
     } else {

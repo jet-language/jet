@@ -55,6 +55,10 @@ pub fn evaluate_modules(
     src: &str,
     base_dir: &Path,
 ) -> Result<Vec<EvaluatedModule>, Diagnostic> {
+    // Module fields use the canonical comptime/TIR evaluator.  Install the
+    // bridge here as well as in higher-level workspace entry points so direct
+    // callers of this public evaluator get the same semantics.
+    jet_codegen::Codegen::TIR::install_comptime_bridge();
     let funcs = collect_funcs(items);
     let mut out = Vec::new();
     for item in items {
@@ -223,22 +227,62 @@ fn evaluate_env_fields(
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
     let extern_names = HashSet::new();
-    let globals = HashMap::new();
-    for (name, _span, value) in fields {
+    // Module fields are a small pure dependency graph.  The old source-order
+    // loop made a valid `port: base + 1, base: 8000` fail or, worse, made the
+    // result depend on declaration order.  Resolve every sibling dependency
+    // first, then evaluate the field with the resolved values in its globals.
+    // `packages` remains text-level sugar and is deliberately not exposed as a
+    // comptime value.
+    let field_map = fields
+        .iter()
+        .map(|(name, span, value)| (name.as_str(), (*span, value)))
+        .collect::<HashMap<_, _>>();
+    let mut states = HashMap::<String, u8>::new();
+    let mut resolved = HashMap::<String, crate::Comptime::CtValue>::new();
+    let mut stack = Vec::<String>::new();
+    for (name, span, _) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
-            let extracted = extract_packages(value, src)?;
+            let extracted = extract_packages(
+                field_map.get(name.as_str()).map(|(_, value)| *value).unwrap(),
+                src,
+            )?;
             entry.packages.extend(extracted.packages);
             adapters.extend(extracted.adapters);
+            continue;
+        }
+        resolve_env_field(
+            name,
+            *span,
+            &field_map,
+            &mut states,
+            &mut resolved,
+            &mut stack,
+            &extern_names,
+            base_dir,
+            funcs,
+        )?;
+    }
+    for (name, _span, value) in fields {
+        if name == Syntax::SYSTEM_FIELD_PACKAGES {
+            continue;
         } else if name == Syntax::ENV_FIELD_PROMPT {
-            capture_prompt_setting(&mut entry, value, base_dir, funcs)?;
+            capture_prompt_setting(
+                &mut entry,
+                value,
+                base_dir,
+                funcs,
+                &resolved,
+            )?;
         } else if name == Syntax::ENV_FIELD_SECRETS {
             // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
             // sugar. Evaluated as an ordinary comptime expression; anything
             // that isn't a `[String]` is captured as a scalar setting instead
             // (E1242-style "wrong shape" surfaces at env-entry validation,
             // not here — this stays a pure capture step, no field-check).
-            check_build_io(value)?;
-            let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
+            let v = resolved
+                .get(name)
+                .cloned()
+                .ok_or_else(|| field_missing_value(name, value.span()))?;
             match names_from(&v) {
                 Some(names) => secrets.extend(names),
                 None => {
@@ -250,8 +294,10 @@ fn evaluate_env_fields(
                 }
             }
         } else {
-            check_build_io(value)?;
-            let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
+            let v = resolved
+                .get(name)
+                .cloned()
+                .ok_or_else(|| field_missing_value(name, value.span()))?;
             entry
                 .settings
                 .entry(name.clone())
@@ -262,11 +308,85 @@ fn evaluate_env_fields(
     Ok((entry, secrets, adapters))
 }
 
+fn resolve_env_field(
+    name: &str,
+    span: crate::Diagnostics::Span,
+    fields: &HashMap<&str, (crate::Diagnostics::Span, &Expr)>,
+    states: &mut HashMap<String, u8>,
+    resolved: &mut HashMap<String, crate::Comptime::CtValue>,
+    stack: &mut Vec<String>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<(), Diagnostic> {
+    if matches!(states.get(name), Some(2)) {
+        return Ok(());
+    }
+    if matches!(states.get(name), Some(1)) {
+        let start = stack.iter().position(|item| item == name).unwrap_or(0);
+        let mut cycle = stack[start..].to_vec();
+        cycle.push(name.to_string());
+        return Err(Diagnostic::error(
+            "E0338",
+            format!("computed module fields form a cycle: {}", cycle.join(" -> ")),
+            "module fields are pure computed values; a cycle has no deterministic evaluation order".to_string(),
+            "break the cycle by making one field a literal or by moving the shared computation into a pure function".to_string(),
+            Some(span),
+        ));
+    }
+    let Some((field_span, value)) = fields.get(name).copied() else {
+        return Ok(());
+    };
+    states.insert(name.to_string(), 1);
+    stack.push(name.to_string());
+    let mut dependencies = Vec::<(String, crate::Diagnostics::Span)>::new();
+    crate::Comptime::walk_identifiers(value, &mut |candidate, candidate_span| {
+        if candidate != name && fields.contains_key(candidate) {
+            dependencies.push((candidate.to_string(), candidate_span));
+        }
+    });
+    // A field may mention a sibling more than once.  Keep the first source
+    // occurrence for stable diagnostics and deterministic traversal.
+    let mut seen = HashSet::new();
+    dependencies.retain(|(dependency, _)| seen.insert(dependency.clone()));
+    for (dependency, dependency_span) in dependencies {
+        resolve_env_field(
+            &dependency,
+            dependency_span,
+            fields,
+            states,
+            resolved,
+            stack,
+            extern_names,
+            base_dir,
+            funcs,
+        )?;
+    }
+    check_build_io(value)?;
+    let v = Comptime::evaluate(value, funcs, extern_names, base_dir, resolved)?;
+    resolved.insert(name.to_string(), v);
+    stack.pop();
+    states.insert(name.to_string(), 2);
+    let _ = field_span;
+    Ok(())
+}
+
+fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3403",
+        format!("computed module field `{name}` did not produce a value"),
+        "a pure module field must evaluate to one deterministic value before the module is merged".to_string(),
+        "return a value from the field expression".to_string(),
+        Some(span),
+    )
+}
+
 fn capture_prompt_setting(
     entry: &mut EntryContribution,
     value: &Expr,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
 ) -> Result<(), Diagnostic> {
     if let Expr::StructLit {
         type_name, fields, ..
@@ -274,10 +394,9 @@ fn capture_prompt_setting(
     {
         if type_name == Syntax::TYPE_PROMPT {
             let extern_names = HashSet::new();
-            let globals = HashMap::new();
             for (field, span, expr) in fields {
                 check_build_io(expr)?;
-                let v = Comptime::evaluate(expr, funcs, &extern_names, base_dir, &globals)?;
+                let v = Comptime::evaluate(expr, funcs, &extern_names, base_dir, globals)?;
                 match field.as_str() {
                     Syntax::PROMPT_FIELD_LABEL => {
                         let Some(label) = string_value(&v) else {
@@ -324,8 +443,7 @@ fn capture_prompt_setting(
 
     check_build_io(value)?;
     let extern_names = HashSet::new();
-    let globals = HashMap::new();
-    let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
+    let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, globals)?;
     entry
         .settings
         .entry(Syntax::ENV_FIELD_PROMPT.to_string())

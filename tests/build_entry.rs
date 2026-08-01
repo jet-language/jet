@@ -1,6 +1,6 @@
 //! D-BUILDENTRY1/D-BUILDACTION1: real Jet `fn build` vertical.
 
-use jet::Comptime::Build::{ActionOutcome, BuildCapability, CacheHitReason};
+use jet::Comptime::Build::{ActionOutcome, BuildCapability, BuildPolicy, CacheHitReason};
 use jet::Driver::{BuildQueryExpression, BuildRunOptions, compile_bundle_path_build};
 use std::collections::BTreeSet;
 use std::fs;
@@ -24,9 +24,11 @@ fn project(name: &str) -> PathBuf {
 fn opts() -> BuildRunOptions {
     BuildRunOptions {
         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::FS]),
+        policy: BuildPolicy::allow_all(),
         execute: true,
         allow_impure: true,
         inspect_only: false,
+        emit_generated: false,
         locked: false,
         freestanding: false,
         web_target: false,
@@ -145,6 +147,109 @@ fn run() { print("ok") }
         "explain-build must expose real cache provenance: {}",
         String::from_utf8_lossy(&explain.stdout)
     );
+}
+
+#[test]
+fn package_manifest_build_entry_uses_the_same_pipeline_as_a_file_entry() {
+    let root = project("package-entry");
+    write(
+        &root.join("pkg.jet"),
+        r#"
+payload: { name: "package-entry", version: "0.1.0" }
+fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("package_message", "fn package_message() => String {{ return \"package\" }}")?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
+    return b.plan(app)
+}
+"#,
+    );
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        "fn run() { print(package_message()) }\n",
+    );
+
+    let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let build = output.build.expect("pkg.jet fn build should be selected");
+    assert_eq!(build.plan.targets()[0].name, "app");
+    assert_eq!(build.generated.len(), 1);
+    assert!(output.compile.rust.contains("package_message"));
+}
+
+#[test]
+fn package_and_file_build_entries_are_rejected_as_one_unit() {
+    let root = project("package-entry-conflict");
+    write(
+        &root.join("pkg.jet"),
+        "payload: { name: \"package-entry-conflict\", version: \"0.1.0\" }\nfn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+    );
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        "fn build(b: BuildContext) => BuildPlan ? { return b.plan() }\nfn run() {}\n",
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3520"));
+}
+
+#[test]
+fn workspace_build_runs_members_in_dependency_order_then_its_own_plan() {
+    let root = project("workspace-entry");
+    let packages = root.join("packages");
+    fs::create_dir_all(packages.join("a")).unwrap();
+    fs::create_dir_all(packages.join("b")).unwrap();
+    write(
+        &root.join("workspace.jet"),
+        r#"
+module workspace {
+    members: ["./packages/a", "./packages/b"]
+}
+
+fn build(b: BuildContext) => BuildPlan ? {
+    app :: b.add_executable("workspace", ["workspace.jet"], [])?
+    return b.plan(app)
+}
+"#,
+    );
+    write(
+        &packages.join("a").join("pkg.jet"),
+        r#"
+payload: { name: "a", version: "0.1.0" }
+    fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("a_generated", "fn a_generated() => String {{ return \"a\" }}")?
+    target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])?
+    return b.plan(target)
+}
+"#,
+    );
+    write(
+        &packages.join("b").join("pkg.jet"),
+        "payload: { name: \"b\", version: \"0.1.0\" }\ndeps: { a: ../a }\n",
+    );
+    write(
+        &packages.join("b").join("run.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\", \"fn b_generated() => String {{ return \\\"b\\\" }}\")?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
+    );
+
+    let output = jet::compile_programmable_build_opts(
+        root.join("workspace.jet").to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .expect("workspace and member build entries should share the Driver pipeline");
+    assert!(root
+        .join("packages/a/.jet/generated/a/a_generated.jet")
+        .is_file());
+    assert!(root
+        .join("packages/b/.jet/generated/b/b_generated.jet")
+        .is_file());
+    assert!(output.rust.contains("workspace"));
 }
 
 #[test]
@@ -654,6 +759,7 @@ fn build(b: BuildContext) => BuildPlan ? {
         }
     }
     loop f, b.program.functions() {
+        if f.name == "build" { b.error(f.span, "BUILDREFLECT", "build leaked into ProgramInfo", "build is an authoring hook, not runtime program surface", "keep build excluded from the read-only reflection snapshot") }
         if f.identity == "left::same" && f.effects.has("Net") && f.reaches_panic() { b.error(f.span, "LEFT", "left", "effect", "ok") }
         if f.identity == "right::same" && (f.effects.has("Net") || f.reaches_panic()) { b.error(f.span, "BAD", "collision", "effect", "fix") }
     }
@@ -844,6 +950,97 @@ fn run() {{ print(generated_value()) }}
 }
 
 #[test]
+fn generated_sources_stage_in_dependency_rounds_and_compile_as_one_program() {
+    let root = project("generated-rounds");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("consumer", "use \"provider\"\npub fn generated_value() => String {{ return provider.message() }}")?
+    b.generate("provider", "pub fn message() => String {{ return \"round two\" }}")?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])?
+    return b.plan(app)
+}
+fn run() { print(generated_value()) }
+"#,
+    );
+    let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let build = output.build.unwrap();
+    assert_eq!(build.generated.len(), 2);
+    assert!(root.join(".jet/generated/main/provider.jet").is_file());
+    assert!(root.join(".jet/generated/main/consumer.jet").is_file());
+    assert!(output.compile.rust.contains("generated_value"));
+}
+
+#[test]
+fn generated_source_dependency_cycles_fail_before_any_file_is_written() {
+    let root = project("generated-cycle");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("alpha", "use \"beta\"\npub fn alpha() {{}}")?
+    b.generate("beta", "use \"alpha\"\npub fn beta() {{}}")?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
+    return b.plan(app)
+}
+fn run() {}
+"#,
+    );
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.code == "E3511"
+            && diagnostic.fix.contains("alpha")
+            && diagnostic.fix.contains("beta")
+    }));
+    assert!(!root.join(".jet/generated/main/alpha.jet").exists());
+    assert!(!root.join(".jet/generated/main/beta.jet").exists());
+}
+
+#[test]
+fn emit_generated_exports_the_exact_materialized_source() {
+    let root = project("emit-generated");
+    let entry = root.join("main.jet");
+    let generated = "fn exported_generated() => String { return \"exported\" }";
+    let generated_literal = generated
+        .replace('"', "\\\"")
+        .replace('{', "{{")
+        .replace('}', "}}");
+    write(
+        &entry,
+        &format!(
+            r#"
+fn build(b: BuildContext) => BuildPlan ? {{
+    b.generate("exported", "{generated_literal}")?
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}}
+fn run() {{ print(exported_generated()) }}
+"#
+        ),
+    );
+    jet::compile_programmable_build_emit_generated_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    // Keep the package segment from `.jet/generated/<package>/<name>.jet`
+    // in the visible export tree.
+    assert_eq!(
+        fs::read_to_string(root.join("build/generated/main/exported.jet")).unwrap(),
+        generated
+    );
+}
+
+#[test]
 fn package_grant_and_workspace_ceiling_resolve_before_execution() {
     let root = project("policy-chain");
     let entry = root.join("main.jet");
@@ -882,6 +1079,46 @@ fn run() {}
     ).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"));
     assert!(!root.join("stamp").exists());
+}
+
+#[test]
+fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
+    let root = project("workspace-grant");
+    let entry = root.join("main.jet");
+    write(
+        &root.join("pkg.jet"),
+        "payload: { name: \"workspace-app\", version: \"0.1.0\" }\n",
+    );
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { policy: .{ grants: .{ \"workspace-app\": #(Exec) } } }\n",
+    );
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    #Impure("workspace grant test") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf workspace > stamp"], ["Exec"])?
+        app :: b.add_executable("app", ["main.jet"], [action])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+    jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(root.join("stamp")).unwrap(), "workspace");
 }
 
 #[test]

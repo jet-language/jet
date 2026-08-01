@@ -112,7 +112,12 @@ pub mod Store;
 use Diagnostics::Diagnostic;
 
 fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    jet_driver::run_compiler_work(work)
+    // D-FRONTENDAPI1=A: install the one read-only Core compiler callback for
+    // every compiler entry point. Build uses the same ambient seam, so a
+    // `comptime` binding and `fn build` cannot observe different APIs.
+    jet_driver::run_compiler_work(|| {
+        Comptime::with_ambient(Some(Compiler::eval_core_call), None, work)
+    })
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -202,66 +207,495 @@ pub fn compile_programmable_build_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_inner(
+        file,
+        grants,
+        freestanding,
+        allow_impure,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        false,
+    )
+}
+
+/// D-BUILDGEN1 / #1040: compile a programmable build and copy the exact
+/// generated Jet sources from this transaction into `build/generated/` for
+/// inspection. The build still compiles the normal `.jet/generated` inputs;
+/// this is only a visible export of the same materialized bytes.
+pub fn compile_programmable_build_emit_generated_opts(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_inner(
+        file,
+        grants,
+        freestanding,
+        allow_impure,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        true,
+    )
+}
+
+fn compile_programmable_build_opts_inner(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    emit_generated: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
+        if is_workspace_build_entry(file) {
+            return compile_workspace_build_opts(
+                file,
+                grants,
+                freestanding,
+                allow_impure,
+                locked,
+                web_target,
+                plugin_target,
+                cross_target,
+                emit_generated,
+            );
+        }
         let grants = resolve_build_grants(file, grants)?;
         let grants = grants
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        Driver::compile_bundle_path_build(
+        let output = Driver::compile_bundle_path_build(
             file,
             Driver::BuildRunOptions {
                 grants,
+                policy: Comptime::Build::BuildPolicy::allow_all(),
                 execute: true,
                 allow_impure,
                 inspect_only: false,
+                emit_generated,
                 locked,
                 freestanding,
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
             },
-        )
-        .map(|output| output.compile)
+        )?;
+        if emit_generated {
+            export_generated_sources(file, &output)?;
+        }
+        Ok(output.compile)
     })
+}
+
+/// D-BUILDSCOPE1: workspace builds are an orchestration boundary. Member
+/// entries run in dependency order with their own BuildContext and policy;
+/// the workspace entry runs last with a fresh context. No member plan crosses
+/// that boundary as a mutable value.
+fn compile_workspace_build_opts(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    emit_generated: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let workspace_path = absolute_source_path(file);
+    let workspace_root = workspace_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let members = match jetpack::WorkspaceFile::load(workspace_root) {
+        Some(Ok(plan)) => jetpack::MemberSelect::dependency_order(workspace_root, &plan.members),
+        Some(Err(diagnostic)) => return Err(vec![diagnostic]),
+        None => Vec::new(),
+    };
+
+    for member in members {
+        let entry = workspace_member_entry(workspace_root, &member.path);
+        if !entry.is_file() {
+            return Err(vec![Diagnostic::error(
+                "E3501",
+                format!("workspace member `{}` has no build entry", member.name),
+                "workspace members run their own unit-local build entry before the workspace entry".to_string(),
+                "add `run.jet` or `src/run.jet`, or name the member source explicitly".to_string(),
+                None,
+            )]);
+        }
+        let member_grants = resolve_build_grants(&entry.to_string_lossy(), grants)?;
+        let member_grants = member_grants
+            .iter()
+            .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+            .collect();
+        let output = Driver::compile_bundle_path_build(
+            &entry.to_string_lossy(),
+            Driver::BuildRunOptions {
+                grants: member_grants,
+                policy: Comptime::Build::BuildPolicy::allow_all(),
+                execute: true,
+                allow_impure,
+                inspect_only: false,
+                emit_generated: false,
+                locked,
+                freestanding,
+                web_target,
+                plugin_target,
+                cross_target: cross_target.map(str::to_string),
+            },
+        )?;
+        if emit_generated {
+            export_generated_sources(&entry.to_string_lossy(), &output)?;
+        }
+    }
+
+    let workspace_grants = resolve_build_grants(&workspace_path.to_string_lossy(), grants)?;
+    let workspace_grants = workspace_grants
+        .iter()
+        .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+        .collect();
+    let output = Driver::compile_bundle_path_build(
+        &workspace_path.to_string_lossy(),
+        Driver::BuildRunOptions {
+            grants: workspace_grants,
+            policy: Comptime::Build::BuildPolicy::allow_all(),
+            execute: true,
+            allow_impure,
+            inspect_only: false,
+            emit_generated: false,
+            locked,
+            freestanding,
+            web_target,
+            plugin_target,
+            cross_target: cross_target.map(str::to_string),
+        },
+    )?;
+    if emit_generated {
+        export_generated_sources(&workspace_path.to_string_lossy(), &output)?;
+    }
+    Ok(output.compile)
+}
+
+fn export_generated_sources(
+    file: &str,
+    output: &Driver::BuildCompileOutput,
+) -> Result<(), Vec<Diagnostic>> {
+    let Some(build) = &output.build else {
+        return Ok(());
+    };
+    let project_root = build_project_root(file);
+    let export_root = project_root.join("build/generated");
+    for generated in build.generated.iter().filter(|generated| {
+        generated
+            .path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some(Syntax::FILE_EXT)
+    }) {
+        let relative = generated
+            .path
+            .strip_prefix(&project_root)
+            .ok()
+            .and_then(|path| path.strip_prefix(".jet/generated").ok())
+            .ok_or_else(|| {
+                vec![Diagnostic::error(
+                    "E3510",
+                    format!("generated module `{}` is outside the project root", generated.name),
+                    "the visible export must stay inside the project that produced the generated source".to_string(),
+                    "run the build from the package containing the entry file".to_string(),
+                    None,
+                )]
+            })?;
+        let destination = export_root.join(relative);
+        let source = read_real_generated_file(&project_root, &generated.path).map_err(|error| {
+            vec![Diagnostic::error(
+                "E3510",
+                format!("could not read generated module `{}`: {error}", generated.name),
+                "the visible export must copy the exact source that was compiled".to_string(),
+                "remove the damaged generated file and rerun the build".to_string(),
+                None,
+            )]
+        })?;
+        write_exported_generated_file(&project_root, &destination, &source).map_err(|error| {
+            vec![Diagnostic::error(
+                "E3510",
+                format!("could not write generated module `{}`: {error}", generated.name),
+                "the visible export must not alter the compiled source".to_string(),
+                "fix the build/generated directory permissions and try again".to_string(),
+                None,
+            )]
+        })?;
+    }
+    Ok(())
+}
+
+fn is_workspace_build_entry(file: &str) -> bool {
+    let path = absolute_source_path(file);
+    if path.file_name().and_then(|name| name.to_str()) != Some(Syntax::WORKSPACE_FILE) {
+        return false;
+    }
+    std::fs::read_to_string(path)
+        .map(|source| jetpack::WorkspaceFile::has_build_entry(&source))
+        .unwrap_or(false)
+}
+
+fn absolute_source_path(file: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(file);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(path)
+    }
+}
+
+fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::PathBuf {
+    let member_root = root.join(member);
+    for candidate in [
+        member_root.join(Syntax::DEFAULT_ENTRY_FILE),
+        member_root.join("src").join(Syntax::DEFAULT_ENTRY_FILE),
+    ] {
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    if let Some(Ok(manifest)) = PackageManifest::PackManifest::load(&member_root) {
+        let candidate = member_root.join(format!("{}.{}", manifest.package.name, Syntax::FILE_EXT));
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    let package_manifest = member_root.join(Syntax::PAYLOAD_FILE);
+    if let Ok(source) = std::fs::read_to_string(&package_manifest) {
+        if PackageManifest::build_entry_source(&source).is_some() {
+            // A package may own build authority without a runtime entry file.
+            // Pass the manifest through the normal Driver path so its selected
+            // build function is checked and run with the package root context.
+            return package_manifest;
+        }
+    }
+    for candidate in [
+        member_root.join("src").join(Syntax::LEGACY_ENTRY_FILE),
+        member_root.join(Syntax::LEGACY_ENTRY_FILE),
+    ] {
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    member_root.join(Syntax::DEFAULT_ENTRY_FILE)
+}
+
+fn read_real_generated_file(
+    project_root: &std::path::Path,
+    path: &std::path::Path,
+) -> std::io::Result<Vec<u8>> {
+    if path_has_symlinked_component(project_root, path)
+        || std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "generated source path contains a symlink",
+        ));
+    }
+    std::fs::read(path)
+}
+
+fn write_exported_generated_file(
+    project_root: &std::path::Path,
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    if path_has_symlinked_component(project_root, path)
+        || std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "generated export path contains a symlink",
+        ));
+    }
+    let Some(parent) = path.parent() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "generated export has no parent directory",
+        ));
+    };
+    ensure_real_directory(parent)?;
+    for attempt in 0..100u32 {
+        let temporary = parent.join(format!(".jet-export-{}-{attempt}", std::process::id()));
+        let mut file = match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        use std::io::Write;
+        if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
+        std::fs::rename(&temporary, path)?;
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique generated export temporary file",
+    ))
+}
+
+fn path_has_symlinked_component(root: &std::path::Path, path: &std::path::Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return true;
+    };
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(part) = component else {
+            return true;
+        };
+        current.push(part);
+        if std::fs::symlink_metadata(&current)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn ensure_real_directory(path: &std::path::Path) -> std::io::Result<()> {
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            std::path::Component::RootDir => current.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "generated export path contains a parent component",
+                ));
+            }
+            std::path::Component::Normal(part) => current.push(part),
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("generated export directory `{}` is not real", current.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&current)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn build_project_root(file: &str) -> std::path::PathBuf {
+    let entry = std::path::Path::new(file);
+    let absolute = if entry.is_absolute() {
+        entry.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(entry)
+    };
+    let mut directory = absolute
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
+    let fallback = directory.clone();
+    loop {
+        if directory.join(Syntax::PAYLOAD_FILE).is_file() {
+            return directory;
+        }
+        let Some(parent) = directory.parent() else {
+            return fallback;
+        };
+        if parent == directory {
+            return fallback;
+        }
+        directory = parent.to_path_buf();
+    }
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
     let mut allowed = cli.iter().cloned().collect::<std::collections::BTreeSet<_>>();
     let mut workspace_denies = std::collections::BTreeSet::new();
-    let mut directory = std::path::Path::new(file).parent();
+    let mut workspace_grants = std::collections::BTreeMap::<
+        String,
+        std::collections::BTreeSet<String>,
+    >::new();
+    let mut package_seen = false;
+    let mut package_name = None;
+    // Build policy is rooted at the entry's real location.  A relative entry
+    // such as `src/run.jet` must still discover the package/workspace files
+    // above the current directory; walking the unresolved relative path
+    // silently missed them for a bare `run.jet`.
+    let entry = std::path::Path::new(file);
+    let absolute = if entry.is_absolute() {
+        entry.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(entry)
+    };
+    let mut directory = absolute.parent();
     while let Some(dir) = directory {
         let package_path = dir.join(Syntax::PAYLOAD_FILE);
-        if let Ok(source) = std::fs::read_to_string(&package_path) {
-            match PackageManifest::parse(&source) {
-                Ok(package) => {
-                    for effect in package.build_allow {
-                        if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                            allowed.insert(capability.flag().to_string());
+        if !package_seen {
+            if let Ok(source) = std::fs::read_to_string(&package_path) {
+                package_seen = true;
+                match PackageManifest::parse(&source) {
+                    Ok(package) => {
+                        package_name = Some(package.package.name.clone());
+                        for effect in package.build_allow {
+                            if let Some(capability) =
+                                Comptime::Build::BuildCapability::parse(&effect)
+                            {
+                                allowed.insert(capability.flag().to_string());
+                            }
                         }
                     }
-                }
-                Err(error) => {
-                    let diagnostic = Manifest::parse(&package_path, &source).err()
-                        .unwrap_or_else(|| Diagnostic::error(
-                            "E3503",
-                            format!("build policy in `{}` is malformed", package_path.display()),
-                            format!("typed package policy parser rejected it: {error:?}"),
-                            "fix the `build: { allow: #(…) }` block before running build code".to_string(),
-                            None,
-                        ));
-                    return Err(vec![diagnostic]);
+                    Err(error) => {
+                        let diagnostic = Manifest::parse(&package_path, &source).err()
+                            .unwrap_or_else(|| Diagnostic::error(
+                                "E3503",
+                                format!("build policy in `{}` is malformed", package_path.display()),
+                                format!("typed package policy parser rejected it: {error:?}"),
+                                "fix the `build: { allow: #(…) }` block before running build code".to_string(),
+                                None,
+                            ));
+                        return Err(vec![diagnostic]);
+                    }
                 }
             }
         }
         let workspace = dir.join(Syntax::WORKSPACE_FILE);
         if let Ok(source) = std::fs::read_to_string(&workspace) {
-            match jetpack::Overlay::parse_workspace_policy(&source) {
-                Ok(policy) => for effect in policy.build_deny {
-                    if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                        workspace_denies.insert(capability.flag().to_string());
-                    }
-                },
+            let policy = match jetpack::Overlay::parse_workspace_policy(&source) {
+                Ok(policy) => policy,
                 Err(error) => return Err(vec![Diagnostic::error(
                     "E3503",
                     format!("build policy in `{}` is malformed", workspace.display()),
@@ -269,9 +703,33 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
                     "fix the typed `policy: .{ deny: #(…) }` block before running build code".to_string(),
                     None,
                 )]),
+            };
+            for effect in policy.build_deny {
+                if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                    workspace_denies.insert(capability.flag().to_string());
+                }
+            }
+            for (subject, effects) in policy.build_grants {
+                let grants = workspace_grants.entry(subject).or_default();
+                for effect in effects {
+                    if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                        grants.insert(capability.flag().to_string());
+                    }
+                }
             }
         }
         directory = dir.parent();
+    }
+    let package_name = package_name.unwrap_or_else(|| {
+        absolute
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("app")
+            .to_string()
+    });
+    if let Some(grants) = workspace_grants.get(&package_name) {
+        allowed.extend(grants.iter().cloned());
     }
     for denied in workspace_denies { allowed.remove(&denied); }
     Ok(allowed.into_iter().collect())

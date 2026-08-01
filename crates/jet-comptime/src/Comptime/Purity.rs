@@ -134,6 +134,20 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
     });
 }
 
+/// Visit every identifier read by an expression.
+///
+/// This is intentionally a read-only syntax walk. Consumers that need
+/// semantic dependency information must filter the names against their own
+/// declaration table; function names and type names are also represented by
+/// `Expr::Ident` while the front end is still doing pure syntax traversal.
+pub fn walk_identifiers(e: &Expr, f: &mut impl FnMut(&str, Span)) {
+    walk_expr_nodes(e, false, &mut |expr| {
+        if let Expr::Ident(name, span) = expr {
+            f(name, *span);
+        }
+    });
+}
+
 pub(super) fn reachable_owned_funcs(
     init: &Expr,
     funcs: &HashMap<String, Func>,

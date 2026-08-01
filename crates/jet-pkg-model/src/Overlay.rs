@@ -19,11 +19,18 @@ pub struct OverlayPolicy {
     pub allow_unfree: Vec<String>,
     /// D-CTEFFECT1 workspace ceiling for programmable builds.
     pub build_deny: Vec<String>,
+    /// D-BUILDSCOPE1 per-package/dependency grants inside the workspace
+    /// ceiling. The package name is the authority subject, never a path or
+    /// an arbitrary value supplied by build code.
+    pub build_grants: Vec<(String, Vec<String>)>,
 }
 
 impl OverlayPolicy {
     pub fn is_empty(&self) -> bool {
-        self.overlays.is_empty() && self.allow_unfree.is_empty() && self.build_deny.is_empty()
+        self.overlays.is_empty()
+            && self.allow_unfree.is_empty()
+            && self.build_deny.is_empty()
+            && self.build_grants.is_empty()
     }
 
     pub fn overlay(&self, name: &str) -> Option<&OverlaySet> {
@@ -134,6 +141,7 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
     let mut policy = OverlayPolicy::default();
     policy.allow_unfree = parse_allow_unfree(&body)?;
     policy.build_deny = parse_build_deny(&body)?;
+    policy.build_grants = parse_build_grants(&body)?;
     let mut pos = 0;
     while let Some(rel) = body[pos..].find(Syntax::WORKSPACE_OVERLAY) {
         let at = pos + rel;
@@ -323,6 +331,66 @@ fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
         .collect())
 }
 
+fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayError> {
+    let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY)? else {
+        return Ok(Vec::new());
+    };
+    let Some(raw) = exact_field_value(&policy_body, Syntax::MANIFEST_BLOCK_GRANTS)? else {
+        return Ok(Vec::new());
+    };
+    let raw = raw.trim();
+    let inner = raw
+        .strip_prefix(".{")
+        .and_then(|value| value.strip_suffix('}'))
+        .or_else(|| raw.strip_prefix('{').and_then(|value| value.strip_suffix('}')))
+        .ok_or_else(|| {
+            OverlayError::Malformed(
+                "`policy.grants:` must be a package map like `.{ \"pkg\": #(Net) }`"
+                    .to_string(),
+            )
+        })?;
+    let mut grants = Vec::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        let Some((subject, effects)) = split_top_level_colon(entry) else {
+            return Err(OverlayError::Malformed(
+                "each `policy.grants` entry needs `\"package\": #(…)`".to_string(),
+            ));
+        };
+        let subject = unquote(subject.trim());
+        if subject.trim().is_empty() {
+            return Err(OverlayError::Malformed(
+                "`policy.grants` package names cannot be empty".to_string(),
+            ));
+        }
+        let effects = parse_effect_tuple(effects.trim(), "policy.grants")?;
+        grants.push((subject, effects));
+    }
+    Ok(grants)
+}
+
+fn parse_effect_tuple(raw: &str, field: &str) -> Result<Vec<String>, OverlayError> {
+    let inner = raw
+        .strip_prefix("#(")
+        .and_then(|value| value.strip_suffix(')'))
+        .ok_or_else(|| {
+            OverlayError::Malformed(format!(
+                "`{field}:` must contain an effect tuple like `#(Net, Exec)`"
+            ))
+        })?;
+    let effects = top_level_commas(inner)
+        .into_iter()
+        .map(|value| unquote(value.trim()))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if effects.is_empty() {
+        return Err(OverlayError::Malformed(format!(
+            "`{field}:` must grant at least one effect"
+        )));
+    }
+    Ok(effects)
+}
+
 fn named_block(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
     let mut pos = 0;
     while let Some(rel) = body[pos..].find(name) {
@@ -407,7 +475,7 @@ fn balanced_policy_body(source: &str) -> Result<String, OverlayError> {
 fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayError> {
     for entry in top_level_commas(body) {
         let entry = entry.trim();
-        if let Some((name, value)) = entry.split_once(':') {
+        if let Some((name, value)) = split_top_level_colon(entry) {
             if name.trim() == field {
                 return Ok(Some(value.trim().to_string()));
             }
@@ -416,6 +484,32 @@ fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayE
         }
     }
     Ok(None)
+}
+
+fn split_top_level_colon(value: &str) -> Option<(&str, &str)> {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ':' if depth == 0 => return Some((&value[..index], &value[index + 1..])),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn merge_package_override(packages: &mut Vec<PackageOverride>, incoming: PackageOverride) {
@@ -540,9 +634,26 @@ fn word_boundary_before(s: &str, at: usize) -> bool {
 pub fn top_level_commas(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
     let mut cur = String::new();
     for c in body.chars() {
+        if quoted {
+            cur.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                quoted = false;
+            }
+            continue;
+        }
         match c {
+            '"' => {
+                quoted = true;
+                cur.push(c);
+            }
             '(' | '[' | '{' => {
                 depth += 1;
                 cur.push(c);
@@ -592,6 +703,36 @@ module workspace {
 }
 "#).unwrap();
         assert_eq!(policy.build_deny, vec!["Exec", "FS"]);
+    }
+
+    #[test]
+    fn build_grants_are_subject_scoped_and_quote_aware() {
+        let policy = parse_workspace_policy(r#"
+module workspace {
+    policy: .{
+        grants: .{ "native:tools": #(Net, Exec), "app": #(FS) },
+        deny: #(Time)
+    }
+}
+"#)
+        .unwrap();
+        assert_eq!(policy.build_deny, vec!["Time"]);
+        assert_eq!(
+            policy.build_grants,
+            vec![
+                ("native:tools".to_string(), vec!["Net".to_string(), "Exec".to_string()]),
+                ("app".to_string(), vec!["FS".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_build_grants_fail_closed() {
+        let error = parse_workspace_policy(
+            "module workspace { policy: .{ grants: .{ \"app\": [Net] } } }",
+        )
+        .unwrap_err();
+        assert!(error.message().contains("policy.grants"));
     }
 
     #[test]

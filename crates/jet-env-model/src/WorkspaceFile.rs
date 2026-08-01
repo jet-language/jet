@@ -78,6 +78,27 @@ pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
     }
 }
 
+/// Return whether a workspace source declares the optional top-level build
+/// authority.  This is a discovery helper for the CLI; full diagnostics and
+/// execution still go through the normal Driver loader and sema pass.
+pub fn has_build_entry(src: &str) -> bool {
+    // Workspace policy is an evaluated overlay, not a Jet item. Keep this
+    // discovery probe on the same source shape as `evaluate`, otherwise a
+    // valid workspace build entry disappears as soon as policy is present.
+    let source = Overlay::strip_overlay_policy(src);
+    let (tokens, lex_diags) = crate::Lexer::lex(&source);
+    if !lex_diags.is_empty() {
+        return false;
+    }
+    crate::Parser::parse(&tokens)
+        .map(|program| {
+            program.items.iter().any(|item| {
+                matches!(item, Item::Func(func) if func.name == "build")
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Cheap token probe: does `src` declare a top-level, enabled
 /// `module workspace { … }`? Full parse/eval happens only on the one match.
 ///

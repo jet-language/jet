@@ -4,4 +4,6 @@
 //! All types and functions are re-exported here so existing call sites
 //! that use `jetpack::WorkspaceFile::…` continue to compile unchanged.
 
-pub use jet_env_model::WorkspaceFile::{evaluate, load, WorkspaceMember, WorkspacePlan};
+pub use jet_env_model::WorkspaceFile::{
+    evaluate, has_build_entry, load, WorkspaceMember, WorkspacePlan,
+};

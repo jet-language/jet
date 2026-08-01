@@ -144,6 +144,44 @@ module dev {
     }
 
     #[test]
+    fn computed_module_fields_resolve_sibling_values_independent_of_source_order() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        port: base + 1,
+        prompt: if port > 8000 -> "ready" else -> "waiting",
+        base: 8000,
+    }
+}
+"#;
+        let modules = evaluate_source(src, &base_dir()).unwrap();
+        let (_, entry) = &modules[0].entries[0];
+        assert_eq!(
+            entry.settings.get("port"),
+            Some(&vec![Scalar::normal("8001")])
+        );
+        assert_eq!(
+            entry.settings.get("prompt"),
+            Some(&vec![Scalar::normal("ready")])
+        );
+    }
+
+    #[test]
+    fn computed_module_field_cycles_are_reported_before_evaluation() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        first: second + 1,
+        second: first + 1,
+    }
+}
+"#;
+        let error = evaluate_source(src, &base_dir()).unwrap_err();
+        assert_eq!(error.code, "E0338");
+        assert!(error.what.contains("first -> second -> first"));
+    }
+
+    #[test]
     fn internal_module_is_skipped_by_automatic_merge() {
         let src = r#"
 module _gaming {

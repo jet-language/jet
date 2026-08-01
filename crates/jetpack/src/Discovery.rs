@@ -518,7 +518,7 @@ mod tests {
             "fixture".to_string(),
         ));
         let json = record_to_json(&index.packages[0]);
-        let parsed = record_from_json(&JSONValue::parse(&json).unwrap()).unwrap();
+        let parsed = record_from_json(&JSON::parse(&json).unwrap()).unwrap();
         assert_eq!(parsed.name, "ripgrep");
         assert_eq!(index.search("rip")[0].display_ref(), "default.ripgrep");
         assert_eq!(index.info("default.ripgrep").unwrap().version, "14.1.0");
