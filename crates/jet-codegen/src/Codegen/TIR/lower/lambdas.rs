@@ -166,8 +166,11 @@ fn lower_lambda_expecting_with_host_borrow(
         .chain(extra_cloned.iter())
     {
         let cap = format!("_jet_cap_{}", mangle(name));
+        // Clone temps must be `mut` when the closure body assigns through them
+        // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
+        // captures — over-mutability is safe; missing mut is rustc E0594 (I2).
         prep.push_str(&format!(
-            "let {} = ({}).clone();\n    ",
+            "let mut {} = ({}).clone();\n    ",
             cap,
             env.place_of(name)
         ));

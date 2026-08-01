@@ -360,7 +360,8 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
                         "MemoryHighWater"=>&scene.rss_hwm,
                         other=>return Err(format!("SceneProbe does not support metric `{other}`")),
                     };
-                    if values.len()!=20{return Err(format!("SceneProbe `{name}` returned {} samples for `{metric}`; policy requires 20",values.len()))}
+                    // SceneProbe law: 120 warmup + 600 measured; only measured frames enter evidence.
+                    if values.len()!=600{return Err(format!("SceneProbe `{name}` returned {} samples for `{metric}`; policy requires 600",values.len()))}
                     samples[*index]=values.iter().map(|v|Rational::parse(&v.to_string(),"1")).collect::<Result<Vec<_>,_>>()?;
                 }
                 continue;

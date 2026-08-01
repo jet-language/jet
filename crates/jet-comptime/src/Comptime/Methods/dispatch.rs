@@ -114,6 +114,19 @@ pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
                     | "oauth_begin"
                     | "oauth_finish"
             ))
+        || (matches!(module, "app" | "core.web")
+            && matches!(
+                method,
+                // Storeful live-query registry — same class of I9 fold bug as auth.
+                "live"
+                    | "subscribe"
+                    | "invalidate"
+                    | "transact_invalidate"
+                    | "signal_push"
+                    | "live_get"
+                    | "live_show"
+                    | "live_stats"
+            ))
         || (repl_mode && module == "core.random" && method != "rng")
 }
 
