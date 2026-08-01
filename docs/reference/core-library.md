@@ -2961,16 +2961,14 @@ Beginner calls accept strings; expert calls accept typed
 | `dns_srv(name, ms)` | `[DNSSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
-`NetError` has stable variants for input, permission, address, connection,
-timeout, closed, cancelled, dns, and platform. Linux is the Epoch 3 proof
-platform for TCP/UDP/Unix/DNS/TLS/happy-eyeballs (`tcp_connect_happy`); native
-macOS/Windows execution for the hostile net matrix is deferred to Epoch 9 with
-the same Prelude symbols (I9). Examples: `examples/features/net/socket_echo.jet`.
 
-### `core.tls` — client TLS over `core.net`
+`NetError` has stable variants for input, permission, address, connection,
 closed, timeout, cancellation, unsupported, DNS, TLS, protocol, and other OS
 failures. `error_operation/address/name/message/os_code` expose portable control
-and audit data. Raw OS text is never control-flow law.
+and audit data. Raw OS text is never control-flow law. Linux is the Epoch 3
+proof platform for TCP/UDP/Unix/DNS/TLS/happy-eyeballs (`tcp_connect_happy`);
+native macOS/Windows hostile-matrix execution is deferred to Epoch 9 with the
+same Prelude symbols (I9). Example: `examples/features/net/socket_echo.jet`.
 
 Ordinary A/AAAA lookups use the platform resolver and preserve host files,
 search policy, VPNs, and enterprise DNS. TXT/SRV use configured host name
