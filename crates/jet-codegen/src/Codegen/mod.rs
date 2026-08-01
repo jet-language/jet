@@ -327,16 +327,13 @@ fn jet_cov_dump() {
     }
 }
 "#;
-const CORELIB_PRELUDE_PARTS: &[&str] = &[
-    "\nmod jet_xml_pull {\n",
-    include_str!("../../../jet-foundation/src/XmlPull.rs"),
-    "\n}\n",
-    "\nmod jet_base_encoding_strict {\n",
-    include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"),
-    "\n}\n",
-    "\nmod jet_regex_syntax {\n",
-    include_str!("../../../jet-foundation/src/RegexSyntax.rs"),
-    "\n}\n",
+/// R10 / #437 / #1133: Core templates are pay-for-what-you-call.
+///
+/// The JetStd brace chain (`mod jet_std {` … closing `}` in YAML.rs) must stay
+/// contiguous — those files are one module body. Optional Top-level fragments
+/// and satellite mods are selected from `bundle.used_core` so a `core.files`
+/// caller never drags Browser/HTTPServer/Game into generated source.
+const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
@@ -352,42 +349,223 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
-    include_str!("../Prelude/CoreLib/Email.rs"),
-    include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
-    include_str!("../Prelude/CoreLib/Top/Game.rs"),
-    include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),
-    include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"),
-    include_str!("../Prelude/CoreLib/Top/Text.rs"),
-    include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"),
-    include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"),
-    include_str!("../Prelude/CoreLib/Top/Process.rs"),
-    include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"),
-    include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"),
-    include_str!("../Prelude/CoreLib/Top/DataFmt.rs"),
-    include_str!("../Prelude/CoreLib/Top/DataFlow.rs"),
-    include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
-    include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"),
-    include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"),
-    include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"),
-    include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"),
-    include_str!("../Prelude/CoreLib/Top/WsClient.rs"),
-    include_str!("../Prelude/CoreLib/Top/Ws.rs"),
-    include_str!("../Prelude/CoreLib/Top/Browser.rs"),
-    include_str!("../Prelude/CoreLib/Top/Args.rs"),
-    include_str!("../Prelude/CoreLib/Top/Reflect.rs"),
-    // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.
-    include_str!("../Prelude/CoreLib/Top/Auth.rs"),
 ];
 
-fn push_corelib_prelude(out: &mut String) {
-    for part in CORELIB_PRELUDE_PARTS {
+fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str]) -> bool {
+    used.iter().any(|usage| {
+        prefixes.iter().any(|prefix| {
+            usage == prefix
+                || usage.starts_with(&format!("{prefix}::"))
+                || usage.starts_with(&format!("{prefix}."))
+        })
+    })
+}
+
+fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
+    let needs_base = core_usage_matches(
+        used_core,
+        &[
+            "core.encoding",
+            "core.encoding.hex",
+            "core.encoding.cbor",
+            "core.binary",
+        ],
+    );
+    let needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
+    if needs_xml {
+        out.push_str("\nmod jet_xml_pull {\n");
+        out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
+        out.push_str("\n}\n");
+    }
+    if needs_base {
+        out.push_str("\nmod jet_base_encoding_strict {\n");
+        out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
+        out.push_str("\n}\n");
+    }
+    if needs_regex {
+        out.push_str("\nmod jet_regex_syntax {\n");
+        out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
+        out.push_str("\n}\n");
+    }
+
+    for part in CORELIB_KERNEL_PARTS {
         out.push_str(part);
+    }
+
+    let needs_email = core_usage_matches(used_core, &["core.email"]);
+    let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
+    let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
+    let needs_files = core_usage_matches(
+        used_core,
+        &["core.files", "core.path", "core.watcher", "core.io", "core.env", "core.os"],
+    );
+    let needs_text = core_usage_matches(
+        used_core,
+        &["core.text", "core.text.unicode", "core.fmt", "core.term"],
+    );
+    let needs_fs_runtime = needs_files
+        || core_usage_matches(used_core, &["core.testing", "core.perf", "core.scope"]);
+    let needs_crypto = core_usage_matches(
+        used_core,
+        &[
+            "core.crypto",
+            "core.crypto.expert",
+            "core.crypto.random",
+            "core.vault",
+            "core.vault.expert",
+            "jet.crypto",
+            "core.uuid",
+        ],
+    );
+    let needs_process = core_usage_matches(used_core, &["core.process"]);
+    let needs_math = core_usage_matches(
+        used_core,
+        &["core.math", "core.random", "core.time", "core.time.date", "core.time.datetime", "core.time.expiring", "core.science.measurement"],
+    );
+    let needs_encoding = core_usage_matches(
+        used_core,
+        &[
+            "core.encoding",
+            "core.encoding.json",
+            "core.encoding.jsonl",
+            "core.encoding.csv",
+            "core.encoding.toml",
+            "core.encoding.yaml",
+            "core.encoding.xml",
+            "core.encoding.cbor",
+            "core.encoding.hex",
+            "core.compress.gzip",
+            "core.compress.zstd",
+            "core.archive",
+            "core.binary",
+        ],
+    ) || needs_xml
+        || needs_base;
+    let needs_data = core_usage_matches(
+        used_core,
+        &[
+            "core.data",
+            "core.sketch.hll",
+            "core.sketch.tdigest",
+            "core.sketch.cms",
+            "core.sketch.reservoir",
+            "core.compute",
+            "jet.db",
+            "core.db",
+        ],
+    );
+    let needs_net = core_usage_matches(
+        used_core,
+        &[
+            "core.net",
+            "core.tls",
+            "core.http",
+            "core.http.client",
+            "core.http.server",
+            "jet.http",
+            "core.ws",
+            "core.email",
+            "core.browser",
+            "core.web",
+            "core.web.devserver",
+            "core.web.storage",
+            "core.web.storage.local",
+            "core.web.storage.session",
+        ],
+    );
+    let needs_http = core_usage_matches(
+        used_core,
+        &[
+            "core.http",
+            "core.http.client",
+            "core.http.server",
+            "jet.http",
+            "core.web",
+            "core.web.devserver",
+        ],
+    );
+    let needs_ws = core_usage_matches(used_core, &["core.ws"]);
+    let needs_browser = core_usage_matches(
+        used_core,
+        &[
+            "core.browser",
+            "core.web",
+            "core.web.storage",
+            "core.web.storage.local",
+            "core.web.storage.session",
+        ],
+    );
+    let needs_args = core_usage_matches(used_core, &["core.args"]);
+    let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
+    let needs_auth = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+
+    if needs_email {
+        out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
+    }
+    if needs_raylib {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+    }
+    if needs_game {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
+    }
+    if needs_files {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+    }
+    if needs_text {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+    }
+    if needs_fs_runtime {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+    }
+    if needs_crypto {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
+    }
+    if needs_process {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
+    }
+    if needs_math {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
+    }
+    if needs_encoding {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
+    }
+    if needs_data {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+    }
+    if needs_net {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+    }
+    if needs_http {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"));
+    }
+    if needs_ws || needs_http || needs_browser {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/WsClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Ws.rs"));
+    }
+    if needs_browser {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
+    }
+    if needs_args {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
+    }
+    if needs_reflect {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
+    }
+    if needs_auth {
+        // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
     }
 }
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
@@ -1342,6 +1520,45 @@ mod tests {
     }
 
     #[test]
+    fn r10_corelib_emits_only_reachable_top_modules() {
+        // R10 / #1133: a files-only program must not drag HTTP/Browser/Game
+        // templates into generated source.
+        let files_only = HashSet::from(["core.files::read".to_string()]);
+        let mut files_out = String::new();
+        push_corelib_prelude(&mut files_out, &files_only);
+        assert!(
+            files_out.contains("struct JetPath"),
+            "files usage must emit PathFiles"
+        );
+        assert!(
+            !files_out.contains("JetHTTPServer")
+                && !files_out.contains("struct JetBrowser")
+                && !files_out.contains("fn jet_game_"),
+            "files-only Core must not emit HTTP/Browser/Game templates"
+        );
+
+        let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);
+        let mut net_out = String::new();
+        push_corelib_prelude(&mut net_out, &net_only);
+        assert!(
+            net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"),
+            "net usage must emit NetHTTP"
+        );
+        assert!(
+            !net_out.contains("JetHTTPServer") && !net_out.contains("struct JetBrowser"),
+            "pure core.net must not emit HTTP server or Browser templates"
+        );
+
+        let http = HashSet::from(["core.http.client::get".to_string()]);
+        let mut http_out = String::new();
+        push_corelib_prelude(&mut http_out, &http);
+        assert!(
+            http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
+            "http usage must emit HTTP templates"
+        );
+    }
+
+    #[test]
     fn core_prelude_stays_split_by_runtime_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2115,7 +2332,7 @@ pub fn emit_bundle_dbg(
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -2295,7 +2512,7 @@ pub fn emit_bundle_tests_cov(
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -2497,7 +2714,7 @@ pub fn emit_bundle_fuzz(
     // property test is present).
     out.push_str(PROP_PRELUDE);
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -2752,7 +2969,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        push_corelib_prelude(&mut out);
+        push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {

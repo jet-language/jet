@@ -412,7 +412,7 @@ const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 `;
 // jet-foundation is a proper standalone module file: safe to carry an inner
 // attribute. The jet-codegen copy is concatenated flat into
-// other prelude text (see Codegen/mod.rs CORELIB_PRELUDE_PARTS) — no mod
+// other prelude text (see Codegen/mod.rs CORELIB_KERNEL_PARTS / push_corelib_prelude) — no mod
 // wrapper, so an inner `#![...]` attribute there would not be at a crate/mod
 // root and is illegal; leave unused-item warnings alone (I2 only forbids
 // rustc *rejecting* generated code, not warning on it).
