@@ -25,6 +25,19 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
     })
 }
 
+fn resident_safe_ct_struct_fields(fields: &[(String, jet_foundation::AST::CtValue)]) -> bool {
+    fields.iter().all(|(_, value)| {
+        matches!(
+            value,
+            jet_foundation::AST::CtValue::Int(_)
+                | jet_foundation::AST::CtValue::Float(_)
+                | jet_foundation::AST::CtValue::Bool(_)
+                | jet_foundation::AST::CtValue::Char(_)
+                | jet_foundation::AST::CtValue::Str(_)
+        )
+    })
+}
+
 fn jit_scalar_type(ty: &Type) -> bool {
     jit_value_type(ty)
 }
@@ -1097,6 +1110,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             | jet_foundation::AST::CtValue::List(_),
         )
         | TExprKind::ConstRef(_) => true,
+        TExprKind::CtLit(jet_foundation::AST::CtValue::Struct { fields, .. }) => {
+            resident_safe_ct_struct_fields(fields)
+        }
         TExprKind::StrLit(parts) => resident_safe_string_parts(parts, callees),
         TExprKind::Local(_) => true,
         TExprKind::Unary { op, operand } => {

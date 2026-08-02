@@ -1,4 +1,4 @@
-use super::actions_policy::{ActionCache, BuildAction, BuildCapability};
+use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
     ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
     ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest,
@@ -18,7 +18,7 @@ use std::path::{Component, Path, PathBuf};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fs, io, time::{Duration, Instant}};
+use std::{fs, io, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 
@@ -346,6 +346,21 @@ fn execute_one_action(
         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
     };
 
+    if action.legacy_wrapper == Some(LegacyWrapperKind::Npm)
+        && action
+            .labels
+            .keys()
+            .any(|key| key.starts_with("legacy.dependency."))
+    {
+        return Err(io_action(
+            action,
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "npm dependency-bearing imports require a provisioned locked dependency tree",
+            ),
+        ));
+    }
+
     if let Some((transport, policy, true)) = &remote {
         let timeout_ms = remote_binding
             .map(|binding| binding.timeout_ms)
@@ -507,6 +522,7 @@ fn execute_remote_action(
     }
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: proof.attempt_id.clone(),
         argv: action.argv.clone(),
         inputs: snapshots.to_vec(),
         outputs: action.outputs.clone(),
@@ -602,16 +618,22 @@ fn remote_for_action(
     }
     let transport = RemoteCacheTransport::for_binding(binding)
         .map_err(|detail| remote_action(action, detail))?;
+    let attempt = REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let attempt_id = format!("attempt-{}-{timestamp}-{attempt}", std::process::id());
     let proof = transport
         .sandbox_proof(
             format!(
-                "remote:{}:{}:local-{}-{}-{}",
+                "remote:{}:{}:local-{}-{}-{attempt}",
                 binding.builder,
                 binding.trust_domain,
                 std::process::id(),
                 action.id.0,
-                REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
             ),
+            attempt_id,
             key.as_str(),
             toolchain_provenance_digest(plan, action.toolchain),
         )

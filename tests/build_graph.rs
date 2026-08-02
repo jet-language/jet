@@ -1001,6 +1001,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
     let sandbox = transport
         .sandbox_proof(
             "remote:builder-roundtrip:trusted:sandbox-1",
+            "attempt-roundtrip-1",
             key.as_str(),
             provenance_digest.clone(),
         )
@@ -1031,6 +1032,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
 
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: sandbox.attempt_id.clone(),
         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
         inputs: vec![ActionInputSnapshot {
             path: BuildPath::new("src/main.jet").unwrap(),
@@ -1046,6 +1048,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
     transport.submit_execution(&request, &policy).unwrap();
     let result = RemoteExecutionResult {
         key: key.clone(),
+        attempt_id: request.attempt_id.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![output],
         toolchain_digest: request.toolchain_digest.clone(),
@@ -1058,6 +1061,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         transport
             .sandbox_proof(
                 "remote:builder-roundtrip:trusted:sandbox-other",
+                "attempt-roundtrip-other",
                 "other-action",
                 provenance_digest,
             )
@@ -1091,6 +1095,7 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
     let proof = transport
         .sandbox_proof(
             "remote:builder-proof:trusted:sandbox-1",
+            "attempt-proof-1",
             key.as_str(),
             ContentDigest::from_bytes(b"provenance"),
         )
@@ -1098,6 +1103,7 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
     let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: proof.attempt_id.clone(),
         argv: vec!["remote-tool".to_string()],
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -1130,8 +1136,14 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
 
     transport.submit_execution(&request, &policy).unwrap();
     transport.cancel_execution(&key, &policy).unwrap();
+    assert!(matches!(
+        transport.submit_execution(&request, &policy),
+        Err(RemoteCacheError::InvalidRecord(message))
+            if message.contains("attempt id was already cancelled")
+    ));
     let late = RemoteExecutionResult {
         key: key.clone(),
+        attempt_id: request.attempt_id.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: Vec::new(),
         toolchain_digest: request.toolchain_digest.clone(),
@@ -1168,6 +1180,7 @@ fn remote_cancel_and_publish_are_one_commit_race() {
     let proof = transport
         .sandbox_proof(
             "remote:builder-race:trusted:race",
+            "attempt-race-1",
             key.as_str(),
             ContentDigest::from_bytes(b"provenance"),
         )
@@ -1175,6 +1188,7 @@ fn remote_cancel_and_publish_are_one_commit_race() {
     let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: proof.attempt_id.clone(),
         argv: vec!["remote-tool".to_string()],
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -1184,6 +1198,7 @@ fn remote_cancel_and_publish_are_one_commit_race() {
     transport.submit_execution(&request, &policy).unwrap();
     let result = RemoteExecutionResult {
         key: key.clone(),
+        attempt_id: request.attempt_id.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: Vec::new(),
         toolchain_digest: request.toolchain_digest.clone(),
@@ -1334,6 +1349,7 @@ fn remote_driver_consumes_authenticated_worker_result() {
                         .publish_execution_result(
                             &RemoteExecutionResult {
                                 key: request.key.clone(),
+                                attempt_id: request.attempt_id.clone(),
                                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
                                 outputs: vec![ActionOutputRecord {
                                     path: request.outputs[0].clone(),
@@ -1466,6 +1482,7 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
     let sandbox = transport
         .sandbox_proof(
             "remote:builder-execute-only:trusted:sandbox-execute-only",
+            "attempt-execute-only-1",
             key.as_str(),
             ContentDigest::from_bytes(b"toolchain"),
         )
@@ -1488,6 +1505,7 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
     let output_path = BuildPath::new("build/app").unwrap();
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: sandbox.attempt_id.clone(),
         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
         inputs: vec![input],
         outputs: vec![output_path.clone()],
@@ -1502,6 +1520,7 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
         .unwrap();
     let result = RemoteExecutionResult {
         key: key.clone(),
+        attempt_id: request.attempt_id.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![ActionOutputRecord {
             path: output_path,
@@ -1544,6 +1563,7 @@ fn remote_transport_rejects_a_symlinked_store_root() {
         transport
             .sandbox_proof(
                 "remote:builder-symlink:trusted:symlink",
+                "attempt-symlink-1",
                 key.as_str(),
                 ContentDigest::from_bytes(b"provenance"),
             )
@@ -1604,6 +1624,7 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     let sandbox = client
         .sandbox_proof(
             "remote:builder-a:trusted:job-1",
+            "attempt-job-1",
             key.as_str(),
             ContentDigest::from_bytes(b"provenance"),
         )
@@ -1622,6 +1643,7 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     let input_digest = client.upload_execution_blob(b"source", &policy).unwrap();
     let request = RemoteExecutionRequest {
         key: key.clone(),
+        attempt_id: sandbox.attempt_id.clone(),
         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
         inputs: vec![ActionInputSnapshot {
             path: BuildPath::new("src/main.jet").unwrap(),
@@ -1649,6 +1671,7 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     let output_digest = worker.upload_execution_blob(b"compiled", &policy).unwrap();
     let result = RemoteExecutionResult {
         key: key.clone(),
+        attempt_id: request.attempt_id.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![ActionOutputRecord {
             path: request.outputs[0].clone(),
@@ -1667,6 +1690,7 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     let new_sandbox = client
         .sandbox_proof(
             "remote:builder-a:trusted:job-2",
+            "attempt-job-2",
             key.as_str(),
             ContentDigest::from_bytes(b"provenance"),
         )
@@ -1674,6 +1698,7 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     let new_policy = RemoteCachePolicy::with_grants(false, false, true, new_sandbox.clone());
     let mut new_request = request.clone();
     new_request.sandbox = new_sandbox.clone();
+    new_request.attempt_id = new_sandbox.attempt_id.clone();
     client.submit_execution(&new_request, &new_policy).unwrap();
     let stale_error = client
         .download_execution_result(&key, &new_policy)
@@ -2082,7 +2107,7 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
 
     fs::write(
         root.join("CMakeLists.txt"),
-        "project(app)\nadd_executable(app src/main.c)\n",
+        "project(app)\nadd_executable(app src/main.c)\n# jet: output=build/app\n",
     )
     .unwrap();
     let cmake = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake).unwrap();
@@ -2093,12 +2118,34 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
         .get("legacy.source-closure")
         .is_some_and(|value| value.starts_with("project-files-v1:")));
 
+    fs::write(
+        root.join("CMakeLists.txt"),
+        "project(app)\nadd_executable(app src/main.c)\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("exact build output")
+    ));
+
     fs::write(root.join("Makefile"), "app: src/main.c\n\tcc -o app src/main.c\n").unwrap();
     assert!(matches!(
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
         Err(BuildError::LegacyProjectFileInvalid(message))
             if message.contains("recipe bodies")
     ));
+
+    fs::write(
+        root.join("build.gradle"),
+        "rootProject.name = \"app\"\ntasks.register(\"build\")\n# jet: output=build/libs/app.jar\n",
+    )
+    .unwrap();
+    let gradle = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle).unwrap();
+    assert!(gradle
+        .outputs
+        .iter()
+        .any(|path| path.as_str() == "build/libs/app.jar"));
 
     fs::write(root.join("build.gradle"), "tasks.register(\"build\") { dependsOn \"x\" }\n")
         .unwrap();
@@ -2119,6 +2166,36 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
             if message.contains("Cargo.lock")
     ));
 
+    fs::write(
+        root.join("package.json"),
+        r#"{"scripts":{"build":"tool"}}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("exact build output")
+    ));
+
+    fs::write(
+        root.join("package.json"),
+        r#"{"scripts":{"build":"tool"},"main":"dist/index.js","dependencies":{"vite":"5"}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("package-lock.json"), b"{}").unwrap();
+    let npm = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm).unwrap();
+    assert!(npm
+        .outputs
+        .iter()
+        .any(|path| path.as_str() == "dist/index.js"));
+    assert_eq!(
+        npm.labels
+            .get("legacy.dependency.dependencies.vite")
+            .map(String::as_str),
+        Some("5")
+    );
+
+    fs::remove_file(root.join("package-lock.json")).unwrap();
     fs::write(
         root.join("package.json"),
         r#"{"scripts":{"build":"tool"},"dependencies":{"vite":"5"}}"#,

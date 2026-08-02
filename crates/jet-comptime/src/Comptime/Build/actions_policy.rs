@@ -93,6 +93,7 @@ struct LegacyProjectImport {
     argv: Option<Vec<String>>,
     inputs: Vec<String>,
     outputs: Vec<String>,
+    outputs_explicit: bool,
     caps: BTreeSet<BuildCapability>,
     env: BTreeMap<String, String>,
     env_allowlist: BTreeSet<String>,
@@ -179,7 +180,12 @@ fn apply_import_key(
             }
         }
         "output" | "outputs" => {
-            for path in parse_import_array(value) {
+            let paths = parse_import_array(value);
+            if paths.is_empty() {
+                return Err(legacy_import_error(kind, "output declarations cannot be empty"));
+            }
+            import.outputs_explicit = true;
+            for path in paths {
                 push_unique(&mut import.outputs, path);
             }
         }
@@ -563,7 +569,6 @@ fn parse_cmake_import(source: &str, import: &mut LegacyProjectImport) -> Result<
                 }
                 push_unique(&mut import.inputs, path);
             }
-            push_unique(&mut import.outputs, format!("build/{name}"));
         }
         _ => unreachable!("all CMake target commands are handled"),
     }
@@ -780,7 +785,6 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
             "task name must be one literal word",
         ));
     }
-    let project = project;
     if matches!(task.as_str(), "build" | "assemble") && project.is_none() {
         return Err(legacy_import_error(
             LegacyWrapperKind::Gradle,
@@ -788,14 +792,6 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
         ));
     }
     import.argv = Some(vec!["gradle".to_string(), task.clone()]);
-    push_unique(
-        &mut import.outputs,
-        if task == "build" || task == "assemble" {
-            format!("build/libs/{}.jar", project.as_deref().unwrap_or_default())
-        } else {
-            format!("build/{task}")
-        },
-    );
     import
         .labels
         .insert("legacy.task".to_string(), task);
@@ -1094,39 +1090,6 @@ fn parse_npm_import(
         ));
     };
     import.argv = Some(vec!["npm".to_string(), "run".to_string(), script.clone()]);
-    let output = if let Some(value) = object.get("main") {
-        json_string(Some(value)).ok_or_else(|| {
-            legacy_import_error(LegacyWrapperKind::Npm, "package main must be a string")
-        })?
-    } else if let Some(value) = object.get("module") {
-        match value {
-            jet_foundation::JSON::JSONValue::String(path) => path.clone(),
-            jet_foundation::JSON::JSONValue::Array(values) => {
-                if values.len() != 1 {
-                    return Err(legacy_import_error(
-                        LegacyWrapperKind::Npm,
-                        "package module must contain exactly one string path",
-                    ));
-                }
-                let Some(jet_foundation::JSON::JSONValue::String(path)) = values.first() else {
-                    return Err(legacy_import_error(
-                        LegacyWrapperKind::Npm,
-                        "package module must contain one string path",
-                    ));
-                };
-                path.clone()
-            }
-            _ => {
-                return Err(legacy_import_error(
-                    LegacyWrapperKind::Npm,
-                    "package module must be a string path",
-                ));
-            }
-        }
-    } else {
-        "dist/index.js".to_string()
-    };
-    push_unique(&mut import.outputs, output);
     let dependency_sections = [
         "dependencies",
         "devDependencies",
@@ -1191,6 +1154,50 @@ fn parse_npm_import(
             "dependency closure requires package-lock.json or npm-shrinkwrap.json",
         ));
     }
+    let output = if let Some(value) = object.get("main") {
+        import.outputs_explicit = true;
+        json_string(Some(value)).ok_or_else(|| {
+            legacy_import_error(LegacyWrapperKind::Npm, "package main must be a string")
+        })?
+    } else if let Some(value) = object.get("module") {
+        import.outputs_explicit = true;
+        match value {
+            jet_foundation::JSON::JSONValue::String(path) => path.clone(),
+            jet_foundation::JSON::JSONValue::Array(values) => {
+                if values.len() != 1 {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Npm,
+                        "package module must contain exactly one string path",
+                    ));
+                }
+                let Some(jet_foundation::JSON::JSONValue::String(path)) = values.first() else {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Npm,
+                        "package module must contain one string path",
+                    ));
+                };
+                path.clone()
+            }
+            _ => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    "package module must be a string path",
+                ));
+            }
+        }
+    } else {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "package must declare an exact build output in main or module",
+        ));
+    };
+    if output.trim().is_empty() {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "package main or module must name a non-empty output path",
+        ));
+    }
+    push_unique(&mut import.outputs, output);
     Ok(())
 }
 
@@ -1212,6 +1219,14 @@ fn parse_legacy_project(
         LegacyWrapperKind::Cargo => parse_cargo_import(root, source, &mut import)?,
     }
     apply_import_directives(kind, source, &mut import)?;
+    if matches!(kind, LegacyWrapperKind::CMake | LegacyWrapperKind::Gradle)
+        && !import.outputs_explicit
+    {
+        return Err(legacy_import_error(
+            kind,
+            "import must declare an exact build output with `jet: output=...`",
+        ));
+    }
     // The wrapper command may observe any project file, not only the
     // canonical manifest.  Import the bounded, non-symlink source closure so
     // cache identity and remote execution cannot silently ignore headers,

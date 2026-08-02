@@ -266,6 +266,7 @@ pub struct RemoteCacheDenied {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteSandboxProof {
     pub sandbox_id: String,
+    pub attempt_id: String,
     pub action_key: String,
     pub provenance_digest: ContentDigest,
     pub worker_id: String,
@@ -282,6 +283,7 @@ impl RemoteSandboxProof {
     ) -> Self {
         RemoteSandboxProof {
             sandbox_id: sandbox_id.into(),
+            attempt_id: String::new(),
             action_key: action_key.into(),
             provenance_digest,
             worker_id: String::new(),
@@ -305,6 +307,11 @@ impl RemoteSandboxProof {
         self
     }
 
+    fn with_attempt_id(mut self, attempt_id: impl Into<String>) -> Self {
+        self.attempt_id = attempt_id.into();
+        self
+    }
+
     fn is_complete(&self) -> bool {
         !self.sandbox_id.is_empty()
             && self.sandbox_id.len() <= 512
@@ -321,14 +328,17 @@ impl RemoteSandboxProof {
                     && !self.platform.is_empty()
                     && !self.abi.is_empty()
                     && !self.worker_receipt.is_empty()
+                    && !self.attempt_id.is_empty()
                     && self.worker_id.len() <= 256
                     && self.platform.len() <= 256
                     && self.abi.len() <= 256
                     && self.worker_receipt.len() <= 256
+                    && self.attempt_id.len() <= 256
                     && !self.worker_id.chars().any(|ch| ch.is_control())
                     && !self.platform.chars().any(|ch| ch.is_control())
                     && !self.abi.chars().any(|ch| ch.is_control())
-                    && !self.worker_receipt.chars().any(|ch| ch.is_control()))
+                    && !self.worker_receipt.chars().any(|ch| ch.is_control())
+                    && !self.attempt_id.chars().any(|ch| ch.is_control()))
     }
 }
 
@@ -929,6 +939,7 @@ impl RemoteCacheTransport {
     pub fn sandbox_proof(
         &self,
         sandbox_id: impl Into<String>,
+        attempt_id: impl Into<String>,
         action_key: impl Into<String>,
         provenance_digest: ContentDigest,
     ) -> Result<RemoteSandboxProof, String> {
@@ -937,14 +948,17 @@ impl RemoteCacheTransport {
             .as_ref()
             .ok_or_else(|| "remote transport has no worker identity".to_string())?;
         let sandbox_id = sandbox_id.into();
+        let attempt_id = attempt_id.into();
         let action_key = action_key.into();
         let worker_receipt = self.worker_receipt(
             identity,
             &sandbox_id,
+            &attempt_id,
             &action_key,
             &provenance_digest,
         )?;
         Ok(RemoteSandboxProof::new(sandbox_id, action_key, provenance_digest)
+            .with_attempt_id(attempt_id)
             .with_worker_identity(
                 identity.worker_id.clone(),
                 identity.platform.clone(),
@@ -1008,6 +1022,7 @@ impl RemoteCacheTransport {
                 != self.worker_receipt(
                     expected,
                     &proof.sandbox_id,
+                    &proof.attempt_id,
                     &proof.action_key,
                     &proof.provenance_digest,
                 )
@@ -1026,6 +1041,7 @@ impl RemoteCacheTransport {
         &self,
         identity: &RemoteWorkerIdentity,
         sandbox_id: &str,
+        attempt_id: &str,
         action_key: &str,
         provenance_digest: &ContentDigest,
     ) -> Result<String, String> {
@@ -1034,13 +1050,14 @@ impl RemoteCacheTransport {
             .as_ref()
             .ok_or_else(|| "remote transport authentication is not configured".to_string())?;
         let payload = format!(
-            "builder={}\ntrust={}\nworker={}\nplatform={}\nabi={}\nsandbox={}\naction={}\nprovenance={}",
+            "builder={}\ntrust={}\nworker={}\nplatform={}\nabi={}\nsandbox={}\nattempt={}\naction={}\nprovenance={}",
             identity.builder,
             identity.trust_domain,
             identity.worker_id,
             identity.platform,
             identity.abi,
             sandbox_id,
+            attempt_id,
             action_key,
             provenance_digest.as_str(),
         );
@@ -1397,6 +1414,30 @@ impl RemoteCacheTransport {
         let _commit = remote_execution_commit_lock(&self.root)?;
         let result_path = self.execution_result_path(&request.key)?;
         let cancelled_path = self.execution_cancel_path(&request.key)?;
+        match secure_read_file_bounded(
+            &self.root,
+            &self.execution_request_path(&request.key)?,
+            MAX_REMOTE_WIRE_BYTES + 256,
+        ) {
+            Ok(bytes) => {
+                let current = decode_remote_execution_request(&self.open("execution-request", &bytes)?)?;
+                if current.attempt_id == request.attempt_id {
+                    return Err(RemoteCacheError::InvalidRecord(
+                        "remote execution attempt id was already submitted".to_string(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(RemoteCacheError::Io(error)),
+        }
+        if self
+            .execution_cancel_attempt(&request.key)?
+            .is_some_and(|attempt_id| attempt_id == request.attempt_id)
+        {
+            return Err(RemoteCacheError::InvalidRecord(
+                "remote execution attempt id was already cancelled".to_string(),
+            ));
+        }
         remove_remote_execution_file(&cancelled_path)?;
         if let Ok(metadata) = fs::symlink_metadata(&result_path) {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -1432,10 +1473,31 @@ impl RemoteCacheTransport {
         self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
+        let attempt_id = policy
+            .proof()
+            .map(|proof| proof.attempt_id.as_str())
+            .ok_or_else(|| {
+                RemoteCacheError::InvalidRecord(
+                    "remote execution cancellation requires an attempt-bound proof".to_string(),
+                )
+            })?;
+        validate_remote_attempt_id(attempt_id)?;
         ensure_remote_root(&self.root)?;
         let _commit = remote_execution_commit_lock(&self.root)?;
+        let request = self.read_execution_request(key)?;
+        if request.attempt_id != attempt_id {
+            return Err(RemoteCacheError::InvalidRecord(
+                "remote execution cancellation belongs to a stale attempt".to_string(),
+            ));
+        }
+        self.validate_sandbox_proof(policy, &request.sandbox, RemoteActionRequest::Execute)?;
         let marker = self.execution_cancel_path(key)?;
-        let bytes = self.seal("execution-cancel", key.as_str().as_bytes())?;
+        let payload = format!(
+            "key={}\nattempt={}\n",
+            hex_encode(key.as_str().as_bytes()),
+            hex_encode(attempt_id.as_bytes()),
+        );
+        let bytes = self.seal("execution-cancel", payload.as_bytes())?;
         atomic_restore_file(&self.root, &marker, &bytes)?;
         remove_remote_execution_file(&self.execution_result_path(key)?)?;
         remove_remote_execution_file(&self.execution_request_path(key)?)?;
@@ -1467,14 +1529,14 @@ impl RemoteCacheTransport {
         }
         validate_remote_execution_result(result)?;
         let _commit = remote_execution_commit_lock(&self.root)?;
-        if self.execution_is_cancelled(&result.key)? {
+        if self.execution_is_cancelled(&result.key, &result.attempt_id)? {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote execution was cancelled before this result was published".to_string(),
             ));
         }
         validate_remote_count(result.outputs.len(), "execution outputs")?;
         let request = self.read_execution_request(&result.key)?;
-        if self.execution_is_cancelled(&result.key)? {
+        if self.execution_is_cancelled(&result.key, &result.attempt_id)? {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote execution was cancelled before this result was published".to_string(),
             ));
@@ -1508,13 +1570,6 @@ impl RemoteCacheTransport {
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
         let _commit = remote_execution_commit_lock(&self.root)?;
-        if self.execution_is_cancelled(key)? {
-            remove_remote_execution_file(&self.execution_result_path(key)?)?;
-            return Err(RemoteCacheError::Io(io::Error::new(
-                io::ErrorKind::NotFound,
-                "remote execution was cancelled",
-            )));
-        }
         let request = self.read_execution_request(key)?;
         self.validate_sandbox_proof(policy, &request.sandbox, RemoteActionRequest::Execute)?;
         let path = self.execution_result_path(key)?;
@@ -1524,7 +1579,7 @@ impl RemoteCacheTransport {
             MAX_REMOTE_WIRE_BYTES + 256,
         )?;
         let result = decode_remote_execution_result(&self.open("execution-result", &bytes)?)?;
-        if self.execution_is_cancelled(key)? {
+        if self.execution_is_cancelled(key, &result.attempt_id)? {
             remove_remote_execution_file(&path)?;
             return Err(RemoteCacheError::Io(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -1553,12 +1608,6 @@ impl RemoteCacheTransport {
     ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
         self.require_auth(RemoteActionRequest::Execute)?;
         self.require_worker_identity()?;
-        if self.execution_is_cancelled(key)? {
-            return Err(RemoteCacheError::Io(io::Error::new(
-                io::ErrorKind::NotFound,
-                "remote execution was cancelled",
-            )));
-        }
         let path = self.execution_request_path(key)?;
         let bytes = secure_read_file_bounded(
             &self.root,
@@ -1573,6 +1622,12 @@ impl RemoteCacheTransport {
         }
         if let Some(expected) = &self.worker_identity {
             self.validate_worker_identity(&request.sandbox, expected)?;
+        }
+        if self.execution_is_cancelled(key, &request.attempt_id)? {
+            return Err(RemoteCacheError::Io(io::Error::new(
+                io::ErrorKind::NotFound,
+                "remote execution was cancelled",
+            )));
         }
         Ok(request)
     }
@@ -1589,20 +1644,72 @@ impl RemoteCacheTransport {
         self.execution_path("cancelled", key)
     }
 
-    fn execution_is_cancelled(&self, key: &ActionKey) -> Result<bool, RemoteCacheError> {
+    fn execution_cancel_attempt(
+        &self,
+        key: &ActionKey,
+    ) -> Result<Option<String>, RemoteCacheError> {
         let path = self.execution_cancel_path(key)?;
         let bytes = match secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256) {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(RemoteCacheError::Io(error)),
         };
         let payload = self.open("execution-cancel", &bytes)?;
-        if payload != key.as_str().as_bytes() {
+        let text = std::str::from_utf8(&payload).map_err(|_| {
+            RemoteCacheError::InvalidRecord(
+                "remote cancellation marker is not UTF-8".to_string(),
+            )
+        })?;
+        let mut marker_key = None;
+        let mut attempt_id = None;
+        let mut seen = BTreeSet::new();
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix("key=") {
+                if !seen.insert("key") {
+                    return Err(duplicate_remote_field("cancellation key"));
+                }
+                marker_key = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                    RemoteCacheError::InvalidRecord(
+                        "remote cancellation marker key is not UTF-8".to_string(),
+                    )
+                })?);
+            } else if let Some(value) = line.strip_prefix("attempt=") {
+                if !seen.insert("attempt") {
+                    return Err(duplicate_remote_field("cancellation attempt"));
+                }
+                attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                    RemoteCacheError::InvalidRecord(
+                        "remote cancellation marker attempt is not UTF-8".to_string(),
+                    )
+                })?);
+            } else if !line.trim().is_empty() {
+                return Err(RemoteCacheError::InvalidRecord(format!(
+                    "unknown remote cancellation field `{line}`"
+                )));
+            }
+        }
+        if marker_key.as_deref() != Some(key.as_str()) {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote cancellation marker does not match its action".to_string(),
             ));
         }
-        Ok(true)
+        let attempt_id = attempt_id.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord(
+                "remote cancellation marker has no attempt id".to_string(),
+            )
+        })?;
+        validate_remote_attempt_id(&attempt_id)?;
+        Ok(Some(attempt_id))
+    }
+
+    fn execution_is_cancelled(
+        &self,
+        key: &ActionKey,
+        attempt_id: &str,
+    ) -> Result<bool, RemoteCacheError> {
+        Ok(self
+            .execution_cancel_attempt(key)?
+            .is_some_and(|cancelled| cancelled == attempt_id))
     }
 
     fn execution_path(
@@ -1631,6 +1738,7 @@ impl RemoteCacheTransport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteExecutionRequest {
     pub key: ActionKey,
+    pub attempt_id: String,
     pub argv: Vec<String>,
     pub inputs: Vec<ActionInputSnapshot>,
     pub outputs: Vec<BuildPath>,
@@ -1641,6 +1749,7 @@ pub struct RemoteExecutionRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteExecutionResult {
     pub key: ActionKey,
+    pub attempt_id: String,
     pub outcome: ActionOutcome,
     pub outputs: Vec<ActionOutputRecord>,
     pub toolchain_digest: ContentDigest,
@@ -1651,6 +1760,7 @@ fn validate_remote_execution_request(
     request: &RemoteExecutionRequest,
 ) -> Result<(), RemoteCacheError> {
     validate_action_key(&request.key)?;
+    validate_remote_attempt_id(&request.attempt_id)?;
     validate_remote_count(request.argv.len(), "argv")?;
     validate_remote_count(request.inputs.len(), "inputs")?;
     validate_remote_count(request.outputs.len(), "outputs")?;
@@ -1661,6 +1771,11 @@ fn validate_remote_execution_request(
             request: RemoteActionRequest::Execute,
             reason: RemoteDeniedReason::ProofDoesNotMatchAction,
         }));
+    }
+    if request.sandbox.attempt_id != request.attempt_id {
+        return Err(RemoteCacheError::InvalidRecord(
+            "remote execution request attempt does not match its sandbox proof".to_string(),
+        ));
     }
     if !request.sandbox.is_complete() {
         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
@@ -1684,6 +1799,7 @@ fn validate_remote_execution_result(
     result: &RemoteExecutionResult,
 ) -> Result<(), RemoteCacheError> {
     validate_action_key(&result.key)?;
+    validate_remote_attempt_id(&result.attempt_id)?;
     validate_remote_count(result.outputs.len(), "execution outputs")?;
     ContentDigest::parse(result.toolchain_digest.as_str())?;
     if !result.sandbox.is_complete() {
@@ -1698,6 +1814,11 @@ fn validate_remote_execution_result(
             reason: RemoteDeniedReason::ProofDoesNotMatchAction,
         }));
     }
+    if result.sandbox.attempt_id != result.attempt_id {
+        return Err(RemoteCacheError::InvalidRecord(
+            "remote execution result attempt does not match its sandbox proof".to_string(),
+        ));
+    }
     for output in &result.outputs {
         validate_remote_path(output.path.as_str())?;
         ContentDigest::parse(output.digest.as_str())?;
@@ -1711,6 +1832,7 @@ fn validate_execution_parity(
     result: &RemoteExecutionResult,
 ) -> Result<(), RemoteCacheError> {
     if request.key != result.key
+        || request.attempt_id != result.attempt_id
         || request.toolchain_digest != result.toolchain_digest
         || request.sandbox != result.sandbox
     {
@@ -1735,8 +1857,9 @@ fn validate_execution_parity(
 
 fn encode_remote_execution_request(request: &RemoteExecutionRequest) -> String {
     let mut encoded = format!(
-        "version=1\nkey={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nargv={}\n",
+        "version=1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nargv={}\n",
         hex_encode(request.key.as_str().as_bytes()),
+        hex_encode(request.attempt_id.as_bytes()),
         request.toolchain_digest.as_str(),
         hex_encode(request.sandbox.sandbox_id.as_bytes()),
         hex_encode(request.sandbox.action_key.as_bytes()),
@@ -1783,6 +1906,7 @@ fn decode_remote_execution_request(
     let mut seen = BTreeSet::new();
     let mut version = None;
     let mut key = None;
+    let mut attempt_id = None;
     let mut toolchain_digest = None;
     let mut sandbox_id = None;
     let mut proof_action = None;
@@ -1806,6 +1930,11 @@ fn decode_remote_execution_request(
             key = Some(ActionKey::new(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution key is not UTF-8".to_string())
             })?));
+        } else if let Some(value) = line.strip_prefix("attempt=") {
+            if !seen.insert("attempt") { return Err(duplicate_remote_field("attempt")); }
+            attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                RemoteCacheError::InvalidRecord("execution attempt id is not UTF-8".to_string())
+            })?);
         } else if let Some(value) = line.strip_prefix("toolchain=") {
             if !seen.insert("toolchain") { return Err(duplicate_remote_field("toolchain")); }
             toolchain_digest = Some(ContentDigest::parse(value)?);
@@ -1891,11 +2020,14 @@ fn decode_remote_execution_request(
         ));
     }
     let key = key.ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution key".to_string()))?;
+    let attempt_id = attempt_id
+        .ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution attempt id".to_string()))?;
     let sandbox = RemoteSandboxProof::new(
         sandbox_id.ok_or_else(|| RemoteCacheError::InvalidRecord("missing sandbox id".to_string()))?,
         proof_action.ok_or_else(|| RemoteCacheError::InvalidRecord("missing proof action key".to_string()))?,
         proof_provenance.ok_or_else(|| RemoteCacheError::InvalidRecord("missing proof provenance".to_string()))?,
     )
+    .with_attempt_id(attempt_id.clone())
     .with_worker_identity(
         worker_id.ok_or_else(|| RemoteCacheError::InvalidRecord("missing worker id".to_string()))?,
         platform.ok_or_else(|| RemoteCacheError::InvalidRecord("missing worker platform".to_string()))?,
@@ -1904,6 +2036,7 @@ fn decode_remote_execution_request(
     );
     let request = RemoteExecutionRequest {
         key,
+        attempt_id,
         argv,
         inputs,
         outputs,
@@ -1917,8 +2050,9 @@ fn decode_remote_execution_request(
 
 fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
     let mut encoded = format!(
-        "version=1\nkey={}\noutcome={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\noutputs={}\n",
+        "version=1\nkey={}\nattempt={}\noutcome={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\noutputs={}\n",
         hex_encode(result.key.as_str().as_bytes()),
+        hex_encode(result.attempt_id.as_bytes()),
         encode_remote_outcome(result.outcome),
         result.toolchain_digest.as_str(),
         hex_encode(result.sandbox.sandbox_id.as_bytes()),
@@ -1954,6 +2088,7 @@ fn decode_remote_execution_result(
     let mut seen = BTreeSet::new();
     let mut version = None;
     let mut key = None;
+    let mut attempt_id = None;
     let mut outcome = None;
     let mut toolchain_digest = None;
     let mut sandbox_id = None;
@@ -1974,6 +2109,11 @@ fn decode_remote_execution_result(
             key = Some(ActionKey::new(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution result key is not UTF-8".to_string())
             })?));
+        } else if let Some(value) = line.strip_prefix("attempt=") {
+            if !seen.insert("attempt") { return Err(duplicate_remote_field("attempt")); }
+            attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                RemoteCacheError::InvalidRecord("execution result attempt id is not UTF-8".to_string())
+            })?);
         } else if let Some(value) = line.strip_prefix("outcome=") {
             if !seen.insert("outcome") { return Err(duplicate_remote_field("outcome")); }
             outcome = Some(parse_remote_outcome(value)?);
@@ -2044,8 +2184,11 @@ fn decode_remote_execution_result(
         ));
     }
     let key = key.ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution result key".to_string()))?;
+    let attempt_id = attempt_id
+        .ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution result attempt id".to_string()))?;
     let result = RemoteExecutionResult {
         key,
+        attempt_id: attempt_id.clone(),
         outcome: outcome
             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution outcome".to_string()))?,
         outputs,
@@ -2057,6 +2200,7 @@ fn decode_remote_execution_result(
             proof_provenance
                 .ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution proof provenance".to_string()))?,
         )
+        .with_attempt_id(attempt_id)
         .with_worker_identity(
             worker_id.ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution worker id".to_string()))?,
             platform.ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution worker platform".to_string()))?,
@@ -2113,6 +2257,19 @@ fn validate_action_key(key: &ActionKey) -> Result<(), RemoteCacheError> {
     {
         return Err(RemoteCacheError::InvalidRecord(
             "action key is empty or contains a record delimiter".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_remote_attempt_id(attempt_id: &str) -> Result<(), RemoteCacheError> {
+    if attempt_id.is_empty()
+        || attempt_id.len() > 256
+        || attempt_id.chars().any(|character| character.is_control())
+    {
+        return Err(RemoteCacheError::InvalidRecord(
+            "remote execution attempt id is empty, too long, or contains control text"
+                .to_string(),
         ));
     }
     Ok(())
