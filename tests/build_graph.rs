@@ -296,6 +296,7 @@ fn declared_target_toolchain_wins_over_ambient_host_tool() {
         .map(|directory| directory.join("false"))
         .find(|path| path.is_file())
         .expect("the test host needs a `false` executable");
+    let declared_false = fs::canonicalize(&false_path).unwrap();
     let mut b = BuildContext::new();
     let toolchain = b
         .toolchain(
@@ -347,7 +348,7 @@ fn declared_target_toolchain_wins_over_ambient_host_tool() {
         matches!(
             &error,
             jet::Comptime::Build::BuildExecutionError::ProbeFailed { detail, .. }
-                if detail.contains(false_path.to_string_lossy().as_ref())
+                if detail.contains(declared_false.to_string_lossy().as_ref())
         ),
         "declared target tool must be used instead of ambient PATH: {error:?}"
     );
