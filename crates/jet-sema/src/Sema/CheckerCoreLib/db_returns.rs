@@ -7,12 +7,21 @@ use super::alloc_ptrs::{db_error_ty, db_row_ty, result_ty};
 /// bookkeeping, mirroring `handle_method_return_ty`'s other sources).
 pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
     match method {
+        "with_policy" => Some(Type::Named("DBScope".into())),
+        "begin" | "commit" | "rollback" | "close" => Some(Type::Bool),
+        _ => None,
+    }
+}
+
+pub fn db_scope_method_return_ty(method: &str) -> Option<Type> {
+    match method {
         "query" => Some(result_ty(Type::List(Box::new(db_row_ty())), db_error_ty())),
         "query_one" => Some(result_ty(
             Type::Option(Box::new(db_row_ty())),
             db_error_ty(),
         )),
         "execute" => Some(result_ty(Type::Int, db_error_ty())),
+        "live" => Some(result_ty(Type::Named("LiveQuery".into()), db_error_ty())),
         "begin" | "commit" | "rollback" | "close" => Some(Type::Bool),
         _ => None,
     }

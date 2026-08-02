@@ -32,6 +32,7 @@ mod CmdProve;
 mod ProveReplay;
 mod ProveSolver;
 mod CmdReport;
+mod CmdRemote;
 mod CmdSchema;
 mod CmdSemIndex;
 mod CmdSupply;
@@ -58,6 +59,7 @@ use CmdPkg::{
 };
 use CmdProve::run_prove;
 use CmdReport::run_report;
+use CmdRemote::run_remote;
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{
@@ -960,6 +962,11 @@ fn main() {
     let cross_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let remote_builder: Option<String> = jet_argv.iter().enumerate().find_map(|(index, arg)| {
+        arg.strip_prefix("--builder=")
+            .map(str::to_string)
+            .or_else(|| (arg == "--builder").then(|| jet_argv.get(index + 1)).flatten().cloned())
+    });
     // c134 Phase 7: `jet dev <file> --target=web --port=<N>` picks the dev
     // server's port explicitly instead of scanning from 8080.
     let dev_port: Option<u16> = jet_argv
@@ -1139,6 +1146,7 @@ fn main() {
                 freestanding,
                 allow_impure,
                 &build_grants,
+                remote_builder.as_deref(),
                 locked,
                 cross_target.as_deref(),
                 explain_partition,
@@ -1241,6 +1249,7 @@ fn main() {
         "diff" => { run_diff(&raw); return; }
         "merge" => { run_merge(&raw); return; }
         "report" => exit(run_report(&raw[1..])),
+        "remote" => run_remote(&raw, mode),
         "help" => {
             if let Some(help) = raw.get(1).and_then(|command| structural_help(command)) {
                 print!("{help}");
@@ -2009,6 +2018,7 @@ fn main() {
                                     freestanding,
                                     allow_impure,
                                     &build_grants,
+                                    remote_builder.as_deref(),
                                     locked,
                                     effective.as_deref(),
                                     explain_partition,
@@ -2256,6 +2266,7 @@ fn main() {
                 freestanding,
                 allow_impure,
                 &build_grants,
+                remote_builder.as_deref(),
                 locked,
                 effective.as_deref(),
                 explain_partition,

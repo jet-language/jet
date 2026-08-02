@@ -2503,8 +2503,9 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
-        // D-DBDRIVER1: jet.db — SQLite via rusqlite (bundled). `open`/`open_memory`
-        // are the only module-level entry points; they PRODUCE a `DBConnection`
+        // D-DBPOLICY-BIND1: jet.db — SQLite via rusqlite (bundled). `open`/`open_memory`
+        // produce an unscoped `DBConnection`; `policy` creates a typed policy
+        // and `with_policy` produces the only row-capable `DBScope`.
         // handle (mirrors `core.files`'s `open`/`create` producing a `FileReader`/
         // `FileWriter`). Every other operation — `query`/`query_one`/`execute`/
         // `begin`/`commit`/`rollback`/`close` — is an INSTANCE method dispatched
@@ -2517,6 +2518,10 @@ pub fn core_fixed_sig(
             Some(Type::Named("DBConnection".to_string())),
         )),
         ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+        ("jet.db", "policy") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Named("RowPolicy".to_string()), Type::String)),
+        )),
         ("jet.db", "params") => Some((
             vec![(read, Type::Named("SQL".to_string()))],
             Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
@@ -2558,7 +2563,7 @@ pub fn core_fixed_sig(
         )),
         ("jet.db", "transaction") | ("jet.db", "migrate") => Some((
             vec![
-                (read, Type::Named("DBConnection".to_string())),
+                (read, Type::Named("DBScope".to_string())),
                 (read, Type::String),
                 (read, Type::List(Box::new(Type::String))),
             ],

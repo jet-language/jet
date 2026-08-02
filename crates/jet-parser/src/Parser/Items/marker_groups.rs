@@ -1054,6 +1054,37 @@ impl<'a> Parser<'a> {
                             ));
                         }
                     }
+                    // D-COMPUTE-KERNEL-SURFACE1=B: preserve the explicit
+                    // kernel declaration in the AST. Sema attaches the proof
+                    // only after it has checked the body.
+                    Syntax::CONTRACT_KERNEL => {
+                        if function.kernel.is_some() {
+                            return Err(Diagnostic::error(
+                                "E1130",
+                                "a function may have only one `#Kernel` marker".to_string(),
+                                "the kernel mode is a single declaration, not a stack of execution policies".to_string(),
+                                "keep one `#Kernel(.parallel)` marker".to_string(),
+                                Some(marker.span),
+                            ));
+                        }
+                        let mode = match arguments
+                            .parameter(0)
+                            .and_then(Self::marker_enum_variant)
+                        {
+                            Some("parallel") => crate::AST::KernelMode::Parallel,
+                            _ => {
+                                return Err(crate::Policy::marker_argument_shape_error(
+                                    Syntax::CONTRACT_KERNEL,
+                                    marker.span,
+                                ));
+                            }
+                        };
+                        function.kernel = Some(crate::AST::KernelMarker {
+                            mode,
+                            span: marker.span,
+                            proof: None,
+                        });
+                    }
                     Syntax::CONTRACT_PRE | Syntax::CONTRACT_POST => {
                         let (Some(condition), Some(message_argument)) =
                             (arguments.parameter(0), arguments.parameter(1))
@@ -1179,6 +1210,7 @@ impl<'a> Parser<'a> {
                     | Syntax::CONTRACT_PRE
                     | Syntax::CONTRACT_POST
                     | Syntax::CONTRACT_INLINE
+                    | Syntax::CONTRACT_KERNEL
                     | Syntax::CONTRACT_DOC
                     | Syntax::KW_TASK
                     | Syntax::ATTR_EVERY

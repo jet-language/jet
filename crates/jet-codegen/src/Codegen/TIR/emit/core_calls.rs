@@ -3087,6 +3087,12 @@ pub(crate) fn emit_tir_core_call(
                 regex_fn("jet_db_open_memory")
             )
         }
+        ("jet.db", "policy") => format!(
+            "{}jet_db_policy_new(({}).clone(), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
         ("jet.db", "params") => {
             format!("{}jet_std::jet_db_params_from_sql(&({}))", cx.root_prefix, arg(0))
         }

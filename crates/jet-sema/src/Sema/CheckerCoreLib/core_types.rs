@@ -187,7 +187,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
-        | "DBConnection" | "DBError"
+        | "DBConnection" | "DBScope" | "DBError"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.

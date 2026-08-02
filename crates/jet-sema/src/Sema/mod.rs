@@ -1838,6 +1838,7 @@ mod CheckerCoreLib;
 mod CheckerFieldPolicy;
 mod CheckerInfer;
 mod CheckerInline;
+mod CheckerKernel;
 mod CheckerItems;
 mod CheckerMarkers;
 mod CheckerOwnership;

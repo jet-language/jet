@@ -209,6 +209,7 @@ fn tir_func(
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        kernel_proof: None,
         body,
         kind: jet::Codegen::TIR::TFuncKind::TopLevel,
     }

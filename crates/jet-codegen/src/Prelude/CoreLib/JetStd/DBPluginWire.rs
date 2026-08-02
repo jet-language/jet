@@ -111,6 +111,152 @@
         }
     }
 
+    /// Validate the small, closed policy language before a scope is created.
+    /// Keeping this check next to the SQL transformer lets the JIT and AOT
+    /// adapters call the same policy semantics.
+    pub fn jet_db_policy_validate(table: &str, expression: &str) -> Result<(), String> {
+        if table.trim().is_empty()
+            || expression.trim().is_empty()
+            || table.len() > 1024 * 1024
+            || expression.len() > 1024 * 1024
+            || table.chars().any(char::is_control)
+            || expression.chars().any(char::is_control)
+        {
+            return Err("row policy needs a table and expression".to_string());
+        }
+        if !table
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err("row policy table must be a simple identifier".to_string());
+        }
+        match expression.trim() {
+            "true" | "owner == user" => Ok(()),
+            other => Err(format!(
+                "unsupported row policy expression `{other}`; supported forms are `true` and `owner == user`"
+            )),
+        }
+    }
+
+    fn db_sql_tokens(sql: &str) -> Vec<(usize, usize, String)> {
+        let bytes = sql.as_bytes();
+        let mut tokens = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\'' {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        if bytes.get(i + 1) == Some(&b'\'') {
+                            i += 2;
+                        } else {
+                            i += 1;
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
+                let start = i;
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
+                {
+                    i += 1;
+                }
+                tokens.push((start, i, sql[start..i].to_ascii_lowercase()));
+            } else {
+                i += 1;
+            }
+        }
+        tokens
+    }
+
+    fn db_sql_target_table(sql: &str, tokens: &[(usize, usize, String)], kind: &str) -> Option<String> {
+        let index = if matches!(kind, "select" | "delete") {
+            tokens
+                .iter()
+                .position(|(_, _, word)| word == "from")?
+                .checked_add(1)?
+        } else {
+            tokens
+                .iter()
+                .position(|(_, _, word)| word == kind)?
+                .checked_add(1)?
+        };
+        tokens.get(index).map(|(_, _, word)| word.clone())
+    }
+
+    fn db_sql_clause_start(tokens: &[(usize, usize, String)], after: usize) -> Option<usize> {
+        tokens
+            .iter()
+            .filter(|(_, _, word)| {
+                matches!(word.as_str(), "order" | "group" | "limit" | "offset" | "returning")
+            })
+            .find(|(start, _, _)| *start > after)
+            .map(|(start, _, _)| *start)
+    }
+
+    /// Apply the closed owner policy to one SQL operation. Unsupported SQL is
+    /// rejected, never passed through unscoped. The returned bind list carries
+    /// the user as a parameter, so the policy value cannot become SQL text.
+    pub fn jet_db_apply_policy(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        expression: &str,
+        user: &str,
+    ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_policy_validate(table, expression).map_err(|message| DBError { message })?;
+        if sql.len() > 1024 * 1024
+            || sql.chars().any(|c| c == ';' || c == '\0' || c.is_control() && !c.is_whitespace())
+        {
+            return Err(DBError {
+                message: "policy-scoped SQL must be one statement without control characters".to_string(),
+            });
+        }
+        let tokens = db_sql_tokens(sql);
+        let Some((_, _, first)) = tokens.first() else {
+            return Err(DBError { message: "policy-scoped SQL is empty".to_string() });
+        };
+        if expression.trim() == "true" {
+            return Ok((sql.to_string(), params.clone()));
+        }
+        let kind = first.as_str();
+        if !matches!(kind, "select" | "update" | "delete") {
+            if matches!(kind, "create" | "alter" | "drop" | "pragma" | "begin" | "commit" | "rollback") {
+                return Ok((sql.to_string(), params.clone()));
+            }
+            return Err(DBError {
+                message: "owner policy supports SELECT, UPDATE, and DELETE only".to_string(),
+            });
+        }
+        if db_sql_target_table(sql, &tokens, kind).as_deref() != Some(&table.to_ascii_lowercase()) {
+            return Err(DBError {
+                message: format!("policy scope targets table `{table}`"),
+            });
+        }
+        let mut scoped_params = params.clone();
+        scoped_params.push(DBValue::Text(user.to_string()));
+        let where_token = tokens
+            .iter()
+            .find(|(_, _, word)| word == "where")
+            .map(|(start, end, _)| (*start, *end));
+        let insertion = where_token
+            .and_then(|(_, end)| db_sql_clause_start(&tokens, end))
+            .unwrap_or_else(|| sql.len());
+        let (head, tail) = sql.split_at(insertion);
+        let predicate = if where_token.is_some() {
+            " AND owner = ?"
+        } else {
+            " WHERE owner = ?"
+        };
+        Ok((format!("{}{}{}", head.trim_end(), predicate, tail), scoped_params))
+    }
+
     // ── core.db wire codec ──────────────────────────────────────────────────────
     // The FFI bridge crate (built only when a program uses `jet.db`, Source/FFI.rs)
     // and this always-compiled prelude are two independently built Rust crates —

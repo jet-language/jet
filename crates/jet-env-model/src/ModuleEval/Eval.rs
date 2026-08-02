@@ -21,6 +21,7 @@ use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
     wrong_namespace_type,
 };
+use super::Computed::evaluate_named_fields;
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
 use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
 
@@ -413,33 +414,27 @@ fn evaluate_env_fields(
     // comptime value.
     let field_map = fields
         .iter()
-        .map(|(name, span, value)| (name.as_str(), (*span, value)))
+        .filter(|(name, _, _)| name != &Syntax::SYSTEM_FIELD_PACKAGES)
+        .map(|(name, span, value)| (name.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
-    let mut states = HashMap::<String, u8>::new();
-    let mut resolved = globals.clone();
-    let mut stack = Vec::<String>::new();
-    for (name, span, _) in fields {
+    for (name, _, value) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
-            let extracted = extract_packages(
-                field_map.get(name.as_str()).map(|(_, value)| *value).unwrap(),
-                src,
-            )?;
+            let extracted = extract_packages(value, src)?;
             entry.packages.extend(extracted.packages);
             adapters.extend(extracted.adapters);
-            continue;
         }
-        resolve_env_field(
-            name,
-            *span,
-            &field_map,
-            &mut states,
-            &mut resolved,
-            &mut stack,
-            &extern_names,
-            base_dir,
-            funcs,
-        )?;
     }
+    let computed = evaluate_named_fields(
+        &field_map,
+        globals,
+        funcs,
+        &extern_names,
+        base_dir,
+        Some(src),
+        "module fields are pure computed values; a cycle has no deterministic evaluation order",
+        "break the cycle by making one field a literal or by moving the shared computation into a pure function",
+    )?;
+    let resolved = computed.values;
     for (name, span, value) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
             continue;
@@ -547,68 +542,6 @@ fn evaluate_env_fields(
         languages,
         files,
     })
-}
-
-fn resolve_env_field(
-    name: &str,
-    span: crate::Diagnostics::Span,
-    fields: &HashMap<&str, (crate::Diagnostics::Span, &Expr)>,
-    states: &mut HashMap<String, u8>,
-    resolved: &mut HashMap<String, crate::Comptime::CtValue>,
-    stack: &mut Vec<String>,
-    extern_names: &HashSet<String>,
-    base_dir: &Path,
-    funcs: &HashMap<String, &Func>,
-) -> Result<(), Diagnostic> {
-    if matches!(states.get(name), Some(2)) {
-        return Ok(());
-    }
-    if matches!(states.get(name), Some(1)) {
-        let start = stack.iter().position(|item| item == name).unwrap_or(0);
-        let mut cycle = stack[start..].to_vec();
-        cycle.push(name.to_string());
-        return Err(Diagnostic::error(
-            "E0338",
-            format!("computed module fields form a cycle: {}", cycle.join(" -> ")),
-            "module fields are pure computed values; a cycle has no deterministic evaluation order".to_string(),
-            "break the cycle by making one field a literal or by moving the shared computation into a pure function".to_string(),
-            Some(span),
-        ));
-    }
-    let Some((_field_span, value)) = fields.get(name).copied() else {
-        return Ok(());
-    };
-    states.insert(name.to_string(), 1);
-    stack.push(name.to_string());
-    let mut dependencies = Vec::<(String, crate::Diagnostics::Span)>::new();
-    crate::Comptime::walk_identifiers(value, &mut |candidate, candidate_span| {
-        if fields.contains_key(candidate) {
-            dependencies.push((candidate.to_string(), candidate_span));
-        }
-    });
-    // A field may mention a sibling more than once.  Keep the first source
-    // occurrence for stable diagnostics and deterministic traversal.
-    let mut seen = HashSet::new();
-    dependencies.retain(|(dependency, _)| seen.insert(dependency.clone()));
-    for (dependency, dependency_span) in dependencies {
-        resolve_env_field(
-            &dependency,
-            dependency_span,
-            fields,
-            states,
-            resolved,
-            stack,
-            extern_names,
-            base_dir,
-            funcs,
-        )?;
-    }
-    check_build_io(value)?;
-    let v = Comptime::evaluate(value, funcs, extern_names, base_dir, resolved)?;
-    resolved.insert(name.to_string(), v);
-    stack.pop();
-    states.insert(name.to_string(), 2);
-    Ok(())
 }
 
 fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {

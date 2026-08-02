@@ -68,6 +68,7 @@ fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> Jet
         }
         doc.replicas.push((replica, text, next_clock));
     }
+    doc.replicas.sort_by(|left, right| left.0.cmp(&right.0));
     doc
 }
 
@@ -209,6 +210,10 @@ fn jet_sync_map_set(mut map: JetSyncMap, key: String, value: String) -> JetSyncM
         }
         map.entries.push((key, value, next_clock, "local".to_string()));
     }
+    // Local edits use one canonical order too.  Merge already returns a
+    // BTreeMap order; keeping the local path identical makes show/serialize
+    // deterministic before the first merge and after duplicate delivery.
+    map.entries.sort_by(|left, right| left.0.cmp(&right.0));
     map
 }
 
@@ -310,6 +315,7 @@ fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> J
             list.items.push((replica, item));
         }
     }
+    list.items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
     list
 }
 

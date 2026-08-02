@@ -396,7 +396,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     if name == "Match" {
         return true;
     }
-    if matches!(name.as_str(), "Claims" | "AuthError" | "Session" | "Auth" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy" | "LiveQuery") {
+    if matches!(name.as_str(), "Claims" | "AuthError" | "Session" | "Auth" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy" | "LiveQuery" | "DBScope") {
         return true;
     }
     // Core crypto values already have total `cx.rust_type` mappings. Admitting

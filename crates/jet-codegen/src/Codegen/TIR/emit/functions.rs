@@ -108,6 +108,21 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         ""
     };
+    let kernel_proof = tir
+        .kernel_proof
+        .map(|proof| {
+            format!(
+                "/* jet-kernel-proof: mode={} bounds={} alias_free={} captures={} race_free={} barriers_uniform={} control_flow={} */\n",
+                proof.mode.as_str(),
+                proof.bounds,
+                proof.alias_free,
+                proof.captures,
+                proof.race_free,
+                proof.barriers_uniform,
+                proof.control_flow,
+            )
+        })
+        .unwrap_or_default();
     // E2-M12 D-OBS1: track the current function name for rich panic reports —
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
@@ -121,7 +136,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         out.push_str(&format!("/* jet-reactive-upgrade: {line} */\n"));
     }
     out.push_str(&format!(
-        "{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
+        "{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = generics,
         params = params,

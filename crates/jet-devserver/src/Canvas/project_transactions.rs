@@ -998,7 +998,10 @@ fn normalize_and_validate_project_changes(
         if change.before == change.after {
             continue;
         }
-        if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
+        if is_canonical_package_file(&change.rel) {
+            jet_driver::Package::PackageFacts::parse(&change.after, change.rel.clone())
+                .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
+        } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
             || change.rel == jet_driver::Syntax::PAYLOAD_FILE
         {
             jet_driver::PackageManifest::parse(&change.after)
@@ -1104,7 +1107,9 @@ struct ProjectWriteBackup {
 }
 
 fn project_file_kind_for_rel(rel: &str) -> &'static str {
-    if rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
+    if is_canonical_package_file(rel) {
+        "package"
+    } else if rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
         || rel == jet_driver::Syntax::PAYLOAD_FILE
     {
         "manifest"

@@ -295,6 +295,24 @@ fn extract_obligations(
         Ok(p) => p,
         Err(_) => return Ok(Vec::new()),
     };
+    // The solver consumes a deliberately small structural projection, but it
+    // must not prove source that the real front end rejects. Keep the failure
+    // as an explicit Unknown evidence item instead of silently dropping it.
+    if jet::compile(source).is_err() {
+        let formula = Formula {
+            assumptions: Vec::new(),
+            claim: Vec::new(),
+        };
+        let span = source_span_text(source, jet::Diagnostics::Span::new(0, source.len()));
+        return Ok(vec![Obligation {
+            id: framed_sha256(&[target_input_sha256, "source_validation", path, &span]),
+            kind: "source_validation".into(),
+            origin: path.to_string(),
+            span,
+            formula,
+            unsupported_reason: Some("sema_validation_failed"),
+        }]);
+    }
     Ok(extract_from_program(path, source, target_input_sha256, &program))
 }
 
@@ -404,7 +422,10 @@ fn walk_items(
                         origin: path.to_string(),
                         span: span_text,
                         formula,
-                        unsupported_reason: None,
+                        // The declaration bounds are assumptions, not an
+                        // index use site. Claiming the same inequalities is a
+                        // tautology and does not prove the access operation.
+                        unsupported_reason: Some("fixed_index_use_site_not_proved"),
                     });
                 }
             }
@@ -482,8 +503,11 @@ fn collect_func_contracts(
     let mut unsupported_reason = None;
     for clause in &func.pre {
         match expr_to_inequalities(&clause.cond) {
-            Some(ineqs) => assumptions.extend(ineqs),
+            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => {
+                assumptions.extend(ineqs)
+            }
             None => unsupported_reason = Some("unsupported_formula"),
+            Some(_) => unsupported_reason = Some("machine_overflow_not_proved"),
         }
     }
     let mut substitutions = func
@@ -493,6 +517,9 @@ fn collect_func_contracts(
         .collect::<BTreeMap<_, _>>();
     match affine_return_expression(func, &substitutions) {
         Ok(Some(return_value)) => {
+            if function_body_contains_machine_arithmetic(func) {
+                unsupported_reason = Some("machine_overflow_not_proved");
+            }
             substitutions.insert("result".into(), return_value);
         }
         Ok(None) => unsupported_reason = Some("unsupported_formula"),
@@ -501,8 +528,9 @@ fn collect_func_contracts(
     let mut claim = Vec::new();
     for clause in &func.post {
         match expr_to_inequalities_with_subst(&clause.cond, &substitutions) {
-            Some(ineqs) => claim.extend(ineqs),
+            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => claim.extend(ineqs),
             None => unsupported_reason = Some("unsupported_formula"),
+            Some(_) => unsupported_reason = Some("machine_overflow_not_proved"),
         }
     }
     if claim.is_empty() {
@@ -592,23 +620,40 @@ fn collect_call_preconditions(
         .iter()
         .map(|param| (param.name.clone(), Affine::var(&param.name, 1)))
         .collect::<BTreeMap<_, _>>();
-    let mut calls = Vec::<(jet::AST::Call, BTreeMap<String, Affine>)>::new();
+    let mut calls = Vec::<(jet::AST::Call, BTreeMap<String, Affine>, bool)>::new();
+    let mut caller_flow_unsupported = false;
     for statement in &func.body {
         visit_stmt_calls(statement, &mut |call| {
-            calls.push((call.clone(), caller_substitutions.clone()))
+            calls.push((
+                call.clone(),
+                caller_substitutions.clone(),
+                caller_flow_unsupported,
+            ))
         });
         if let jet::AST::Stmt::Val(binding) = statement {
-            if !binding.mutable && binding.pattern.is_none() {
-                if let Some(value) = expr_to_affine_with_subst(
-                    &binding.init,
-                    &caller_substitutions,
-                ) {
-                    caller_substitutions.insert(binding.name.clone(), value);
-                }
+            if binding.mutable
+                || binding.pattern.is_some()
+                || binding.uninit
+                || binding.arena_view
+                || binding.string_view
+                || caller_substitutions.contains_key(&binding.name)
+            {
+                caller_flow_unsupported = true;
+            } else if let Some(value) =
+                expr_to_affine_with_subst(&binding.init, &caller_substitutions)
+            {
+                caller_substitutions.insert(binding.name.clone(), value);
+            } else {
+                caller_flow_unsupported = true;
             }
+        } else if !matches!(statement, jet::AST::Stmt::Expr(_)) {
+            // Assignment, branching, looping, and returns can invalidate the
+            // affine snapshot captured for a later call. Do not reuse facts
+            // across those control-flow boundaries.
+            caller_flow_unsupported = true;
         }
     }
-    for (call, caller_substitutions) in calls {
+    for (call, caller_substitutions, flow_unsupported) in calls {
         let Some(spec) = specs.get(&call.name) else {
             continue;
         };
@@ -616,7 +661,10 @@ fn collect_call_preconditions(
             continue;
         }
         let mut claim = Vec::new();
-        let mut unsupported_reason = caller_pre_unsupported.then_some("unsupported_formula");
+        let mut unsupported_reason = caller_pre_unsupported
+            .then_some("unsupported_formula")
+            .or(flow_unsupported.then_some("caller_flow_not_proved"))
+            .or(call_args_contain_machine_arithmetic(&call).then_some("machine_overflow_not_proved"));
         if let Some(substitutions) = bind_call_arguments(
             &spec.params,
             &call.args,
@@ -956,6 +1004,39 @@ fn framed_sha256(fields: &[&str]) -> String {
 
 fn expr_to_inequalities(expr: &Expr) -> Option<Vec<Inequality>> {
     expr_to_inequalities_with_subst(expr, &BTreeMap::new())
+}
+
+/// `Int` is a machine integer in Jet. The native solver's arithmetic is over
+/// mathematical `i128`, so any source-authored arithmetic needs a separate
+/// overflow proof before it may participate in a certificate. This pass is
+/// intentionally conservative until sema exports those range facts.
+fn contains_machine_arithmetic(expr: &Expr) -> bool {
+    match expr {
+        Expr::Binary(op, left, right, _) => {
+            matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
+                || contains_machine_arithmetic(left)
+                || contains_machine_arithmetic(right)
+        }
+        Expr::Unary(UnOp::Neg, _, _) => true,
+        Expr::Paren(inner, _) => contains_machine_arithmetic(inner),
+        _ => false,
+    }
+}
+
+fn call_args_contain_machine_arithmetic(call: &jet::AST::Call) -> bool {
+    call.args
+        .iter()
+        .any(|argument| contains_machine_arithmetic(&argument.expr))
+}
+
+fn function_body_contains_machine_arithmetic(func: &jet::AST::Func) -> bool {
+    func.body.iter().any(|statement| match statement {
+        jet::AST::Stmt::Val(binding) => contains_machine_arithmetic(&binding.init),
+        jet::AST::Stmt::Return(Some(value), _) | jet::AST::Stmt::Expr(value) => {
+            contains_machine_arithmetic(value)
+        }
+        _ => true,
+    })
 }
 
 fn expr_to_inequalities_with_subst(

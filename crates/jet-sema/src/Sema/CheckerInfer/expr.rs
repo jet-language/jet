@@ -2632,6 +2632,25 @@ impl<'a> Checker<'a> {
                 }
                 Some(args[0].clone())
             }
+            // D-COMPUTE-TENSOR-SLICE: Tensor bracket access is a first-axis
+            // window. Keep the range fact explicit so TIR can select the
+            // owned-copy or mutable-view Prelude path; scalar indexing has no
+            // one-axis result type and is not part of this surface.
+            Type::Named(name) if name == "Tensor" => {
+                if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                    *kind = IndexKind::Range;
+                    Some(Type::Named(name.clone()))
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!("Tensor indexes must be Range, not {}", idx_ty.show()),
+                        "Tensor brackets select a first-axis window with an inclusive or exclusive Range".to_string(),
+                        "use `tensor[start..end]` or `tensor[window]`".to_string(),
+                        Some(index.span()),
+                    ));
+                    None
+                }
+            }
             Type::Map { key, value, .. } => {
                 *kind = IndexKind::Map;
                 if idx_ty != **key {

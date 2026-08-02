@@ -2688,14 +2688,14 @@ fn canvas_project_transactions_roll_back_when_later_write_fails() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"entry\":\"packages/tools/nested/main.jet\",\"files\":[{{\"path\":\"packages/tools/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/nested/main.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"entry\":\"packages/tools/nested/main.jet\",\"files\":[{{\"path\":\"packages/tools/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/nested/main.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
         project_revision
     );
     let err = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect_err("second write should fail and rollback first write");
     assert!(err.contains("\"kind\":\"io\""), "{err}");
     assert!(
-        !dir.join("packages/tools/pkg.jet").exists(),
+        !dir.join("packages/tools/package.jet").exists(),
         "first project write must be rolled back"
     );
     assert_eq!(
@@ -2804,7 +2804,10 @@ fn canvas_project_transactions_add_env_service() {
         .expect("add env service preview");
     assert!(preview.contains("\"op\":\"add_env_service\""), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("redis-server --port 6380"), "{preview}");
+    assert!(
+        preview.contains("run: [\\\"redis-server\\\", \\\"--port\\\", \\\"6380\\\"]"),
+        "{preview}"
+    );
     assert!(!dir.join("env.jet").exists());
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
@@ -2841,26 +2844,26 @@ fn canvas_project_transactions_create_package_from_workspace() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/run.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/run.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
         project_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("create package preview");
     assert!(preview.contains("\"op\":\"create_package\""), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("diff -- packages/tools/pkg.jet"), "{preview}");
+    assert!(preview.contains("diff -- packages/tools/package.jet"), "{preview}");
     assert!(preview.contains("diff -- packages/tools/run.jet"), "{preview}");
-    assert!(!dir.join("packages/tools/pkg.jet").exists());
+    assert!(!dir.join("packages/tools/package.jet").exists());
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect("create package apply");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
-    let manifest = fs::read_to_string(dir.join("packages/tools/pkg.jet")).unwrap();
+    let manifest = fs::read_to_string(dir.join("packages/tools/package.jet")).unwrap();
     assert!(manifest.contains("name: \"tools\""), "{manifest}");
-    assert!(manifest.contains("tools: executable"), "{manifest}");
+    assert!(manifest.contains("tools: Output :: .Executable"), "{manifest}");
     assert!(
-        jetpack::PackageManifest::parse(&manifest).is_ok(),
+        jet::Package::PackageFacts::parse(&manifest, "package.jet").is_ok(),
         "{manifest}"
     );
     let main = fs::read_to_string(dir.join("packages/tools/run.jet")).unwrap();

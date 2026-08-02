@@ -545,7 +545,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
-    let needs_sync = core_usage_matches(used_core, &["core.sync", "app"]);
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "jet.db"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
@@ -687,7 +687,7 @@ fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet
             "core.web.devserver",
         ],
     );
-    let needs_live = core_usage_matches(used_core, &["app", "core.web"]);
+    let needs_live = core_usage_matches(used_core, &["app", "core.web", "jet.db"]);
     if needs_webapp {
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);

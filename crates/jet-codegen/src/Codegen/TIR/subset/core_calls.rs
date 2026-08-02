@@ -132,6 +132,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
+    // D-SYNC1: the application sync publisher is a typed, deterministic
+    // Prelude call. Its return is String and its named `over:` label is
+    // already checked by sema; no closure or host policy remains for TIR.
+    if matches!(module, "app" | "core.web") && matches!(method, "sync" | "sync_over") {
+        return true;
+    }
     // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.
     if matches!(module, "core.time.date" | "core.time.datetime")
         && matches!(method, "new" | "today" | "parse" | "from_timestamp" | "now")
@@ -297,6 +303,17 @@ pub(super) fn core_call_args_in_subset(
             && args.iter().enumerate().all(|(idx, arg)| {
                 let label_ok = if idx == 1 {
                     arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("policy")
+                } else {
+                    arg.label.is_none()
+                };
+                label_ok && expr_in_subset(&arg.expr, cx, locals)
+            });
+    }
+    if matches!(module, "app" | "core.web") && method == "sync" {
+        return args.len() == 2
+            && args.iter().enumerate().all(|(idx, arg)| {
+                let label_ok = if idx == 1 {
+                    arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("over")
                 } else {
                     arg.label.is_none()
                 };

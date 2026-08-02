@@ -1851,6 +1851,17 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if matches!(op, crate::Codegen::TIR::THandleOp::ReflectValueDisplay) {
+                    if let CtValue::Struct { type_name, fields } = &r {
+                        if type_name == "__Reflect" {
+                            let value = fields
+                                .iter()
+                                .find_map(|(name, value)| (name == "value").then_some(value))
+                                .ok_or_else(|| unsupported("reflect value", self.span()))?;
+                            return self.show_value(value, scope).map(CtValue::Str);
+                        }
+                    }
+                }
                 if let crate::Codegen::TIR::THandleOp::WebAppMethod { method } = op {
                     return self.eval_web_app_method(&r, method, argv);
                 }
@@ -2158,6 +2169,37 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                // AOT reflection uses the resolved user-struct layout. Keep
+                // that static fact in the erased TIR carrier so `.fields()`
+                // cannot expose implementation fields from built-ins or
+                // guess from a runtime `CtValue::Struct` alone.
+                if module == "core.reflect" && method == "of" && args.len() == 1 {
+                    let value = argv
+                        .pop()
+                        .ok_or_else(|| unsupported("reflect value", *source_span))?;
+                    let field_names = match &args[0].ty {
+                        Type::Named(type_name) => self
+                            .struct_fields
+                            .get(type_name)
+                            .map(|fields| {
+                                CtValue::List(
+                                    fields
+                                        .iter()
+                                        .map(|(name, _)| CtValue::Str(name.clone()))
+                                        .collect(),
+                                )
+                            }),
+                        _ => None,
+                    };
+                    let mut fields = vec![("value".to_string(), value)];
+                    if let Some(field_names) = field_names {
+                        fields.push(("field_names".to_string(), field_names));
+                    }
+                    return Ok(CtValue::Struct {
+                        type_name: "__Reflect".to_string(),
+                        fields,
+                    });
                 }
                 if module == "core.web" && matches!(method.as_str(), "app" | "page") {
                     return self.eval_web_core_call(method, argv);

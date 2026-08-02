@@ -765,6 +765,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "jet.db" => &[
             "open",
             "open_memory",
+            "policy",
             "params",
             "row_value",
             "row_int",

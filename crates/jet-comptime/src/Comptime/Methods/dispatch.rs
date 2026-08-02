@@ -126,6 +126,10 @@ pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
                     | "live_get"
                     | "live_show"
                     | "live_stats"
+                    // The sync publisher mutates a bounded session registry;
+                    // it must never be folded into an immutable binding.
+                    | "sync_over"
+                    | "sync"
             ))
         || (repl_mode && module == "core.random" && method != "rng")
 }

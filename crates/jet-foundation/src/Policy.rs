@@ -241,6 +241,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
         "Capability" => crate::Facts::EFFECT_ROOTS,
         "FfiLanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
+        "KernelMode" => &["parallel"],
         "IntType" => &[
             "I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128",
         ],
@@ -649,6 +650,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!(retired "Pure", sig!(), CALLABLE_SITE, Bare, "=[]=>"),
     rule!("Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
     rule!("Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
+    rule!("Kernel", sig!(param!("mode", Ident => "KernelMode")), FUNCTION_SITE, Call),
     rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant], BareOrCall),
     // D-TASK-META1=A: the bare form stays the beginner task marker; the
     // optional named fields are typed metadata on the same marker.

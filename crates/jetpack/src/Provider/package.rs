@@ -29,8 +29,11 @@ pub(super) fn find_canonical_package(
         .ok_or_else(|| format!("canonical Package {} could not be read", root_marker.display()))?
         .map_err(|error| format!("canonical Package {} is invalid: {error}", root_marker.display()))?;
     let root_matches = root.name == requested || root.outputs.contains_key(requested);
-    if root_matches || root.members.is_empty() {
+    if root_matches {
         return Ok(Some((repo.to_path_buf(), root)));
+    }
+    if root.members.is_empty() {
+        return Ok(None);
     }
 
     let mut candidates = Vec::new();
@@ -106,17 +109,29 @@ fn collect_one_canonical_package(
         return Ok(());
     }
     seen.push(path.to_path_buf());
-    let marker = path.join(crate::Syntax::PACKAGE_FILE);
-    let marker_metadata = match std::fs::symlink_metadata(&marker) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.to_string()),
+    let marker = [
+        path.join(crate::Syntax::PACKAGE_FILE),
+        path.join(crate::Syntax::PAYLOAD_FILE),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+    .or_else(|| {
+        [
+            path.join(crate::Syntax::PACKAGE_FILE),
+            path.join(crate::Syntax::PAYLOAD_FILE),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.exists())
+    });
+    let Some(marker) = marker else {
+        return Ok(());
     };
+    let marker_metadata = std::fs::symlink_metadata(&marker).map_err(|error| error.to_string())?;
     if marker_metadata.file_type().is_symlink() {
-        return Err(format!("canonical Package marker is a symlink: {}", marker.display()));
+        return Err(format!("Package marker is a symlink: {}", marker.display()));
     }
     if !marker_metadata.is_file() {
-        return Err(format!("canonical Package marker is not a file: {}", marker.display()));
+        return Err(format!("Package marker is not a file: {}", marker.display()));
     }
     let facts = PackageFacts::load(path)
         .ok_or_else(|| format!("canonical Package {} could not be read", marker.display()))?

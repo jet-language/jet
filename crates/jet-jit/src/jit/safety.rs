@@ -1933,6 +1933,10 @@ fn resident_safe_builtin_op(
                     _ => false,
                 }
         }
+        // Tensor values stay in the ambient ABI. Their view operations must
+        // deopt so the interpreter calls the canonical Prelude symbols rather
+        // than inventing a second tensor representation in Cranelift.
+        TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => false,
         TBuiltinOp::SplitWrite { .. } => {
             (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
                 && args.len() == 1

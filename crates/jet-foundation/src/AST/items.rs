@@ -797,6 +797,55 @@ impl MaturityTag {
     }
 }
 
+/// D-COMPUTE-KERNEL-SURFACE1=B: the closed execution mode for a safe kernel
+/// declaration. The marker is source metadata until sema attaches a proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelMode {
+    Parallel,
+}
+
+impl KernelMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KernelMode::Parallel => "parallel",
+        }
+    }
+}
+
+/// D-COMPUTE-KERNEL-SURFACE1=B: facts sema proved before TIR. Backends consume
+/// this record; they never re-derive safety from source or generated Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KernelProof {
+    pub mode: KernelMode,
+    pub bounds: bool,
+    pub alias_free: bool,
+    pub captures: bool,
+    pub race_free: bool,
+    pub barriers_uniform: bool,
+    pub control_flow: bool,
+}
+
+impl KernelProof {
+    pub const fn parallel() -> Self {
+        Self {
+            mode: KernelMode::Parallel,
+            bounds: true,
+            alias_free: true,
+            captures: true,
+            race_free: true,
+            barriers_uniform: true,
+            control_flow: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KernelMarker {
+    pub mode: KernelMode,
+    pub span: Span,
+    pub proof: Option<KernelProof>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Func {
     /// Exact parser-owned declaration boundary, including `fn` through body.
@@ -901,6 +950,9 @@ pub struct Func {
     /// stability tag. Stored for fmt/docs/IDE; erased for sema and codegen.
     pub maturity: Option<MaturityTag>,
     pub maturity_span: Option<Span>,
+    /// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe-kernel declaration and the
+    /// sema proof attached after the body has been checked.
+    pub kernel: Option<KernelMarker>,
     /// D-METHODMACRO1=A: `#Inline fn` / method — a soft hint (`#[inline]` in
     /// codegen); never rejected by sema.
     pub is_inline: bool,

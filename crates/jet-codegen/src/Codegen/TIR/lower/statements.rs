@@ -94,7 +94,7 @@ fn bake_comptime_value_with_type(
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 3 } else { 2 });
-    let mut split_views = split_view_plan(stmts, cx);
+    let mut split_views = split_view_plan(stmts, cx, env);
     let mut index = 0;
     while index < stmts.len() {
         if let Some(view) = split_views.remove(&index) {
@@ -229,6 +229,15 @@ fn split_owner_key(expr: &Expr) -> Option<String> {
     }
 }
 
+fn split_owner_root(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, _, _) | Expr::Index { base, .. } => split_owner_root(base),
+        Expr::Paren(inner, _) | Expr::Place(inner, _, _) => split_owner_root(inner),
+        _ => None,
+    }
+}
+
 /// D-PIN1=A: `mem.pin(&place)` IS a write window on `place` — the pin adds a
 /// sema-side no-move promise, not a second runtime shape. Every tier therefore
 /// lowers it through the same path as a written `Expr::Place`, which is what
@@ -313,13 +322,46 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
     })
 }
 
-fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> {
-    let mut candidates: Vec<_> = stmts
-        .iter()
-        .enumerate()
-        .filter_map(|(index, stmt)| split_view_candidate(stmt, index, cx))
-        .filter(|view| view.start >= 0 && view.end >= view.start)
-        .collect();
+fn split_view_plan(
+    stmts: &[Stmt],
+    cx: &Cx,
+    env: &LowerEnv,
+) -> HashMap<usize, PlannedSplitView> {
+    // The planner emits Rust slice operations. Compute Tensor windows use
+    // checked Prelude handles instead, so resolve block-local owners before
+    // planning and leave those bindings on the normal `Expr::Place` path.
+    // This temporary environment never affects lexical lowering; it only makes
+    // the already-resolved local types visible while selecting candidates. It
+    // must advance in source order: prebinding the whole block makes an earlier
+    // owner look like a later shadow and can route a Tensor through Rust slices.
+    let mut owner_env = env.clone();
+    let mut owner_generation: HashMap<String, usize> = HashMap::new();
+    let mut candidates = Vec::new();
+    for (index, stmt) in stmts.iter().enumerate() {
+        if let Some(mut view) = split_view_candidate(stmt, index, cx) {
+            let is_tensor = matches!(
+                tir_recv_jet_ty(&view.owner, &owner_env),
+                Some(Type::Named(name) | Type::Apply { name, .. }) if name == "Tensor"
+            );
+            if !is_tensor && view.start >= 0 && view.end >= view.start {
+                let root = split_owner_root(&view.owner).unwrap_or_default();
+                let generation = owner_generation.get(&root).copied().unwrap_or_default();
+                view.owner_key = format!("{}@{generation}", view.owner_key);
+                candidates.push(view);
+            }
+        }
+        if let Stmt::Val(binding) = stmt {
+            owner_generation
+                .entry(binding.name.clone())
+                .and_modify(|generation| *generation += 1)
+                .or_insert(1);
+            owner_env.bind(
+                &binding.name,
+                TLocal::user(&binding.name),
+                binding.ty.clone(),
+            );
+        }
+    }
     for candidate in &mut candidates {
         candidate.last_use = stmts[candidate.stmt_index + 1..]
             .iter()

@@ -234,7 +234,12 @@ pub fn run_build_entry_with_policy(
     allow_impure: bool,
     policy: Build::BuildPolicy,
 ) -> Result<ProgramBuildEvaluation, Diagnostic> {
-    let context = Build::begin_program_build_with_policy(package, program_value, policy);
+    let context = Build::begin_program_build_with_policy_at(
+        package,
+        program_value,
+        policy,
+        base_dir,
+    );
     let mut interp = Interp {
         funcs,
         base_dir,

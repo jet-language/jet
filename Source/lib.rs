@@ -208,6 +208,30 @@ pub fn compile_programmable_build_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder(
+        file,
+        grants,
+        freestanding,
+        allow_impure,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        None,
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -218,6 +242,7 @@ pub fn compile_programmable_build_opts(
         plugin_target,
         cross_target,
         false,
+        remote_builder,
     )
 }
 
@@ -235,6 +260,30 @@ pub fn compile_programmable_build_emit_generated_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_emit_generated_opts_with_builder(
+        file,
+        grants,
+        freestanding,
+        allow_impure,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        None,
+    )
+}
+
+pub fn compile_programmable_build_emit_generated_opts_with_builder(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -245,6 +294,7 @@ pub fn compile_programmable_build_emit_generated_opts(
         plugin_target,
         cross_target,
         true,
+        remote_builder,
     )
 }
 
@@ -258,8 +308,21 @@ fn compile_programmable_build_opts_inner(
     plugin_target: bool,
     cross_target: Option<&str>,
     emit_generated: bool,
+    remote_builder: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
+        let remote = remote_builder
+            .map(Comptime::Build::RemoteBuildBinding::load_host)
+            .transpose()
+            .map_err(|error| {
+                vec![Diagnostic::error(
+                    "E3502",
+                    format!("remote builder binding could not be loaded: {error}"),
+                    "remote endpoints and credentials come only from host-owned bindings".to_string(),
+                    "run `jet remote list`, or bind the builder with `jet remote bind`".to_string(),
+                    None,
+                )]
+            })?;
         if is_workspace_build_entry(file) {
             return compile_workspace_build_opts(
                 file,
@@ -271,6 +334,7 @@ fn compile_programmable_build_opts_inner(
                 plugin_target,
                 cross_target,
                 emit_generated,
+                remote,
             );
         }
         let grants = resolve_build_grants(file, grants)?;
@@ -292,7 +356,7 @@ fn compile_programmable_build_opts_inner(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
-                remote: None,
+                remote,
             },
         )?;
         if emit_generated {
@@ -316,6 +380,7 @@ fn compile_workspace_build_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
     emit_generated: bool,
+    remote: Option<Comptime::Build::RemoteBuildBinding>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     let workspace_path = absolute_source_path(file);
     let workspace_root = workspace_path
@@ -361,7 +426,7 @@ fn compile_workspace_build_opts(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
-                remote: None,
+                remote: remote.clone(),
             },
         )?;
         if emit_generated {
@@ -388,7 +453,7 @@ fn compile_workspace_build_opts(
             web_target,
             plugin_target,
             cross_target: cross_target.map(str::to_string),
-            remote: None,
+            remote,
         },
     )?;
     if emit_generated {

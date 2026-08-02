@@ -389,6 +389,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         must_use_span: None,
         maturity: None,
         maturity_span: None,
+        kernel: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,

@@ -547,6 +547,7 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "Path" => Some("JetPath"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
         "DBConnection" => Some("JetDbConnection"),
+        "DBScope" => Some("JetDbScope"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
         _ => None,
@@ -588,6 +589,7 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
         "ComputeStream" => Some("JetComputeStream"),
         "GradTriple" => Some("JetComputeGradTriple"),
         "SparseTensor" => Some("JetSparseCsr"),
+        "RawKernelContract" => Some("JetRawKernelContract"),
         _ => None,
     }
 }
@@ -2510,7 +2512,7 @@ fn register_core_close_types(cx: &mut Cx) {
         );
     }
     if imports("jet.db") {
-        cx.close_types.insert("DBConnection".to_string());
+        cx.close_types.extend(["DBConnection", "DBScope"].into_iter().map(str::to_string));
     }
 }
 

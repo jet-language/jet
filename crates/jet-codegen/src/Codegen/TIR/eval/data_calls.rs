@@ -453,10 +453,55 @@ impl<'a> EvalCtx<'a> {
                     Ok(v)
                 }
             }
-            "table" | "rows" | "series" | "values" | "schema" | "missing_count" | "lazy"
-            | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by" | "inner_join"
-            | "left_join" | "describe" | "csv_reader"
-            | "json_reader" => Err(unsupported(
+            "series" => {
+                let values = self.eval_expr(&args[0], scope)?;
+                Ok(ct_struct(
+                    "Series",
+                    vec![("values", values), ("missing", CtValue::Int(0))],
+                ))
+            }
+            "values" => {
+                let series = self.eval_expr(&args[0], scope)?;
+                match series {
+                    CtValue::Struct { type_name, fields }
+                        if type_name == "Series" || type_name == "DataSeries" => fields
+                            .into_iter()
+                            .find_map(|(name, value)| (name == "values").then_some(value))
+                            .ok_or_else(|| unsupported("`data.values()` needs a Series", span)),
+                    _ => Err(unsupported("`data.values()` needs a Series", span)),
+                }
+            }
+            "missing_count" => {
+                let series = self.eval_expr(&args[0], scope)?;
+                let CtValue::Struct { type_name, fields } = series else {
+                    return Err(unsupported("`data.missing_count()` needs a Series", span));
+                };
+                if type_name != "Series" && type_name != "DataSeries" {
+                    return Err(unsupported("`data.missing_count()` needs a Series", span));
+                }
+                let mut missing = fields
+                    .iter()
+                    .find_map(|(name, value)| {
+                        (name == "missing").then(|| match value {
+                            CtValue::Int(count) => *count,
+                            _ => 0,
+                        })
+                    })
+                    .unwrap_or(0);
+                if let Some(CtValue::List(values)) = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "values").then_some(value))
+                {
+                    missing += values
+                        .iter()
+                        .filter(|value| matches!(value, CtValue::None(_)))
+                        .count() as i64;
+                }
+                Ok(CtValue::Int(missing))
+            }
+            "table" | "rows" | "schema" | "lazy" | "plan" | "lazy_filter"
+            | "lazy_sort_by" | "collect" | "sort_by" | "inner_join" | "left_join"
+            | "describe" | "csv_reader" | "json_reader" => Err(unsupported(
                 &format!("`core.data.{method}()` at comptime (impure tier)"),
                 span,
             )),

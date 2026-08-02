@@ -4747,6 +4747,14 @@ there is no unproved fallback. Atomics/reorderable reductions require recorded
 policy. Raw device code is confined to `#Unsafe("reason")` with typed boundary
 contracts and differential-test requirements.
 
+**D-COMPUTE-KERNEL-SURFACE1=B — explicit safe-kernel marker**: an ordinary
+function becomes a safe kernel only with `#Kernel(.parallel)`. Sema attaches
+one proof record covering bounds, aliasing, captures, races, barrier
+uniformity, and control flow before TIR. This epoch ships the conservative
+read-only, effect-free expression subset; indexed writes, loops, captures, and
+opaque/provider calls remain rejected until their proof facts exist. Raw
+vendor/device code stays in the typed `#Unsafe` tier.
+
 **D-COMPUTE-AUTODIFF1=D — reverse default, composable transforms**:
 `compute.grad`/`value_and_grad` are scalar-loss defaults; `jvp`/`vjp` compose for
 mixed and higher-order work. Unsupported mutation/control flow fails at its

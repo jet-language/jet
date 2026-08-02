@@ -1700,6 +1700,9 @@ pub struct TFunc {
     /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
     /// decides, codegen just emits.
     pub is_inline_always: bool,
+    /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
+    /// emitter and interpreter carry this fact without re-deriving it.
+    pub kernel_proof: Option<crate::AST::KernelProof>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
@@ -4370,6 +4373,8 @@ pub enum THandleOp {
     WebAppMethod {
         method: String,
     },
+    /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
+    DBWithPolicy,
     /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DBError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
@@ -4379,6 +4384,9 @@ pub enum THandleOp {
     DBQueryOne,
     /// D-DBDRIVER1: `conn.execute(sql, params)` → `Result<Int, DBError>` (affected rows).
     DBExecute,
+    /// D-DBPOLICY-BIND1: scoped query registered with the same live registry as
+    /// `app.live`, after policy transformation.
+    DBLive,
     /// D-DBDRIVER1: `conn.begin()` → `{ffi}::jet_db_begin((recv).handle)` → `Bool`.
     DBBegin,
     /// D-DBDRIVER1: `conn.commit()` → `{ffi}::jet_db_commit((recv).handle)` → `Bool`.

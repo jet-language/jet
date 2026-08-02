@@ -13,8 +13,9 @@ The project document is the workspace/package layer above file graphs. It is
 read-only in v1. Its source truth is ordinary Jet project files:
 
 - single-file mode: the opened `.jet` file;
-- package mode: `pkg.jet` plus package source files;
-- workspace mode: `workspace.jet`, member `pkg.jet` files, member source files,
+- package mode: `package.jet` plus package source files (`pkg.jet` is accepted as
+  a migration input);
+- workspace mode: `workspace.jet`, member `package.jet` files, member source files,
   env source, and `.jet/lock`.
 
 Top-level fields:
@@ -28,8 +29,8 @@ Top-level fields:
 | `entry` | Entry source path relative to `project_root`. |
 | `mode` | `single_file`, `package`, or `workspace`. |
 | `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
-| `packages` | Parsed `pkg.jet` facts for the root package and workspace members. |
-| `targets` | Package/build targets projected from `pkg.jet` with package path and manifest source. |
+| `packages` | Parsed `package.jet` facts for the root package and workspace members. |
+| `targets` | Package/build targets projected from `package.jet` with package path and manifest source. |
 | `envs` / `services` | `env.jet` projection from Jetpack module evaluation, including package refs, prompt, secrets, and dev services. |
 | `files` | Projected source-truth files with per-file revisions and kinds. |
 | `locks` | `.jet/lock` facts used by the projection. |
@@ -40,11 +41,11 @@ Top-level fields:
 Example:
 
 ```json
-{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/pkg.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches","comment_boxes","staged_nodes"],"shared_visual":"source-anchored-comments"}}
+{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/package.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/package.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches","comment_boxes","staged_nodes"],"shared_visual":"source-anchored-comments"}}
 ```
 
 Project documents do not create a Canvas project asset. Package/workspace
-semantics must remain in `pkg.jet`, `workspace.jet`, source files, env source,
+semantics must remain in `package.jet`, `workspace.jet`, source files, env source,
 and `.jet/lock`. Local UI state such as tabs, zoom, selected nodes, breakpoints,
 and watches may be cached locally; shared visual intent uses source-anchored
 Canvas comments/collapse hints only when the user chooses to share it.
@@ -71,18 +72,18 @@ Current transactions:
 
 | `op` | Extra fields | Effect |
 |---|---|---|
-| `add_dependency` | `manifest`, `name`, `spec` | Inserts or updates one `deps:` entry in a `pkg.jet` file using the existing manifest edit helper, then validates the manifest parser before write. |
-| `remove_dependency` | `manifest`, `name` | Removes one `deps:` entry from a `pkg.jet` file using the existing manifest edit helper, then validates the manifest parser before write. |
-| `edit_pkg_field` | `manifest`, `field`, `value` | Edits known string fields in the `payload` block (`name`, `version`, `jet`, `description`, `license`, `repository`, `edition`) and validates the manifest parser before write. |
-| `add_target` | `manifest`, `name`, `target` | Inserts or updates one `packages:` target entry and validates the manifest parser before write. |
-| `create_package` | `package_path`, `name`, `target`, optional `entry` | Creates a package directory with `pkg.jet` and an entry `.jet` file, then validates the manifest parser and generated entry syntax before write. New files must appear in `files` with revision `missing`. |
+| `add_dependency` | `manifest`, `name`, `spec` | Inserts or updates one `deps:` entry in a Package file using the existing manifest edit helper, then validates the manifest parser before write. |
+| `remove_dependency` | `manifest`, `name` | Removes one `deps:` entry from a Package file using the existing manifest edit helper, then validates the manifest parser before write. |
+| `edit_pkg_field` | `manifest`, `field`, `value` | Edits known string fields in a Package file (or its migration-era `payload` block) and validates the manifest parser before write. |
+| `add_target` | `manifest`, `name`, `target` | Inserts or updates one Package output/target entry and validates the manifest parser before write. |
+| `create_package` | `package_path`, `name`, `target`, optional `entry` | Creates a package directory with `package.jet` and an entry `.jet` file, then validates the manifest parser and generated entry syntax before write. New files must appear in `files` with revision `missing`. |
 | `add_workspace_member` | `workspace`, `member_path` | Creates or edits `workspace.jet` to include a package directory, then validates the workspace evaluator before write. Existing explicit member lists are edited in source; `find("./dir")` workspaces no-op when the member path is already covered. |
 | `add_env_service` | `env`, `name`, optional `enable`, `port`, `run` (string array), `ready`, typed `shutdown`, `data_dir` | Creates or edits `env.jet` to include a dev service, then validates Jetpack module evaluation before write. |
 
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":true,"op":"add_dependency","preview":true,"changed":true,"project_revision":"sha256-...","after_project_revision":"sha256-...","writes":"preview_only","authority":["canvas.source_edit:project"],"audit":{"touched_files":[{"path":"packages/app/pkg.jet","revision":"sha256-...","changed":true}],"diagnostics":[]},"diff":"diff -- packages/app/pkg.jet\n--- before\n+++ after\n+    logging: ../logging,\n"}
+{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":true,"op":"add_dependency","preview":true,"changed":true,"project_revision":"sha256-...","after_project_revision":"sha256-...","writes":"preview_only","authority":["canvas.source_edit:project"],"audit":{"touched_files":[{"path":"packages/app/package.jet","revision":"sha256-...","changed":true}],"diagnostics":[]},"diff":"diff -- packages/app/package.jet\n--- before\n+++ after\n+    logging: ../logging,\n"}
 ```
 
 Failure response:
@@ -93,7 +94,7 @@ Failure response:
 
 A stale `project_revision` or touched-file `revision` fails before any write.
 Preview mode and rejected transactions leave source untouched. Apply mode writes
-only after the changed `pkg.jet` parses through Jetpack's manifest parser.
+only after the changed Package file parses through Jetpack's manifest parser.
 
 ## Graph Document V1
 

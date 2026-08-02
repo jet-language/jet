@@ -47,6 +47,13 @@ fn ci_opts() -> BuildRunOptions {
     }
 }
 
+fn inspect_opts() -> BuildRunOptions {
+    BuildRunOptions {
+        execute: false,
+        ..opts()
+    }
+}
+
 fn write(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
 }
@@ -219,9 +226,9 @@ fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
             "cargo",
             "cargo",
             ["Cargo.toml"],
-            ["target/imported"],
-            ["cargo", "build"],
-            ["Exec"],
+            ["target/debug/legacy-import"],
+            ["cargo", "build", "--bin", "legacy-import"],
+            ["Exec", "FS"],
             tc,
             [],
             identity,
@@ -238,6 +245,137 @@ fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
         return b.plan(app)
     }
     return b.plan()
+}
+
+#[test]
+fn production_legacy_import_uses_project_contents_for_the_typed_action() {
+    let root = project("legacy-content");
+    let entry = root.join("main.jet");
+    write(
+        &root.join("Cargo.toml"),
+        "[package]\nname = \"legacy-content\"\nversion = \"1.2.3\"\n\n[[bin]]\nname = \"cli\"\n",
+    );
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
+    #Impure("inspect the canonical Cargo import") {
+        tc :: b.toolchain("native", "x86_64-linux")?
+        identity :: b.signing("builder", "ci")?
+        imported :: b.legacy(
+            "cargo",
+            "cargo-import",
+            ["Cargo.toml"],
+            ["target/debug/cli"],
+            ["cargo", "build", "--bin", "cli"],
+            ["Exec", "FS"],
+            tc,
+            [],
+            identity,
+            "generic",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "cached",
+            "Cargo.toml"
+        )?
+        app :: b.add_executable("app", ["main.jet"], [imported])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let output = compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap();
+    let build = output.build.expect("legacy import should produce a build plan");
+    let action = build
+        .plan
+        .actions()
+        .iter()
+        .find(|action| action.name == "cargo-import")
+        .expect("imported action");
+    assert_eq!(
+        action.argv,
+        vec!["cargo", "build", "--bin", "cli"]
+    );
+    assert_eq!(
+        action
+            .inputs
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Cargo.toml"]
+    );
+    assert_eq!(
+        action
+            .outputs
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["target/debug/cli"]
+    );
+    assert_eq!(
+        action.labels.get("legacy.version").map(String::as_str),
+        Some("1.2.3")
+    );
+    assert_eq!(
+        action.labels.get("legacy.target").map(String::as_str),
+        None
+    );
+}
+
+#[test]
+fn production_legacy_import_rejects_unsupported_project_constructs() {
+    let root = project("legacy-unsupported");
+    let entry = root.join("main.jet");
+    write(
+        &root.join("CMakeLists.txt"),
+        "add_custom_command(OUTPUT generated COMMAND sh -c \"touch generated\")\n",
+    );
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
+    #Impure("reject unsupported CMake import") {
+        tc :: b.toolchain("native", "x86_64-linux")?
+        identity :: b.signing("builder", "ci")?
+        imported :: b.legacy(
+            "cmake",
+            "cmake-import",
+            ["CMakeLists.txt"],
+            ["build/app"],
+            ["cmake", "--build", "build"],
+            ["Exec", "FS"],
+            tc,
+            [],
+            identity,
+            "generic",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "cached",
+            "CMakeLists.txt"
+        )?
+        app :: b.add_executable("app", ["main.jet"], [imported])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| {
+        diagnostic.what.contains("unsupported construct")
+            && diagnostic.what.contains("add_custom_command")
+    }), "{errors:#?}");
 }
 fn run() {}
 "#,

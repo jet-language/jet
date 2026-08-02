@@ -3125,10 +3125,18 @@ Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
 symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
 
-`raw_kernel_contract` is an audited `#Unsafe` boundary descriptor. Its fields
-state the obligations a raw provider must satisfy; they are not compiler proof
-that the raw body is bounds-safe, race-free, or barrier-uniform. The public
-ordinary-kernel surface is owner-gated by `D-COMPUTE-KERNEL-SURFACE1`.
+`#Kernel(.parallel) fn` is the explicit safe-kernel declaration selected by
+`D-COMPUTE-KERNEL-SURFACE1=B`. Sema accepts the marker only after proving the
+current conservative kernel subset: read-only parameters, no reachable
+effects or opaque calls, straight-line control flow, and checked Core compute
+operations. The resulting bounds/alias/capture/race/barrier/control proof is
+attached to TIR and carried unchanged by AOT, default `jet run`, and the
+interpreter. Unsupported indexed writes, loops, captures, and provider calls
+are rejected; they do not silently fall back to an unproved kernel.
+
+`raw_kernel_contract` remains an audited `#Unsafe` boundary descriptor. Its
+fields state the obligations a raw provider must satisfy; they are not
+compiler proof that the raw body is bounds-safe, race-free, or barrier-uniform.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).

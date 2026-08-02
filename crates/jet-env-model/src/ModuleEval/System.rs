@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::Comptime::{self, CtValue};
+use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
@@ -20,7 +20,8 @@ use super::Diagnostics::{
     missing_system_target, service_enable_not_bool, service_missing_enable, unknown_platform,
     unknown_record_field,
 };
-use super::Eval::{check_build_io, extract_packages};
+use super::Computed::{evaluate_expression, evaluate_named_fields};
+use super::Eval::extract_packages;
 use super::Types::{
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind,
     ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
@@ -109,11 +110,10 @@ fn evaluate_service(
     let mut enable = None;
     let mut extra = Vec::new();
     for (name, span, value) in &entry.fields {
-        check_build_io(value)?;
-        let v = Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, globals)?;
+        let v = evaluate_expression(value, globals, funcs, &HashSet::new(), base_dir)?;
         if name == Syntax::SERVICE_FIELD_ENABLE {
             match v {
-                Comptime::CtValue::Bool(b) => enable = Some(b),
+                CtValue::Bool(b) => enable = Some(b),
                 _ => return Err(service_enable_not_bool(*span)),
             }
         } else {
@@ -272,7 +272,7 @@ fn eval_string(
     globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<String, Diagnostic> {
-    match Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)? {
+    match evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)? {
         CtValue::Str(value) => Ok(value),
         _ => Err(image_field_shape(field, "a string", span)),
     }
@@ -286,7 +286,7 @@ fn eval_names(
     globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
-    match Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)? {
+    match evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)? {
         CtValue::List(values) => values
             .into_iter()
             .map(|value| match value {
@@ -305,7 +305,7 @@ fn eval_user(
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, CtValue>,
 ) -> Result<u32, Diagnostic> {
-    let value = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
+    let value = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
     let CtValue::Int(value) = value else {
         return Err(image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span));
     };
@@ -337,8 +337,7 @@ fn eval_expose(
     globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<i64>, Diagnostic> {
-    check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
+    let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
     let CtValue::List(items) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_EXPOSE,
@@ -371,8 +370,7 @@ fn eval_env_vars(
     globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<(String, String)>, Diagnostic> {
-    check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
+    let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
     let CtValue::Map(m) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_ENV_VARS,
@@ -410,8 +408,7 @@ fn eval_files(
     globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
-    check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
+    let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
     let CtValue::List(items) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_FILES,
@@ -457,13 +454,12 @@ fn eval_base(
     if call.name != Syntax::IMAGE_BASE_FN || call.args.len() != 1 {
         return shape_err();
     }
-    check_build_io(&call.args[0].expr)?;
-    let v = Comptime::evaluate(
+    let v = evaluate_expression(
         &call.args[0].expr,
+        globals,
         funcs,
         &HashSet::new(),
         base_dir,
-        globals,
     )?;
     let CtValue::Str(s) = v else {
         return shape_err();
@@ -618,11 +614,6 @@ fn evaluate_host_override(
     // Host fields form the same small pure dependency graph as ordinary
     // computed module fields. Resolve the generic fields before materializing
     // services/options so declaration order cannot change a fleet's meaning.
-    let field_names = lit
-        .fields
-        .iter()
-        .map(|field| field.name.clone())
-        .collect::<HashSet<_>>();
     let field_exprs = lit
         .fields
         .iter()
@@ -631,34 +622,17 @@ fn evaluate_host_override(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    let dependencies = lit
-        .fields
-        .iter()
-        .map(|field| {
-            let mut names = Vec::new();
-            collect_host_field_dependencies(&field.value, &field_names, &mut names);
-            names.sort();
-            names.dedup();
-            (field.name.clone(), names)
-        })
-        .collect::<HashMap<_, _>>();
-    let mut resolved = globals.clone();
-    let mut states = HashMap::<String, u8>::new();
-    let mut stack = Vec::new();
-    let mut names = field_exprs.keys().cloned().collect::<Vec<_>>();
-    names.sort();
-    for name in names {
-        resolve_host_field(
-            &name,
-            &field_exprs,
-            &dependencies,
-            &mut states,
-            &mut resolved,
-            &mut stack,
-            base_dir,
-            funcs,
-        )?;
-    }
+    let computed = evaluate_named_fields(
+        &field_exprs,
+        globals,
+        funcs,
+        &HashSet::new(),
+        base_dir,
+        Some(&wrapped),
+        "host override values must have a deterministic dependency order",
+        "break the cycle by making one field independent or by moving the shared computation into a pure function",
+    )?;
+    let resolved = computed.values;
     let mut fields = Vec::new();
     let mut provenance = Vec::new();
     for field in &lit.fields {
@@ -667,7 +641,6 @@ fn evaluate_host_override(
                 HostOverrideValue::Platform(check_platform(os, arch, *span)?)
             }
             SystemFieldValue::Packages(expr) => {
-                check_build_io(expr)?;
                 HostOverrideValue::Packages(extract_packages(expr, &wrapped)?.packages)
             }
             SystemFieldValue::Services(entries) => HostOverrideValue::Services(
@@ -696,25 +669,30 @@ fn evaluate_host_override(
                 HostOverrideValue::Options(options)
             }
             SystemFieldValue::Other(expr) => {
-                check_build_io(expr)?;
-                HostOverrideValue::Value(Comptime::evaluate(
+                HostOverrideValue::Value(evaluate_expression(
                     expr,
+                    &resolved,
                     funcs,
                     &HashSet::new(),
                     base_dir,
-                    &resolved,
                 )?)
             }
         };
         fields.push((field.name.clone(), value));
+        let common = computed
+            .provenance
+            .iter()
+            .find(|candidate| candidate.field == field.name);
         provenance.push(HostOverrideProvenance {
             field: field.name.clone(),
-            dependencies: dependencies
-                .get(&field.name)
-                .cloned()
+            dependencies: common
+                .map(|candidate| candidate.dependencies.clone())
                 .unwrap_or_default(),
-            pure: true,
-            source: host_field_source(source, field.span, wrapped.len() - source.len()),
+            pure: common.map(|candidate| candidate.pure).unwrap_or(true),
+            source: common
+                .map(|candidate| candidate.source.clone())
+                .filter(|candidate| !candidate.is_empty())
+                .unwrap_or_else(|| host_field_source(source, field.span, wrapped.len() - source.len())),
         });
     }
     Ok(HostOverride {
@@ -738,102 +716,20 @@ fn evaluate_host_option(
     base_dir: &Path,
     resolved: &HashMap<String, CtValue>,
 ) -> Result<String, Diagnostic> {
-    check_build_io(expr)?;
     let value = match expr {
-        Expr::Ident(name, _) if !resolved.contains_key(name) => None,
-        Expr::Field(..) => None,
-        Expr::Str(..) => None,
-        _ => Some(Comptime::evaluate(
+        Expr::Ident(name, _) if !resolved.contains_key(name) => CtValue::Str(
+            host_field_source(source, value_span, prefix_len),
+        ),
+        Expr::Field(..) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
+        _ => evaluate_expression(
             expr,
+            resolved,
             funcs,
             &HashSet::new(),
             base_dir,
-            resolved,
-        )?),
+        )?,
     };
-    Ok(value
-        .map(|value| value.jet_show())
-        .unwrap_or_else(|| host_field_source(source, value_span, prefix_len)))
-}
-
-fn collect_host_field_dependencies(
-    value: &SystemFieldValue,
-    field_names: &HashSet<String>,
-    dependencies: &mut Vec<String>,
-) {
-    let mut collect = |expr: &Expr| {
-        crate::Comptime::walk_identifiers(expr, &mut |name, _| {
-            if field_names.contains(name) {
-                dependencies.push(name.to_string());
-            }
-        });
-    };
-    match value {
-        SystemFieldValue::Packages(expr) | SystemFieldValue::Other(expr) => collect(expr),
-        SystemFieldValue::Services(entries) => {
-            for entry in entries {
-                for (_, _, expr) in &entry.fields {
-                    collect(expr);
-                }
-            }
-        }
-        SystemFieldValue::Options(entries) => {
-            for entry in entries {
-                collect(&entry.value);
-            }
-        }
-        SystemFieldValue::Platform { .. } => {}
-    }
-}
-
-fn resolve_host_field(
-    name: &str,
-    fields: &HashMap<String, (Span, &Expr)>,
-    dependencies: &HashMap<String, Vec<String>>,
-    states: &mut HashMap<String, u8>,
-    resolved: &mut HashMap<String, CtValue>,
-    stack: &mut Vec<String>,
-    base_dir: &Path,
-    funcs: &HashMap<String, &Func>,
-) -> Result<(), Diagnostic> {
-    if matches!(states.get(name), Some(2)) {
-        return Ok(());
-    }
-    let Some((span, expr)) = fields.get(name).copied() else {
-        return Ok(());
-    };
-    if matches!(states.get(name), Some(1)) {
-        let start = stack.iter().position(|field| field == name).unwrap_or(0);
-        let mut cycle = stack[start..].to_vec();
-        cycle.push(name.to_string());
-        return Err(Diagnostic::error(
-            "E0338",
-            format!("computed fleet fields form a cycle: {}", cycle.join(" -> ")),
-            "host override values must have a deterministic dependency order".to_string(),
-            "break the cycle by making one field independent or by moving the shared computation into a pure function".to_string(),
-            Some(span),
-        ));
-    }
-    states.insert(name.to_string(), 1);
-    stack.push(name.to_string());
-    for dependency in dependencies.get(name).into_iter().flatten() {
-        resolve_host_field(
-            dependency,
-            fields,
-            dependencies,
-            states,
-            resolved,
-            stack,
-            base_dir,
-            funcs,
-        )?;
-    }
-    check_build_io(expr)?;
-    let value = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, resolved)?;
-    resolved.insert(name.to_string(), value);
-    stack.pop();
-    states.insert(name.to_string(), 2);
-    Ok(())
+    Ok(value.jet_show())
 }
 
 fn host_field_source(source: &str, span: Span, prefix_len: usize) -> String {

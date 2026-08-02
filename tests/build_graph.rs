@@ -3,15 +3,20 @@ use jet::Comptime::Build::{
     ActionInputSnapshot, ActionKey, ActionOutputRecord, ActionResultRecord, BuildCapability,
     BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy,
     BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest,
-    GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord,
+    FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
+    LocalCas, LockRecord,
     PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest,
     RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
     RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof,
     ReproducibilityClass, SdkIdentity,
     SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
-    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, read_packaged_file_bounded,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, execute_build_plan_with_front_end_and_remote,
+    read_packaged_file_bounded,
 };
 use std::fs;
+use std::sync::Mutex;
+
+static REMOTE_HOST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn registers_typed_targets_and_default_plan() {
@@ -938,6 +943,12 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
     };
     transport.upload_action_record(&record, &policy).unwrap();
     assert_eq!(transport.download_action_record(&key, &policy).unwrap(), record);
+    let mut wrong_length = record.clone();
+    wrong_length.outputs[0].byte_len = 7;
+    assert!(matches!(
+        transport.upload_action_record(&wrong_length, &policy),
+        Err(RemoteCacheError::InvalidRecord(_))
+    ));
 
     let request = RemoteExecutionRequest {
         key: key.clone(),
@@ -976,6 +987,234 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
             if denied.reason == RemoteDeniedReason::ProofDoesNotMatchAction
     ));
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_identity_{}_{}",
+        std::process::id(),
+        "proof"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let binding = RemoteBuildBinding::new("builder-proof", &root, b"identity-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-a")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+    let key = ActionKey::new("proof-action");
+    let proof = transport
+        .sandbox_proof(
+            "remote:builder-proof:trusted:sandbox-1",
+            key.as_str(),
+            ContentDigest::from_bytes(b"provenance"),
+        )
+        .unwrap();
+    let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: vec!["remote-tool".to_string()],
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+        sandbox: proof.clone(),
+    };
+
+    let mut wrong_platform = proof.clone();
+    wrong_platform.platform = "windows-x86_64".to_string();
+    let wrong_policy = RemoteCachePolicy::with_grants(
+        false,
+        false,
+        true,
+        wrong_platform.clone(),
+    );
+    let mut wrong_request = request.clone();
+    wrong_request.sandbox = wrong_platform;
+    assert!(matches!(
+        transport.submit_execution(&wrong_request, &wrong_policy),
+        Err(RemoteCacheError::InvalidRecord(_))
+    ));
+
+    transport.submit_execution(&request, &policy).unwrap();
+    transport.cancel_execution(&key, &policy).unwrap();
+    let late = RemoteExecutionResult {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: Vec::new(),
+        toolchain_digest: request.toolchain_digest.clone(),
+        sandbox: proof,
+    };
+    assert!(matches!(
+        transport.publish_execution_result(&late, &policy),
+        Err(RemoteCacheError::InvalidRecord(_))
+    ));
+    assert!(matches!(
+        transport.download_execution_result(&key, &policy),
+        Err(RemoteCacheError::Io(error))
+            if error.kind() == std::io::ErrorKind::NotFound
+    ));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn remote_host_binding_registry_round_trips_without_storing_secret() {
+    let _guard = REMOTE_HOST_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_registry_{}_{}",
+        std::process::id(),
+        "binding"
+    ));
+    let config = root.join("config");
+    let remote_root = root.join("remote");
+    let credential = root.join("credential");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&remote_root).unwrap();
+    fs::write(&credential, b"registry-secret").unwrap();
+    let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("XDG_CONFIG_HOME", &config);
+
+    let binding = RemoteBuildBinding::bind_host(
+        "registry-builder",
+        &remote_root,
+        &credential,
+        "trusted",
+        "worker-a",
+        "linux-x86_64",
+        "native",
+        true,
+        true,
+        true,
+        true,
+        4321,
+    )
+    .unwrap();
+    let record = config
+        .join("jet")
+        .join("remote-bindings")
+        .join("registry-builder.conf");
+    let record_text = fs::read_to_string(record).unwrap();
+    assert!(!record_text.contains("registry-secret"));
+    assert_eq!(RemoteBuildBinding::list_host().unwrap(), vec!["registry-builder"]);
+    assert_eq!(RemoteBuildBinding::load_host("registry-builder").unwrap(), binding);
+    RemoteBuildBinding::remove_host("registry-builder").unwrap();
+    assert!(RemoteBuildBinding::list_host().unwrap().is_empty());
+
+    match previous_config {
+        Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+        None => std::env::remove_var("XDG_CONFIG_HOME"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn remote_driver_consumes_authenticated_worker_result() {
+    let project_root = std::env::temp_dir().join(format!(
+        "jet_remote_driver_{}_{}",
+        std::process::id(),
+        "worker"
+    ));
+    let _ = fs::remove_dir_all(&project_root);
+    fs::create_dir_all(&project_root).unwrap();
+    let remote_root = project_root.join("remote-transport");
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "remote-action",
+            ActionSpec::cached(["remote-tool"])
+                .with_outputs(["build/remote-app"])
+                .with_cap(BuildCapability::Net),
+        )
+        .unwrap();
+    let target = b
+        .add_executable("remote-app", TargetSpec::new().with_action(action))
+        .unwrap();
+    let plan = b.plan_with_default(target).unwrap();
+    let grants = [BuildCapability::Net].into_iter().collect();
+    let key = plan
+        .effective_action_key(
+            action,
+            &[],
+            &grants,
+            std::path::Path::new("remote-tool"),
+            &ContentDigest::from_bytes(b"remote-tool"),
+            &[],
+        )
+        .unwrap();
+    let binding = RemoteBuildBinding::new("builder-a", &remote_root, b"driver-worker-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-a")
+        .with_platform(format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH))
+        .with_abi("native")
+        .with_execute(true)
+        .with_timeout_ms(2_000);
+
+    let worker_key = key.clone();
+    let worker_binding = binding.clone();
+    let worker = std::thread::spawn(move || {
+        let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match transport.read_execution_request(&worker_key) {
+                Ok(request) => {
+                    let policy = RemoteCachePolicy::with_grants(
+                        false,
+                        false,
+                        true,
+                        request.sandbox.clone(),
+                    );
+                    let bytes = b"remote worker output";
+                    let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+                    transport
+                        .publish_execution_result(
+                            &RemoteExecutionResult {
+                                key: request.key.clone(),
+                                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+                                outputs: vec![ActionOutputRecord {
+                                    path: request.outputs[0].clone(),
+                                    digest,
+                                    byte_len: bytes.len() as u64,
+                                }],
+                                toolchain_digest: request.toolchain_digest.clone(),
+                                sandbox: request.sandbox,
+                            },
+                            &policy,
+                        )
+                        .unwrap();
+                    return;
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("remote worker could not read request: {error}"),
+            }
+        }
+    });
+
+    let execution = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &project_root,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap();
+    worker.join().unwrap();
+    assert!(execution.report.events.iter().any(|event| {
+        matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action: finished,
+                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+            } if *finished == action.id()
+        )
+    }));
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]
@@ -1731,7 +1970,8 @@ fn plugin_action_and_generated_module_cannot_share_one_path() {
             "collision-plugin",
             "1.0.0",
             "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        ),
+        )
+        .with_capability(BuildCapability::Exec),
         PluginContribution::new()
             .with_action(
                 "emit-source",

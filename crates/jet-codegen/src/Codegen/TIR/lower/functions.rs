@@ -135,6 +135,7 @@ pub(crate) fn lower_error_conv(
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        kernel_proof: None,
         body: lower_stmts(&conversion.body, cx, &mut env),
         kind: TFuncKind::TopLevel,
     }
@@ -240,6 +241,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -460,6 +462,7 @@ pub(crate) fn lower_method_for_owner(
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         body,
         kind,
     }
@@ -566,6 +569,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -659,6 +663,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        kernel_proof: None,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,

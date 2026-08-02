@@ -1,9 +1,9 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability};
 use super::cache_cas::{
-    ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
-    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-    LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
-    RemoteDeniedReason, RemoteExecutionRequest, RemoteSandboxProof, atomic_restore_file,
+    ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
+    ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest,
+    FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
+    RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, atomic_restore_file,
     ensure_real_directory, secure_read_file,
 };
 use super::errors_keys::BuildError;
@@ -301,28 +301,36 @@ fn execute_one_action(
                             "remote cache record contains a failed outcome".to_string(),
                         ));
                     }
-                    restore_remote_outputs(
+                    match restore_remote_outputs(
                         transport,
                         policy,
                         project_root,
                         action,
                         &record,
                         super::cache_cas::RemoteActionRequest::CacheRead,
-                    )
-                    .map_err(|detail| remote_action(action, detail))?;
-                    write_last_rebuild_record(
-                        project_root,
-                        action,
-                        &key,
-                        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                        None,
-                    )?;
-                    return Ok(ActionOutcome::RestoredFromCache);
+                    ) {
+                        Ok(()) => {
+                            write_last_rebuild_record(
+                                project_root,
+                                action,
+                                &key,
+                                ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                                None,
+                            )?;
+                            return Ok(ActionOutcome::RestoredFromCache);
+                        }
+                        Err(_detail)
+                            if remote_binding
+                                .is_some_and(|binding| binding.fallback_local) => {}
+                        Err(detail) => return Err(remote_action(action, detail)),
+                    }
                 }
                 Err(RemoteCacheError::Io(error))
                     if error.kind() == io::ErrorKind::NotFound => {}
                 Err(RemoteCacheError::Denied(denied))
                     if denied.reason == RemoteDeniedReason::GrantNotAllowed => {}
+                Err(_error)
+                    if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
                 Err(error) => return Err(remote_action(action, error.to_string())),
             }
         }
@@ -339,100 +347,26 @@ fn execute_one_action(
     };
 
     if let Some((transport, policy, true)) = &remote {
-        let proof = policy
-            .proof()
-            .cloned()
-            .ok_or_else(|| remote_action(action, "remote sandbox proof is missing".to_string()))?;
-        for snapshot in &snapshots {
-            let path = resolve_under(project_root, snapshot.path.as_str())
-                .map_err(|e| io_action(action, e))?;
-            let bytes = secure_read_file(project_root, &path).map_err(|e| io_action(action, e))?;
-            let digest = transport
-                .upload_execution_blob(&bytes, policy)
-                .map_err(|error| remote_action(action, error.to_string()))?;
-            if digest != snapshot.digest || bytes.len() as u64 != snapshot.byte_len {
-                return Err(remote_action(
-                    action,
-                    format!(
-                        "remote input CAS identity changed for {}",
-                        snapshot.path.as_str()
-                    ),
-                ));
-            }
-        }
-        let request = RemoteExecutionRequest {
-            key: key.clone(),
-            argv: action.argv.clone(),
-            inputs: snapshots.clone(),
-            outputs: action.outputs.clone(),
-            toolchain_digest: toolchain_provenance_digest(plan, action.toolchain),
-            sandbox: proof,
-        };
-        transport
-            .submit_execution(&request, policy)
-            .map_err(|error| remote_action(action, error.to_string()))?;
         let timeout_ms = remote_binding
             .map(|binding| binding.timeout_ms)
             .unwrap_or(30_000);
-        let result = wait_remote_execution_result(transport, policy, &key, action, timeout_ms)?;
-        match result.outcome {
-            ActionOutcome::Succeeded { exit_code } => {
-                restore_remote_outputs(
-                    transport,
-                    policy,
-                    project_root,
-                    action,
-                    &ActionResultRecord {
-                        key: result.key.clone(),
-                        outcome: result.outcome,
-                        outputs: result.outputs.clone(),
-                        provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-                    },
-                    super::cache_cas::RemoteActionRequest::Execute,
-                )
-                .map_err(|detail| remote_action(action, detail))?;
-                if action.cache == ActionCache::Cached {
-                    let record = cas
-                        .capture_declared_outputs(
-                            project_root,
-                            action,
-                            key.clone(),
-                            ActionOutcome::Succeeded { exit_code },
-                            ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-                        )
-                        .map_err(|e| io_action(action, e))?;
-                    if policy
-                        .check(super::cache_cas::RemoteActionRequest::CacheWrite)
-                        .is_ok()
-                    {
-                        publish_remote_outputs(transport, policy, project_root, &record)
-                            .map_err(|detail| remote_action(action, detail))?;
-                    }
-                    write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
-                }
-                write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
-                return Ok(ActionOutcome::Succeeded { exit_code });
-            }
-            ActionOutcome::Failed { exit_code } => {
-                write_last_rebuild_record(
-                    project_root,
-                    action,
-                    &key,
-                    rebuild_status,
-                    Some(exit_code),
-                )?;
-                return Err(BuildExecutionError::ActionFailed {
-                    action: action.name.clone(),
-                    exit_code,
-                    stderr: "remote execution failed".to_string(),
-                });
-            }
-            ActionOutcome::RestoredFromCache => {
-                return Err(remote_action(
-                    action,
-                    "remote execution returned a cache-only outcome".to_string(),
-                ));
-            }
+        let remote_result = execute_remote_action(
+            plan,
+            action,
+            project_root,
+            cas,
+            &record_path,
+            &snapshots,
+            &key,
+            transport,
+            policy,
+            rebuild_status,
+            timeout_ms,
+        );
+        match remote_result {
+            Ok(outcome) => return Ok(outcome),
+            Err(_error) if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
+            Err(error) => return Err(error),
         }
     }
 
@@ -532,6 +466,105 @@ fn execute_one_action(
     Ok(outcome)
 }
 
+fn execute_remote_action(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    project_root: &Path,
+    cas: &LocalCas,
+    record_path: &Path,
+    snapshots: &[ActionInputSnapshot],
+    key: &ActionKey,
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+    rebuild_status: ActionCacheStatus,
+    timeout_ms: u64,
+) -> Result<ActionOutcome, BuildExecutionError> {
+    let proof = policy
+        .proof()
+        .cloned()
+        .ok_or_else(|| remote_action(action, "remote sandbox proof is missing".to_string()))?;
+    for snapshot in snapshots {
+        let path = resolve_under(project_root, snapshot.path.as_str())
+            .map_err(|e| io_action(action, e))?;
+        let bytes = secure_read_file(project_root, &path).map_err(|e| io_action(action, e))?;
+        let digest = transport
+            .upload_execution_blob(&bytes, policy)
+            .map_err(|error| remote_action(action, error.to_string()))?;
+        if digest != snapshot.digest || bytes.len() as u64 != snapshot.byte_len {
+            return Err(remote_action(
+                action,
+                format!(
+                    "remote input CAS identity changed for {}",
+                    snapshot.path.as_str()
+                ),
+            ));
+        }
+    }
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: action.argv.clone(),
+        inputs: snapshots.to_vec(),
+        outputs: action.outputs.clone(),
+        toolchain_digest: toolchain_provenance_digest(plan, action.toolchain),
+        sandbox: proof,
+    };
+    transport
+        .submit_execution(&request, policy)
+        .map_err(|error| remote_action(action, error.to_string()))?;
+    let result = wait_remote_execution_result(transport, policy, key, action, timeout_ms)?;
+    match result.outcome {
+        ActionOutcome::Succeeded { exit_code } => {
+            restore_remote_outputs(
+                transport,
+                policy,
+                project_root,
+                action,
+                &ActionResultRecord {
+                    key: result.key.clone(),
+                    outcome: result.outcome,
+                    outputs: result.outputs.clone(),
+                    provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                },
+                super::cache_cas::RemoteActionRequest::Execute,
+            )
+            .map_err(|detail| remote_action(action, detail))?;
+            if action.cache == ActionCache::Cached {
+                let record = cas
+                    .capture_declared_outputs(
+                        project_root,
+                        action,
+                        key.clone(),
+                        ActionOutcome::Succeeded { exit_code },
+                        ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                    )
+                    .map_err(|e| io_action(action, e))?;
+                if policy
+                    .check(super::cache_cas::RemoteActionRequest::CacheWrite)
+                    .is_ok()
+                {
+                    publish_remote_outputs(transport, policy, project_root, &record)
+                        .map_err(|detail| remote_action(action, detail))?;
+                }
+                write_action_record(record_path, &record).map_err(|e| io_action(action, e))?;
+            }
+            write_last_rebuild_record(project_root, action, key, rebuild_status, None)?;
+            Ok(ActionOutcome::Succeeded { exit_code })
+        }
+        ActionOutcome::Failed { exit_code } => {
+            write_last_rebuild_record(project_root, action, key, rebuild_status, Some(exit_code))?;
+            Err(BuildExecutionError::ActionFailed {
+                action: action.name.clone(),
+                exit_code,
+                stderr: "remote execution failed".to_string(),
+            })
+        }
+        ActionOutcome::RestoredFromCache => Err(remote_action(
+            action,
+            "remote execution returned a cache-only outcome".to_string(),
+        )),
+    }
+}
+
 fn remote_for_action(
     plan: &BuildPlan,
     action: &BuildAction,
@@ -562,18 +595,22 @@ fn remote_for_action(
             capability: BuildCapability::Net,
         });
     }
-    let proof = RemoteSandboxProof::new(
-        format!(
-            "remote:{}:{}:local-{}-{}-{}",
-            binding.builder,
-            binding.trust_domain,
-            std::process::id(),
-            action.id.0,
-            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
-        ),
-        key.as_str(),
-        toolchain_provenance_digest(plan, action.toolchain),
-    );
+    let transport = RemoteCacheTransport::for_binding(binding)
+        .map_err(|detail| remote_action(action, detail))?;
+    let proof = transport
+        .sandbox_proof(
+            format!(
+                "remote:{}:{}:local-{}-{}-{}",
+                binding.builder,
+                binding.trust_domain,
+                std::process::id(),
+                action.id.0,
+                REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+            ),
+            key.as_str(),
+            toolchain_provenance_digest(plan, action.toolchain),
+        )
+        .map_err(|detail| remote_action(action, detail))?;
     if !action.caps.contains(&BuildCapability::Net) {
         return Err(BuildExecutionError::MissingGrant {
             action: format!("remote build transport for {}", action.name),
@@ -581,8 +618,7 @@ fn remote_for_action(
         });
     }
     Ok(Some((
-        RemoteCacheTransport::for_binding(binding)
-            .map_err(|detail| remote_action(action, detail))?,
+        transport,
         RemoteCachePolicy::with_grants(
             binding.cache_read,
             binding.cache_write,
@@ -612,6 +648,7 @@ fn wait_remote_execution_result(
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                let _ = transport.cancel_execution(key, policy);
                 return Err(remote_action(
                     action,
                     format!(
@@ -620,7 +657,10 @@ fn wait_remote_execution_result(
                     ),
                 ));
             }
-            Err(error) => return Err(remote_action(action, error.to_string())),
+            Err(error) => {
+                let _ = transport.cancel_execution(key, policy);
+                return Err(remote_action(action, error.to_string()));
+            }
         }
     }
 }

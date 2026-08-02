@@ -12,6 +12,11 @@ pub const CONTRACT_PRE: &str = "Pre"; // D-PREPOST1
 /// "msg")`; `result` names the return value inside `cond`.
 pub const CONTRACT_POST: &str = "Post"; // D-PREPOST1
 
+/// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe kernel declaration —
+/// `#Kernel(.parallel) fn …`. The mode is intentionally a closed marker
+/// argument, so adding another execution mode needs a new owner ruling.
+pub const CONTRACT_KERNEL: &str = "Kernel"; // D-COMPUTE-KERNEL-SURFACE1
+
 /// D-PERSIST1 / D-CONTRACTCASE1: dev-tier contract on a module-level
 /// binding — the value survives `jet dev` hot reloads (identity = module
 /// path + binding name). Inert in release builds.

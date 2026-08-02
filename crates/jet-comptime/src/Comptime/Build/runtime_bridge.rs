@@ -17,12 +17,13 @@ use crate::AST::{ComptimeInput, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 struct ProgramBuildSession {
     context: BuildContext,
     package: String,
+    project_root: PathBuf,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -45,6 +46,18 @@ pub fn begin_program_build_with_policy(
     program: CtValue,
     policy: BuildPolicy,
 ) -> CtValue {
+    begin_program_build_with_policy_at(package, program, policy, Path::new("."))
+}
+
+/// Start a build session with the owning project root. The root is retained
+/// for production-only imports whose semantics come from a canonical project
+/// file (legacy wrappers); source text cannot substitute another root.
+pub fn begin_program_build_with_policy_at(
+    package: impl Into<String>,
+    program: CtValue,
+    policy: BuildPolicy,
+    project_root: &Path,
+) -> CtValue {
     let context = BuildContext::new_with_policy(policy);
     let id = context.context;
     PROGRAM_BUILD_SESSIONS.with(|sessions| {
@@ -53,6 +66,7 @@ pub fn begin_program_build_with_policy(
             ProgramBuildSession {
                 context,
                 package: package.into(),
+                project_root: project_root.to_path_buf(),
                 diagnostics: Vec::new(),
             },
         );
@@ -459,6 +473,17 @@ fn eval_session_method(
                         span,
                     ));
                 }
+                let imported = LegacyWrapperSpec::from_project_file(
+                    &session.project_root,
+                    wrapper.kind,
+                )
+                .map_err(|error| build_error_diag(&error, span))?;
+                validate_legacy_import_contract(&wrapper, &imported, span)?;
+                for (label, value) in imported.labels {
+                    if !matches!(label.as_str(), "legacy.import" | "legacy.project-file") {
+                        wrapper = wrapper.with_label(label, value);
+                    }
+                }
                 wrapper = wrapper.with_project_file(project_file);
             }
             let spec = wrapper
@@ -728,6 +753,77 @@ fn eval_session_method(
         Ok(value) => CtValue::ResOk(Box::new(value)),
         Err(error) => CtValue::ResErr(Box::new(CtValue::Str(build_error_text(&error)))),
     })
+}
+
+/// A source-level `b.legacy` call declares the graph handles, while the
+/// canonical project file remains the authority for the wrapper command and
+/// discovered paths. Require the caller to repeat every imported fact in the
+/// typed call. This makes the production graph inspectable and prevents a
+/// stale source-side facade from silently discarding project-file semantics.
+fn validate_legacy_import_contract(
+    declared: &LegacyWrapperSpec,
+    imported: &LegacyWrapperSpec,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if declared.argv != imported.argv {
+        return Err(build_diag(
+            "legacy wrapper argv does not match its canonical project-file import",
+            span,
+        ));
+    }
+    let declared_inputs = declared.inputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let imported_inputs = imported.inputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    if declared_inputs != imported_inputs {
+        return Err(build_diag(
+            "legacy wrapper inputs must exactly match its canonical project-file import",
+            span,
+        ));
+    }
+    let declared_outputs = declared.outputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let imported_outputs = imported.outputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    if declared_outputs != imported_outputs {
+        return Err(build_diag(
+            "legacy wrapper outputs must exactly match its canonical project-file import",
+            span,
+        ));
+    }
+    if declared.caps != imported.caps {
+        return Err(build_diag(
+            "legacy wrapper capabilities must exactly match its canonical project-file import",
+            span,
+        ));
+    }
+    if declared.env != imported.env {
+        return Err(build_diag(
+            "legacy wrapper environment does not match its canonical project-file import",
+            span,
+        ));
+    }
+    if declared.env_allowlist != imported.env_allowlist {
+        return Err(build_diag(
+            "legacy wrapper environment allowlist must exactly match its canonical project-file import",
+            span,
+        ));
+    }
+    if declared.resource_pools != imported.resource_pools {
+        return Err(build_diag(
+            "legacy wrapper resource pools must exactly match its canonical project-file import",
+            span,
+        ));
+    }
+    if imported.cache != ActionCache::Cached && declared.cache != imported.cache {
+        return Err(build_diag(
+            "legacy wrapper cache policy does not match its canonical project-file import",
+            span,
+        ));
+    }
+    if imported.action_kind != ActionKind::Generic && declared.action_kind != imported.action_kind {
+        return Err(build_diag(
+            "legacy wrapper action kind does not match its canonical project-file import",
+            span,
+        ));
+    }
+    Ok(())
 }
 
 fn build_session_id(value: &CtValue) -> Option<u64> {

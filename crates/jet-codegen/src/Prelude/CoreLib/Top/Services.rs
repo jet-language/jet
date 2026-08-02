@@ -725,8 +725,9 @@ fn jet_services_send(
             "service message exceeds the 1 MiB limit".to_string(),
         ));
     }
+    let draining = tree.draining.iter().any(|name| name == &endpoint.worker);
     let worker = jet_services_find_worker_mut(tree, endpoint)?;
-    if !worker.running {
+    if !worker.running || draining {
         return Err(JetServiceError::NotStarted(format!(
             "worker `{}` is not running",
             worker.name
@@ -767,8 +768,16 @@ fn jet_services_receive(
             "service tree is not started".to_string(),
         ));
     }
-    let worker = jet_services_find_worker_mut(tree, endpoint)?;
-    let message = match worker.mailbox.receiver.try_recv() {
+    let draining = tree.draining.iter().any(|name| name == &endpoint.worker);
+    let (message, should_stop) = {
+        let worker = jet_services_find_worker_mut(tree, endpoint)?;
+        if !worker.running && !draining {
+        return Err(JetServiceError::NotStarted(format!(
+            "worker `{}` is not running",
+            worker.name
+        )));
+    }
+        let message = match worker.mailbox.receiver.try_recv() {
         Ok(message) => message,
         Err(std::sync::mpsc::TryRecvError::Empty) => {
             return Err(JetServiceError::Ambiguous(format!(
@@ -783,16 +792,25 @@ fn jet_services_receive(
             )));
         }
     };
-    let mirrored = worker.mailbox.messages.first().cloned().ok_or_else(|| {
+        let mirrored = worker.mailbox.messages.first().cloned().ok_or_else(|| {
         JetServiceError::Policy("mailbox channel and durable mirror diverged".to_string())
     })?;
-    if mirrored != message {
+        if mirrored != message {
         return Err(JetServiceError::Policy(
             "mailbox channel and durable mirror diverged".to_string(),
         ));
     }
-    worker.mailbox.messages.remove(0);
-    worker.mailbox.depth = worker.mailbox.messages.len() as i64;
+        worker.mailbox.messages.remove(0);
+        worker.mailbox.depth = worker.mailbox.messages.len() as i64;
+        let should_stop = worker.mailbox.messages.is_empty();
+        (message, should_stop)
+    };
+    if draining && should_stop {
+        if let Ok(worker) = jet_services_find_worker_mut(tree, endpoint) {
+            worker.running = false;
+        }
+        tree.draining.retain(|name| name != &endpoint.worker);
+    }
     Ok(message)
 }
 
@@ -1299,7 +1317,6 @@ fn jet_services_drain_worker(
     }
     let name = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
-        worker.running = false;
         worker.name.clone()
     };
     if !tree.draining.iter().any(|n| n == &name) {

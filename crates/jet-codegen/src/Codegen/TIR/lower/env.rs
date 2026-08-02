@@ -20,6 +20,7 @@ use std::rc::Rc;
 /// matching the AST path bit-for-bit (the Phase-3 "reproduce the AST's
 /// partiality where it is load-bearing" lesson, again).
 
+#[derive(Clone)]
 pub(crate) struct LowerEnv {
     pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
     /// D-PROVENANCE1=B: source note for each exact `#Track` Float binding.

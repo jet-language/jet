@@ -4268,18 +4268,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // encoded, rows/count/error decoded) — see `Source/Prelude/DB.rs` and
                 // `jet_std::jet_db_{encode_params,decode_query_result,decode_execute_result}`
                 // in `Source/Prelude/CoreLib.rs`.
+                THandleOp::DBWithPolicy => format!(
+                    "{root}JetDbScope {{ handle: ({recv}).handle, policy: ({policy}).clone(), user: ({user}).clone() }}",
+                    policy = a(0),
+                    user = a(1),
+                ),
                 THandleOp::DBQuery => format!(
-                    "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))), Err(e) => Err(e) }} }}",
                     a(0),
                     a(1)
                 ),
                 THandleOp::DBQueryOne => format!(
-                    "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({})))).map(|__rows| __rows.into_iter().next())",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))).map(|__rows| __rows.into_iter().next()), Err(e) => Err(e) }} }}",
                     a(0),
                     a(1)
                 ),
                 THandleOp::DBExecute => format!(
-                    "{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))), Err(e) => Err(e) }} }}",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::DBLive => format!(
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => match {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))) {{ Ok(__rows) => Ok({root}jet_app_live(format!(\"db:{{}}:{{}}\", __jet_scope.policy.table, __jet_sql), format!(\"{{:?}}\", __rows))), Err(e) => Err(e) }}, Err(e) => Err(e) }} }}",
                     a(0),
                     a(1)
                 ),

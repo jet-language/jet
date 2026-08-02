@@ -48,14 +48,54 @@ impl<'a> Checker<'a> {
             self.expect_core_arg(name, 1, &params_ty, &mut args[1]);
         }
     
-        /// D-DBDRIVER1: instance methods on a `DBConnection` handle (produced by
-        /// `db.open`/`db.open_memory`, mirroring `core.files`'s `open`/`create`
-        /// producing a `FileReader`/`FileWriter`). The one generic driver interface:
-        /// SQL text plus a separate `[DBValue]` bind list. `query`/`query_one`/
-        /// `execute` are fallible (`? DBError`); `begin`/`commit`/`rollback`/`close`
-        /// report plain success/failure (`Bool`) — there is nothing else to recover
-        /// from a transaction control statement or a close.
+        /// D-DBPOLICY-BIND1: an unscoped connection can establish a typed policy
+        /// scope and control a transaction, but row reads/writes are only exposed
+        /// on the returned `DBScope`. This keeps a connection from bypassing the
+        /// policy simply by retaining the original handle.
         pub(crate) fn check_db_connection_method(
+            &mut self,
+            method: &str,
+            args: &mut [crate::AST::CallArg],
+            span: Span,
+        ) -> Option<Option<Type>> {
+            match method {
+                "with_policy" => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity("with_policy", 2, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    } else {
+                        self.expect_core_arg(
+                            "with_policy",
+                            0,
+                            &Type::Named("RowPolicy".to_string()),
+                            &mut args[0],
+                        );
+                        self.expect_core_arg("with_policy", 1, &Type::String, &mut args[1]);
+                    }
+                    self.record_effect(Effect::DB.name(), span);
+                    Some(Some(Type::Named("DBScope".to_string())))
+                }
+                "begin" | "commit" | "rollback" | "close" => {
+                    if !args.is_empty() {
+                        self.diags
+                            .push(wrong_core_arity(method, 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    }
+                    // D-EFFDBREAD1=A: transaction-control and close calls neither
+                    // read nor write rows themselves, so they keep the plain `DB`
+                    // root (an ancestor of both leaves).
+                    self.record_effect(Effect::DB.name(), span);
+                    Some(Some(Type::Bool))
+                }
+                _ => None,
+            }
+        }
+
+        pub(crate) fn check_db_scope_method(
             &mut self,
             method: &str,
             args: &mut [crate::AST::CallArg],
@@ -83,17 +123,18 @@ impl<'a> Checker<'a> {
                     self.record_effect(&db_write(), span);
                     Some(Some(result_ty(Type::Int, db_error_ty())))
                 }
+                "live" => {
+                    self.check_db_sql_params_args("live", args, span);
+                    self.record_effect(&db_read(), span);
+                    Some(Some(result_ty(Type::Named("LiveQuery".to_string()), db_error_ty())))
+                }
                 "begin" | "commit" | "rollback" | "close" => {
                     if !args.is_empty() {
-                        self.diags
-                            .push(wrong_core_arity(method, 0, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
+                        self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
                         }
                     }
-                    // D-EFFDBREAD1=A: transaction-control and close calls neither
-                    // read nor write rows themselves, so they keep the plain `DB`
-                    // root (an ancestor of both leaves).
                     self.record_effect(Effect::DB.name(), span);
                     Some(Some(Type::Bool))
                 }

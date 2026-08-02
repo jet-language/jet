@@ -1,7 +1,11 @@
-// D-COMPUTE-KERNEL1 (#1139/#1140): safe bounds proof + raw kernel contract under #Unsafe.
+// D-COMPUTE-KERNEL1 / D-COMPUTE-KERNEL-SURFACE1=B (#1139/#1140): the safe
+// marker carries a sema proof; raw provider contracts stay behind #Unsafe.
 use core.compute as compute
 
+#Kernel(.parallel) fn lane_add(left: Int, right: Int) => Int = left + right;
+
 fn run() {
+    print("kernel:{lane_add(20, 22)}")
     ok :: compute.kernel_bounds_ok([2, 3], [1, 2]) ?? panic("bounds")
     print("bounds:{ok}")
 

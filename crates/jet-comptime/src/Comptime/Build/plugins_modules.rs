@@ -220,8 +220,22 @@ pub fn read_packaged_file_bounded(
             "plugin {label} exceeds {limit} bytes"
         ));
     }
-    let file = fs::File::open(path)
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(0o400000 | 0o2000000);
+    }
+    let file = options
+        .open(path)
         .map_err(|error| format!("could not read plugin {label}: {error}"))?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|error| format!("could not stat plugin {label}: {error}"))?;
+    if !opened_metadata.is_file() {
+        return Err(format!("plugin {label} must be a regular file"));
+    }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take(limit.saturating_add(1) as u64)
         .read_to_end(&mut bytes)

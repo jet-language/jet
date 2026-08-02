@@ -435,14 +435,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "to_string", 0) => THandleOp::PathToString,
         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
         ("Path", "walk", 0) => THandleOp::PathWalk,
-        // D-DBDRIVER1: `DBConnection` instance methods.
-        ("DBConnection", "query", 2) => THandleOp::DBQuery,
-        ("DBConnection", "query_one", 2) => THandleOp::DBQueryOne,
-        ("DBConnection", "execute", 2) => THandleOp::DBExecute,
+        // D-DBPOLICY-BIND1: only a DBScope can perform row reads/writes.
+        ("DBConnection", "with_policy", 2) => THandleOp::DBWithPolicy,
+        ("DBScope", "query", 2) => THandleOp::DBQuery,
+        ("DBScope", "query_one", 2) => THandleOp::DBQueryOne,
+        ("DBScope", "execute", 2) => THandleOp::DBExecute,
+        ("DBScope", "live", 2) => THandleOp::DBLive,
         ("DBConnection", "begin", 0) => THandleOp::DBBegin,
         ("DBConnection", "commit", 0) => THandleOp::DBCommit,
         ("DBConnection", "rollback", 0) => THandleOp::DBRollback,
         ("DBConnection", "close", 0) => THandleOp::DBClose,
+        ("DBScope", "begin", 0) => THandleOp::DBBegin,
+        ("DBScope", "commit", 0) => THandleOp::DBCommit,
+        ("DBScope", "rollback", 0) => THandleOp::DBRollback,
+        ("DBScope", "close", 0) => THandleOp::DBClose,
         // D-DBDRIVER1: `DBValue` accessor methods.
         ("DBValue", "int", 0) => THandleOp::DBValueInt,
         ("DBValue", "float", 0) => THandleOp::DBValueFloat,
@@ -526,6 +532,8 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             if handle == "DBConnection" {
                 Some(crate::Sema::db_connection_method_return_ty(method))
+            } else if handle == "DBScope" {
+                Some(crate::Sema::db_scope_method_return_ty(method))
             } else {
                 None
             }

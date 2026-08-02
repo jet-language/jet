@@ -39,9 +39,11 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsOptions => "ParsedArgsOptions",
         THandleOp::ParsedArgsSubcommand => "ParsedArgsSubcommand",
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
+        THandleOp::DBWithPolicy => "DBWithPolicy",
         THandleOp::DBQuery => "DBQuery",
         THandleOp::DBQueryOne => "DBQueryOne",
         THandleOp::DBExecute => "DBExecute",
+        THandleOp::DBLive => "DBLive",
         THandleOp::DBBegin => "DBBegin",
         THandleOp::DBCommit => "DBCommit",
         THandleOp::DBRollback => "DBRollback",
@@ -77,6 +79,100 @@ fn path_value(s: String) -> CtValue {
     CtValue::Struct {
         type_name: "Path".to_string(),
         fields: vec![("inner".to_string(), CtValue::Str(s))],
+    }
+}
+
+fn reflect_inner(recv: &CtValue) -> Option<&CtValue> {
+    match recv {
+        CtValue::Struct { type_name, fields } if type_name == "__Reflect" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "value").then_some(value)),
+        _ => None,
+    }
+}
+
+fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != "__Reflect" {
+        return None;
+    }
+    fields.iter().find_map(|(name, value)| {
+        if name != "field_names" {
+            return None;
+        }
+        let CtValue::List(names) = value else {
+            return None;
+        };
+        Some(
+            names
+                .iter()
+                .filter_map(|value| match value {
+                    CtValue::Str(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        )
+    })
+}
+
+fn reflect_type_name(value: &CtValue) -> String {
+    value.jet_type().name()
+}
+
+fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
+    match method {
+        "type_name" => reflect_inner(recv)
+            .map(|value| CtValue::Str(reflect_type_name(value)))
+            .ok_or_else(|| unsupported("reflect value", span)),
+        "display" => reflect_inner(recv)
+            .map(|value| CtValue::Str(value.jet_show()))
+            .ok_or_else(|| unsupported("reflect value", span)),
+        "fields" => {
+            let value = reflect_inner(recv).ok_or_else(|| unsupported("reflect value", span))?;
+            let Some(field_names) = reflect_field_names(recv) else {
+                return Ok(CtValue::List(Vec::new()));
+            };
+            let fields = match value {
+                CtValue::Struct { fields, .. } => fields,
+                _ => return Ok(CtValue::List(Vec::new())),
+            };
+            Ok(CtValue::List(
+                field_names
+                    .into_iter()
+                    .filter_map(|name| {
+                        let value = fields.iter().find_map(|(actual, value)| {
+                            (actual == &name
+                                || actual.strip_prefix("user_") == Some(name.as_str()))
+                                .then_some(value)
+                        })?;
+                        Some(CtValue::Struct {
+                            type_name: "__ReflectField".to_string(),
+                            fields: vec![
+                                ("name".to_string(), CtValue::Str(name)),
+                                ("value".to_string(), CtValue::Str(value.jet_show())),
+                            ],
+                        })
+                    })
+                    .collect(),
+            ))
+        }
+        "name" => match recv {
+            CtValue::Struct { type_name, fields } if type_name == "__ReflectField" => fields
+                .iter()
+                .find_map(|(name, value)| (name == "name").then_some(value.clone()))
+                .ok_or_else(|| unsupported("reflect field", span)),
+            _ => Err(unsupported("reflect field", span)),
+        },
+        "value" => match recv {
+            CtValue::Struct { type_name, fields } if type_name == "__ReflectField" => fields
+                .iter()
+                .find_map(|(name, value)| (name == "value").then_some(value.clone()))
+                .ok_or_else(|| unsupported("reflect field", span)),
+            _ => Err(unsupported("reflect field", span)),
+        },
+        _ => Err(unsupported("reflect handle", span)),
     }
 }
 
@@ -336,9 +432,11 @@ pub(super) fn eval_handle(
         THandleOp::DBValueBool => db_value_result(recv, "bool", span),
         THandleOp::DBValueIsNull => db_value_result(recv, "is_null", span),
         // Runtime-tier only (jet-jit ambient); comptime has no SQLite host.
+        THandleOp::DBWithPolicy => Err(unsupported("handle `DBWithPolicy`", span)),
         THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
         THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
         THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),
+        THandleOp::DBLive => Err(unsupported("handle `DBLive`", span)),
         THandleOp::DBBegin => Err(unsupported("handle `DBBegin`", span)),
         THandleOp::DBCommit => Err(unsupported("handle `DBCommit`", span)),
         THandleOp::DBRollback => Err(unsupported("handle `DBRollback`", span)),
@@ -592,11 +690,11 @@ pub(super) fn eval_handle(
             Err(unsupported("handle `TerminalSessionResize`", span))
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
-        THandleOp::ReflectValueTypeName => Err(unsupported("handle `ReflectValueTypeName`", span)),
-        THandleOp::ReflectValueDisplay => Err(unsupported("handle `ReflectValueDisplay`", span)),
-        THandleOp::ReflectValueFields => Err(unsupported("handle `ReflectValueFields`", span)),
-        THandleOp::ReflectFieldName => Err(unsupported("handle `ReflectFieldName`", span)),
-        THandleOp::ReflectFieldValue => Err(unsupported("handle `ReflectFieldValue`", span)),
+        THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
+        THandleOp::ReflectValueDisplay => reflect_handle(recv, "display", span),
+        THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
+        THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
+        THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
         THandleOp::TaskJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()

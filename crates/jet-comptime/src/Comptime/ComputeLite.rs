@@ -10,6 +10,10 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
 // The shared compute core uses the same range law as the rest of the
 // evaluator.  Comptime has its own value boundary, so it supplies only the
 // small range carrier and panic adapter needed to include that core source.
@@ -27,7 +31,7 @@ struct JetRange {
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-    panic!("{} (at {}:{})", msg, file, line)
+    jet_foundation::ice!(None, "{} (at {}:{})", msg, file, line)
 }
 
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");

@@ -452,6 +452,10 @@ impl<'a> Checker<'a> {
                 Some(f.name_span),
             ));
         }
+        // D-COMPUTE-KERNEL-SURFACE1=B: attach the proof only after ordinary
+        // sema has checked the complete body. TIR consumes this fact; it never
+        // retries the safety analysis.
+        self.check_kernel_marker(f, owner_type);
     }
 
     /// D-ANY-JAI1 (c7jaiany): validate that a trait-bounded variadic parameter
@@ -1327,6 +1331,7 @@ pub(crate) fn synthesize_delegation_method(
         must_use_span: None,
         maturity: None,
         maturity_span: None,
+        kernel: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,
@@ -1403,6 +1408,7 @@ pub(crate) fn synthesize_default_method(
         must_use_span: None,
         maturity: None,
         maturity_span: None,
+        kernel: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,

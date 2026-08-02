@@ -345,6 +345,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "remote",
+        summary: "Manage host-owned remote builders",
+        headline: false,
+    },
+    CommandSpec {
         name: "push",
         summary: "Deploy one or more Jetos machines",
         headline: false,
@@ -601,6 +606,7 @@ pub const FLAGS: &[FlagSpec] = &[
     // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
     FlagSpec { long: "--release", help: "with build/run: optimize for release" },
     FlagSpec { long: "--profile", help: "with build/run: use --profile=<name>" },
+    FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
     FlagSpec { long: "--scope", help: "with trust grant: choose user or repository scope" },
@@ -645,7 +651,8 @@ pub fn is_builtin(name: &str) -> bool {
 pub fn owns_flag_vocabulary(name: &str) -> bool {
     matches!(
         name,
-        "env"
+            "env"
+            | "remote"
             | "dev"
             | "devtools"
             | "serve"

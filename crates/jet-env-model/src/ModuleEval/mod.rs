@@ -19,6 +19,7 @@
 //! bodies meaning.
 
 mod DevService;
+mod Computed;
 mod Diagnostics;
 mod Environment;
 mod Eval;

@@ -3718,13 +3718,17 @@ provenance after the complete runtime bundle is checked.
 The remote cache/execution seam is transport-only. Cache reads, writes, and
 remote execution require an explicit policy grant plus a complete sandbox
 proof whose action key, toolchain digest, output paths, and provenance are
-checked for parity. A missing worker or remote record is a miss/error; Jet
-never falls back to ambient local execution under the remote surface. The host
-must supply an explicit `RemoteBuildBinding` with a previously authorized
-builder, absolute transport root, credential, trust domain, grants, and
-timeout; source text, CLI flags, and environment variables cannot create an
-endpoint or trust root. Request, result, cache-record, and CAS-blob envelopes
-use authenticated HMAC-SHA256 transport records. Input/output blobs must exist
+checked for parity. A proof also binds the authorized builder, trust domain,
+worker identity, platform, ABI, and credential-bound worker receipt. A missing
+worker or remote record is an error; `fallback_local` is an explicit host
+binding choice that resumes the same sandboxed local executor after a remote
+failure. Timeouts write an authenticated cancellation tombstone; late worker
+results are rejected and cannot become cache records. The host creates and
+removes bindings with `jet remote bind`, `jet remote list`, and `jet remote
+remove`; `jet build --builder <name>` selects one. Source text, ordinary CLI
+flags, and environment variables cannot create an endpoint, credential, or
+trust root. Request, result, cache-record, and CAS-blob envelopes use
+authenticated HMAC-SHA256 transport records. Input/output blobs must exist
 before a request/result or cache record is published, and a new submission
 removes any older result for the same action key before a worker can answer.
 
@@ -3739,11 +3743,13 @@ bounded too, and both the compiler loader and the production `jetpack` host
 reject symlinks and non-regular package files.
 
 Legacy CMake, Make, Gradle, npm, and Cargo support remains an explicit Tier-2
-wrapper. `LegacyWrapperSpec::from_project_file` imports only the wrapper's
-canonical root file, records it as a typed action input, rejects links and
-oversized/non-UTF-8 files, and still requires declared outputs and capabilities.
-The production build policy denies these wrappers in CI unless a stronger
-host policy explicitly replaces that default.
+wrapper. `LegacyWrapperSpec::from_project_file` parses the wrapper's canonical
+root file into the typed command, paths, capabilities, environment, cache,
+kind, pools, and provenance fields. It records the file as a typed action
+input, rejects links, oversized/non-UTF-8 files, and unsupported constructs,
+and the production `b.legacy` bridge fails if its declared graph does not
+match the import. The production build policy denies these wrappers in CI
+unless a stronger host policy explicitly replaces that default.
 
 Fleet host overrides are typed values, not deferred source snippets. Their
 fields use the same pure comptime evaluator and dependency-cycle checks as

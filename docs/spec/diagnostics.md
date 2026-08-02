@@ -640,6 +640,7 @@ renumbered, and no new `W` code may be allocated.
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
 | E1110 | sema  | `.task => …` has no lexical or parameter taskgroup handle, uses the wrong lexical handle, or lets `TaskGroup` escape (D-TASKSCOPE1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | a parallel collection adapter captures mutable state or crosses a worker boundary with a non-shareable value (D-PARCAPTURE1=D) |
+| E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | *retired for raw references by D-MEM1/S3* (`-> &T` returns remain absent; invalid named-view returns use E2305/E2307) |
@@ -995,6 +996,13 @@ CLI.
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
 | E1110 | `.task => …` has no lexical or parameter taskgroup handle, uses the wrong lexical handle, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical handle or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Use the active `g.task => …`, or pass that handle directly to `fn helper(group: TaskGroup)`; do not store or capture it. |
 | E1111 | A `para_*` callback changes captured state, hides capture facts, or its items, captures, or results cannot safely cross worker boundaries. | Parallel workers run without a hidden shared-mutation or merge rule; their callbacks, inputs, and outputs must expose thread-safe owned values. | Write the callback inline or use a top-level function; return extra data, use `para_partition`/`para_fold`, copy into plain owned data, or keep the operation sequential. |
+
+### E1130 — safe kernel proof (D-COMPUTE-KERNEL-SURFACE1=B)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Kernel(.parallel)` cannot prove `{obligation}` ``. | A safe kernel must carry sema facts for bounds, aliasing, captures, races, barrier uniformity, and control flow before TIR. The shipped subset is read-only, effect-free, straight-line code over checked Core compute operations. | Keep parameters read-only, remove effects/provider calls, and use the checked expression subset; put raw device code behind its typed `#Unsafe("reason")` boundary. |
+| a function has more than one `#Kernel` marker. | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |

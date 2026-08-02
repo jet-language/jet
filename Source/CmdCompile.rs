@@ -190,6 +190,7 @@ pub(crate) fn run_compile_cmd(
     freestanding: bool,
     allow_impure: bool,
     build_grants: &[String],
+    remote_builder: Option<&str>,
     locked: bool,
     cross_target: Option<&str>,
     explain_partition: bool,
@@ -225,6 +226,18 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USER_ERROR);
         }
     };
+
+    if remote_builder.is_some() && cmd != "build" {
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            "E2102",
+            "`--builder` is only valid with `jet build`".to_string(),
+            "remote execution is selected at the programmable build boundary".to_string(),
+            "run `jet build --builder=<name> <file.jet>`".to_string(),
+            None,
+        );
+        report_problems(mode, file, &src, &[diagnostic]);
+        exit(ExitCodes::USAGE);
+    }
 
     if cmd == "check" {
         let all_diags = jet::check_with_path(file);
@@ -382,7 +395,7 @@ pub(crate) fn run_compile_cmd(
             cross_target,
         )
     } else if cmd == "build" && emit_generated {
-        jet::compile_programmable_build_emit_generated_opts(
+        jet::compile_programmable_build_emit_generated_opts_with_builder(
             file,
             build_grants,
             freestanding,
@@ -391,9 +404,10 @@ pub(crate) fn run_compile_cmd(
             is_web,
             is_plugin,
             cross_target,
+            remote_builder,
         )
     } else if cmd == "build" {
-        jet::compile_programmable_build_opts(
+        jet::compile_programmable_build_opts_with_builder(
             file,
             build_grants,
             freestanding,
@@ -402,6 +416,7 @@ pub(crate) fn run_compile_cmd(
             is_web,
             is_plugin,
             cross_target,
+            remote_builder,
         )
     } else if is_web {
         jet::compile_web(file)
