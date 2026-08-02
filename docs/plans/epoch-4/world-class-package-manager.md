@@ -351,30 +351,40 @@ live acceptance, and documentation. Work order is binding.
   applies resolved-symbol Clippy denials for host processes, TCP/UDP, Unix and
   Windows local sockets, and DNS; alias-based `extern crate std` escapes must
   fail that lane. Native linking and dynamic loading require forbidden unsafe
-  code or a denied dependency. Filesystem and time authority are not claimed
-  absent: later evaluator slices must introduce them through explicit
-  capability stages. Jetpack's integration remains private, exposes no
+  code or a denied dependency. Filesystem authority is limited to the explicit
+  project-root import capability below; time authority remains outside this
+  stage. Jetpack's integration remains private, exposes no
   evaluation entry point, and partial-stage permits are minted inside seam
   tests only.
-- Lazy thunks, attrsets, functions, string contexts, path values, import,
-  derivation primitive, required builtins, flake inputs/locks/registries.
+- Lazy thunks, attrsets, functions, string contexts, bounded project-relative
+  path values, and read-only imports are now shipped in the native evaluator.
+  Imports receive an explicit private project-root capability from Jetpack;
+  absolute paths, URI paths, escapes, symlink escapes, missing files, cycles,
+  and over-budget sources fail closed. Windows has no pathname-based import
+  fallback; imports remain unsupported there until handle-relative authority
+  is available. Derivation primitives, broader required
+  builtins, and flake input/lock/registry evaluation remain on their own cards.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,
   native-code/plugin rejection, evaluator resource limits, and ballot-selected
-  IFD behavior.
+  IFD behavior remain enforced. String contexts retain package/path provenance
+  internally and never become executable shell behavior.
 - No raw evaluator trace reaches users.
 - The bounded devShell projection is now a product path under
   D-JPK-NIXPRODUCT1=A. It returns typed package facts, preserves unsupported
-  hooks as explicit loss records, evaluates only bounded pure lazy expressions,
-  records the native evaluator identity in `.jet/lock`, and grants no path,
-  process, network, import, or derivation authority. Other evaluator stages
-  remain private until their own differential proof lands.
+  hooks as explicit loss records, evaluates only bounded pure lazy expressions
+  plus explicitly authorized project imports, records the native evaluator
+  identity in `.jet/lock`, and grants no process, network, or derivation
+  authority. Other evaluator stages remain private until their own differential
+  proof lands.
 - `tests/fixtures/nix-compat/stage-a.json` records the pinned literal,
   lazy-binding, function, and attrset projections, native rejection,
   normalized lock, and four output identities. Real nixpkgs derivation
   bit-match remains the later differential-proof slice.
   Regenerate and verify it with the exact oracle executable:
   `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
-  scripts/agent/verify-nix-eval-fixture.js`.
+  scripts/agent/verify-nix-eval-fixture.js`. The authority corpus is checked
+  with `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
+  scripts/agent/verify-nix-eval-authority-fixture.js`.
 
 ### E4-JP10 — Nix evaluator breadth and performance
 

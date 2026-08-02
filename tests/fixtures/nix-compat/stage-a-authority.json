@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "values": [
+    {
+      "name": "relative_import_and_string_context_projection",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }",
+      "files": {
+        "sub/shell.nix": "{ pkgs }: { packages = [ \"${pkgs.fd}\" ]; buildInputs = import ../inputs.nix pkgs; shellHook = \"echo ${pkgs.ripgrep}\"; }",
+        "inputs.nix": "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
+      },
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = [ \"${pkgs.fd}\" ]; buildInputs = import ./inputs.nix pkgs; shellHook = \"echo ${pkgs.ripgrep}\"; }",
+      "nix_value": {
+        "buildInputs": ["ripgrep"],
+        "packages": ["fd"],
+        "shellHook": "echo ripgrep"
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
+    }
+  ]
+}

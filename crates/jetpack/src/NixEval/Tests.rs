@@ -22,6 +22,8 @@ fn private_integration_projects_lazy_flake_without_external_nix() {
             "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = /tmp/package; }; }; }",
             "x86_64-linux",
         )
-        .expect_err("private production boundary must reject path authority");
-    assert!(error.to_string().contains("path values belong to the authority stage"));
+        .expect_err("private production boundary must reject ambient path authority");
+    assert!(error
+        .to_string()
+        .contains("absolute paths require explicit project-root authority"));
 }

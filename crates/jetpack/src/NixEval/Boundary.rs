@@ -7,6 +7,7 @@
 #![allow(dead_code)] // B-F consume this seam as they land; product use stays forbidden.
 
 use jet_nix_eval::{BoundaryError, DevShellEvaluation, ValidatedOracleManifest};
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub(in crate::NixEval) struct NativeBoundary {
@@ -31,6 +32,20 @@ impl NativeBoundary {
     ) -> Result<DevShellEvaluation, BoundaryError> {
         jet_nix_eval::evaluate_devshell(source, system)
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))
+    }
+
+    pub(in crate::NixEval) fn evaluate_devshell_with_import_authority(
+        &self,
+        source: &str,
+        system: &str,
+        import_authority: Option<Rc<dyn Fn(&str) -> Result<String, String>>>,
+    ) -> Result<DevShellEvaluation, BoundaryError> {
+        jet_nix_eval::evaluate_devshell_with_import_authority(
+            source,
+            system,
+            import_authority,
+        )
+        .map_err(|error| BoundaryError::Evaluation(error.to_string()))
     }
 
     pub(in crate::NixEval) fn evaluator_identity(

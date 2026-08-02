@@ -1,5 +1,7 @@
 use super::*;
 use alloc::format;
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 
@@ -8,6 +10,8 @@ const X86_64_LINUX_BUILD: &str = "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7
 const X86_64_LINUX_EXECUTABLE: &str = "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ=";
 const STAGE_A_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a.json");
+const STAGE_A_AUTHORITY_FIXTURE: &str =
+    include_str!("../../../tests/fixtures/nix-compat/stage-a-authority.json");
 
 #[test]
 fn partial_stage_authority_is_minted_inside_seam_tests() {
@@ -269,13 +273,157 @@ fn native_devshell_rejects_truncated_expressions_without_panicking() {
 }
 
 #[test]
-fn native_devshell_rejects_indented_string_interpolation() {
-    let error = evaluate_devshell(
+fn native_devshell_evaluates_indented_string_interpolation() {
+    let evaluated = evaluate_devshell(
         r#"{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }"#,
         "x86_64-linux",
     )
-    .expect_err("indented interpolation belongs to the later string stage");
-    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("string interpolation")));
+    .expect("indented string interpolation must evaluate");
+    assert_eq!(evaluated.packages(), &["fd".to_string()]);
+}
+
+#[test]
+fn native_devshell_preserves_string_contexts_during_projection() {
+    let evaluated = evaluate_devshell(
+        r#"{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ "${pkgs.fd}" (builtins.toString pkgs.ripgrep) ];
+            shellHook = "echo ${pkgs.fd}";
+          };
+        }"#,
+        "x86_64-linux",
+    )
+    .expect("bounded string contexts must evaluate");
+    assert_eq!(
+        evaluated.packages(),
+        &["fd".to_string(), "ripgrep".to_string()]
+    );
+    assert_eq!(evaluated.unsupported(), &["shellHook".to_string()]);
+}
+
+#[test]
+fn native_devshell_rejects_path_and_import_without_authority() {
+    let path_error = evaluate_devshell(
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ /tmp/package ]; }; }",
+        "x86_64-linux",
+    )
+    .expect_err("absolute paths must not gain ambient authority");
+    assert!(matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("absolute paths")));
+
+    let import_error = evaluate_devshell(
+        "{ devShells.x86_64-linux.default = import ./shell.nix; }",
+        "x86_64-linux",
+    )
+    .expect_err("imports must require explicit authority");
+    assert!(matches!(import_error, EvaluationError::Unsupported(reason) if reason.contains("explicit project-root authority")));
+}
+
+#[test]
+fn native_devshell_imports_bounded_relative_sources() {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "sub/shell.nix".to_string(),
+        "{ pkgs }: pkgs.mkShell { packages = [ \"${pkgs.fd}\" ]; buildInputs = import ../inputs.nix pkgs; }".to_string(),
+    );
+    files.insert(
+        "inputs.nix".to_string(),
+        "pkgs: [ (builtins.toString pkgs.ripgrep) ]".to_string(),
+    );
+    let authority = Rc::new(move |path: &str| {
+        files
+            .get(path)
+            .cloned()
+            .ok_or_else(|| format!("missing test import `{path}`"))
+    });
+    let evaluated = evaluate_devshell_with_import_authority(
+        "{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }",
+        "x86_64-linux",
+        Some(authority),
+    )
+    .expect("authorized relative imports must evaluate");
+    assert_eq!(
+        evaluated.packages(),
+        &["fd".to_string(), "ripgrep".to_string()]
+    );
+}
+
+#[test]
+fn native_devshell_does_not_coerce_path_contexts_into_packages() {
+    let authority = Rc::new(|_: &str| Ok("pkgs.fd".to_string()));
+    let error = evaluate_devshell_with_import_authority(
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ \"${./package}\" ]; }; }",
+        "x86_64-linux",
+        Some(authority),
+    )
+    .expect_err("path string contexts must not become package names");
+    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("path string contexts")));
+}
+
+#[test]
+fn native_devshell_import_authority_rejects_escape_and_cycles() {
+    let escape_authority = Rc::new(|path: &str| Ok(format!("{path}: not used")));
+    let escape = evaluate_devshell_with_import_authority(
+        "{ devShells.x86_64-linux.default = import ../outside.nix; }",
+        "x86_64-linux",
+        Some(escape_authority),
+    )
+    .expect_err("parent imports must not escape the project root");
+    assert!(matches!(escape, EvaluationError::Unsupported(reason) if reason.contains("escapes")));
+
+    let cycle_authority = Rc::new(|path: &str| {
+        Ok(match path {
+            "a.nix" => "import ./a.nix".to_string(),
+            _ => "pkgs.fd".to_string(),
+        })
+    });
+    let cycle = evaluate_devshell_with_import_authority(
+        "{ devShells.x86_64-linux.default = import ./a.nix; }",
+        "x86_64-linux",
+        Some(cycle_authority),
+    )
+    .expect_err("cyclic imports must fail closed");
+    assert!(matches!(cycle, EvaluationError::Invalid(reason) if reason.contains("cyclic")));
+}
+
+#[test]
+fn stage_a_authority_fixture_matches_native_projection() {
+    let fixture = JSON::parse(STAGE_A_AUTHORITY_FIXTURE).expect("authority fixture must parse");
+    let root = fixture.as_object().expect("authority fixture root");
+    let values = root
+        .get("values")
+        .expect("authority fixture values")
+        .as_array()
+        .expect("authority fixture values array");
+    for value in values {
+        let value = value.as_object().expect("authority value object");
+        let source = value.get("source").unwrap().as_str().unwrap();
+        let system = value.get("system").unwrap().as_str().unwrap();
+        let files = value.get("files").unwrap().as_object().unwrap();
+        let mut imports = BTreeMap::new();
+        for (path, source) in files {
+            imports.insert(path.clone(), source.as_str().unwrap().to_string());
+        }
+        let authority = Rc::new(move |path: &str| {
+            imports
+                .get(path)
+                .cloned()
+                .ok_or_else(|| format!("fixture has no `{path}`"))
+        });
+        let evaluated = evaluate_devshell_with_import_authority(
+            source,
+            system,
+            Some(authority),
+        )
+        .expect("authority fixture source must evaluate");
+        assert_eq!(
+            evaluated.packages(),
+            &fixture_strings(value.get("jet_packages").unwrap())
+        );
+        assert_eq!(
+            evaluated.unsupported(),
+            &fixture_strings(value.get("jet_unsupported").unwrap())
+        );
+    }
 }
 
 #[test]

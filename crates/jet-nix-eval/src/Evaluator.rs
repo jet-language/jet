@@ -5,6 +5,7 @@ use alloc::format;
 use alloc::rc::{Rc, Weak};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use alloc::vec;
 use core::cell::{Cell, RefCell};
 use core::fmt;
 use core::mem;
@@ -13,6 +14,10 @@ const MAX_TOKENS: usize = 65_536;
 const MAX_EVAL_DEPTH: usize = 256;
 const MAX_DEV_SHELL_PACKAGES: usize = 256;
 const MAX_PACKAGE_NAME_BYTES: usize = 128;
+const MAX_IMPORTS: usize = 64;
+const MAX_PATH_BYTES: usize = 4_096;
+const MAX_STRING_PARTS: usize = 256;
+const MAX_STRING_BYTES: usize = 1 << 20;
 
 #[derive(Debug, Clone)]
 enum Error {
@@ -55,7 +60,7 @@ impl fmt::Display for Error {
             Self::Type { expected, actual } => {
                 write!(output, "expected {expected} in foreign flake, got {actual}")
             }
-            Self::Cycle => write!(output, "cyclic foreign flake thunk"),
+            Self::Cycle => write!(output, "cyclic foreign flake evaluation"),
         }
     }
 }
@@ -63,6 +68,8 @@ impl fmt::Display for Error {
 #[derive(Clone)]
 enum Expr {
     String(String),
+    StringContext(Vec<StringPart>),
+    Path(String),
     Integer(i64),
     Bool(bool),
     Null,
@@ -80,6 +87,18 @@ enum Expr {
 }
 
 #[derive(Clone)]
+enum StringPart {
+    Literal(String),
+    Expression(Box<Expr>),
+}
+
+#[derive(Clone)]
+enum StringTokenPart {
+    Literal(String),
+    Expression(String),
+}
+
+#[derive(Clone)]
 enum Pattern {
     Name(String),
     Attrs(Vec<(String, Option<Expr>)>),
@@ -89,6 +108,8 @@ enum Pattern {
 enum Token {
     Identifier(String),
     String(String),
+    StringContext(Vec<StringTokenPart>),
+    Path(String),
     Integer(i64),
     LeftBrace,
     RightBrace,
@@ -234,11 +255,7 @@ impl<'a> Lexer<'a> {
                 self.position += 2;
                 Token::Merge
             }
-            b'/' => {
-                return Err(Error::Unsupported(
-                    "path values belong to the authority stage".into(),
-                ));
-            }
+            b'/' => Token::Path(self.path()?),
             b':' => {
                 self.position += 1;
                 Token::Colon
@@ -253,6 +270,12 @@ impl<'a> Lexer<'a> {
                 self.position += 3;
                 Token::Ellipsis
             }
+            b'.' if self.source.as_bytes().get(self.position + 1) == Some(&b'/')
+                || (self.source.as_bytes().get(self.position + 1) == Some(&b'.')
+                    && self.source.as_bytes().get(self.position + 2) == Some(&b'/')) =>
+            {
+                Token::Path(self.path()?)
+            }
             b'.' => {
                 self.position += 1;
                 Token::Dot
@@ -265,9 +288,9 @@ impl<'a> Lexer<'a> {
                 self.position += 1;
                 Token::Question
             }
-            b'"' => Token::String(self.string()?),
+            b'"' => self.string()?,
             b'\'' if self.source.as_bytes().get(self.position + 1) == Some(&b'\'') => {
-                Token::String(self.indented_string()?)
+                self.indented_string()?
             }
             b'-' if self
                 .source
@@ -288,14 +311,23 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    fn string(&mut self) -> Result<String, Error> {
+    fn string(&mut self) -> Result<Token, Error> {
         self.position += 1;
-        let mut value = String::new();
+        let mut literal = String::new();
+        let mut parts: Option<Vec<StringTokenPart>> = None;
         while self.position < self.source.len() {
             let byte = self.source.as_bytes()[self.position];
             if byte == b'"' {
                 self.position += 1;
-                return Ok(value);
+                return Ok(match parts {
+                    None => Token::String(literal),
+                    Some(mut parts) => {
+                        if !literal.is_empty() {
+                            parts.push(StringTokenPart::Literal(literal));
+                        }
+                        Token::StringContext(parts)
+                    }
+                });
             }
             if byte == b'\\' {
                 self.position += 1;
@@ -309,26 +341,35 @@ impl<'a> Lexer<'a> {
                     Some(b'$') => '$',
                     _ => return Err(Error::Syntax("invalid string escape".into())),
                 };
-                value.push(character);
+                literal.push(character);
                 self.position += 1;
                 continue;
             }
             if byte == b'$' && self.source.as_bytes().get(self.position + 1) == Some(&b'{') {
-                return Err(Error::Unsupported(
-                    "string interpolation belongs to the string-context stage".into(),
-                ));
+                let parts = parts.get_or_insert_with(Vec::new);
+                if !literal.is_empty() {
+                    parts.push(StringTokenPart::Literal(mem::take(&mut literal)));
+                }
+                self.position += 2;
+                parts.push(StringTokenPart::Expression(self.interpolation()?));
+                if parts.len() > MAX_STRING_PARTS {
+                    return Err(Error::ResourceLimit(format!(
+                        "foreign flake string has more than {MAX_STRING_PARTS} parts"
+                    )));
+                }
+                continue;
             }
             let character = self.source[self.position..]
                 .chars()
                 .next()
                 .ok_or_else(|| Error::Syntax("invalid UTF-8 string".into()))?;
-            value.push(character);
+            literal.push(character);
             self.position += character.len_utf8();
         }
         Err(Error::Syntax("unterminated string".into()))
     }
 
-    fn indented_string(&mut self) -> Result<String, Error> {
+    fn indented_string(&mut self) -> Result<Token, Error> {
         self.position += 2;
         let start = self.position;
         while self.position + 1 < self.source.len()
@@ -341,13 +382,36 @@ impl<'a> Lexer<'a> {
             return Err(Error::Syntax("unterminated indented string".into()));
         }
         let value = self.source[start..self.position].to_string();
-        if value.contains("${") {
+        self.position += 2;
+        let parts = interpolated_parts(&value)?;
+        Ok(match parts {
+            None => Token::String(value),
+            Some(parts) => Token::StringContext(parts),
+        })
+    }
+
+    fn interpolation(&mut self) -> Result<String, Error> {
+        capture_interpolation(self.source, &mut self.position)
+    }
+
+    fn path(&mut self) -> Result<String, Error> {
+        let start = self.position;
+        while let Some(byte) = self.source.as_bytes().get(self.position).copied() {
+            if byte.is_ascii_whitespace() || matches!(byte, b';' | b',' | b'}' | b']' | b')') {
+                break;
+            }
+            self.position += 1;
+        }
+        let path = self.source[start..self.position].to_string();
+        if path.is_empty() {
+            return Err(Error::Syntax("path value requires a path".into()));
+        }
+        if path.contains("${") {
             return Err(Error::Unsupported(
-                "string interpolation belongs to the string-context stage".into(),
+                "path interpolation is not supported in the bounded evaluator".into(),
             ));
         }
-        self.position += 2;
-        Ok(value)
+        Ok(path)
     }
 
     fn integer(&mut self) -> Result<i64, Error> {
@@ -381,6 +445,154 @@ impl<'a> Lexer<'a> {
         }
         self.source[start..self.position].to_string()
     }
+}
+
+fn interpolated_parts(source: &str) -> Result<Option<Vec<StringTokenPart>>, Error> {
+    let mut position = 0;
+    let mut literal = String::new();
+    let mut parts = None;
+    while position < source.len() {
+        if source.as_bytes()[position] == b'$'
+            && source.as_bytes().get(position + 1) == Some(&b'{')
+        {
+            let parts = parts.get_or_insert_with(Vec::new);
+            if !literal.is_empty() {
+                parts.push(StringTokenPart::Literal(mem::take(&mut literal)));
+            }
+            position += 2;
+            parts.push(StringTokenPart::Expression(capture_interpolation(
+                source,
+                &mut position,
+            )?));
+            if parts.len() > MAX_STRING_PARTS {
+                return Err(Error::ResourceLimit(format!(
+                    "foreign flake string has more than {MAX_STRING_PARTS} parts"
+                )));
+            }
+            continue;
+        }
+        let character = source[position..]
+            .chars()
+            .next()
+            .ok_or_else(|| Error::Syntax("invalid UTF-8 string".into()))?;
+        literal.push(character);
+        position += character.len_utf8();
+    }
+    if let Some(mut parts) = parts {
+        if !literal.is_empty() {
+            parts.push(StringTokenPart::Literal(literal));
+        }
+        Ok(Some(parts))
+    } else {
+        Ok(None)
+    }
+}
+
+fn capture_interpolation(source: &str, position: &mut usize) -> Result<String, Error> {
+    let start = *position;
+    let mut braces = 0usize;
+    let mut parentheses = 0usize;
+    let mut brackets = 0usize;
+    while *position < source.len() {
+        let byte = source.as_bytes()[*position];
+        match byte {
+            b'"' => skip_double_string(source, position)?,
+            b'\'' if source.as_bytes().get(*position + 1) == Some(&b'\'') => {
+                skip_indented_string(source, position)?;
+            }
+            b'{' => {
+                braces += 1;
+                *position += 1;
+            }
+            b'}' if braces == 0 && parentheses == 0 && brackets == 0 => {
+                let expression = source[start..*position].to_string();
+                *position += 1;
+                return Ok(expression);
+            }
+            b'}' => {
+                if braces == 0 {
+                    return Err(Error::Syntax("unbalanced interpolation expression".into()));
+                }
+                braces -= 1;
+                *position += 1;
+            }
+            b'(' => {
+                parentheses += 1;
+                *position += 1;
+            }
+            b')' => {
+                if parentheses == 0 {
+                    return Err(Error::Syntax("unbalanced interpolation expression".into()));
+                }
+                parentheses -= 1;
+                *position += 1;
+            }
+            b'[' => {
+                brackets += 1;
+                *position += 1;
+            }
+            b']' => {
+                if brackets == 0 {
+                    return Err(Error::Syntax("unbalanced interpolation expression".into()));
+                }
+                brackets -= 1;
+                *position += 1;
+            }
+            _ => {
+                *position += source[*position..]
+                    .chars()
+                    .next()
+                    .ok_or_else(|| Error::Syntax("invalid UTF-8 interpolation".into()))?
+                    .len_utf8();
+            }
+        }
+    }
+    Err(Error::Syntax("unterminated string interpolation".into()))
+}
+
+fn skip_double_string(source: &str, position: &mut usize) -> Result<(), Error> {
+    *position += 1;
+    while *position < source.len() {
+        match source.as_bytes()[*position] {
+            b'\\' => {
+                *position += 1;
+                if *position >= source.len() {
+                    return Err(Error::Syntax("unterminated string escape".into()));
+                }
+                *position += 1;
+            }
+            b'"' => {
+                *position += 1;
+                return Ok(());
+            }
+            _ => *position += next_char_len(source, *position)?,
+        }
+    }
+    Err(Error::Syntax("unterminated string interpolation expression".into()))
+}
+
+fn skip_indented_string(source: &str, position: &mut usize) -> Result<(), Error> {
+    *position += 2;
+    while *position + 1 < source.len() {
+        if source.as_bytes()[*position] == b'\''
+            && source.as_bytes()[*position + 1] == b'\''
+        {
+            *position += 2;
+            return Ok(());
+        }
+        *position += next_char_len(source, *position)?;
+    }
+    Err(Error::Syntax(
+        "unterminated indented string interpolation expression".into(),
+    ))
+}
+
+fn next_char_len(source: &str, position: usize) -> Result<usize, Error> {
+    source[position..]
+        .chars()
+        .next()
+        .map(char::len_utf8)
+        .ok_or_else(|| Error::Syntax("invalid UTF-8 interpolation".into()))
 }
 
 struct Parser {
@@ -503,6 +715,8 @@ impl Parser {
     fn atom(&mut self) -> Result<Expr, Error> {
         match self.bump() {
             Token::String(value) => Ok(Expr::String(value)),
+            Token::StringContext(parts) => self.string_context(parts),
+            Token::Path(value) => Ok(Expr::Path(value)),
             Token::Integer(value) => Ok(Expr::Integer(value)),
             Token::Identifier(_name) if _name == "true" => Ok(Expr::Bool(true)),
             Token::Identifier(_name) if _name == "false" => Ok(Expr::Bool(false)),
@@ -520,6 +734,23 @@ impl Parser {
             }
             token => Err(Error::Syntax(format!("unexpected token {}", token_name(&token)))),
         }
+    }
+
+    fn string_context(&self, parts: Vec<StringTokenPart>) -> Result<Expr, Error> {
+        let mut expressions = Vec::with_capacity(parts.len());
+        for part in parts {
+            match part {
+                StringTokenPart::Literal(value) => {
+                    expressions.push(StringPart::Literal(value));
+                }
+                StringTokenPart::Expression(source) => {
+                    let tokens = Lexer::new(&source).tokenize()?;
+                    let expression = Parser::new(tokens).parse()?;
+                    expressions.push(StringPart::Expression(Box::new(expression)));
+                }
+            }
+        }
+        Ok(Expr::StringContext(expressions))
     }
 
     fn attrset(&mut self) -> Result<Expr, Error> {
@@ -612,7 +843,12 @@ impl Parser {
     fn starts_application(&self) -> bool {
         match self.peek() {
             Token::Identifier(name) => !matches!(name.as_str(), "in" | "then" | "else"),
-            Token::String(_) | Token::Integer(_) | Token::LeftBrace | Token::LeftBracket => true,
+            Token::String(_)
+            | Token::StringContext(_)
+            | Token::Path(_)
+            | Token::Integer(_)
+            | Token::LeftBrace
+            | Token::LeftBracket => true,
             Token::LeftParen => true,
             _ => false,
         }
@@ -670,6 +906,8 @@ fn token_name(token: &Token) -> &'static str {
     match token {
         Token::Identifier(_) => "identifier",
         Token::String(_) => "string",
+        Token::StringContext(_) => "string",
+        Token::Path(_) => "path",
         Token::Integer(_) => "integer",
         Token::LeftBrace => "`{`",
         Token::RightBrace => "`}`",
@@ -761,12 +999,22 @@ type Environment = Rc<RefCell<EnvironmentFrame>>;
 
 struct EvaluationArena {
     environments: RefCell<Vec<Environment>>,
+    system: String,
+    import_authority: Option<Rc<ImportAuthority>>,
+    imports: Cell<usize>,
+    active_imports: RefCell<Vec<String>>,
 }
 
+type ImportAuthority = dyn Fn(&str) -> Result<String, String>;
+
 impl EvaluationArena {
-    fn new() -> Rc<Self> {
+    fn new(system: &str, import_authority: Option<Rc<ImportAuthority>>) -> Rc<Self> {
         Rc::new(Self {
             environments: RefCell::new(Vec::new()),
+            system: system.to_string(),
+            import_authority,
+            imports: Cell::new(0),
+            active_imports: RefCell::new(Vec::new()),
         })
     }
 
@@ -781,16 +1029,18 @@ struct EnvironmentFrame {
     scopes: Vec<Thunk>,
     fuel: Rc<Cell<usize>>,
     arena: Weak<EvaluationArena>,
+    base_path: String,
 }
 
 impl EnvironmentFrame {
-    fn root(arena: &Rc<EvaluationArena>, system: &str) -> Environment {
+    fn root(arena: &Rc<EvaluationArena>, base_path: &str) -> Environment {
         let environment = Rc::new(RefCell::new(Self {
             parent: None,
             bindings: BTreeMap::new(),
             scopes: Vec::new(),
             fuel: Rc::new(Cell::new(0)),
             arena: Rc::downgrade(arena),
+            base_path: base_path.to_string(),
         }));
         arena.register(environment.clone());
         {
@@ -805,7 +1055,7 @@ impl EnvironmentFrame {
             );
             let _ = frame.bindings.insert(
                 "system".into(),
-                Thunk::value(Value::String(system.to_string())),
+                Thunk::value(Value::String(arena.system.clone())),
             );
             let _ = frame.bindings.insert(
                 "builtins".into(),
@@ -815,17 +1065,21 @@ impl EnvironmentFrame {
                 "mkShell".into(),
                 Thunk::value(Value::Native(NativeFunction::MkShell)),
             );
+            let _ = frame.bindings.insert(
+                "import".into(),
+                Thunk::value(Value::Native(NativeFunction::Import)),
+            );
         }
         environment
     }
 
     fn child(parent: &Environment) -> Result<Environment, Error> {
-        let (fuel, arena) = {
+        let (fuel, arena, base_path) = {
             let parent = parent.borrow();
             let Some(arena) = parent.arena.upgrade() else {
                 return Err(Error::Invalid("foreign flake evaluation arena expired".into()));
             };
-            (parent.fuel.clone(), arena)
+            (parent.fuel.clone(), arena, parent.base_path.clone())
         };
         let environment = Rc::new(RefCell::new(Self {
             parent: Some(parent.clone()),
@@ -833,6 +1087,7 @@ impl EnvironmentFrame {
             scopes: Vec::new(),
             fuel,
             arena: Rc::downgrade(&arena),
+            base_path,
         }));
         arena.register(environment.clone());
         Ok(environment)
@@ -845,6 +1100,8 @@ enum Value {
     Bool(bool),
     Integer(i64),
     String(String),
+    StringContext { value: String, contexts: Vec<String> },
+    Path(String),
     Package(String),
     PackageNamespace(String),
     BuiltinsNamespace,
@@ -865,16 +1122,20 @@ struct FunctionValue {
 #[derive(Clone)]
 enum NativeFunction {
     MkShell,
+    Import,
+    ToString,
+    HasContext,
 }
 
 pub(super) fn evaluate_devshell(
     source: &str,
     system: &str,
+    import_authority: Option<Rc<ImportAuthority>>,
 ) -> Result<DevShellEvaluation, EvaluationError> {
     let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
     let expression = Parser::new(tokens).parse().map_err(Error::public)?;
-    let arena = EvaluationArena::new();
-    let environment = EnvironmentFrame::root(&arena, system);
+    let arena = EvaluationArena::new(system, import_authority);
+    let environment = EnvironmentFrame::root(&arena, "");
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
     let shell = resolve_shell(root.clone(), system, &arena).map_err(Error::public)?;
     project_shell(shell, system).map_err(Error::public)
@@ -901,6 +1162,17 @@ fn evaluate_expr(
     }
     match expression {
         Expr::String(value) => Ok(Value::String(value.clone())),
+        Expr::StringContext(parts) => evaluate_string_context(parts, environment, depth, arena),
+        Expr::Path(raw) => {
+            let base_path = environment.borrow().base_path.clone();
+            let path = resolve_path_literal(raw, &base_path)?;
+            if arena.import_authority.is_none() {
+                return Err(Error::Unsupported(
+                    "path values require explicit project-root authority".into(),
+                ));
+            }
+            Ok(Value::Path(path))
+        }
         Expr::Integer(value) => Ok(Value::Integer(*value)),
         Expr::Bool(value) => Ok(Value::Bool(*value)),
         Expr::Null => Ok(Value::Null),
@@ -985,6 +1257,154 @@ fn evaluate_expr(
     }
 }
 
+fn evaluate_string_context(
+    parts: &[StringPart],
+    environment: &Environment,
+    depth: usize,
+    arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    let mut value = String::new();
+    let mut contexts = Vec::new();
+    for part in parts {
+        let (text, part_contexts) = match part {
+            StringPart::Literal(text) => (text.clone(), Vec::new()),
+            StringPart::Expression(expression) => {
+                let value = evaluate_expr(expression, environment, depth + 1, arena)?;
+                stringify_value(&value)?
+            }
+        };
+        if value.len() + text.len() > MAX_STRING_BYTES {
+            return Err(Error::ResourceLimit(format!(
+                "foreign flake string exceeds {MAX_STRING_BYTES} bytes"
+            )));
+        }
+        value.push_str(&text);
+        for context in part_contexts {
+            if !contexts.iter().any(|existing| existing == &context) {
+                contexts.push(context);
+            }
+        }
+    }
+    if contexts.is_empty() {
+        Ok(Value::String(value))
+    } else {
+        Ok(Value::StringContext { value, contexts })
+    }
+}
+
+fn stringify_value(value: &Value) -> Result<(String, Vec<String>), Error> {
+    match value {
+        Value::String(value) => Ok((value.clone(), Vec::new())),
+        Value::StringContext { value, contexts } => Ok((value.clone(), contexts.clone())),
+        Value::Integer(value) => Ok((value.to_string(), Vec::new())),
+        Value::Package(name) => Ok((name.clone(), vec![format!("package:{name}")])),
+        Value::Path(path) => Ok((path.clone(), vec![format!("path:{path}")])),
+        value => Err(Error::Unsupported(format!(
+            "value of type {} cannot be coerced to a string",
+            value_name(value)
+        ))),
+    }
+}
+
+fn resolve_path_literal(raw: &str, base: &str) -> Result<String, Error> {
+    if raw.len() > MAX_PATH_BYTES {
+        return Err(Error::ResourceLimit(format!(
+            "foreign flake path exceeds {MAX_PATH_BYTES} bytes"
+        )));
+    }
+    if raw.starts_with('/') {
+        return Err(Error::Unsupported(
+            "absolute paths require explicit project-root authority".into(),
+        ));
+    }
+    if raw.contains('\\') || raw.contains('\0') {
+        return Err(Error::Unsupported(
+            "path values must use bounded relative UTF-8 paths".into(),
+        ));
+    }
+    if raw.contains(':') {
+        return Err(Error::Unsupported(
+            "URI paths require explicit fetch authority".into(),
+        ));
+    }
+
+    let mut components = base
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for component in raw.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err(Error::Unsupported(
+                        "path escapes the flake project-root authority".into(),
+                    ));
+                }
+            }
+            component if component.contains('\0') => {
+                return Err(Error::Unsupported("path contains NUL".into()));
+            }
+            component => components.push(component.to_string()),
+        }
+    }
+    if components.is_empty() {
+        return Err(Error::Invalid("path value names the flake root directory".into()));
+    }
+    let path = components.join("/");
+    if path.len() > MAX_PATH_BYTES {
+        return Err(Error::ResourceLimit(format!(
+            "foreign flake path exceeds {MAX_PATH_BYTES} bytes"
+        )));
+    }
+    Ok(path)
+}
+
+fn imported_parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(parent, _)| parent)
+}
+
+fn evaluate_import(path: &str, arena: &Rc<EvaluationArena>) -> Result<Value, Error> {
+    let Some(authority) = arena.import_authority.clone() else {
+        return Err(Error::Unsupported(
+            "import requires explicit project-root authority".into(),
+        ));
+    };
+    let imports = arena.imports.get();
+    if imports >= MAX_IMPORTS {
+        return Err(Error::ResourceLimit(format!(
+            "foreign flake imports exceed {MAX_IMPORTS} files"
+        )));
+    }
+    if arena
+        .active_imports
+        .borrow()
+        .iter()
+        .any(|active| active == path)
+    {
+        return Err(Error::Cycle);
+    }
+    arena.imports.set(imports + 1);
+    arena.active_imports.borrow_mut().push(path.to_string());
+    let result = (|| {
+        let source = authority(path).map_err(|reason| {
+            Error::Invalid(format!("could not import `{path}`: {reason}"))
+        })?;
+        if source.len() > MAX_STRING_BYTES {
+            return Err(Error::ResourceLimit(format!(
+                "imported `{path}` exceeds {MAX_STRING_BYTES} bytes"
+            )));
+        }
+        let tokens = Lexer::new(&source).tokenize()?;
+        let expression = Parser::new(tokens).parse()?;
+        let environment = EnvironmentFrame::root(arena, imported_parent(path));
+        evaluate_expr(&expression, &environment, 0, arena)
+    })();
+    arena.active_imports.borrow_mut().pop();
+    result
+}
+
 fn resolve_shell(
     root: Value,
     system: &str,
@@ -1057,6 +1477,14 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
             let item = item.force()?;
             let name = match item {
                 Value::Package(name) | Value::String(name) => package_name(&name)?,
+                Value::StringContext { value, contexts } => {
+                    if contexts.iter().any(|context| context.starts_with("path:")) {
+                        return Err(Error::Unsupported(
+                            "path string contexts are not devShell packages".into(),
+                        ));
+                    }
+                    package_name(&value)?
+                }
                 value => {
                     return Err(Error::Unsupported(format!(
                         "package expression has type {}",
@@ -1074,7 +1502,8 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
     if let Some(hook) = try_select(shell, "shellHook")? {
         match hook.force()? {
             Value::String(value) if value.trim().is_empty() => {}
-            Value::String(_) | Value::Integer(_) | Value::Bool(_) | Value::Null => {
+            Value::StringContext { value, .. } if value.trim().is_empty() => {}
+            Value::String(_) | Value::StringContext { .. } | Value::Integer(_) | Value::Bool(_) | Value::Null => {
                 unsupported.push("shellHook".into())
             }
             _ => unsupported.push("shellHook".into()),
@@ -1147,7 +1576,13 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
             "{prefix}.{field}"
         ))))),
         Value::LibraryNamespace => Ok(None),
-        Value::BuiltinsNamespace => Ok(None),
+        Value::BuiltinsNamespace => match field {
+            "toString" => Ok(Some(Thunk::value(Value::Native(NativeFunction::ToString)))),
+            "hasContext" => Ok(Some(Thunk::value(Value::Native(
+                NativeFunction::HasContext,
+            )))),
+            _ => Ok(None),
+        },
         value => Err(Error::Type {
             expected: "attribute set",
             actual: value_name(&value),
@@ -1218,6 +1653,30 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
                 })
             }
         }
+        Value::Native(NativeFunction::Import) => {
+            let value = argument.force()?;
+            let Value::Path(path) = value else {
+                return Err(Error::Type {
+                    expected: "path import argument",
+                    actual: value_name(&value),
+                });
+            };
+            evaluate_import(&path, arena)
+        }
+        Value::Native(NativeFunction::ToString) => {
+            let value = argument.force()?;
+            let (value, contexts) = stringify_value(&value)?;
+            if contexts.is_empty() {
+                Ok(Value::String(value))
+            } else {
+                Ok(Value::StringContext { value, contexts })
+            }
+        }
+        Value::Native(NativeFunction::HasContext) => {
+            let value = argument.force()?;
+            let (_, contexts) = stringify_value(&value)?;
+            Ok(Value::Bool(!contexts.is_empty()))
+        }
         value => Err(Error::Type {
             expected: "function",
             actual: value_name(&value),
@@ -1248,6 +1707,12 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::Integer(left), Value::Integer(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
+        (
+            Value::StringContext { value: left, .. },
+            Value::StringContext { value: right, .. },
+        ) => left == right,
+        (Value::String(left), Value::StringContext { value: right, .. })
+        | (Value::StringContext { value: left, .. }, Value::String(right)) => left == right,
         (Value::Package(left), Value::Package(right)) => left == right,
         _ => false,
     }
@@ -1258,7 +1723,8 @@ fn value_name(value: &Value) -> &'static str {
         Value::Null => "null",
         Value::Bool(_) => "boolean",
         Value::Integer(_) => "integer",
-        Value::String(_) => "string",
+        Value::String(_) | Value::StringContext { .. } => "string",
+        Value::Path(_) => "path",
         Value::Package(_) => "package",
         Value::PackageNamespace(_) => "package namespace",
         Value::BuiltinsNamespace => "builtins namespace",

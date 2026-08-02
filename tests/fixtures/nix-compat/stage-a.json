@@ -54,6 +54,18 @@
       },
       "jet_packages": ["fd", "ripgrep"],
       "jet_unsupported": []
+    },
+    {
+      "name": "string_context_projection",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ \"${pkgs.fd}\" (builtins.toString pkgs.ripgrep) ]; shellHook = \"echo ${pkgs.fd}\"; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = [ \"${pkgs.fd}\" (builtins.toString pkgs.ripgrep) ]; shellHook = \"echo ${pkgs.fd}\"; }",
+      "nix_value": {
+        "packages": ["fd", "ripgrep"],
+        "shellHook": "echo fd"
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
     }
   ],
   "errors": [

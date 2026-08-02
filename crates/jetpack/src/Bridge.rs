@@ -21,6 +21,7 @@ use super::JSON;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::path::Path;
+use std::rc::Rc;
 
 /// Facts pulled from a flake's default devShell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,7 +41,8 @@ pub const FIXTURE_FILE: &str = "flake-devshell.json";
 /// Read devshell facts for the flake at `flake_dir`, either from a captured
 /// fixture (offline/test path) or through the bounded native evaluator. The
 /// native path reads literal `packages`, `buildInputs`, and
-/// `nativeBuildInputs` lists and retains unsupported hooks as loss facts.
+/// `nativeBuildInputs` lists, resolves imports only below the flake project
+/// root, and retains unsupported hooks as loss facts.
 pub fn read_devshell_facts(
     flake_dir: &Path,
     fixtures: Option<&Path>,
@@ -71,7 +73,27 @@ pub fn read_devshell_facts(
                 ))
             })?;
             let system = host_system();
-            let evaluation = crate::NixEval::evaluate_devshell(&source, &system)
+            let source_root = flake_dir.canonicalize().map_err(|error| {
+                ProviderError::Unsupported(format!(
+                    "couldn't resolve flake project root `{}`: {error}",
+                    flake_dir.display()
+                ))
+            })?;
+            let authority = crate::NixEval::ProjectImportAuthority::open(&source_root)
+                .map_err(|error| {
+                    ProviderError::Unsupported(format!(
+                        "couldn't open flake project root for imports: {error}"
+                    ))
+                })?;
+            let import_authority: Rc<dyn Fn(&str) -> Result<String, String>> =
+                Rc::new(move |relative: &str| {
+                    authority.read(relative).map_err(|error| error.to_string())
+                });
+            let evaluation = crate::NixEval::evaluate_devshell_with_import_authority(
+                &source,
+                &system,
+                Some(import_authority),
+            )
                 .map_err(|error| ProviderError::Unsupported(error.to_string()))?;
             Ok(DevShellFacts {
                 packages: evaluation.packages().to_vec(),
@@ -437,5 +459,94 @@ mod tests {
         assert!(matches!(err, ProviderError::FixtureMissing(_)));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn native_path_reads_only_authorized_project_imports() {
+        let dir = scratch("native_import");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(
+            dir.join("flake.nix"),
+            "{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("sub/shell.nix"),
+            "{ pkgs }: { packages = [ pkgs.fd ]; buildInputs = import ../inputs.nix pkgs; }",
+        )
+        .unwrap();
+        std::fs::write(dir.join("inputs.nix"), "pkgs: [ pkgs.ripgrep ]").unwrap();
+
+        let facts = read_devshell_facts(&dir, None).expect("native project imports must work");
+        assert_eq!(facts.packages, vec!["fd", "ripgrep"]);
+
+        std::fs::write(
+            dir.join("sub/shell.nix"),
+            "{ pkgs }: { packages = import ../../outside.nix pkgs; }",
+        )
+        .unwrap();
+        let error = read_devshell_facts(&dir, None).expect_err("project-root escape must fail");
+        assert!(matches!(
+            error,
+            ProviderError::Unsupported(reason)
+                if reason.contains("escapes the flake project-root authority")
+        ));
+
+        #[cfg(unix)]
+        {
+            let outside = scratch("native_import_outside");
+            std::fs::write(outside.join("escape.nix"), "pkgs: [ pkgs.fd ]").unwrap();
+            std::fs::write(
+                dir.join("sub/shell.nix"),
+                "{ pkgs }: { packages = import ./escape.nix pkgs; }",
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(outside.join("escape.nix"), dir.join("sub/escape.nix"))
+                .unwrap();
+            let error = read_devshell_facts(&dir, None)
+                .expect_err("symlink imports must remain below the project root");
+            assert!(matches!(
+                error,
+                ProviderError::Unsupported(reason)
+                    if reason.contains("symlinks are not allowed")
+            ));
+            std::fs::remove_dir_all(&outside).ok();
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn native_path_works_without_nix_on_path() {
+        const CHILD: &str = "JETPACK_NATIVE_NIX_NO_PATH_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "Bridge::tests::native_path_works_without_nix_on_path",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "child failed\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        assert!(!crate::Provider::nix_on_path());
+        let dir = scratch("native_no_nix");
+        std::fs::write(
+            dir.join("flake.nix"),
+            "{ devShells.x86_64-linux.default = { packages = [ pkgs.fd ]; }; }",
+        )
+        .unwrap();
+        let facts = read_devshell_facts(&dir, None).expect("native evaluator must not need Nix");
+        assert_eq!(facts.packages, vec!["fd"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

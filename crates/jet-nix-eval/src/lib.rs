@@ -87,9 +87,10 @@ const MAX_EVALUATOR_INPUT_BYTES: usize = 1 << 20;
 /// A typed projection of the supported, non-executing devShell surface.
 ///
 /// This is deliberately smaller than the Nix language. It evaluates bounded
-/// lazy let bindings, attribute sets, and functions to project literal package
-/// lists, and records fields that have no Jet environment meaning. Imports,
-/// paths, derivations, and unbounded authority remain outside this stage.
+/// lazy let bindings, attribute sets, functions, string contexts, and
+/// project-root imports to project literal package lists, and records fields
+/// that have no Jet environment meaning. Derivations and unbounded authority
+/// remain outside this stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DevShellEvaluation {
     system: String,
@@ -136,10 +137,22 @@ impl fmt::Display for EvaluationError {
 
 impl core::error::Error for EvaluationError {}
 
-/// Evaluate the bounded native devShell surface.
+/// Evaluate the bounded native devShell surface without filesystem authority.
 pub fn evaluate_devshell(
     source: &str,
     system: &str,
+) -> core::result::Result<DevShellEvaluation, EvaluationError> {
+    evaluate_devshell_with_import_authority(source, system, None)
+}
+
+/// Evaluate the bounded native devShell surface with an explicit, read-only
+/// project-root import authority. The callback receives a normalized relative
+/// path and returns only that file's source; it cannot grant process, network,
+/// or arbitrary host-path authority.
+pub fn evaluate_devshell_with_import_authority(
+    source: &str,
+    system: &str,
+    import_authority: Option<alloc::rc::Rc<dyn Fn(&str) -> core::result::Result<String, String>>>,
 ) -> core::result::Result<DevShellEvaluation, EvaluationError> {
     if source.len() > MAX_EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);
@@ -148,7 +161,7 @@ pub fn evaluate_devshell(
         return Err(EvaluationError::UnsupportedSystem(system.to_string()));
     }
 
-    Evaluator::evaluate_devshell(source, system)
+    Evaluator::evaluate_devshell(source, system, import_authority)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
