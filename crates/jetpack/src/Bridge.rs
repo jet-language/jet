@@ -579,7 +579,7 @@ mod tests {
         let graph = FlakeGraph::parse("flake.nix", &source).unwrap();
         let mut facts = DevShellFacts::default();
         for output in &graph.outputs {
-            if output.kind == super::SemanticLock::FlakeOutputKind::Package {
+            if output.kind == crate::SemanticLock::FlakeOutputKind::Package {
                 record_package_output_fact(&mut facts, output, &host);
             }
         }
