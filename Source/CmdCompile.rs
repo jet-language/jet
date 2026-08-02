@@ -2138,13 +2138,14 @@ fn manifest_fingerprint(file: &str) -> String {
 fn native_cache_salt(
     toolchain: &str,
     dependency_fingerprint: &str,
+    corelib_fingerprint: &str,
     mode: &str,
     target: &str,
     instance_fingerprints: &[String],
 ) -> String {
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
-    format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
+    format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{corelib_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
 }
 
 const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v2";
@@ -2294,9 +2295,11 @@ fn native_cache_key_with_toolchain(
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(&bundle);
+    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
     let salt = native_cache_salt(
         toolchain_identity,
         &format!("{}:{dependency_interfaces}", manifest_fingerprint(file)),
+        &corelib_fingerprint,
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         &instances,
@@ -3288,13 +3291,14 @@ mod missing_c_lib_tests {
     #[test]
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
-        let base = native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &instances);
-        assert_ne!(base, native_cache_salt("tool-b", "deps-a", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-b", "run", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "test", "linux-x86_64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "macos-aarch64", &instances));
-        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-c".into()]));
-        assert_eq!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
+        let base = native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &instances);
+        assert_ne!(base, native_cache_salt("tool-b", "deps-a", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-b", "core-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-b", "run", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "test", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "macos-aarch64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-c".into()]));
+        assert_eq!(base, native_cache_salt("tool-a", "deps-a", "core-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
     }
 
     #[test]

@@ -367,21 +367,16 @@ fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<
     // keys and audits can see which Top-module set was selected.
     let mut body = String::new();
     push_corelib_prelude_body(&mut body, used_core);
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for b in body.as_bytes() {
-        hash ^= u64::from(*b);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
+    let hash = crate::SHA256::sha256_hex(body.as_bytes());
     out.push_str(&format!(
-        "/* jet-corelib-r10 len={} fp={hash:016x} */\n",
+        "/* jet-corelib-r10 len={} fp={hash} */\n",
         body.len()
     ));
     out.push_str(&body);
 }
 
 /// R10 / #1133: content identity of the Core templates a program will link.
-#[cfg(test)]
-pub(crate) fn corelib_emission_fingerprint(
+pub fn corelib_emission_fingerprint(
     used_core: &std::collections::HashSet<String>,
 ) -> String {
     let mut out = String::new();

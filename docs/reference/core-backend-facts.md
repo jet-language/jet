@@ -20,7 +20,7 @@ differentially conform to these facts against the CPU/oracle path.
 1. AOT emit calls Prelude `jet_*` symbols only.
 2. JIT hosts marshal into the same symbols, or deopt to the TIR evaluator which
    calls the same symbols via Lite includes (`ComputeLite`, …).
-3. Cache identity includes the R10 emission fingerprint comment
+3. Cache identity includes the SHA-256 R10 emission fingerprint comment
    (`jet-corelib-r10`) so a broader Top-module set cannot reuse a narrower
    artifact.
 

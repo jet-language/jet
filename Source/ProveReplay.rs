@@ -17,6 +17,7 @@ use jet_foundation::JSON::{parse_json, JSONValue};
 const MAGIC: &[u8; 8] = b"JREPLAY\0";
 const KIND_TIME_WALL: u16 = 0x0001;
 const MAX_REPLAY_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_EXACT_JSON_INTEGER: u64 = (1 << 53) - 1;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CaptureOpts {
@@ -458,7 +459,7 @@ fn build_safe_time_artifact(
             Json::Obj(vec![
                 ("bits".into(), Json::Int(64)),
                 ("t".into(), Json::Str("int".into())),
-                ("v".into(), Json::Str(format!("{unix_ns:016x}"))),
+                ("v".into(), Json::Str(canonical_u64_string(unix_ns))),
             ]),
         ),
     ]);
@@ -593,6 +594,14 @@ fn content_id(body_with_zero_id: &[u8]) -> String {
     hex[..24.min(hex.len())].to_string()
 }
 
+fn canonical_u64_string(value: u64) -> String {
+    if value <= MAX_EXACT_JSON_INTEGER {
+        value.to_string()
+    } else {
+        format!("{value:016x}")
+    }
+}
+
 fn artifact_id_from_bytes(bytes: &[u8]) -> Result<String, String> {
     let header = parse_and_verify(bytes).map_err(|(_, why)| why)?;
     header
@@ -634,9 +643,12 @@ fn parse_and_verify(
     let flat = flatten_identity_fields(header_text)
         .map_err(|why| ("E3622", why))?;
     let jend = bytes
-        .windows(4)
-        .rposition(|w| w == b"JEND")
+        .len()
+        .checked_sub(52)
         .ok_or(("E3622", "missing JEND footer".into()))?;
+    if &bytes[jend..jend + 4] != b"JEND" {
+        return Err(("E3622", "missing JEND footer".into()));
+    }
     let footer_end = jend
         .checked_add(52)
         .ok_or(("E3622", "replay footer length overflow".into()))?;
@@ -740,12 +752,8 @@ fn parse_and_verify(
     if artifact_id.bytes().any(|byte| byte.is_ascii_uppercase()) {
         return Err(("E3622", "replay artifact_id must use lowercase hex".into()));
     }
-    let zero_id = "0".repeat(24);
-    let marker = format!("\"artifact_id\":\"{artifact_id}\"");
-    let replacement = format!("\"artifact_id\":\"{zero_id}\"");
-    let zero_header = header_text
-        .replace(&marker, &replacement)
-        .into_bytes();
+    let zero_header = zero_artifact_id_header(header_text)
+        .map_err(|why| ("E3622", why))?;
     if zero_header.len() != header_bytes.len() {
         return Err(("E3622", "replay artifact_id field is malformed".into()));
     }
@@ -769,11 +777,14 @@ fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
     if header_end > bytes.len() {
         return Err("replay header is truncated".into());
     }
-    let mut off = header_end;
+    let off = header_end;
     let jend = bytes
-        .windows(4)
-        .rposition(|w| w == b"JEND")
+        .len()
+        .checked_sub(52)
         .ok_or_else(|| "missing JEND while reading Time".to_string())?;
+    if &bytes[jend..jend + 4] != b"JEND" {
+        return Err("missing JEND while reading Time".to_string());
+    }
     let header_frame_end = off
         .checked_add(15)
         .ok_or_else(|| "Time frame header length overflow".to_string())?;
@@ -803,17 +814,16 @@ fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
         .ok_or_else(|| "Time payload length overflow".to_string())?;
     let payload = std::str::from_utf8(&bytes[payload_end - plen..payload_end])
         .map_err(|_| "Time payload is not UTF-8".to_string())?;
-    let hex = extract_nested_hex_v(payload).ok_or_else(|| {
-        "Time payload missing unix_ns.v hex field".to_string()
+    let value = extract_nested_hex_v(payload).ok_or_else(|| {
+        "Time payload missing unix_ns.v field".to_string()
     })?;
-    let ns = u64::from_str_radix(&hex, 16)
-        .map_err(|_| format!("invalid unix_ns hex `{hex}`"))?;
+    let ns = parse_canonical_u64(&value)?;
     let millis = ns / 1_000_000;
     i64::try_from(millis).map_err(|_| "Time value exceeds the signed millisecond range".into())
 }
 
 fn extract_nested_hex_v(payload: &str) -> Option<String> {
-    // payload shape: {"call_id":0,...,"unix_ns":{"bits":64,"t":"int","v":"<hex>"}}
+    // payload shape: {"call_id":0,...,"unix_ns":{"bits":64,"t":"int","v":"<integer>"}}
     let key = "\"v\":\"";
     let start = payload.find(key)? + key.len();
     let end = payload[start..].find('"')? + start;
@@ -856,10 +866,46 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     {
         return Err("Time payload unix_ns type is invalid".into());
     }
-    if !matches!(unix_ns.get("v"), Some(JSONValue::String(value)) if value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())) {
+    let JSONValue::String(value) = unix_ns
+        .get("v")
+        .ok_or_else(|| "Time payload unix_ns value is missing".to_string())?
+    else {
         return Err("Time payload unix_ns value is invalid".into());
-    }
+    };
+    parse_canonical_u64(value)
+        .map_err(|_| "Time payload unix_ns value is invalid".to_string())?;
     Ok(())
+}
+
+fn parse_canonical_u64(value: &str) -> Result<u64, String> {
+    if value.is_empty() {
+        return Err("empty unsigned integer".into());
+    }
+    if value.bytes().all(|byte| byte.is_ascii_digit()) {
+        if value.len() > 1 && value.starts_with('0') {
+            return Err("unsigned integer has a leading zero".into());
+        }
+        let decimal = value
+            .parse::<u64>()
+            .map_err(|_| "unsigned integer is out of range".to_string())?;
+        if decimal > MAX_EXACT_JSON_INTEGER {
+            return Err("large unsigned integer must use fixed-width hexadecimal".into());
+        }
+        return Ok(decimal);
+    }
+    if value.len() != 16
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("unsigned integer is not canonical".into());
+    }
+    let hexadecimal = u64::from_str_radix(value, 16)
+        .map_err(|_| "unsigned integer is out of range".to_string())?;
+    if hexadecimal <= MAX_EXACT_JSON_INTEGER {
+        return Err("small unsigned integer must use minimal decimal".into());
+    }
+    Ok(hexadecimal)
 }
 
 fn canonical_json_value(value: &JSONValue) -> Result<String, String> {
@@ -997,6 +1043,21 @@ fn flatten_identity_fields(
             "tir_schema",
         ],
     )?;
+    for key in [
+        "abi",
+        "build_digest",
+        "core_abi",
+        "entry",
+        "execution_adapter",
+        "lock_digest",
+        "profile",
+        "source_digest",
+        "target_triple",
+        "tir_hash",
+        "tir_schema",
+    ] {
+        let _ = string_field(identity, key)?;
+    }
     for key in ["entry", "source_digest", "execution_adapter", "target_triple"] {
         out.insert(key.to_string(), string_field(identity, key)?);
     }
@@ -1009,7 +1070,7 @@ fn flatten_identity_fields(
     if producer != "jet-prove" {
         return Err("header producer is not jet-prove".into());
     }
-    if !matches!(root.get("privacy_salt"), Some(JSONValue::String(salt)) if salt.len() == 43 && salt.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')) {
+    if !matches!(root.get("privacy_salt"), Some(JSONValue::String(salt)) if is_base64url_32(salt)) {
         return Err("header privacy_salt is invalid".into());
     }
     if !matches!(root.get("extensions"), Some(JSONValue::Object(_))) {
@@ -1075,6 +1136,48 @@ fn flatten_identity_fields(
         return Err("header version is incompatible".into());
     }
     Ok(out)
+}
+
+fn zero_artifact_id_header(header_text: &str) -> Result<Vec<u8>, String> {
+    let mut value = parse_json(header_text).map_err(|_| "header is not valid JSON".to_string())?;
+    let JSONValue::Object(root) = &mut value else {
+        return Err("header must be a JSON object".into());
+    };
+    let Some(JSONValue::String(artifact_id)) = root.get("artifact_id") else {
+        return Err("header artifact_id must be a string".into());
+    };
+    if artifact_id.len() != 24 {
+        return Err("header artifact_id has the wrong length".into());
+    }
+    root.insert("artifact_id".into(), JSONValue::String("0".repeat(24)));
+    Ok(canonical_json_value(&value)?.into_bytes())
+}
+
+fn is_base64url_32(value: &str) -> bool {
+    if value.len() != 43 {
+        return false;
+    }
+    let mut buffer = 0u32;
+    let mut bits = 0u8;
+    let mut bytes = 0usize;
+    for byte in value.bytes() {
+        let digit = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return false,
+        } as u32;
+        buffer = (buffer << 6) | digit;
+        bits += 6;
+        while bits >= 8 {
+            bits -= 8;
+            bytes += 1;
+            buffer &= if bits == 0 { 0 } else { (1u32 << bits) - 1 };
+        }
+    }
+    bytes == 32 && bits == 2 && buffer == 0
 }
 
 fn identity_matches(
@@ -1267,6 +1370,24 @@ mod tests {
         assert_eq!(header.get("run_outcome").map(String::as_str), Some("exit"));
         assert_eq!(header.get("run_status").map(String::as_str), Some("0"));
         assert_eq!(extract_first_time_ms(&bytes).unwrap(), 1_234);
+    }
+
+    #[test]
+    fn time_integer_encoding_is_minimal_until_fixed_width_is_required() {
+        assert_eq!(canonical_u64_string(0), "0");
+        assert_eq!(canonical_u64_string(MAX_EXACT_JSON_INTEGER), "9007199254740991");
+        assert_eq!(canonical_u64_string(MAX_EXACT_JSON_INTEGER + 1), "0020000000000000");
+        assert_eq!(parse_canonical_u64("0").unwrap(), 0);
+        assert_eq!(parse_canonical_u64("0020000000000000").unwrap(), MAX_EXACT_JSON_INTEGER + 1);
+        assert!(parse_canonical_u64("0000000000000000").is_err());
+        assert!(parse_canonical_u64("9007199254740992").is_err());
+    }
+
+    #[test]
+    fn privacy_salt_requires_a_valid_thirty_two_byte_base64url_value() {
+        assert!(is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+        assert!(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!"));
+        assert!(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-"));
     }
 
     #[test]

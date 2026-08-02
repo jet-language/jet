@@ -158,6 +158,20 @@ fn prove_rejects_capture_path_escape_before_writing_an_artifact() {
     assert!(!root.parent().unwrap().join("escape.jetproof-replay").exists());
 }
 
+#[test]
+fn prove_capture_does_not_finalize_after_front_end_failure() {
+    let root = workspace("capture_front_end_failure");
+    fs::write(root.join("bad.jet"), "fn run() { missing() }\n").unwrap();
+    let artifact = root.join("failed.jetproof-replay");
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "bad.jet", "--capture=failed.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!artifact.exists(), "front-end failure must not leave a replay artifact");
+}
+
 #[cfg(unix)]
 #[test]
 fn prove_rejects_a_symlink_target() {

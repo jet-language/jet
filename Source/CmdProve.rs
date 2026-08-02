@@ -272,7 +272,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         };
         if authority.expected_status != exit_code || authority.expected_outcome != outcome {
             eprintln!(
-                "Error [E3628]: replay diverged: captured outcome={} status={}, current outcome={} status={}",
+                "Error [E3623]: replay diverged: captured outcome={} status={}, current outcome={} status={}",
                 authority.expected_outcome, authority.expected_status, outcome, exit_code
             );
             eprintln!(" Fix: recapture with `--capture` so the normal producer result is authoritative");
@@ -302,14 +302,16 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(ExitCodes::ICE);
         }
     }
-    if let Some(authority) = capture_authority.as_ref() {
-        if let Err(status) = crate::ProveReplay::finalize_safe_capture(
-            &identity,
-            authority,
-            exit_code,
-            json,
-        ) {
-            exit(status);
+    if failed == 0 {
+        if let Some(authority) = capture_authority.as_ref() {
+            if let Err(status) = crate::ProveReplay::finalize_safe_capture(
+                &identity,
+                authority,
+                exit_code,
+                json,
+            ) {
+                exit(status);
+            }
         }
     }
     if json {
