@@ -369,7 +369,7 @@ pub(super) fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
     2
 }
 
-/// `jetpack bridge flake` (U16, card c9jetpackgates) — best-effort translator
+/// `jetpack bridge flake` (U16, card c9jetpackgates) — bounded native translator
 /// from a foreign `flake.nix`'s devShell into jetpack's own `env.*` module
 /// form. Never edits the project's `env.jet`; the shim prints to stdout for
 /// the user to review and merge (I8 — one canonical env surface).

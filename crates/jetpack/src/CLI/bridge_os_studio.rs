@@ -2,7 +2,6 @@ use super::parse::Parsed;
 use super::studio_server::{serve_studio, studio_context, studio_host};
 use super::workspace_sources::fixtures_for;
 use crate::Output::Theme;
-use crate::Provider;
 use crate::Syntax;
 use crate::{Bridge, JSON};
 use std::path::PathBuf;
@@ -11,16 +10,6 @@ pub(super) fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
             let fixtures = fixtures_for(&parsed.flags);
-            if fixtures.is_none() && !Provider::nix_on_path() {
-                theme.error_coded(
-                    "E1256",
-                    "`jet bridge flake` needs `nix`, which isn't on PATH",
-                    "translating a flake.nix's devShell shells out to `nix eval` (U16); without \
-                     `nix` there's nothing to read the devShell from.",
-                    "install Nix from the official installer, or write env.* by hand.",
-                );
-                return 2;
-            }
             let dir = std::env::current_dir().unwrap_or_default();
             Bridge::cmd_flake(theme, &dir, fixtures.as_deref())
         }

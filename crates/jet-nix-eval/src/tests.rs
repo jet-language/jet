@@ -187,3 +187,67 @@ fn unknown_oracle_system_fails_closed() {
         Err(BoundaryError::UnsupportedOracleSystem(_))
     ));
 }
+
+#[test]
+fn native_devshell_projects_literal_packages_and_loss_facts() {
+    let evaluated = evaluate_devshell(
+        r#"
+        {
+          outputs = { devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.ripgrep pkgs.fd ];
+            buildInputs = with pkgs; [ nodejs ];
+            shellHook = "export FOO=1";
+          }; };
+        }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("literal devShell must evaluate");
+    assert_eq!(evaluated.system(), "x86_64-linux");
+    assert_eq!(
+        evaluated.packages(),
+        &["fd".to_string(), "nodejs".to_string(), "ripgrep".to_string()]
+    );
+    assert_eq!(evaluated.unsupported(), &["shellHook".to_string()]);
+}
+
+#[test]
+fn native_devshell_rejects_dynamic_package_expressions() {
+    let error = evaluate_devshell(
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+        "x86_64-linux",
+    )
+    .expect_err("dynamic package expressions must not be guessed");
+    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("literal package list")));
+}
+
+#[test]
+fn native_devshell_rejects_unknown_systems_and_empty_flakes() {
+    assert!(matches!(
+        evaluate_devshell("{ }", "x86_64-windows"),
+        Err(EvaluationError::UnsupportedSystem(_))
+    ));
+    assert!(matches!(
+        evaluate_devshell("{ }", "x86_64-linux"),
+        Err(EvaluationError::Unsupported(reason)) if reason.contains("devShell")
+    ));
+}
+
+#[test]
+fn native_devshell_treats_indented_hooks_as_unsupported_loss() {
+    let evaluated = evaluate_devshell(
+        r#"{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.fd ];
+            shellHook = ''
+              # packages = [ pkgs.must-not-leak ];
+              export FOO=1
+            '';
+          };
+        }"#,
+        "x86_64-linux",
+    )
+    .expect("indented shell hooks must not confuse package extraction");
+    assert_eq!(evaluated.packages(), &["fd".to_string()]);
+    assert_eq!(evaluated.unsupported(), &["shellHook".to_string()]);
+}

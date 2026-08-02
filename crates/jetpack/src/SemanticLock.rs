@@ -27,6 +27,7 @@ pub enum LockRecordKind {
     PackageOverlay,
     FlakeComposition,
     FlakeUnsupported,
+    FlakeEvaluator,
     /// Selected typed variant domain (E4-JP15 / D-JPK-VARIANT1).
     Variant,
     Future(String),
@@ -51,6 +52,7 @@ impl LockRecordKind {
             LockRecordKind::PackageOverlay => "package-overlay",
             LockRecordKind::FlakeComposition => "flake-composition",
             LockRecordKind::FlakeUnsupported => "flake-unsupported",
+            LockRecordKind::FlakeEvaluator => "flake-evaluator",
             LockRecordKind::Variant => "variant",
             LockRecordKind::Future(s) => s.as_str(),
         }
@@ -74,6 +76,7 @@ impl LockRecordKind {
             "package-overlay" => LockRecordKind::PackageOverlay,
             "flake-composition" => LockRecordKind::FlakeComposition,
             "flake-unsupported" => LockRecordKind::FlakeUnsupported,
+            "flake-evaluator" => LockRecordKind::FlakeEvaluator,
             "variant" => LockRecordKind::Variant,
             other => LockRecordKind::Future(other.to_string()),
         }

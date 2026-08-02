@@ -1218,7 +1218,7 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
 
 /// U16: enter a foreign flake's default devShell directly through `nix
 /// develop` — the ratified stopgap (jetpack never parses/composes a foreign
-/// flake's devShell itself; `jetpack bridge flake` is the best-effort
+/// flake's devShell itself; `jetpack bridge flake` is the bounded native
 /// translator for users who want to adopt it as `env.*` instead). Gated on
 /// the same trust store as a declared env, keyed on the flake's content
 /// (`Trust::gate_flake`) since arbitrary flake.nix text is untrusted input

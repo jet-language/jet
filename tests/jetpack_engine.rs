@@ -1643,24 +1643,55 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
 
 
 #[test]
-fn bridge_flake_missing_nix_is_e1256_not_a_panic() {
+fn bridge_flake_uses_native_evaluator_without_nix() {
     let dir = Scratch::new("bridge-nonix");
-    fs::write(dir.join("flake.nix"), "{ }").unwrap();
+    fs::write(
+        dir.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+    )
+    .unwrap();
     let output = jetpack()
         .args(["bridge", "flake", "--no-color"])
         .current_dir(&dir.path)
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
         .output()
         .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+
+#[test]
+fn bridge_flake_rejects_dynamic_native_evaluator_input() {
+    let dir = Scratch::new("bridge-native-unsupported");
+    fs::write(
+        dir.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(stderr.contains("literal package list"), "stderr: {stderr}");
 }
 
 
 #[test]
 fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
-    // The best-effort translation: buildInputs become a plain env.dev
+    // The bounded translation: buildInputs become a plain env.dev
     // packages list on stdout; a non-empty shellHook (no env.* equivalent)
     // fires L0204 on stderr without blocking the print.
     let dir = Scratch::new("bridge-shim");
@@ -1733,7 +1764,7 @@ fn bridge_flake_no_flake_nix_here_is_friendly() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("no flake.nix"), "stderr: {stderr}");
+    assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
 }
 
 

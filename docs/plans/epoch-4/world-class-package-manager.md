@@ -80,7 +80,8 @@ Production blockers after that stop-line:
 - the current package graph and semantic lock layers contain substantial data
   models, but several are not one live resolver/build/store path;
 - user package profiles/generations do not exist;
-- Nix/flakes/nixpkgs still require installed Nix on product paths;
+- Nix package realization and direct foreign-shell entry still require
+  installed Nix; the bounded literal devShell bridge is native;
 - current Git-index + author-TOFU trust does not defend first use, rollback,
   freeze, mix-and-match, or a compromised cache builder;
 - the documented AST-only build-cache key is not a complete action identity.
@@ -360,8 +361,11 @@ live acceptance, and documentation. Work order is binding.
   IFD behavior.
 - No raw evaluator trace reaches users.
 - Representative nixpkgs derivations bit-match reference Nix.
-- Partial evaluator stages are internal test surfaces only; no provider/product
-  path enables them before JP11.
+- The bounded literal devShell projection is now a product path under
+  D-JPK-NIXPRODUCT1=A. It returns typed package facts, preserves unsupported
+  hooks as explicit loss records, records the native evaluator identity in
+  `.jet/lock`, and never executes Nix code. Other evaluator stages remain
+  private until their own differential proof lands.
 
 ### E4-JP10 — Nix evaluator breadth and performance
 

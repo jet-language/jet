@@ -1,5 +1,5 @@
-//! `jetpack bridge flake` (U16, card c9jetpackgates) — a best-effort
-//! translator from an existing `flake.nix`'s default devShell into jetpack's
+//! `jetpack bridge flake` — a bounded native projection from an existing
+//! `flake.nix`'s default devShell into jetpack's
 //! own `env.*` module form (D-JPK-MODBODY1's already-ratified `module
 //! env.dev { packages: […] }` shape — no new syntax needed).
 //!
@@ -10,10 +10,9 @@
 //! remain in the lock as `unmapped` facts and fire L0204, one warning per
 //! field, without blocking the print.
 //!
-//! Determinism for tests: mirrors `Provider.rs`'s fixture convention — a
-//! captured `nix eval --json` payload can stand in for the real binary, so
-//! the drift check (same flake.nix twice → same shim) never needs Nix
-//! installed.
+//! Determinism for tests: a captured provider payload can still stand in for
+//! the foreign result, but the product path evaluates the supported literal
+//! devShell surface natively and never shells out to `nix`.
 
 use super::Output::Theme;
 use super::Provider::ProviderError;
@@ -22,9 +21,8 @@ use super::JSON;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::path::Path;
-use std::process::Command;
 
-/// Facts pulled from a flake's default devShell, best-effort.
+/// Facts pulled from a flake's default devShell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DevShellFacts {
     /// `buildInputs` package names, sorted + deduped for a stable shim.
@@ -40,53 +38,55 @@ pub struct DevShellFacts {
 pub const FIXTURE_FILE: &str = "flake-devshell.json";
 
 /// Read devshell facts for the flake at `flake_dir`, either from a captured
-/// fixture (offline/test path) or by shelling out to `nix eval`. The eval
-/// expression reads the default devShell's `buildInputs` (mapped to each
-/// derivation's `pname`/`name`) and `shellHook`, the two fields every
-/// `pkgs.mkShell`-built devShell carries.
+/// fixture (offline/test path) or through the bounded native evaluator. The
+/// native path reads literal `packages`, `buildInputs`, and
+/// `nativeBuildInputs` lists and retains unsupported hooks as loss facts.
 pub fn read_devshell_facts(
     flake_dir: &Path,
     fixtures: Option<&Path>,
 ) -> Result<DevShellFacts, ProviderError> {
-    let stdout = match fixtures {
+    match fixtures {
         Some(dir) => {
             let path = dir.join(FIXTURE_FILE);
-            std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?
+            let stdout = std::fs::read_to_string(&path)
+                .map_err(|_| ProviderError::FixtureMissing(path))?;
+            parse_facts_json(&stdout)
         }
-        None => run_nix_eval(flake_dir)?,
-    };
-    parse_facts_json(&stdout)
+        None => {
+            let flake_path = [
+                flake_dir.join(Syntax::FOREIGN_FLAKE_FILE),
+                flake_dir.join(Syntax::FOREIGN_DEVENV_FILE),
+            ]
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or_else(|| {
+                ProviderError::Unsupported(
+                    "no foreign flake file was found for native evaluation".to_string(),
+                )
+            })?;
+            let source = std::fs::read_to_string(&flake_path).map_err(|error| {
+                ProviderError::Unsupported(format!(
+                    "couldn't read `{}`: {error}",
+                    flake_path.display()
+                ))
+            })?;
+            let system = host_system();
+            let evaluation = crate::NixEval::evaluate_devshell(&source, &system)
+                .map_err(|error| ProviderError::Unsupported(error.to_string()))?;
+            Ok(DevShellFacts {
+                packages: evaluation.packages().to_vec(),
+                unmapped: evaluation.unsupported().to_vec(),
+            })
+        }
+    }
 }
 
-fn run_nix_eval(flake_dir: &Path) -> Result<String, ProviderError> {
-    let expr = format!(
-        "let f = builtins.getFlake {:?}; s = builtins.currentSystem; \
-         ds = f.devShells.${{s}}.default; in {{ \
-         buildInputs = map (p: p.pname or p.name or \"?\") (ds.buildInputs or []); \
-         shellHook = ds.shellHook or \"\"; }}",
-        flake_dir.display().to_string()
-    );
-    let output = Command::new("nix")
-        .args(["eval", "--impure", "--json", "--expr", &expr])
-        .output();
-    let output = match output {
-        Ok(o) => o,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(ProviderError::NixMissing)
-        }
-        Err(e) => return Err(ProviderError::BuildFailed(e.to_string())),
+fn host_system() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
     };
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let reason = stderr
-            .trim()
-            .lines()
-            .last()
-            .unwrap_or("nix eval failed")
-            .to_string();
-        return Err(ProviderError::BuildFailed(reason));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    format!("{}-{os}", std::env::consts::ARCH)
 }
 
 fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
@@ -124,7 +124,7 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
 pub fn render_shim(facts: &DevShellFacts) -> String {
     let pkgs = facts.packages.join(", ");
     format!(
-        "// Generated by `jet bridge flake` — best-effort flake.nix translation.\n\
+        "// Generated by `jet bridge flake` — bounded native devShell projection.\n\
          // Review before committing; see stderr for any fields it couldn't map.\n\
          module env.dev {{\n\
          \x20   packages: [{pkgs}]\n\
@@ -139,7 +139,7 @@ pub fn l0204_unmappable(field: &str, file: &str) -> Diagnostic {
     Diagnostic::lint(
         "L0204",
         format!("`{field}` in `{file}` has no `env.*` equivalent yet"),
-        "`jet bridge flake` (U16) is a best-effort translator; some flake.nix/devenv.nix fields \
+        "`jet bridge flake` (U16) is a bounded translator; some flake.nix/devenv.nix fields \
          (shellHook, multiple named devShells, buildInputs vs nativeBuildInputs) have no ratified \
          `env.*` spelling."
             .to_string(),
@@ -153,8 +153,7 @@ pub fn l0204_unmappable(field: &str, file: &str) -> Diagnostic {
 
 /// `jetpack bridge flake` — read `flake.nix` in `dir`, commit its typed graph
 /// to `.jet/lock`, print the generated shim to stdout, and print any L0204
-/// warnings to stderr. Returns the exit code. `nix` missing is E1256, checked
-/// by the caller before this runs (so the message names the right command).
+/// warnings to stderr. Returns the exit code.
 pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     let flake_path = [
         dir.join(Syntax::FOREIGN_FLAKE_FILE),
@@ -182,9 +181,9 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
         }
     };
     // The bridge consumes the same typed foreign graph used by `.jet/lock`.
-    // Keep the best-effort devShell translation usable when arbitrary Nix is
-    // present, but surface every known projection loss instead of silently
-    // dropping it.
+    // Keep the bounded devShell translation usable when the graph contains
+    // unsupported fields, but surface every known projection loss instead of
+    // silently dropping it.
     match FlakeGraph::load(&flake_path) {
         Ok(graph) => {
             if graph.named_dev_shells().len() > 1
@@ -228,7 +227,36 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     }
                 }
             }
-            if let Err(error) = super::SemanticLock::atomic_commit(dir, &graph.semantic_lock()) {
+            let system = host_system();
+            let evaluator = match crate::NixEval::evaluator_identity(&system) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    theme.error(
+                        "couldn't identify the native evaluator",
+                        &error.to_string(),
+                        "use a supported host system for native flake evaluation.",
+                    );
+                    return 1;
+                }
+            };
+            let mut lock = graph.semantic_lock();
+            lock.records.push(super::SemanticLock::SemanticRecord::new(
+                super::SemanticLock::LockIdentity {
+                    kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
+                    key: "flake-evaluator".to_string(),
+                    exact: evaluator.clone(),
+                    hash: crate::SHA256::sha256_hex(evaluator.as_bytes()),
+                    platform: system,
+                },
+                super::SemanticLock::LockRationale {
+                    source_ref: flake_path.display().to_string(),
+                    provider: "native-nix-evaluator".to_string(),
+                    exact_output: evaluator,
+                    reason: "bounded native devShell evaluation identity".to_string(),
+                    ..super::SemanticLock::LockRationale::default()
+                },
+            ));
+            if let Err(error) = super::SemanticLock::atomic_commit(dir, &lock) {
                 theme.error(
                     "couldn't commit foreign graph",
                     &format!(
@@ -392,6 +420,8 @@ mod tests {
         assert_eq!(code, 0);
         let raw = std::fs::read_to_string(crate::SemanticLock::live_path(&dir)).unwrap();
         assert!(raw.contains("flake-unsupported:shellHook"), "{raw}");
+        assert!(raw.contains("flake-evaluator"), "{raw}");
+        assert!(raw.contains("native-nix:2.34.8:"), "{raw}");
         let graph = FlakeGraph::load(&dir.join("flake.nix")).unwrap();
         assert_eq!(graph.unsupported, vec!["shellHook".to_string()]);
 
