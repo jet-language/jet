@@ -1,7 +1,8 @@
 //! Incremental build cache (M14).
 //!
-//! Layout: `~/.cache/jet/build/<sha256-of-source+flags>/bin`
-//! Key = SHA-256 of generated Rust source + build profile tag string.
+//! Layout: `~/.cache/jet/build/<semantic-key>/bin` plus `bin.sha256`.
+//! The key is supplied by the compiler; the sidecar proves cached artifact
+//! bytes were not truncated or corrupted between builds.
 
 use crate::SHA256::sha256_hex;
 use std::fs;
@@ -36,10 +37,25 @@ pub fn cached_bin(key: &str) -> PathBuf {
     cache_dir().join(key).join("bin")
 }
 
+fn cached_digest(key: &str) -> PathBuf {
+    cache_dir().join(key).join("bin.sha256")
+}
+
+fn matches_digest(path: &Path, expected: &str) -> bool {
+    fs::read(path)
+        .ok()
+        .map(|bytes| sha256_hex(&bytes) == expected.trim())
+        .unwrap_or(false)
+}
+
 /// Copy a cached binary to `dest` when present. Returns `true` on cache hit.
 pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
     let src = cached_bin(key);
-    if !src.is_file() {
+    let expected = match fs::read_to_string(cached_digest(key)) {
+        Ok(expected) => expected,
+        Err(_) => return false,
+    };
+    if !src.is_file() || !matches_digest(&src, &expected) {
         return false;
     }
     if let Some(parent) = dest.parent() {
@@ -62,6 +78,10 @@ pub fn store_cached(key: &str, bin: &Path) {
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
+    let digest = match fs::read(bin) {
+        Ok(bytes) => sha256_hex(&bytes),
+        Err(_) => return,
+    };
     let dest = dir.join("bin");
     let tmp = dir.join(format!("bin.tmp.{}", std::process::id()));
     if fs::copy(bin, &tmp).is_err() {
@@ -73,6 +93,16 @@ pub fn store_cached(key: &str, bin: &Path) {
         // and clean up the temp file either way.
         let _ = fs::copy(&tmp, &dest);
         let _ = fs::remove_file(&tmp);
+    }
+    let digest_path = cached_digest(key);
+    let digest_tmp = dir.join(format!("bin.sha256.tmp.{}", std::process::id()));
+    if fs::write(&digest_tmp, format!("{digest}\n")).is_err() {
+        let _ = fs::remove_file(&digest_tmp);
+        return;
+    }
+    if fs::rename(&digest_tmp, &digest_path).is_err() {
+        let _ = fs::copy(&digest_tmp, &digest_path);
+        let _ = fs::remove_file(&digest_tmp);
     }
 }
 
@@ -100,5 +130,19 @@ mod tests {
         let k1 = cache_key("fn main() {}", "default");
         let k2 = cache_key("fn main() {}", "default");
         assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn cache_integrity_rejects_changed_bytes() {
+        let path = std::env::temp_dir().join(format!(
+            "jet-build-cache-integrity-{}",
+            std::process::id()
+        ));
+        fs::write(&path, b"valid").unwrap();
+        let digest = sha256_hex(b"valid");
+        assert!(matches_digest(&path, &digest));
+        fs::write(&path, b"corrupt").unwrap();
+        assert!(!matches_digest(&path, &digest));
+        let _ = fs::remove_file(path);
     }
 }

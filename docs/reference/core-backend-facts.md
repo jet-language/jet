@@ -20,9 +20,10 @@ differentially conform to these facts against the CPU/oracle path.
 1. AOT emit calls Prelude `jet_*` symbols only.
 2. JIT hosts marshal into the same symbols, or deopt to the TIR evaluator which
    calls the same symbols via Lite includes (`ComputeLite`, …).
-3. Cache identity includes the SHA-256 R10 emission fingerprint comment
-   (`jet-corelib-r10`) so a broader Top-module set cannot reuse a narrower
-   artifact.
+3. Native cache identity includes the SHA-256 R10 emission fingerprint comment
+   (`jet-corelib-r10`) and length-delimited toolchain, dependency, target, mode,
+   and instance facts, so a broader Top-module set cannot reuse a narrower
+   artifact or collide with another semantic input.
 
 ## Offline delivery
 
@@ -34,10 +35,14 @@ Hostile closure checks:
 
 - Missing or mismatched R10 fingerprint → rebuild (no silent reuse of a
   narrower Top-module set).
+- Missing or mismatched `bin.sha256` → cache miss and rebuild; a truncated or
+  modified cached binary is never treated as a valid artifact.
 - A package Core module must resolve through CoreProvider; a second embedded
   copy of the same source is forbidden.
 - Offline builds use the pinned Jet toolchain identity recorded in the store;
-  host drift that changes that identity invalidates the cache.
+  host drift that changes that identity invalidates the cache. An unreadable
+  project manifest also disables cache reuse instead of becoming an empty
+  identity.
 
 AOT and default `jet run` (Cranelift / deopt) share the same Prelude symbols for
 every module in the table above (I9).

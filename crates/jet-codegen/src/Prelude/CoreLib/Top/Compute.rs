@@ -80,7 +80,7 @@ impl JetShow for JetTensor {
             "Tensor(shape={:?}, device={}, len={})",
             self.shape,
             self.device.jet_show(),
-            self.data.len()
+            jet_compute_tensor_numel(self)
         )
     }
 }
@@ -130,6 +130,10 @@ fn jet_compute_numel(shape: &[i64]) -> Result<i64, JetComputeError> {
 }
 
 fn jet_compute_storage_len(shape: &[i64]) -> Result<usize, JetComputeError> {
+    // Validate strides even when an earlier zero axis makes the element count
+    // zero. Otherwise a shape such as `[0, i64::MAX]` could look empty while
+    // carrying an unrepresentable axis into later indexing code.
+    jet_compute_row_major_strides(shape)?;
     let n = jet_compute_numel(shape)?;
     let len = usize::try_from(n).map_err(|_| {
         JetComputeError::InvalidShape("Tensor storage length is too large".to_string())
@@ -143,15 +147,83 @@ fn jet_compute_storage_len(shape: &[i64]) -> Result<usize, JetComputeError> {
     Ok(len)
 }
 
+fn jet_compute_view_metadata(
+    tensor: &JetTensor,
+) -> Result<(&[i64], usize), JetComputeError> {
+    let rank = tensor.shape.len();
+    if tensor.strides.len() == rank {
+        return Ok((&tensor.strides, 0));
+    }
+    if rank.checked_add(1) != Some(tensor.strides.len()) {
+        return Err(JetComputeError::InvalidShape(
+            "Tensor stride and view metadata disagree".to_string(),
+        ));
+    }
+    let offset = usize::try_from(tensor.strides[rank]).map_err(|_| {
+        JetComputeError::InvalidShape("Tensor view offset must be non-negative".to_string())
+    })?;
+    Ok((&tensor.strides[..rank], offset))
+}
+
+fn jet_compute_view_offset(tensor: &JetTensor) -> usize {
+    tensor
+        .strides
+        .get(tensor.shape.len())
+        .and_then(|offset| usize::try_from(*offset).ok())
+        .unwrap_or(0)
+}
+
+fn jet_compute_view_strides(
+    shape: &[i64],
+    offset: usize,
+) -> Result<Vec<i64>, JetComputeError> {
+    let mut strides = jet_compute_row_major_strides(shape)?;
+    if offset != 0 {
+        strides.push(i64::try_from(offset).map_err(|_| {
+            JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
+        })?);
+    }
+    Ok(strides)
+}
+
+fn jet_compute_tensor_view_bounds(
+    tensor: &JetTensor,
+    offset: usize,
+    expected_len: usize,
+) -> Result<std::ops::Range<usize>, JetComputeError> {
+    let end = offset.checked_add(expected_len).ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor view end overflows backing storage".to_string())
+    })?;
+    if end > tensor.data.len() {
+        return Err(JetComputeError::InvalidShape(
+            "Tensor view exceeds backing storage".to_string(),
+        ));
+    }
+    Ok(offset..end)
+}
+
+fn jet_compute_tensor_values(tensor: &JetTensor) -> &[f64] {
+    let Ok(expected_len) = jet_compute_storage_len(&tensor.shape) else {
+        return &[];
+    };
+    let offset = jet_compute_view_offset(tensor);
+    let Some(end) = offset.checked_add(expected_len) else {
+        return &[];
+    };
+    tensor.data.get(offset..end).unwrap_or(&[])
+}
+
 fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError> {
     let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
     let expected_len = jet_compute_storage_len(&tensor.shape)?;
-    if tensor.strides != expected_strides || tensor.data.len() != expected_len {
+    let (strides, offset) = jet_compute_view_metadata(tensor)?;
+    if strides != expected_strides {
         return Err(JetComputeError::InvalidShape(
             "Tensor storage and shape metadata disagree".to_string(),
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let bounds = jet_compute_tensor_view_bounds(tensor, offset, expected_len)?;
+    if tensor.data[bounds].iter().any(|value| !value.is_finite()) {
         return Err(JetComputeError::Arithmetic(
             "Tensor values must be finite".to_string(),
         ));
@@ -244,6 +316,7 @@ fn jet_compute_window_bounds(
     exclusive: bool,
 ) -> Result<std::ops::Range<usize>, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
+    let (_, offset) = jet_compute_view_metadata(tensor)?;
     let axis_len = tensor.shape.first().copied().ok_or_else(|| {
         JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
     })?;
@@ -274,6 +347,12 @@ fn jet_compute_window_bounds(
     let end = usize::try_from(flat_end).map_err(|_| {
         JetComputeError::OutOfBounds("Tensor view end is outside storage".to_string())
     })?;
+    let start = offset.checked_add(start).ok_or_else(|| {
+        JetComputeError::OutOfBounds("Tensor view start overflows storage".to_string())
+    })?;
+    let end = offset.checked_add(end).ok_or_else(|| {
+        JetComputeError::OutOfBounds("Tensor view end overflows storage".to_string())
+    })?;
     if end > tensor.data.len() || start > end {
         return Err(JetComputeError::OutOfBounds(
             "Tensor view is outside storage".to_string(),
@@ -296,11 +375,11 @@ fn jet_compute_slice_checked(
     shape[0] = first_axis_end.checked_sub(start).ok_or_else(|| {
         JetComputeError::OutOfBounds("Tensor slice has a negative extent".to_string())
     })?;
-    let strides = jet_compute_row_major_strides(&shape)?;
+    let strides = jet_compute_view_strides(&shape, bounds.start)?;
     Ok(JetTensor {
         shape,
         strides,
-        data: std::sync::Arc::new(tensor.data[bounds].to_vec()),
+        data: tensor.data.clone(),
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: tensor.last_transfer.clone(),
@@ -387,7 +466,7 @@ fn jet_compute_tensor_rank(tensor: &JetTensor) -> i64 {
 }
 
 fn jet_compute_tensor_numel(tensor: &JetTensor) -> i64 {
-    i64::try_from(tensor.data.len()).unwrap_or(i64::MAX)
+    i64::try_from(jet_compute_tensor_values(tensor).len()).unwrap_or(i64::MAX)
 }
 
 fn jet_compute_tensor_device(tensor: &JetTensor) -> String {
@@ -399,7 +478,7 @@ fn jet_compute_tensor_placement(tensor: &JetTensor) -> String {
 }
 
 fn jet_compute_tensor_to_list(tensor: &JetTensor) -> Vec<f64> {
-    (*tensor.data).clone()
+    jet_compute_tensor_values(tensor).to_vec()
 }
 
 fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetComputeError> {
@@ -430,9 +509,18 @@ fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetC
             JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
         })?;
     }
+    let (_, base_offset) = jet_compute_view_metadata(tensor)?;
+    let view_end = base_offset.checked_add(
+        usize::try_from(jet_compute_numel(&tensor.shape)?).map_err(|_| {
+            JetComputeError::OutOfBounds("tensor view length is too large".to_string())
+        })?,
+    ).ok_or_else(|| {
+        JetComputeError::OutOfBounds("tensor view end overflows storage".to_string())
+    })?;
     usize::try_from(offset)
         .ok()
-        .filter(|index| *index < tensor.data.len())
+        .and_then(|relative| base_offset.checked_add(relative))
+        .filter(|index| *index >= base_offset && *index < view_end)
         .ok_or_else(|| JetComputeError::OutOfBounds("tensor index is outside storage".to_string()))
 }
 
@@ -470,14 +558,16 @@ fn jet_compute_reshape(
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
     let n = jet_compute_storage_len(shape)?;
-    if n != tensor.data.len() {
+    let tensor_n = jet_compute_storage_len(&tensor.shape)?;
+    if n != tensor_n {
         return Err(JetComputeError::InvalidShape(format!(
             "reshape numel {} does not match tensor numel {}",
             n,
-            tensor.data.len()
+            tensor_n
         )));
     }
-    let strides = jet_compute_row_major_strides(shape)?;
+    let (_, offset) = jet_compute_view_metadata(tensor)?;
+    let strides = jet_compute_view_strides(shape, offset)?;
     Ok(JetTensor {
         shape: shape.clone(),
         strides,
@@ -669,6 +759,7 @@ fn jet_compute_materialize_broadcast(
             tensor.strides[i]
         };
     }
+    let values = jet_compute_tensor_values(tensor);
     let mut data = Vec::with_capacity(n);
     for flat in 0..n {
         let mut rem = i64::try_from(flat).map_err(|_| {
@@ -687,10 +778,10 @@ fn jet_compute_materialize_broadcast(
                 JetComputeError::InvalidShape("broadcast offset overflow".to_string())
             })?;
         }
-        let index = usize::try_from(offset).ok().filter(|i| *i < tensor.data.len()).ok_or_else(|| {
+        let index = usize::try_from(offset).ok().filter(|i| *i < values.len()).ok_or_else(|| {
             JetComputeError::InvalidShape("broadcast source index is outside storage".to_string())
         })?;
-        data.push(tensor.data[index]);
+        data.push(values[index]);
     }
     let receipt = jet_compute_place(JetComputeDevice::Auto);
     Ok(JetTensor {
@@ -800,8 +891,9 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
         )));
     }
     let receipt = jet_compute_place(JetComputeDevice::Auto);
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for value in tensor.data.iter() {
+    let values = jet_compute_tensor_values(tensor);
+    let mut data = Vec::with_capacity(values.len());
+    for value in values {
         let output = match op {
             "negate" => -*value,
             "abs" => value.abs(),
@@ -861,8 +953,10 @@ fn jet_compute_binary(
         )));
     }
     let receipt = jet_compute_place(JetComputeDevice::Auto);
-    let mut data = Vec::with_capacity(left.data.len());
-    for (x, y) in left.data.iter().zip(right.data.iter()) {
+    let left_values = jet_compute_tensor_values(&left);
+    let right_values = jet_compute_tensor_values(&right);
+    let mut data = Vec::with_capacity(left_values.len());
+    for (x, y) in left_values.iter().zip(right_values.iter()) {
         if op == "div" && *y == 0.0 {
             return Err(JetComputeError::Arithmetic(
                 "division by zero in compute operation".to_string(),
@@ -923,12 +1017,13 @@ fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
     let matrix_len = n.checked_mul(n).ok_or_else(|| {
         JetComputeError::InvalidShape("det matrix storage length overflow".to_string())
     })?;
-    if matrix_len != tensor.data.len() {
+    let values = jet_compute_tensor_values(tensor);
+    if matrix_len != values.len() {
         return Err(JetComputeError::InvalidShape(
             "det matrix storage is inconsistent".to_string(),
         ));
     }
-    let mut a = (*tensor.data).clone();
+    let mut a = values.to_vec();
     let mut det = 1.0;
     for i in 0..n {
         let mut pivot = i;
@@ -1170,7 +1265,8 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
             "fft requires a rank-1 tensor".to_string(),
         ));
     }
-    let n = tensor.data.len();
+    let values = jet_compute_tensor_values(tensor);
+    let n = values.len();
     let output_len = n
         .checked_mul(2)
         .and_then(|length| i64::try_from(length).ok())
@@ -1188,8 +1284,8 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
         let mut im = 0.0;
         for t in 0..n {
             let angle = -2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            re += tensor.data[t] * angle.cos();
-            im += tensor.data[t] * angle.sin();
+            re += values[t] * angle.cos();
+            im += values[t] * angle.sin();
         }
         jet_compute_set(&mut out, &vec![(2 * k) as i64], re)?;
         jet_compute_set(&mut out, &vec![(2 * k + 1) as i64], im)?;
@@ -1261,8 +1357,7 @@ fn jet_compute_transfer(
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let byte_count = tensor
-        .data
+    let byte_count = jet_compute_tensor_values(tensor)
         .len()
         .checked_mul(std::mem::size_of::<f64>())
         .and_then(|bytes| i64::try_from(bytes).ok())
@@ -1442,7 +1537,8 @@ fn jet_compute_reduce_to_shape(
         JetComputeDevice::Auto,
     )?;
     let rank_delta = tensor.shape.len() - target_shape.len();
-    for flat in 0..tensor.data.len() {
+    let values = jet_compute_tensor_values(tensor);
+    for flat in 0..values.len() {
         let mut rem = flat as i64;
         let mut output_coords = vec![0i64; tensor.shape.len()];
         for axis in (0..tensor.shape.len()).rev() {
@@ -1461,7 +1557,7 @@ fn jet_compute_reduce_to_shape(
         }
         let target_offset = jet_compute_offset(&out, &target_coords)?;
         let accumulated = std::sync::Arc::make_mut(&mut out.data);
-        accumulated[target_offset] += tensor.data[flat];
+        accumulated[target_offset] += values[flat];
         if !out.data[target_offset].is_finite() {
             return Err(JetComputeError::Arithmetic(
                 "gradient accumulation produced a non-finite value".to_string(),
@@ -1684,8 +1780,7 @@ fn jet_compute_mse_loss(pred: &JetTensor, target: &JetTensor) -> Result<f64, Jet
             "mse_loss requires a non-empty tensor".to_string(),
         ));
     }
-    let sum = sq
-        .data
+    let sum = jet_compute_tensor_values(&sq)
         .iter()
         .try_fold(0.0, |sum, value| {
             let next = sum + value;
@@ -1734,8 +1829,7 @@ fn jet_compute_serialize(tensor: &JetTensor) -> String {
         .map(|d| d.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let data = tensor
-        .data
+    let data = jet_compute_tensor_values(tensor)
         .iter()
         // Debug formatting is Rust's shortest round-tripping f64 spelling.
         // Keep it stable across the AOT/JIT/interpreter Prelude boundary.
@@ -1948,6 +2042,7 @@ fn jet_compute_validate_sparse(sparse: &JetSparseCsr) -> Result<(), JetComputeEr
         JetComputeError::InvalidShape("sparse nnz is too large".to_string())
     })?;
     if sparse.row_ptr.first().copied() != Some(0)
+        || sparse.row_ptr.last().copied() != Some(nnz)
         || sparse
             .row_ptr
             .windows(2)

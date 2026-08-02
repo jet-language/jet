@@ -2118,21 +2118,29 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
 }
 
 /// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing `pkg.jet`'s bytes, or
-/// empty when the file has no project manifest. Folded into the cache-key salt
-/// so a manifest edit — including a tightened `effects:` budget or a changed
-/// build profile — invalidates old cache entries. That is what keeps skipping
-/// the pipeline on a cache hit sound: a policy the manifest enforces (effect
-/// budgets, D-EFFBUDGET1) can never be masked by an unchanged program AST,
-/// because changing the manifest changes the key.
-fn manifest_fingerprint(file: &str) -> String {
+/// an empty identity when the file has no project manifest. An unreadable
+/// manifest returns `None`, disabling cache reuse rather than guessing. The
+/// fingerprint is folded into the cache-key salt so a manifest edit — including
+/// a tightened `effects:` budget or a changed build profile — invalidates old
+/// cache entries. That is what keeps skipping the pipeline on a cache hit sound:
+/// a policy the manifest enforces (effect budgets, D-EFFBUDGET1) can never be
+/// masked by an unchanged program AST, because changing the manifest changes
+/// the key.
+fn manifest_fingerprint(file: &str) -> Option<String> {
     let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
     if let Some(root) = jet::Loader::find_manifest_root(search_from) {
         let pack = root.join(jet::Syntax::PAYLOAD_FILE);
-        if let Ok(raw) = fs::read_to_string(&pack) {
-            return jet::SHA256::sha256_hex(raw.as_bytes());
-        }
+        return fs::read(&pack)
+            .ok()
+            .map(|raw| jet::SHA256::sha256_hex(&raw));
     }
-    String::new()
+    Some(String::new())
+}
+
+fn append_cache_field(bytes: &mut Vec<u8>, value: &str) {
+    let value = value.as_bytes();
+    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(value);
 }
 
 fn native_cache_salt(
@@ -2145,10 +2153,25 @@ fn native_cache_salt(
 ) -> String {
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
-    format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{corelib_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"jet-native-cache-salt-v3");
+    for value in [
+        toolchain,
+        dependency_fingerprint,
+        corelib_fingerprint,
+        mode,
+        target,
+    ] {
+        append_cache_field(&mut bytes, value);
+    }
+    bytes.extend_from_slice(&(instances.len() as u64).to_be_bytes());
+    for instance in instances {
+        append_cache_field(&mut bytes, &instance);
+    }
+    jet::SHA256::sha256_hex(&bytes)
 }
 
-const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v2";
+const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v3";
 
 fn command_identity(program: &str, args: &[&str]) -> String {
     match Command::new(program).args(args).output() {
@@ -2296,9 +2319,10 @@ fn native_cache_key_with_toolchain(
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(&bundle);
     let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
+    let manifest = manifest_fingerprint(file)?;
     let salt = native_cache_salt(
         toolchain_identity,
-        &format!("{}:{dependency_interfaces}", manifest_fingerprint(file)),
+        &format!("{manifest}:{dependency_interfaces}"),
         &corelib_fingerprint,
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),

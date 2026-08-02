@@ -208,6 +208,25 @@ fn ct_to_raw_kernel_contract(
 }
 
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
+    // CtValue owns lists, not Arc-backed borrowed views.  Marshal the logical
+    // view and rebase its offset; Prelude remains authority for validation and
+    // logical element selection.
+    if let Err(error) = jet_compute_validate_tensor(tensor) {
+        jet_panic(
+            "ComputeLite::tensor_to_ct",
+            line!(),
+            &format!("invalid Tensor result: {}", error.jet_show()),
+        );
+    }
+    let (strides, _) = match jet_compute_view_metadata(tensor) {
+        Ok(metadata) => metadata,
+        Err(error) => jet_panic(
+            "ComputeLite::tensor_to_ct",
+            line!(),
+            &format!("invalid Tensor view metadata: {}", error.jet_show()),
+        ),
+    };
+    let data = jet_compute_tensor_values(tensor);
     CtValue::Struct {
         type_name: "Tensor".to_string(),
         fields: vec![
@@ -217,17 +236,11 @@ fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
             ),
             (
                 "strides".to_string(),
-                CtValue::List(tensor.strides.iter().map(|d| CtValue::Int(*d)).collect()),
+                CtValue::List(strides.iter().map(|d| CtValue::Int(*d)).collect()),
             ),
             (
                 "data".to_string(),
-                CtValue::List(
-                    tensor
-                        .data
-                        .iter()
-                        .map(|v| CtValue::Float(CtFloat::f64(*v)))
-                        .collect(),
-                ),
+                CtValue::List(data.iter().map(|v| CtValue::Float(CtFloat::f64(*v))).collect()),
             ),
             ("device".to_string(), device_to_ct(tensor.device)),
             (
@@ -312,8 +325,7 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
         return Err(unsupported("Tensor placement metadata", span));
     }
     if let Some(receipt) = &tensor.last_transfer {
-        let expected_bytes = tensor
-            .data
+        let expected_bytes = jet_compute_tensor_values(&tensor)
             .len()
             .checked_mul(std::mem::size_of::<f64>())
             .and_then(|bytes| i64::try_from(bytes).ok())
@@ -374,10 +386,10 @@ pub fn tensor_view_list(
 ) -> Result<CtValue, Diagnostic> {
     let tensor = ct_to_tensor(value, span)?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    let bounds = jet_compute_window_bounds(&tensor, start, end, exclusive)
+    let view = jet_compute_slice_checked(&tensor, start, end, exclusive)
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
     Ok(CtValue::List(
-        tensor.data[bounds]
+        jet_compute_tensor_to_list(&view)
             .iter()
             .map(|value| CtValue::Float(CtFloat::f64(*value)))
             .collect(),
@@ -404,9 +416,13 @@ pub fn tensor_replace_data(
 ) -> Result<CtValue, Diagnostic> {
     let mut tensor = ct_to_tensor(value, span)?;
     let values = as_f64_list(&CtValue::List(items), span)?;
-    if values.len() != tensor.data.len() {
+    let logical_strides = jet_compute_view_metadata(&tensor)
+        .map(|(strides, _)| strides.to_vec())
+        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
+    if values.len() != jet_compute_tensor_values(&tensor).len() {
         return Err(unsupported("Tensor write-back length", span));
     }
+    tensor.strides = logical_strides;
     tensor.data = std::sync::Arc::new(values);
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
