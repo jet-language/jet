@@ -209,30 +209,40 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     match FlakeGraph::load(&flake_path) {
         Ok(graph) => {
             let system = host_system();
-            let native_derivations = std::fs::read_to_string(&flake_path)
-                .ok()
-                .map(|source| {
-                    graph
-                        .outputs
-                        .iter()
-                        .filter(|output| {
-                            matches!(
-                                &output.kind,
-                                super::SemanticLock::FlakeOutputKind::Package
-                            ) && output.system == system
-                        })
-                        .filter_map(|output| {
-                            crate::NixEval::evaluate_derivation_output(
-                                &source,
-                                &system,
-                                &output.attribute,
-                            )
-                            .ok()
-                            .map(|derivation| (output.name.clone(), derivation))
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let mut native_derivations = Vec::new();
+            let source = match std::fs::read_to_string(&flake_path) {
+                Ok(source) => source,
+                Err(error) => {
+                    theme.error(
+                        "couldn't read the foreign flake",
+                        &format!("couldn't evaluate package derivations: {error}"),
+                        "fix the flake file, then run `jet bridge flake` again.",
+                    );
+                    return 1;
+                }
+            };
+            for output in graph.outputs.iter().filter(|output| {
+                matches!(
+                    &output.kind,
+                    super::SemanticLock::FlakeOutputKind::Package
+                ) && output.system == system
+            }) {
+                match crate::NixEval::evaluate_derivation_output(
+                    &source,
+                    &system,
+                    &output.attribute,
+                ) {
+                    Ok(derivation) => native_derivations.push((output.name.clone(), derivation)),
+                    Err(error) => {
+                        theme.error(
+                            "couldn't evaluate a package derivation",
+                            &format!("{}: {error}", output.name),
+                            "use a supported pure derivation, or wait for the later evaluator breadth card.",
+                        );
+                        return 1;
+                    }
+                }
+            }
             if graph.named_dev_shells().len() > 1
                 && !facts.unmapped.iter().any(|item| item == "named devShells")
             {
@@ -523,6 +533,32 @@ mod tests {
         let raw = std::fs::read_to_string(crate::SemanticLock::live_path(&dir)).unwrap();
         assert!(raw.contains("flake-derivation:packages:"));
         assert!(raw.contains("76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv"));
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_rejects_unsupported_package_derivation() {
+        let dir = scratch("derivation_error");
+        let system = host_system();
+        std::fs::write(
+            dir.join("flake.nix"),
+            format!(
+                "{{ packages.{system}.default = builtins.derivation {{ name = \"bad\"; system = \"{system}\"; builder = \"/bin/sh\"; args = [ /tmp/outside ]; }}; }}"
+            ),
+        )
+        .unwrap();
+        let fixtures = scratch("derivation_error_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        let code = cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures));
+        assert_eq!(code, 1);
+        assert!(!crate::SemanticLock::live_path(&dir).exists());
 
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fixtures).ok();
