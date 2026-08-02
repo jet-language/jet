@@ -295,24 +295,8 @@ fn extract_obligations(
         Ok(p) => p,
         Err(_) => return Ok(Vec::new()),
     };
-    // The solver consumes a deliberately small structural projection, but it
-    // must not prove source that the real front end rejects. Keep the failure
-    // as an explicit Unknown evidence item instead of silently dropping it.
-    if jet::compile(source).is_err() {
-        let formula = Formula {
-            assumptions: Vec::new(),
-            claim: Vec::new(),
-        };
-        let span = source_span_text(source, jet::Diagnostics::Span::new(0, source.len()));
-        return Ok(vec![Obligation {
-            id: framed_sha256(&[target_input_sha256, "source_validation", path, &span]),
-            kind: "source_validation".into(),
-            origin: path.to_string(),
-            span,
-            formula,
-            unsupported_reason: Some("sema_validation_failed"),
-        }]);
-    }
+    // Front-end checking is owned by `jet prove`; this producer only projects
+    // the already-checked source into its fixed obligation shapes.
     Ok(extract_from_program(path, source, target_input_sha256, &program))
 }
 
@@ -425,7 +409,7 @@ fn walk_items(
                         // The declaration bounds are assumptions, not an
                         // index use site. Claiming the same inequalities is a
                         // tautology and does not prove the access operation.
-                        unsupported_reason: Some("fixed_index_use_site_not_proved"),
+                        unsupported_reason: Some("unsupported_formula"),
                     });
                 }
             }
@@ -507,7 +491,7 @@ fn collect_func_contracts(
                 assumptions.extend(ineqs)
             }
             None => unsupported_reason = Some("unsupported_formula"),
-            Some(_) => unsupported_reason = Some("machine_overflow_not_proved"),
+            Some(_) => unsupported_reason = Some("machine_overflow"),
         }
     }
     let mut substitutions = func
@@ -518,7 +502,7 @@ fn collect_func_contracts(
     match affine_return_expression(func, &substitutions) {
         Ok(Some(return_value)) => {
             if function_body_contains_machine_arithmetic(func) {
-                unsupported_reason = Some("machine_overflow_not_proved");
+                unsupported_reason = Some("machine_overflow");
             }
             substitutions.insert("result".into(), return_value);
         }
@@ -530,7 +514,7 @@ fn collect_func_contracts(
         match expr_to_inequalities_with_subst(&clause.cond, &substitutions) {
             Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => claim.extend(ineqs),
             None => unsupported_reason = Some("unsupported_formula"),
-            Some(_) => unsupported_reason = Some("machine_overflow_not_proved"),
+            Some(_) => unsupported_reason = Some("machine_overflow"),
         }
     }
     if claim.is_empty() {
@@ -620,17 +604,27 @@ fn collect_call_preconditions(
         .iter()
         .map(|param| (param.name.clone(), Affine::var(&param.name, 1)))
         .collect::<BTreeMap<_, _>>();
-    let mut calls = Vec::<(jet::AST::Call, BTreeMap<String, Affine>, bool)>::new();
+    let mut calls = Vec::<(
+        jet::AST::Call,
+        BTreeMap<String, Affine>,
+        bool,
+        bool,
+    )>::new();
     let mut caller_flow_unsupported = false;
+    let mut caller_machine_overflow = false;
     for statement in &func.body {
         visit_stmt_calls(statement, &mut |call| {
             calls.push((
                 call.clone(),
                 caller_substitutions.clone(),
                 caller_flow_unsupported,
+                caller_machine_overflow,
             ))
         });
         if let jet::AST::Stmt::Val(binding) = statement {
+            if contains_machine_arithmetic(&binding.init) {
+                caller_machine_overflow = true;
+            }
             if binding.mutable
                 || binding.pattern.is_some()
                 || binding.uninit
@@ -653,7 +647,13 @@ fn collect_call_preconditions(
             caller_flow_unsupported = true;
         }
     }
-    for (call, caller_substitutions, flow_unsupported) in calls {
+    for (
+        call,
+        caller_substitutions,
+        flow_unsupported,
+        machine_overflow,
+    ) in calls
+    {
         let Some(spec) = specs.get(&call.name) else {
             continue;
         };
@@ -663,8 +663,9 @@ fn collect_call_preconditions(
         let mut claim = Vec::new();
         let mut unsupported_reason = caller_pre_unsupported
             .then_some("unsupported_formula")
-            .or(flow_unsupported.then_some("caller_flow_not_proved"))
-            .or(call_args_contain_machine_arithmetic(&call).then_some("machine_overflow_not_proved"));
+            .or(flow_unsupported.then_some("unsupported_formula"))
+            .or(machine_overflow.then_some("machine_overflow"))
+            .or(call_args_contain_machine_arithmetic(&call).then_some("machine_overflow"));
         if let Some(substitutions) = bind_call_arguments(
             &spec.params,
             &call.args,
@@ -1780,7 +1781,7 @@ mod tests {
     }
 
     #[test]
-    fn discharges_a_straight_line_affine_postcondition_from_the_body() {
+    fn marks_machine_arithmetic_postconditions_unknown_without_range_facts() {
         let source = r#"
 #[Pre(value > 0, "positive"), Post(result > value, "grows")]
 fn grow(value: Int) => Int {
@@ -1797,7 +1798,10 @@ fn grow(value: Int) => Int {
         assert_eq!(evidence.len(), 1);
         assert!(matches!(
             evidence[0].outcome,
-            SolverOutcome::Proved { .. }
+            SolverOutcome::Unknown {
+                reason: "machine_overflow",
+                ..
+            }
         ));
     }
 
@@ -1809,7 +1813,7 @@ fn checked(value: Int) => Int { return value }
 
 #Pre(input > 0, "positive input")
 fn caller(input: Int) => Int {
-    shifted :: input + 1
+    shifted :: input
     return checked(shifted)
 }
 "#;
@@ -1824,6 +1828,34 @@ fn caller(input: Int) => Int {
         assert!(matches!(
             evidence[0].outcome,
             SolverOutcome::Proved { .. }
+        ));
+    }
+
+    #[test]
+    fn marks_machine_arithmetic_call_unknown_without_range_facts() {
+        let source = r#"
+#Pre(value > 0, "positive")
+fn checked(value: Int) => Int { return value }
+
+#Pre(input > 0, "positive input")
+fn caller(input: Int) => Int {
+    shifted :: input + 1
+    return checked(shifted)
+}
+"#;
+        let evidence = run_solver_producer(
+            &[("calls-overflow.jet".into(), source.into())],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(matches!(
+            evidence[0].outcome,
+            SolverOutcome::Unknown {
+                reason: "machine_overflow",
+                ..
+            }
         ));
     }
 
