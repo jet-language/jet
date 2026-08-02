@@ -1,4 +1,5 @@
 use super::*;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 
@@ -219,6 +220,65 @@ fn native_devshell_rejects_dynamic_package_expressions() {
 }
 
 #[test]
+fn native_devshell_keeps_unused_thunks_lazy_and_reports_forced_cycles() {
+    let evaluated = evaluate_devshell(
+        "let unused = unused; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+        "x86_64-linux",
+    )
+    .expect("unused recursive thunks must remain lazy");
+    assert_eq!(evaluated.packages(), &["fd".to_string()]);
+
+    let error = evaluate_devshell(
+        "let cycle = cycle; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ cycle ]; }; }",
+        "x86_64-linux",
+    )
+    .expect_err("forcing a recursive thunk must fail closed");
+    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("cyclic")));
+}
+
+#[test]
+fn native_devshell_bounds_lazy_thunk_chains() {
+    let mut source = String::from("let ");
+    for index in 0..300 {
+        source.push_str(&format!("v{index} = v{}; ", index + 1));
+    }
+    source.push_str(
+        "v300 = pkgs.fd; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ v0 ]; }; }",
+    );
+    let error = evaluate_devshell(&source, "x86_64-linux")
+        .expect_err("deep lazy thunk chains must hit the evaluator budget");
+    assert!(matches!(error, EvaluationError::ResourceLimit(reason) if reason.contains("expression steps")));
+}
+
+#[test]
+fn native_devshell_releases_lazy_scopes_after_each_evaluation() {
+    let source =
+        "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }";
+    for _ in 0..256 {
+        let evaluated = evaluate_devshell(source, "x86_64-linux")
+            .expect("repeated bounded evaluations must remain valid");
+        assert_eq!(evaluated.packages(), &["fd".to_string()]);
+    }
+}
+
+#[test]
+fn native_devshell_rejects_truncated_expressions_without_panicking() {
+    for source in ["let", "let value =", "[", "{ outputs =", "(pkgs.mkShell"] {
+        assert!(evaluate_devshell(source, "x86_64-linux").is_err());
+    }
+}
+
+#[test]
+fn native_devshell_rejects_indented_string_interpolation() {
+    let error = evaluate_devshell(
+        r#"{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }"#,
+        "x86_64-linux",
+    )
+    .expect_err("indented interpolation belongs to the later string stage");
+    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("string interpolation")));
+}
+
+#[test]
 fn stage_a_differential_fixture_matches_native_projection() {
     let fixture = JSON::parse(STAGE_A_FIXTURE).expect("Stage A fixture must parse");
     let root = fixture.as_object().expect("Stage A fixture root object");
@@ -227,18 +287,27 @@ fn stage_a_differential_fixture_matches_native_projection() {
         .expect("Stage A value cases")
         .as_array()
         .expect("Stage A values array");
+    for value in values {
+        let value_case = value.as_object().expect("Stage A value case object");
+        let value_source = value_case
+            .get("source")
+            .expect("Stage A value source")
+            .as_str()
+            .expect("Stage A value source string");
+        let system = value_case
+            .get("system")
+            .expect("Stage A value system")
+            .as_str()
+            .expect("Stage A value system string");
+        let evaluated = evaluate_devshell(value_source, system)
+            .expect("pinned Stage A devShell value must evaluate");
+        let fixture_packages = fixture_strings(value_case.get("jet_packages").unwrap());
+        let fixture_unsupported = fixture_strings(value_case.get("jet_unsupported").unwrap());
+        assert_eq!(evaluated.packages(), fixture_packages.as_slice());
+        assert_eq!(evaluated.unsupported(), fixture_unsupported.as_slice());
+    }
+
     let value_case = values[0].as_object().expect("Stage A value case object");
-    let value_source = value_case
-        .get("source")
-        .expect("Stage A value source")
-        .as_str()
-        .expect("Stage A value source string");
-    let evaluated = evaluate_devshell(value_source, "x86_64-linux")
-        .expect("pinned literal devShell fixture must evaluate");
-    let fixture_packages = fixture_strings(value_case.get("jet_packages").unwrap());
-    let fixture_unsupported = fixture_strings(value_case.get("jet_unsupported").unwrap());
-    assert_eq!(evaluated.packages(), fixture_packages.as_slice());
-    assert_eq!(evaluated.unsupported(), fixture_unsupported.as_slice());
     let nix_value = value_case
         .get("nix_value")
         .expect("Stage A reference value")

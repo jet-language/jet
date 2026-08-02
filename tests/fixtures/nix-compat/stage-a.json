@@ -20,6 +20,40 @@
       },
       "jet_packages": ["fd", "nodejs", "ripgrep"],
       "jet_unsupported": ["shellHook"]
+    },
+    {
+      "name": "lazy_unused_binding_and_attrset_projection",
+      "system": "x86_64-linux",
+      "source": "let unused = unused; selected = { packages = [ pkgs.fd ]; }; in { outputs = { devShells.x86_64-linux.default = pkgs.mkShell selected; }; }",
+      "nix_expression": "let unused = unused; selected = { packages = [ \"fd\" ]; }; in selected",
+      "nix_value": {
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "named_function_application_projection",
+      "system": "x86_64-linux",
+      "source": "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.ripgrep pkgs.fd ]; }; }",
+      "nix_expression": "let make = packages: { packages = packages; }; in make [ \"ripgrep\" \"fd\" ]",
+      "nix_value": {
+        "packages": ["ripgrep", "fd"]
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "attr_pattern_default_and_merge_projection",
+      "system": "x86_64-linux",
+      "source": "let base = { packages = [ pkgs.fd ]; }; add = x: x // { nativeBuildInputs = [ pkgs.ripgrep ]; }; make = { packages ? [ pkgs.fd ], nativeBuildInputs ? [] }: pkgs.mkShell { packages = packages; nativeBuildInputs = nativeBuildInputs; }; in { outputs = { devShells.x86_64-linux.default = make (add base); }; }",
+      "nix_expression": "let base = { packages = [ \"fd\" ]; }; add = x: x // { nativeBuildInputs = [ \"ripgrep\" ]; }; make = { packages ? [ \"fd\" ], nativeBuildInputs ? [] }: { packages = packages; nativeBuildInputs = nativeBuildInputs; }; in make (add base)",
+      "nix_value": {
+        "nativeBuildInputs": ["ripgrep"],
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
     }
   ],
   "errors": [

@@ -362,14 +362,16 @@ live acceptance, and documentation. Work order is binding.
   native-code/plugin rejection, evaluator resource limits, and ballot-selected
   IFD behavior.
 - No raw evaluator trace reaches users.
-- The bounded literal devShell projection is now a product path under
+- The bounded devShell projection is now a product path under
   D-JPK-NIXPRODUCT1=A. It returns typed package facts, preserves unsupported
-  hooks as explicit loss records, records the native evaluator identity in
-  `.jet/lock`, and never executes Nix code. Other evaluator stages remain
-  private until their own differential proof lands.
-- `tests/fixtures/nix-compat/stage-a.json` records the pinned literal devShell
-  value, native rejection, normalized lock, and four output identities. Real
-  nixpkgs derivation bit-match remains the later differential-proof slice.
+  hooks as explicit loss records, evaluates only bounded pure lazy expressions,
+  records the native evaluator identity in `.jet/lock`, and grants no path,
+  process, network, import, or derivation authority. Other evaluator stages
+  remain private until their own differential proof lands.
+- `tests/fixtures/nix-compat/stage-a.json` records the pinned literal,
+  lazy-binding, function, and attrset projections, native rejection,
+  normalized lock, and four output identities. Real nixpkgs derivation
+  bit-match remains the later differential-proof slice.
   Regenerate and verify it with the exact oracle executable:
   `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
   scripts/agent/verify-nix-eval-fixture.js`.
