@@ -234,16 +234,23 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             )
         })
         .collect();
-    let solver = match crate::ProveSolver::run_solver_producer(
-        &solver_members,
-        &target.input_sha256,
-        enable_solver,
-    ) {
-        Ok(items) => items,
-        Err(message) => {
-            eprintln!("error: solver producer failed: {message}");
-            exit(ExitCodes::ICE);
+    // The solver is a projection of the checked front end. Do not let it parse
+    // and discharge a member after sema has rejected another member in the
+    // target; that would turn a failed source check into partial proof output.
+    let solver = if failed == 0 {
+        match crate::ProveSolver::run_solver_producer(
+            &solver_members,
+            &target.input_sha256,
+            enable_solver,
+        ) {
+            Ok(items) => items,
+            Err(message) => {
+                eprintln!("error: solver producer failed: {message}");
+                exit(ExitCodes::ICE);
+            }
         }
+    } else {
+        Vec::new()
     };
     let solver_disproved = solver
         .iter()

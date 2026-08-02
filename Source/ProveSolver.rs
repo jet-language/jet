@@ -595,7 +595,10 @@ fn collect_call_preconditions(
     let mut caller_pre_unsupported = false;
     for clause in &func.pre {
         match expr_to_inequalities(&clause.cond) {
-            Some(ineqs) => assumptions.extend(ineqs),
+            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => {
+                assumptions.extend(ineqs)
+            }
+            Some(_) => caller_pre_unsupported = true,
             None => caller_pre_unsupported = true,
         }
     }

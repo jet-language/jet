@@ -309,3 +309,29 @@ fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
     assert!(json.contains("\"code\":\"E2941\""), "{json}");
     assert!(!json.contains("\"evidence\""), "malformed CLI emitted a ProofReport: {json}");
 }
+
+#[test]
+fn prove_solver_lens_emits_checked_certificate_evidence() {
+    let root = workspace("solver_lens");
+    fs::write(
+        root.join("checked.jet"),
+        "#[Pre(value > 0, \"positive\"), Post(result == value, \"unchanged\")] fn checked(value: Int) => Int { return value }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "checked.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"facet\":\"solver\""), "{report}");
+    assert!(report.contains("\"status\":\"proved\""), "{report}");
+    assert!(report.contains("\"solver\":{\"disproved\":0,\"proved\":1"), "{report}");
+}
