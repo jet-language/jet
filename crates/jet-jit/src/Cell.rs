@@ -590,7 +590,7 @@ extern "C" fn jet_jit_cell_guard_project(
                     rt.heap.record_set_int(record, 1, second).expect("Cell tuple");
                     record
                 }
-                _ => panic!("Cell projection shape"),
+                _ => jet_foundation::ice!(None, "Cell projection shape"),
             }
         } else {
             let guard = rt.cells.read_guards[(guard - 1) as usize]
@@ -616,7 +616,7 @@ extern "C" fn jet_jit_cell_guard_project(
                     rt.heap.record_set_int(record, 1, second).expect("Cell tuple");
                     record
                 }
-                _ => panic!("Cell projection shape"),
+                _ => jet_foundation::ice!(None, "Cell projection shape"),
             }
         }
     })

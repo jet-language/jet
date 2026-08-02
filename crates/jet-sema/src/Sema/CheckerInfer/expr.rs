@@ -1134,6 +1134,7 @@ impl<'a> Checker<'a> {
                     match base_ty {
                         Type::List(inner) => Some(Type::List(inner)),
                         Type::String => Some(Type::String),
+                        Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
                         other => {
                             self.diags.push(Diagnostic::error(
                                 "E0505",
@@ -1416,6 +1417,7 @@ impl<'a> Checker<'a> {
                     let elem = match ty {
                         Type::List(elem) => *elem,
                         Type::FixedList { elem, .. } => *elem,
+                        Type::Named(name) if name == "Tensor" => Type::Float,
                         other => return Some(other),
                     };
                     Some(Type::Apply {
@@ -2787,6 +2789,7 @@ impl<'a> Checker<'a> {
                 Some(Type::List(inner))
             }
             Type::String => Some(Type::String),
+            Type::Named(name) if name == "Tensor" => Some(Type::Named(name)),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0505",

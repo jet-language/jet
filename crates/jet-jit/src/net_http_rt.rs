@@ -224,6 +224,11 @@ pub mod jet_std {
 type JetDeadlineGuard = JetSchedulerDeadlineGuard;
 
 fn jet_std_time_now() -> i64 {
+    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
         if let Ok(n) = s.parse::<i64>() {
             return n;

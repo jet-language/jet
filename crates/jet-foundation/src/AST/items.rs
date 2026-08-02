@@ -3,6 +3,7 @@ use super::{
     Stmt, Type,
 };
 use crate::Diagnostics::Span;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub enum Item {
@@ -457,20 +458,22 @@ pub struct ImageField {
 
 /// D-JPK-IMAGE1 (=A, ratified 2026-07-01): what an `Image`'s `from:` names —
 /// a `System` (the `.Iso`/`.Qcow`/`.Raw` disk-image tier, U14 original shape) or
-/// a `Package` (the `.Oci` container tier, same card). One `from:` keyword,
-/// two referent namespaces; `kind:` (explicit or inferred from which one is
-/// written) picks the interpretation.
+/// a `Package` (the `.Oci` container tier, same card), or an `Environment`
+/// (`from: env.<name>`, the runnable shell image projection). One `from:`
+/// keyword, three referent namespaces; `kind:` (explicit or inferred from
+/// which one is written) picks the interpretation.
 #[derive(Debug, Clone)]
 pub enum ImageFromRef {
     System(String),
     Package(String),
+    Environment(String),
 }
 
 /// The parsed value of one `Image` field (U14/D-JPK-IMAGE1).
 #[derive(Debug, Clone)]
 pub enum ImageFieldValue {
-    /// `from: system.<name>` or `from: packages.<name>` — stores which one and
-    /// the whole value span.
+    /// `from: system.<name>`, `from: packages.<name>`, or `from: env.<name>` —
+    /// stores which one and the whole value span.
     From { source: ImageFromRef, span: Span },
     /// `format: iso` — a bare format keyword. Stores the word and its span.
     Format { word: String, span: Span },
@@ -879,6 +882,10 @@ pub struct Func {
     /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
+    /// D-TASK-META1=A: progressive typed metadata on a task marker. Bare
+    /// tasks remain ordinary uncached functions; this record is absent for
+    /// that beginner form.
+    pub task_metadata: Option<TaskMetadata>,
     /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
     /// declarative schedule on a `#Job fn`. `None` means unscheduled (a
     /// plain task, invoked manually only). Legal only alongside `is_task`
@@ -920,6 +927,26 @@ pub struct Func {
     /// the checked contract sema enforces at every call site.
     pub inline_foreign: Option<InlineForeign>,
     pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskMetadata {
+    pub packages: Vec<String>,
+    pub cwd: Option<String>,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub skip: Option<String>,
+    pub cache: TaskCachePolicy,
+    pub authority: Option<String>,
+    pub limits: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskCachePolicy {
+    #[default]
+    Uncached,
+    Local,
+    Shared,
 }
 
 /// D-FFI-INLINE1=A (card #501): the inline foreign tier payload on a

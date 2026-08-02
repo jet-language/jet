@@ -1031,7 +1031,14 @@ impl CtValue {
                 variant,
                 args,
             } => {
-                let prefix = format!("user_{}::{}", type_name, ct_mangle(variant));
+                // Anonymous unions use compiler-owned bare Rust variants;
+                // ordinary user enums keep the `user_` namespace prefix.
+                let variant = if type_name.starts_with("__JetUnion_") {
+                    variant.clone()
+                } else {
+                    ct_mangle(variant)
+                };
+                let prefix = format!("user_{}::{}", type_name, variant);
                 if args.is_empty() {
                     prefix
                 } else if args.iter().all(|(label, _)| label.is_none()) {
@@ -1114,5 +1121,19 @@ mod tests {
         };
 
         assert_eq!(wrapped.jet_show(), "user_Ready(Loaded(7))");
+    }
+
+    #[test]
+    fn anonymous_union_serialization_uses_bare_generated_variant() {
+        let value = CtValue::Enum {
+            type_name: "__JetUnion_Int_String".to_string(),
+            variant: "Int".to_string(),
+            args: vec![(None, CtValue::Int(3))],
+        };
+
+        assert_eq!(
+            value.serialize(),
+            "user___JetUnion_Int_String::Int(3i64)"
+        );
     }
 }

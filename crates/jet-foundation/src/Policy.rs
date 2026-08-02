@@ -650,7 +650,18 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
     rule!("Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
     rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant], BareOrCall),
-    rule!("Job", sig!(), FUNCTION_SITE, Bare),
+    // D-TASK-META1=A: the bare form stays the beginner task marker; the
+    // optional named fields are typed metadata on the same marker.
+    rule!("Job", sig!(
+        param!("packages", Any, "[]"),
+        param!("cwd", Any, "none"),
+        param!("inputs", Any, "[]"),
+        param!("outputs", Any, "[]"),
+        param!("skip", Any, "none"),
+        param!("cache", Any, ".Uncached"),
+        param!("authority", Any, "none"),
+        param!("limits", Any, "{}")
+    ), FUNCTION_SITE, BareOrCall),
     rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE, Call),
     rule!("Replayable", sig!(), CALLABLE_SITE, Bare),
     rule!("WasmExport", sig!(), FUNCTION_SITE, Bare),

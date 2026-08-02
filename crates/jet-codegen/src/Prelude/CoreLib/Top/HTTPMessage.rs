@@ -1,6 +1,8 @@
 // D-HTTP-CORE2=A: one ordered, repeat-preserving header value shared by the
 // client and server runtime paths.
 
+const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetHTTPOperation {
     ClientConnect,

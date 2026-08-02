@@ -313,6 +313,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         is_task: false,
         task_span: None,
         every: None,
+        task_metadata: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,

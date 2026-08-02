@@ -1,6 +1,7 @@
 // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: canonical task-group ownership.
 // This exact Prelude source is compiled for JIT hosts and embedded in AOT
 // programs. Engines supply only representation-specific cancel/join adapters.
+#[derive(Debug)]
 pub struct JetTaskGroupRuntime<T> {
     children: std::sync::Mutex<Vec<T>>,
 }

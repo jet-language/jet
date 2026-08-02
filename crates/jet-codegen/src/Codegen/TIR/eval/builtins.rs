@@ -188,6 +188,12 @@ pub(super) fn eval_builtin(
                 xs[a as usize..end_exclusive as usize].to_vec(),
             ))
         }
+        TBuiltinOp::ComputeViewNew { .. } => {
+            crate::Comptime::ComputeLite::tensor_view_list(recv, &args, span)
+        }
+        TBuiltinOp::ComputeViewMutNew { .. } => {
+            Err(unsupported("Tensor mutable view builtin", span))
+        }
         TBuiltinOp::SplitWrite { .. } | TBuiltinOp::GetDisjointWrite => {
             Err(unsupported("disjoint mutable view builtin", span))
         }

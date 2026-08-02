@@ -1904,6 +1904,7 @@ pub fn apply_core_call(
                     | "auth_routes"
                     | "auth_show"
                     | "sync_over"
+                    | "sync"
             ) =>
         {
             if matches!(
@@ -1911,7 +1912,7 @@ pub fn apply_core_call(
                 "auth" | "auth_oauth" | "auth_routes" | "auth_show"
             ) {
                 super::super::AuthLite::apply(method, &args, span)
-            } else if method == "sync_over" {
+            } else if matches!(method, "sync_over" | "sync") {
                 super::super::SyncLite::apply(method, &args, span)
             } else {
                 super::super::AppLite::apply(method, &args, span)

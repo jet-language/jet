@@ -244,6 +244,155 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TASK)
         }
 
+        /// D-TASK-META1=A: decode optional static fields on the existing task
+        /// marker. Task execution remains an ordinary function call.
+        pub(in crate::Parser) fn task_metadata_from_marker(
+            &self,
+            marker: &crate::AST::Marker,
+        ) -> Result<Option<crate::AST::TaskMetadata>, Diagnostic> {
+            if marker.args.is_empty() {
+                return Ok(None);
+            }
+            let arguments = self.bound_registered_rule_arguments(marker)?;
+            let mut metadata = crate::AST::TaskMetadata::default();
+            metadata.packages = Self::task_string_list(arguments.parameter(0), marker.span)?;
+            metadata.cwd = Self::task_optional_string(arguments.parameter(1), marker.span, "cwd")?;
+            metadata.inputs = Self::task_string_list(arguments.parameter(2), marker.span)?;
+            metadata.outputs = Self::task_string_list(arguments.parameter(3), marker.span)?;
+            metadata.skip = Self::task_optional_string(arguments.parameter(4), marker.span, "skip")?;
+            if let Some(cache) = arguments.parameter(5) {
+                metadata.cache = match Self::task_word(cache) {
+                    Some("Local") => crate::AST::TaskCachePolicy::Local,
+                    Some("Shared") => crate::AST::TaskCachePolicy::Shared,
+                    Some("Uncached") | Some("Off") => crate::AST::TaskCachePolicy::Uncached,
+                    _ => return Err(Self::task_metadata_error(
+                        "cache",
+                        ".Uncached, .Local, or .Shared",
+                        cache.span(),
+                    )),
+                };
+            }
+            metadata.authority =
+                Self::task_optional_string(arguments.parameter(6), marker.span, "authority")?;
+            if let Some(limits) = arguments.parameter(7) {
+                metadata.limits = Self::task_limits(limits, marker.span)?;
+            }
+            Ok(Some(metadata))
+        }
+
+        fn task_string_list(
+            expr: Option<&crate::AST::Expr>,
+            marker_span: Span,
+        ) -> Result<Vec<String>, Diagnostic> {
+            let Some(expr) = expr else { return Ok(Vec::new()) };
+            match expr {
+                crate::AST::Expr::ListLit(values, _) => values
+                    .iter()
+                    .map(|value| {
+                        Self::task_word(value).map(str::to_string).ok_or_else(|| {
+                            Self::task_metadata_error(
+                                "list",
+                                "a list of strings or names",
+                                value.span(),
+                            )
+                        })
+                    })
+                    .collect(),
+                _ => Self::task_word(expr)
+                    .map(|value| vec![value.to_string()])
+                    .ok_or_else(|| {
+                        Self::task_metadata_error(
+                            "list",
+                            "a list of strings or names",
+                            marker_span,
+                        )
+                    }),
+            }
+        }
+
+        fn task_optional_string(
+            expr: Option<&crate::AST::Expr>,
+            marker_span: Span,
+            field: &str,
+        ) -> Result<Option<String>, Diagnostic> {
+            let Some(expr) = expr else { return Ok(None) };
+            match Self::task_word(expr) {
+                Some(value) if value != "none" && value != "None" => Ok(Some(value.to_string())),
+                Some(_) => Ok(None),
+                None => Err(Self::task_metadata_error(field, "a string or name", marker_span)),
+            }
+        }
+
+        fn task_limits(
+            expr: &crate::AST::Expr,
+            marker_span: Span,
+        ) -> Result<std::collections::BTreeMap<String, String>, Diagnostic> {
+            let crate::AST::Expr::MapLit(entries, _) = expr else {
+                return Err(Self::task_metadata_error(
+                    "limits",
+                    "a map of names to static values",
+                    marker_span,
+                ));
+            };
+            let mut limits = std::collections::BTreeMap::new();
+            for (key, value) in entries {
+                let Some(key) = Self::task_word(key) else {
+                    return Err(Self::task_metadata_error(
+                        "limits",
+                        "a map of names to static values",
+                        key.span(),
+                    ));
+                };
+                let Some(value) = Self::task_static_word(value) else {
+                    return Err(Self::task_metadata_error(
+                        "limits",
+                        "a map of names to static values",
+                        value.span(),
+                    ));
+                };
+                if limits.insert(key.to_string(), value).is_some() {
+                    return Err(Self::task_metadata_error(
+                        "limits",
+                        "a map with unique keys",
+                        marker_span,
+                    ));
+                }
+            }
+            Ok(limits)
+        }
+
+        fn task_word(expr: &crate::AST::Expr) -> Option<&str> {
+            match expr {
+                crate::AST::Expr::Ident(value, _) => Some(value.as_str()),
+                crate::AST::Expr::EnumLit { variant, args, .. } if args.is_empty() => {
+                    Some(variant.as_str())
+                }
+                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(value) => Some(value.as_str()),
+                    crate::AST::StrPart::Interp(..) => None,
+                },
+                _ => None,
+            }
+        }
+
+        fn task_static_word(expr: &crate::AST::Expr) -> Option<String> {
+            Self::task_word(expr).map(str::to_string).or_else(|| match expr {
+                crate::AST::Expr::Int(value, ..) => Some(value.to_string()),
+                crate::AST::Expr::Bool(value, _) => Some(value.to_string()),
+                _ => None,
+            })
+        }
+
+        fn task_metadata_error(field: &str, expected: &str, span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E1330",
+                format!("task metadata {field} has the wrong shape"),
+                format!("D-TASK-META1: {field} is {expected}"),
+                format!("write {field}: as {expected}"),
+                Some(span),
+            )
+        }
+
         /// D-SCHEDULE1: true when the cursor is at `#Every(…)` (a schedule fn
         /// marker). Token stream: `# Every (`.
         pub(in crate::Parser) fn at_every_fn(&self) -> bool {

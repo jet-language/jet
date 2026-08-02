@@ -225,7 +225,7 @@ impl<'a> Parser<'a> {
             self.validate_registered_rule_arguments(marker)
         }
 
-        fn validate_registered_rule_arguments(&self, marker: &Marker) -> Result<(), Diagnostic> {
+        pub(in crate::Parser) fn validate_registered_rule_arguments(&self, marker: &Marker) -> Result<(), Diagnostic> {
             let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
                 return Ok(());
             };
@@ -668,6 +668,14 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn marker_sequence_leads_to_function(&self) -> bool {
             if self.at_test_def()
                 || self.at_bench_def()
+                // D-MARK-META1=B: maturity is a `#Meta` field, not a
+                // standalone marker. Let the top-level parser issue its
+                // ordinary unknown-marker diagnostic instead of classifying
+                // this spelling as an attached function marker.
+                || matches!(self.marker_name_at(self.pos), Some(name)
+                    if name == Syntax::ATTR_EXPERIMENTAL
+                        || name == Syntax::ATTR_TESTED
+                        || name == Syntax::ATTR_HARDENED)
                 || matches!(self.marker_name_at(self.pos), Some(name)
                     if name == Syntax::ATTR_POLICY && self.policy_is_file_decl())
             {
@@ -944,9 +952,10 @@ impl<'a> Parser<'a> {
                             policy.push(declaration);
                         }
                     }
-                    Syntax::KW_TASK if marker.args.is_empty() => {
+                    Syntax::KW_TASK => {
                         function.is_task = true;
                         function.task_span = Some(marker.span);
+                        function.task_metadata = self.task_metadata_from_marker(&marker)?;
                     }
                     // D-TASKS-LIST1=A: only a group that also has `#Job`
                     // reaches this arm. Discovery reads the retained marker.

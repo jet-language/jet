@@ -1667,7 +1667,13 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
-                if matches!(op, crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }) {
+                let is_tensor = matches!(&recv.ty, Type::Named(name) if name == "Tensor")
+                    || matches!(&recv.ty, Type::Apply { name, .. } if name == "Tensor");
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
+                        | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
+                ) {
                     let base_name = match &recv.kind {
                         TExprKind::Local(local) => local.name.clone(),
                         TExprKind::Borrow { place, .. } => match &place.kind {
@@ -1678,11 +1684,31 @@ impl<'a> EvalCtx<'a> {
                         },
                         _ => return Err(unsupported("view-mut base", self.span())),
                     };
-                    let CtValue::List(xs) = scope
+                    let base_value = scope
                         .get(&base_name)
                         .cloned()
-                        .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?
-                    else {
+                        .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?;
+                    if is_tensor {
+                        let evaluated_args = args
+                            .iter()
+                            .map(|arg| self.eval_expr(arg, scope))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let (start, end_exclusive) =
+                            crate::Comptime::ComputeLite::tensor_view_window(
+                                &base_value,
+                                &evaluated_args,
+                                self.span(),
+                            )?;
+                        return Ok(CtValue::Struct {
+                            type_name: "__JetViewMut".into(),
+                            fields: vec![
+                                ("base".into(), CtValue::Str(base_name)),
+                                ("start".into(), CtValue::Int(start as i64)),
+                                ("end".into(), CtValue::Int(end_exclusive as i64 - 1)),
+                            ],
+                        });
+                    }
+                    let CtValue::List(xs) = base_value else {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
                     let (start, end_exclusive) = if args.len() == 1 {
@@ -1798,7 +1824,10 @@ impl<'a> EvalCtx<'a> {
                 // `__JetViewMut` is a write-through handle; read builtins see the
                 // inclusive window as a List (same surface as View after ViewNew).
                 // Do not write the temporary List back over the ViewMut binding.
-                let mut skip_view_mut_wb = false;
+                let mut skip_view_mut_wb = matches!(
+                    op,
+                    crate::Codegen::TIR::TBuiltinOp::ComputeViewNew { .. }
+                );
                 if let CtValue::Struct {
                     type_name,
                     fields,
@@ -2543,7 +2572,7 @@ impl<'a> EvalCtx<'a> {
                         false,
                     )
                 };
-                match b {
+                match &b {
                     CtValue::List(xs) => {
                         let end_valid = if exclusive {
                             z as usize <= xs.len()
@@ -2574,6 +2603,17 @@ impl<'a> EvalCtx<'a> {
                                 chars[a as usize..=z as usize].iter().collect(),
                             ))
                         }
+                    }
+                    CtValue::Struct { type_name, .. }
+                        if type_name == "Tensor" || type_name == "JetTensor" =>
+                    {
+                        crate::Comptime::ComputeLite::tensor_slice_value(
+                            &b,
+                            a,
+                            z,
+                            exclusive,
+                            self.span(),
+                        )
                     }
                     _ => Err(unsupported("slice recv", self.span())),
                 }

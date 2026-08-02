@@ -7,9 +7,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use jet::AST::{BinOp, Expr, Item, Program, UnOp};
+use jet::Diagnostics::span_line_col;
 use jet::Lexer;
 use jet::Parser;
 use jet::SHA256;
+use jet_foundation::JSON::{parse_json, JSONValue};
 
 const MAX_OBLIGATIONS: usize = 10_000;
 const MAX_TERMS: usize = 50_000;
@@ -130,14 +132,12 @@ pub(crate) struct Formula {
 
 impl Formula {
     fn to_json(&self) -> String {
-        let assumptions = self
-            .assumptions
+        let assumptions = canonical_inequalities(&self.assumptions)
             .iter()
             .map(Inequality::to_json)
             .collect::<Vec<_>>()
             .join(",");
-        let claim = self
-            .claim
+        let claim = canonical_inequalities(&self.claim)
             .iter()
             .map(Inequality::to_json)
             .collect::<Vec<_>>()
@@ -148,7 +148,8 @@ impl Formula {
     }
 
     fn hash(&self) -> String {
-        SHA256::sha256_hex(self.to_json().as_bytes())
+        let canonical = format!("{}\n", self.to_json());
+        SHA256::sha256_hex(canonical.as_bytes())
     }
 
     fn term_count(&self) -> usize {
@@ -166,6 +167,13 @@ impl Formula {
         }
         vars
     }
+}
+
+fn canonical_inequalities(inequalities: &[Inequality]) -> Vec<Inequality> {
+    let mut normalized = inequalities.to_vec();
+    normalized.sort_by(|left, right| left.to_json().cmp(&right.to_json()));
+    normalized.dedup();
+    normalized
 }
 
 #[derive(Clone, Debug)]
@@ -211,6 +219,7 @@ pub(crate) struct SolverEvidence {
 /// Collect solver obligations from target members and discharge them.
 pub(crate) fn run_solver_producer(
     members: &[(String, String)],
+    target_input_sha256: &str,
     enable: bool,
 ) -> Result<Vec<SolverEvidence>, String> {
     if !enable {
@@ -218,7 +227,7 @@ pub(crate) fn run_solver_producer(
     }
     let mut obligations = Vec::new();
     for (path, source) in members {
-        obligations.extend(extract_obligations(path, source)?);
+        obligations.extend(extract_obligations(path, source, target_input_sha256)?);
         if obligations.len() > MAX_OBLIGATIONS {
             return Err("solver structural_limit: more than 10000 obligations".into());
         }
@@ -238,7 +247,8 @@ pub(crate) fn run_solver_producer(
             });
             continue;
         }
-        let outcome = prove_obligation(&obligation.formula);
+        let outcome = prove_obligation(&obligation.formula)
+            .map_err(|reason| format!("solver certificate failure: {reason}"))?;
         let tag = match &outcome {
             SolverOutcome::Proved { .. } => "proved",
             SolverOutcome::Disproved { .. } => "disproved",
@@ -254,14 +264,20 @@ pub(crate) fn run_solver_producer(
 }
 
 fn evidence_id_for(obligation: &Obligation, tag: &str) -> String {
-    let payload = format!(
-        "{}|{}|{}|{}|{}",
-        obligation.id, obligation.kind, obligation.origin, obligation.span, tag
-    );
-    SHA256::sha256_hex(payload.as_bytes())
+    framed_sha256(&[
+        &obligation.id,
+        &obligation.kind,
+        &obligation.origin,
+        &obligation.span,
+        tag,
+    ])
 }
 
-fn extract_obligations(path: &str, source: &str) -> Result<Vec<Obligation>, String> {
+fn extract_obligations(
+    path: &str,
+    source: &str,
+    target_input_sha256: &str,
+) -> Result<Vec<Obligation>, String> {
     let (toks, lex_diags) = Lexer::lex(source);
     if !lex_diags.is_empty() {
         return Ok(Vec::new());
@@ -270,59 +286,171 @@ fn extract_obligations(path: &str, source: &str) -> Result<Vec<Obligation>, Stri
         Ok(p) => p,
         Err(_) => return Ok(Vec::new()),
     };
-    Ok(extract_from_program(path, &program))
+    Ok(extract_from_program(path, source, target_input_sha256, &program))
 }
 
-fn extract_from_program(path: &str, program: &Program) -> Vec<Obligation> {
+fn extract_from_program(
+    path: &str,
+    source: &str,
+    target_input_sha256: &str,
+    program: &Program,
+) -> Vec<Obligation> {
     let mut out = Vec::new();
-    walk_items(path, &program.items, &mut out);
+    let mut specs = BTreeMap::new();
+    collect_function_specs(&program.items, &mut specs);
+    walk_items(
+        path,
+        source,
+        target_input_sha256,
+        &program.items,
+        &specs,
+        &mut out,
+    );
     out
 }
 
-fn walk_items(path: &str, items: &[Item], out: &mut Vec<Obligation>) {
+#[derive(Clone)]
+struct FunctionSpec {
+    params: Vec<String>,
+    pre: Vec<Expr>,
+}
+
+fn collect_function_specs(items: &[Item], out: &mut BTreeMap<String, FunctionSpec>) {
+    for item in items {
+        match item {
+            Item::Func(func) => {
+                out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
+                    params: func.params.iter().map(|param| param.name.clone()).collect(),
+                    pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                });
+            }
+            Item::Impl(imp) => {
+                for func in &imp.methods {
+                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
+                        params: func.params.iter().map(|param| param.name.clone()).collect(),
+                        pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                    });
+                }
+            }
+            Item::Struct(def) => {
+                for func in &def.methods {
+                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
+                        params: func.params.iter().map(|param| param.name.clone()).collect(),
+                        pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                    });
+                }
+            }
+            Item::Enum(def) => {
+                for func in &def.methods {
+                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
+                        params: func.params.iter().map(|param| param.name.clone()).collect(),
+                        pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                    });
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_function_specs(body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn walk_items(
+    path: &str,
+    source: &str,
+    target_input_sha256: &str,
+    items: &[Item],
+    specs: &BTreeMap<String, FunctionSpec>,
+    out: &mut Vec<Obligation>,
+) {
     for item in items {
         match item {
             Item::Distinct(def) => {
                 if let Some((lo, hi, span)) = def.range {
-                    // Consistency only: the declared inclusive bounds must satisfy lo <= hi.
-                    // (Universal "value always in range" is not a theorem without assumptions.)
+                    // The distinct declaration is the authority for the bounded
+                    // value. Keep the invariant as assumptions and prove that
+                    // every claimed bound follows from that same checked fact.
+                    // This gives the certificate checker real arithmetic to
+                    // validate instead of a constant "lo <= hi" label.
+                    let bounds = inclusive_bounds(lo, hi);
                     let formula = Formula {
-                        assumptions: Vec::new(),
-                        claim: vec![Inequality::le(Affine::constant((lo as i128) - (hi as i128)))],
+                        assumptions: bounds.clone(),
+                        claim: bounds,
                     };
                     let formula_hash = formula.hash();
-                    let span_text = format!("{}:{}-{}:{}", 1, span.start.max(1), 1, span.end.max(1));
-                    let id = SHA256::sha256_hex(
-                        format!("{path}|refinement|{span_text}|{formula_hash}").as_bytes(),
-                    );
+                    let span_text = source_span_text(source, span);
+                    let id = framed_sha256(&[
+                        target_input_sha256,
+                        "fixed_index_bounds",
+                        path,
+                        &span_text,
+                        &formula_hash,
+                    ]);
                     out.push(Obligation {
                         id,
-                        kind: "refinement".into(),
+                        kind: "fixed_index_bounds".into(),
                         origin: path.to_string(),
                         span: span_text,
                         formula,
                     });
                 }
             }
-            Item::Func(func) => collect_func_contracts(path, func, out),
+            Item::Func(func) => {
+                collect_func_contracts(path, source, target_input_sha256, func, out);
+                collect_call_preconditions(
+                    path,
+                    source,
+                    target_input_sha256,
+                    func,
+                    specs,
+                    out,
+                );
+            }
             Item::Impl(imp) => {
                 for method in &imp.methods {
-                    collect_func_contracts(path, method, out);
+                    collect_func_contracts(path, source, target_input_sha256, method, out);
+                    collect_call_preconditions(
+                        path,
+                        source,
+                        target_input_sha256,
+                        method,
+                        specs,
+                        out,
+                    );
                 }
             }
             Item::Struct(def) => {
                 for method in &def.methods {
-                    collect_func_contracts(path, method, out);
+                    collect_func_contracts(path, source, target_input_sha256, method, out);
+                    collect_call_preconditions(
+                        path,
+                        source,
+                        target_input_sha256,
+                        method,
+                        specs,
+                        out,
+                    );
                 }
             }
             Item::Enum(def) => {
                 for method in &def.methods {
-                    collect_func_contracts(path, method, out);
+                    collect_func_contracts(path, source, target_input_sha256, method, out);
+                    collect_call_preconditions(
+                        path,
+                        source,
+                        target_input_sha256,
+                        method,
+                        specs,
+                        out,
+                    );
                 }
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
-                    walk_items(path, body, out);
+                    walk_items(path, source, target_input_sha256, body, specs, out);
                 }
             }
             _ => {}
@@ -332,6 +460,8 @@ fn walk_items(path: &str, items: &[Item], out: &mut Vec<Obligation>) {
 
 fn collect_func_contracts(
     path: &str,
+    source: &str,
+    target_input_sha256: &str,
     func: &jet::AST::Func,
     out: &mut Vec<Obligation>,
 ) {
@@ -355,10 +485,14 @@ fn collect_func_contracts(
         claim,
     };
     let formula_hash = formula.hash();
-    let span = format!("fn:{}", func.name);
-    let id = SHA256::sha256_hex(
-        format!("{path}|contract|{}|{span}|{formula_hash}", func.name).as_bytes(),
-    );
+    let span = source_span_text(source, func.span);
+    let id = framed_sha256(&[
+        target_input_sha256,
+        "function_postcondition",
+        path,
+        &span,
+        &formula_hash,
+    ]);
     out.push(Obligation {
         id,
         kind: "function_postcondition".into(),
@@ -368,16 +502,382 @@ fn collect_func_contracts(
     });
 }
 
+fn collect_call_preconditions(
+    path: &str,
+    source: &str,
+    target_input_sha256: &str,
+    func: &jet::AST::Func,
+    specs: &BTreeMap<String, FunctionSpec>,
+    out: &mut Vec<Obligation>,
+) {
+    let assumptions = func
+        .pre
+        .iter()
+        .filter_map(|clause| expr_to_inequalities(&clause.cond))
+        .flatten()
+        .collect::<Vec<_>>();
+    let mut calls = Vec::<jet::AST::Call>::new();
+    for statement in &func.body {
+        visit_stmt_calls(statement, &mut |call| calls.push(call.clone()));
+    }
+    for call in calls {
+        let Some(spec) = specs.get(&call.name) else {
+            continue;
+        };
+        if spec.pre.is_empty() {
+            continue;
+        }
+        let Some(substitutions) = bind_call_arguments(&spec.params, &call.args) else {
+            continue;
+        };
+        let mut claim = Vec::new();
+        let mut supported = true;
+        for condition in &spec.pre {
+            let Some(inequalities) = expr_to_inequalities_with_subst(condition, &substitutions)
+            else {
+                supported = false;
+                break;
+            };
+            claim.extend(inequalities);
+        }
+        if !supported || claim.is_empty() {
+            continue;
+        }
+        let formula = Formula { assumptions: assumptions.clone(), claim };
+        let formula_hash = formula.hash();
+        let span = source_span_text(source, call.name_span);
+        let origin = format!("{path}::{} -> {}", func.name, call.name);
+        let id = framed_sha256(&[
+            target_input_sha256,
+            "call_precondition",
+            path,
+            &origin,
+            &span,
+            &formula_hash,
+        ]);
+        out.push(Obligation {
+            id,
+            kind: "call_precondition".into(),
+            origin,
+            span,
+            formula,
+        });
+    }
+}
+
+fn bind_call_arguments(
+    params: &[String],
+    args: &[jet::AST::CallArg],
+) -> Option<BTreeMap<String, Affine>> {
+    if params.len() != args.len() || args.iter().any(|arg| arg.spread) {
+        return None;
+    }
+    let mut slots = vec![None; params.len()];
+    let mut next_positional = 0usize;
+    for arg in args {
+        let index = if let Some((label, _)) = &arg.label {
+            params.iter().position(|param| param == label)?
+        } else {
+            while next_positional < slots.len() && slots[next_positional].is_some() {
+                next_positional += 1;
+            }
+            let index = next_positional;
+            next_positional = next_positional.checked_add(1)?;
+            index
+        };
+        if index >= slots.len() || slots[index].is_some() {
+            return None;
+        }
+        let affine = expr_to_affine_with_subst(&arg.expr, &BTreeMap::new())?;
+        slots[index] = Some(affine);
+    }
+    if slots.iter().any(Option::is_none) {
+        return None;
+    }
+    let mut substitutions = BTreeMap::new();
+    for (param, slot) in params.iter().zip(slots) {
+        let Some(affine) = slot else {
+            return None;
+        };
+        substitutions.insert(param.clone(), affine);
+    }
+    Some(substitutions)
+}
+
+fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST::Call)) {
+    use jet::AST::Stmt;
+    match statement {
+        Stmt::Expr(expr) | Stmt::Yield(expr, _) => visit_expr_calls(expr, calls),
+        Stmt::Val(binding) => visit_expr_calls(&binding.init, calls),
+        Stmt::Assign { target, value, .. } => {
+            visit_lvalue_calls(target, calls);
+            visit_expr_calls(value, calls);
+        }
+        Stmt::Return(Some(expr), _)
+        | Stmt::BreakValue(expr, _)
+        | Stmt::BreakLabelValue(_, _, expr, _) => visit_expr_calls(expr, calls),
+        Stmt::Return(None, _)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..) => {}
+        Stmt::While { cond, body, .. } => {
+            visit_expr_calls(cond, calls);
+            visit_stmt_list(body, calls);
+        }
+        Stmt::For { kind, body, .. } => {
+            match kind {
+                jet::AST::ForKind::Range { start, end, step, .. } => {
+                    visit_expr_calls(start, calls);
+                    visit_expr_calls(end, calls);
+                    if let Some(step) = step {
+                        visit_expr_calls(step, calls);
+                    }
+                }
+                jet::AST::ForKind::In { collection, step } => {
+                    visit_expr_calls(collection, calls);
+                    if let Some(step) = step {
+                        visit_expr_calls(step, calls);
+                    }
+                }
+            }
+            visit_stmt_list(body, calls);
+        }
+        Stmt::Switch { subject, arms, else_body, .. }
+        | Stmt::ComptimeSwitch { subject, arms, else_body, .. } => {
+            visit_expr_calls(subject, calls);
+            for arm in arms {
+                visit_expr_calls(&arm.cond, calls);
+                visit_stmt_list(&arm.body, calls);
+            }
+            if let Some(body) = else_body {
+                visit_stmt_list(body, calls);
+            }
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            visit_expr_calls(&init.init, calls);
+            visit_expr_calls(cond, calls);
+            if let Some(step) = step {
+                visit_stmt_calls(step, calls);
+            }
+            visit_stmt_list(body, calls);
+        }
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            visit_expr_calls(cond, calls);
+            visit_stmt_list(then_body, calls);
+            if let Some(body) = else_body {
+                visit_stmt_list(body, calls);
+            }
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, expr, _) in fields {
+                visit_expr_calls(expr, calls);
+            }
+            visit_stmt_list(body, calls);
+        }
+        Stmt::ScopeMember { args, body, .. } => {
+            for arg in args {
+                visit_expr_calls(arg, calls);
+            }
+            visit_stmt_list(body, calls);
+        }
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. } => visit_stmt_list(body, calls),
+    }
+}
+
+fn visit_stmt_list(statements: &[jet::AST::Stmt], calls: &mut impl FnMut(&jet::AST::Call)) {
+    for statement in statements {
+        visit_stmt_calls(statement, calls);
+    }
+}
+
+fn visit_lvalue_calls(target: &jet::AST::LValue, calls: &mut impl FnMut(&jet::AST::Call)) {
+    match target {
+        jet::AST::LValue::Local { .. } => {}
+        jet::AST::LValue::Index { base, index, .. } => {
+            visit_expr_calls(base, calls);
+            visit_expr_calls(index, calls);
+        }
+        jet::AST::LValue::Field { base, .. } => visit_expr_calls(base, calls),
+    }
+}
+
+fn visit_call_args(args: &[jet::AST::CallArg], calls: &mut impl FnMut(&jet::AST::Call)) {
+    for arg in args {
+        visit_expr_calls(&arg.expr, calls);
+    }
+}
+
+fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
+    match expr {
+        Expr::Call(call) => {
+            calls(call);
+            visit_call_args(&call.args, calls);
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            visit_expr_calls(receiver, calls);
+            visit_call_args(args, calls);
+        }
+        Expr::CallValue { callee, args, .. } => {
+            visit_expr_calls(callee, calls);
+            visit_call_args(args, calls);
+        }
+        Expr::Str(parts, _) => {
+            for part in parts {
+                if let jet::AST::StrPart::Interp(expr, _) = part {
+                    visit_expr_calls(expr, calls);
+                }
+            }
+        }
+        Expr::ListLit(items, _) => {
+            for item in items {
+                visit_expr_calls(item, calls);
+            }
+        }
+        Expr::TupleLit(items, _, _) => {
+            for (_, item) in items {
+                visit_expr_calls(item, calls);
+            }
+        }
+        Expr::MemberSpread { base, .. }
+        | Expr::Spread(base, _)
+        | Expr::Deref(base, _)
+        | Expr::RawOf(base, _)
+        | Expr::Copy(base, _)
+        | Expr::Place(base, _, _)
+        | Expr::Field(base, _, _)
+        | Expr::Present(base, _)
+        | Expr::Ok(base, _)
+        | Expr::Err(base, _)
+        | Expr::Try(base, _, _)
+        | Expr::Paren(base, _) => visit_expr_calls(base, calls),
+        Expr::MapLit(entries, _) => {
+            for (key, value) in entries {
+                visit_expr_calls(key, calls);
+                visit_expr_calls(value, calls);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            visit_expr_calls(base, calls);
+            visit_expr_calls(index, calls);
+        }
+        Expr::Slice { base, start, end, range, .. } => {
+            visit_expr_calls(base, calls);
+            if let Some(range) = range {
+                visit_expr_calls(range, calls);
+            } else {
+                visit_expr_calls(start, calls);
+                visit_expr_calls(end, calls);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            visit_expr_calls(start, calls);
+            visit_expr_calls(end, calls);
+        }
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            visit_expr_calls(inner, calls)
+        }
+        Expr::Binary(_, left, right, _) => {
+            visit_expr_calls(left, calls);
+            visit_expr_calls(right, calls);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for operand in operands {
+                visit_expr_calls(operand, calls);
+            }
+        }
+        Expr::OptField { base, .. } => visit_expr_calls(base, calls),
+        Expr::StructLit { fields, .. } => {
+            for (_, _, value) in fields {
+                visit_expr_calls(value, calls);
+            }
+        }
+        Expr::TypedLit { body, .. } => body.for_each_expr(|value| visit_expr_calls(value, calls)),
+        Expr::EnumLit { args, .. } => {
+            for arg in args {
+                match arg {
+                    jet::AST::EnumLitArg::Positional(value)
+                    | jet::AST::EnumLitArg::Named { expr: value, .. } => {
+                        visit_expr_calls(value, calls)
+                    }
+                }
+            }
+        }
+        Expr::Tainted(inner, _, _)
+        | Expr::PatternTest { subject: inner, .. } => visit_expr_calls(inner, calls),
+        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            visit_expr_calls(cond, calls);
+            visit_stmt_list(then_body, calls);
+            visit_expr_calls(then_value, calls);
+            visit_stmt_list(else_body, calls);
+            visit_expr_calls(else_value, calls);
+        }
+        Expr::Lambda(lambda) => match &lambda.body {
+            jet::AST::LambdaBody::Expr(value) => visit_expr_calls(value, calls),
+            jet::AST::LambdaBody::Block(body) => visit_stmt_list(body, calls),
+        },
+        Expr::OrFallback { value, fallback, .. } => {
+            visit_expr_calls(value, calls);
+            match fallback {
+                jet::AST::OrFallback::Value(value)
+                | jet::AST::OrFallback::Return(Some(value), _) => visit_expr_calls(value, calls),
+                jet::AST::OrFallback::Panic { args, .. } => visit_call_args(args, calls),
+                _ => {}
+            }
+        }
+        Expr::PtrFromAddr { addr, .. } => visit_expr_calls(addr, calls),
+        _ => {}
+    }
+}
+
+fn source_span_text(source: &str, span: jet::Diagnostics::Span) -> String {
+    let (start_line, start_column) = span_line_col(source, span.start);
+    let (end_line, end_column) = span_line_col(source, span.end);
+    format!("{start_line}:{start_column}-{end_line}:{end_column}")
+}
+
+fn framed_sha256(fields: &[&str]) -> String {
+    let mut bytes = Vec::new();
+    for field in fields {
+        bytes.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(field.as_bytes());
+    }
+    SHA256::sha256_hex(&bytes)
+}
+
 fn expr_to_inequalities(expr: &Expr) -> Option<Vec<Inequality>> {
+    expr_to_inequalities_with_subst(expr, &BTreeMap::new())
+}
+
+fn expr_to_inequalities_with_subst(
+    expr: &Expr,
+    substitutions: &BTreeMap<String, Affine>,
+) -> Option<Vec<Inequality>> {
     match expr {
         Expr::Binary(op, left, right, _) => {
             if *op == BinOp::And {
-                let mut out = expr_to_inequalities(left)?;
-                out.extend(expr_to_inequalities(right)?);
+                let mut out = expr_to_inequalities_with_subst(left, substitutions)?;
+                out.extend(expr_to_inequalities_with_subst(right, substitutions)?);
                 return Some(out);
             }
-            let lhs = expr_to_affine(left)?;
-            let rhs = expr_to_affine(right)?;
+            let lhs = expr_to_affine_with_subst(left, substitutions)?;
+            let rhs = expr_to_affine_with_subst(right, substitutions)?;
             match op {
                 BinOp::Le => Some(vec![Inequality::le(lhs.add(&rhs.scale(-1).ok()?).ok()?)]),
                 BinOp::Ge => Some(vec![Inequality::le(rhs.add(&lhs.scale(-1).ok()?).ok()?)]),
@@ -401,13 +901,19 @@ fn expr_to_inequalities(expr: &Expr) -> Option<Vec<Inequality>> {
     }
 }
 
-fn expr_to_affine(expr: &Expr) -> Option<Affine> {
+fn expr_to_affine_with_subst(
+    expr: &Expr,
+    substitutions: &BTreeMap<String, Affine>,
+) -> Option<Affine> {
     match expr {
         Expr::Int(v, _, _, _) => Some(Affine::constant(*v as i128)),
-        Expr::Ident(name, _) => Some(Affine::var(name, 1)),
+        Expr::Ident(name, _) => substitutions
+            .get(name)
+            .cloned()
+            .or_else(|| Some(Affine::var(name, 1))),
         Expr::Binary(op, left, right, _) => {
-            let l = expr_to_affine(left)?;
-            let r = expr_to_affine(right)?;
+            let l = expr_to_affine_with_subst(left, substitutions)?;
+            let r = expr_to_affine_with_subst(right, substitutions)?;
             match op {
                 BinOp::Add => l.add(&r).ok(),
                 BinOp::Sub => l.add(&r.scale(-1).ok()?).ok(),
@@ -424,13 +930,29 @@ fn expr_to_affine(expr: &Expr) -> Option<Affine> {
             }
         }
         Expr::Unary(UnOp::Neg, inner, _) => {
-            expr_to_affine(inner).and_then(|a| a.scale(-1).ok())
+            expr_to_affine_with_subst(inner, substitutions).and_then(|a| a.scale(-1).ok())
         }
+        Expr::Paren(inner, _) => expr_to_affine_with_subst(inner, substitutions),
         _ => None,
     }
 }
 
-fn prove_obligation(formula: &Formula) -> SolverOutcome {
+fn inclusive_bounds(lower: i64, upper: i64) -> Vec<Inequality> {
+    vec![
+        Inequality::le(
+            Affine::var("value", -1)
+                .add(&Affine::constant(lower as i128))
+                .unwrap_or_else(|_| Affine::constant(1)),
+        ),
+        Inequality::le(
+            Affine::var("value", 1)
+                .add(&Affine::constant(-(upper as i128)))
+                .unwrap_or_else(|_| Affine::constant(1)),
+        ),
+    ]
+}
+
+fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
     // Prove assumptions => claim by showing assumptions ∧ ¬claim is unsat.
     let mut negated_claim = Vec::new();
     for ineq in &formula.claim {
@@ -438,25 +960,25 @@ fn prove_obligation(formula: &Formula) -> SolverOutcome {
         match ineq.affine.scale(-1).and_then(|a| a.add(&Affine::constant(1))) {
             Ok(affine) => negated_claim.push(Inequality::le(affine)),
             Err(SolverFail::CoefficientOverflow) => {
-                return SolverOutcome::Unknown {
+                return Ok(SolverOutcome::Unknown {
                     reason: "coefficient_overflow",
                     steps: 0,
-                };
+                });
             }
             Err(SolverFail::StructuralLimit) => {
-                return SolverOutcome::Unknown {
+                return Ok(SolverOutcome::Unknown {
                     reason: "structural_limit",
                     steps: 0,
-                };
+                });
             }
         }
     }
     // For AND-claim, ¬claim is OR of negations. Split into branches per negated conjunct.
     if negated_claim.is_empty() {
-        return SolverOutcome::Unknown {
+        return Ok(SolverOutcome::Unknown {
             reason: "structural_limit",
             steps: 0,
-        };
+        });
     }
 
     let mut steps = 0u64;
@@ -464,13 +986,17 @@ fn prove_obligation(formula: &Formula) -> SolverOutcome {
     for (branch_index, neg) in negated_claim.iter().enumerate() {
         let mut branch = formula.assumptions.clone();
         branch.push(neg.clone());
+        if let Some(assignment) = find_counterexample(&branch) {
+            charge(&mut steps).map_err(|_| "step_limit".to_string())?;
+            return Ok(SolverOutcome::Disproved { assignment, steps });
+        }
         match search_unsat(&branch, &mut steps) {
             Ok(proof) => certificates.push((branch_index, proof)),
             Err(SearchErr::Unknown(reason)) => {
-                return SolverOutcome::Unknown { reason, steps };
+                return Ok(SolverOutcome::Unknown { reason, steps });
             }
             Err(SearchErr::Sat(assignment)) => {
-                return SolverOutcome::Disproved { assignment, steps };
+                return Ok(SolverOutcome::Disproved { assignment, steps });
             }
         }
     }
@@ -495,16 +1021,21 @@ fn prove_obligation(formula: &Formula) -> SolverOutcome {
     };
     let certificate_sha256 = SHA256::sha256_hex(format!("{certificate}\n").as_bytes());
     if let Err(reason) = check_certificate(formula, &certificate) {
-        return SolverOutcome::Unknown {
-            reason,
-            steps,
+        return match reason {
+            "coefficient_overflow" | "structural_limit" | "step_limit" => {
+                Ok(SolverOutcome::Unknown {
+                    reason,
+                    steps,
+                })
+            }
+            _ => Err(format!("invalid certificate: {reason}")),
         };
     }
-    SolverOutcome::Proved {
+    Ok(SolverOutcome::Proved {
         certificate,
         certificate_sha256,
         steps,
-    }
+    })
 }
 
 enum SearchErr {
@@ -540,11 +1071,18 @@ fn search_unsat(ineqs: &[Inequality], steps: &mut u64) -> Result<String, SearchE
                     let c = ineq.affine.constant;
                     if *coeff > 0 {
                         // v <= floor((-c)/coeff)
-                        let bound = (-c).div_euclid(*coeff);
+                        let negated = c
+                            .checked_neg()
+                            .ok_or(SearchErr::Unknown("coefficient_overflow"))?;
+                        let bound = negated.div_euclid(*coeff);
                         hi = hi.min(bound);
                     } else if *coeff < 0 {
                         // v >= ceil((-c)/coeff) ; for negatives use checked div
-                        let bound = (-c).div_euclid(*coeff);
+                        let negated = c
+                            .checked_neg()
+                            .ok_or(SearchErr::Unknown("coefficient_overflow"))?;
+                        let bound = ceil_div(negated, *coeff)
+                            .ok_or(SearchErr::Unknown("coefficient_overflow"))?;
                         lo = lo.max(bound);
                     }
                 }
@@ -628,7 +1166,10 @@ fn satisfies(ineqs: &[Inequality], assignment: &BTreeMap<String, i128>) -> bool 
             let Some(value) = assignment.get(var) else {
                 return false;
             };
-            match total.checked_add(coeff.saturating_mul(*value)) {
+            match coeff
+                .checked_mul(*value)
+                .and_then(|term| total.checked_add(term))
+            {
                 Some(next) => total = next,
                 None => return false,
             }
@@ -638,6 +1179,69 @@ fn satisfies(ineqs: &[Inequality], assignment: &BTreeMap<String, i128>) -> bool 
         }
     }
     true
+}
+
+/// Try the canonical small integer witness before bounded search gives up on
+/// an unbounded variable.  This is a witness finder only: the caller still
+/// verifies the complete branch and the solver payload never exposes an
+/// unverified assignment.
+fn find_counterexample(ineqs: &[Inequality]) -> Option<BTreeMap<String, i128>> {
+    let variables: BTreeSet<String> = ineqs
+        .iter()
+        .flat_map(|ineq| ineq.affine.terms.keys().cloned())
+        .collect();
+    if variables.len() > MAX_VARS {
+        return None;
+    }
+    let mut domains: BTreeMap<String, (Option<i128>, Option<i128>)> = variables
+        .iter()
+        .map(|name| (name.clone(), (None, None)))
+        .collect();
+    for ineq in ineqs {
+        if ineq.affine.terms.len() != 1 {
+            continue;
+        }
+        let Some((name, coefficient)) = ineq.affine.terms.iter().next() else {
+            continue;
+        };
+        let Some(negated_constant) = ineq.affine.constant.checked_neg() else {
+            return None;
+        };
+        let entry = domains.get_mut(name)?;
+        if *coefficient > 0 {
+            let upper = negated_constant.div_euclid(*coefficient);
+            entry.1 = Some(entry.1.map_or(upper, |old| old.min(upper)));
+        } else if *coefficient < 0 {
+            let lower = ceil_div(negated_constant, *coefficient)?;
+            entry.0 = Some(entry.0.map_or(lower, |old| old.max(lower)));
+        }
+    }
+    let mut assignment = BTreeMap::new();
+    for (name, (lower, upper)) in domains {
+        let value = match (lower, upper) {
+            (Some(lo), Some(hi)) if lo > hi => return None,
+            (Some(lo), Some(hi)) if lo <= 1 && 1 <= hi => 1,
+            (Some(lo), Some(_)) => lo,
+            (Some(lo), None) => lo.max(1),
+            (None, Some(hi)) => hi.min(1),
+            (None, None) => 1,
+        };
+        assignment.insert(name, value);
+    }
+    satisfies(ineqs, &assignment).then_some(assignment)
+}
+
+fn ceil_div(numerator: i128, denominator: i128) -> Option<i128> {
+    if denominator == 0 {
+        return None;
+    }
+    let quotient = numerator.checked_div(denominator)?;
+    let remainder = numerator.checked_rem(denominator)?;
+    if remainder != 0 && ((numerator > 0) == (denominator > 0)) {
+        quotient.checked_add(1)
+    } else {
+        Some(quotient)
+    }
 }
 
 fn find_linear_contradiction(
@@ -660,12 +1264,19 @@ fn find_linear_contradiction(
             let a = &ineqs[i].affine;
             let b = &ineqs[j].affine;
             if a.terms.len() == 1 && b.terms.len() == 1 {
-                let (va, ca) = a.terms.iter().next().unwrap();
-                let (vb, cb) = b.terms.iter().next().unwrap();
-                if va == vb && *ca == -*cb && *ca != 0 {
+                let Some((va, ca)) = a.terms.iter().next() else {
+                    continue;
+                };
+                let Some((vb, cb)) = b.terms.iter().next() else {
+                    continue;
+                };
+                if va == vb && ca.checked_neg() == Some(*cb) && *ca != 0 {
                     // ca*x + a.c <= 0 and -ca*x + b.c <= 0 => a.c + b.c <= 0 required;
                     // contradiction when a.c + b.c > 0.
-                    if a.constant.saturating_add(b.constant) > 0 {
+                    let Some(sum) = a.constant.checked_add(b.constant) else {
+                        return Err(SearchErr::Unknown("coefficient_overflow"));
+                    };
+                    if sum > 0 {
                         return Ok(Some(format!(
                             "{{\"kind\":\"linear_contradiction\",\"multipliers\":[{{\"inequalityIndex\":{i},\"multiplier\":\"1\"}},{{\"inequalityIndex\":{j},\"multiplier\":\"1\"}}]}}"
                         )));
@@ -679,45 +1290,180 @@ fn find_linear_contradiction(
 
 fn charge(steps: &mut u64) -> Result<(), SearchErr> {
     if *steps >= MAX_STEPS {
-        return Err(SearchErr::Unknown("structural_limit"));
+        return Err(SearchErr::Unknown("step_limit"));
     }
     *steps += 1;
     Ok(())
 }
 
 fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'static str> {
-    // Independent checker: accept linear_contradiction / and_intro / split shapes
-    // and re-validate that a claimed contradiction is present in the branch set.
-    if certificate.contains("linear_contradiction")
-        || certificate.contains("and_intro")
-        || certificate.contains("\"kind\":\"split\"")
-    {
-        // Recompute: assumptions ∧ ¬claim must be unsat under a fresh search budget.
-        let mut steps = 0u64;
-        let mut negated = Vec::new();
-        for ineq in &formula.claim {
-            let affine = ineq
-                .affine
-                .scale(-1)
-                .and_then(|a| a.add(&Affine::constant(1)))
-                .map_err(|_| "coefficient_overflow")?;
-            negated.push(Inequality::le(affine));
-        }
-        for neg in &negated {
-            let mut branch = formula.assumptions.clone();
-            branch.push(neg.clone());
-            match search_unsat(&branch, &mut steps) {
-                Ok(_) => {}
-                Err(SearchErr::Sat(_)) => return Err("certificate_invalid"),
-                Err(SearchErr::Unknown(reason)) => return Err(reason),
+    let root = parse_json(certificate).map_err(|_| "certificate_invalid")?;
+    let mut negated = Vec::new();
+    for ineq in &formula.claim {
+        let affine = ineq
+            .affine
+            .scale(-1)
+            .and_then(|a| a.add(&Affine::constant(1)))
+            .map_err(|_| "coefficient_overflow")?;
+        negated.push(Inequality::le(affine));
+    }
+    if negated.is_empty() {
+        return Err("certificate_invalid");
+    }
+
+    match object_kind(&root)? {
+        "and_intro" => {
+            let object = as_object(&root)?;
+            let children = match object.get("children") {
+                Some(JSONValue::Array(children)) => children,
+                _ => return Err("certificate_invalid"),
+            };
+            if children.len() != negated.len() {
+                return Err("certificate_invalid");
+            }
+            let mut seen = BTreeSet::new();
+            for child in children {
+                let child = as_object(child)?;
+                let branch_index = json_usize(child.get("branchIndex"))?;
+                if branch_index >= negated.len() || !seen.insert(branch_index) {
+                    return Err("certificate_invalid");
+                }
+                let proof = child.get("proof").ok_or("certificate_invalid")?;
+                let mut branch = formula.assumptions.clone();
+                branch.push(negated[branch_index].clone());
+                check_certificate_node(proof, &branch)?;
+            }
+            if seen.len() != negated.len() {
+                return Err("certificate_invalid");
             }
         }
-        return Ok(());
+        _ => {
+            if negated.len() != 1 {
+                return Err("certificate_invalid");
+            }
+            let mut branch = formula.assumptions.clone();
+            branch.push(negated[0].clone());
+            check_certificate_node(&root, &branch)?;
+        }
     }
-    Err("certificate_invalid")
+
+    // Independent recomputation remains mandatory even after the tree check.
+    // It makes malformed leaves, unsupported arithmetic, and future certificate
+    // parser mistakes fail closed rather than turning a shape check into trust.
+    let mut steps = 0u64;
+    for neg in &negated {
+        let mut branch = formula.assumptions.clone();
+        branch.push(neg.clone());
+        match search_unsat(&branch, &mut steps) {
+            Ok(_) => {}
+            Err(SearchErr::Sat(_)) => return Err("certificate_invalid"),
+            Err(SearchErr::Unknown(reason)) => return Err(reason),
+        }
+    }
+    Ok(())
 }
 
-pub(crate) fn evidence_json(item: &SolverEvidence) -> String {
+fn as_object(value: &JSONValue) -> Result<&std::collections::HashMap<String, JSONValue>, &'static str> {
+    match value {
+        JSONValue::Object(object) => Ok(object),
+        _ => Err("certificate_invalid"),
+    }
+}
+
+fn object_kind(value: &JSONValue) -> Result<&str, &'static str> {
+    let object = as_object(value)?;
+    match object.get("kind") {
+        Some(JSONValue::String(kind)) => Ok(kind.as_str()),
+        _ => Err("certificate_invalid"),
+    }
+}
+
+fn json_usize(value: Option<&JSONValue>) -> Result<usize, &'static str> {
+    match value {
+        Some(JSONValue::Number(value)) if *value >= 0 => usize::try_from(*value).map_err(|_| "certificate_invalid"),
+        _ => Err("certificate_invalid"),
+    }
+}
+
+fn json_i128(value: Option<&JSONValue>) -> Result<i128, &'static str> {
+    let Some(JSONValue::String(value)) = value else {
+        return Err("certificate_invalid");
+    };
+    value.parse::<i128>().map_err(|_| "certificate_invalid")
+}
+
+fn check_certificate_node(
+    value: &JSONValue,
+    inequalities: &[Inequality],
+) -> Result<(), &'static str> {
+    match object_kind(value)? {
+        "linear_contradiction" => {
+            let object = as_object(value)?;
+            let entries = match object.get("multipliers") {
+                Some(JSONValue::Array(entries)) => entries,
+                _ => return Err("certificate_invalid"),
+            };
+            if entries.is_empty() {
+                let mut steps = 0u64;
+                return match search_unsat(inequalities, &mut steps) {
+                    Ok(_) => Ok(()),
+                    Err(SearchErr::Sat(_)) => Err("certificate_invalid"),
+                    Err(SearchErr::Unknown(reason)) => Err(reason),
+                };
+            }
+            let mut sum = Affine::constant(0);
+            for entry in entries {
+                let entry = as_object(entry)?;
+                let index = json_usize(entry.get("inequalityIndex"))?;
+                if index >= inequalities.len() {
+                    return Err("certificate_invalid");
+                }
+                let multiplier = json_i128(entry.get("multiplier"))?;
+                if multiplier < 0 {
+                    return Err("certificate_invalid");
+                }
+                sum = sum
+                    .add(&inequalities[index].affine.scale(multiplier).map_err(|_| "coefficient_overflow")?)
+                    .map_err(|_| "coefficient_overflow")?;
+            }
+            if sum.terms.is_empty() && sum.constant > 0 {
+                Ok(())
+            } else {
+                Err("certificate_invalid")
+            }
+        }
+        "split" => {
+            let object = as_object(value)?;
+            let variable = match object.get("variable") {
+                Some(JSONValue::String(variable)) if !variable.is_empty() => variable,
+                _ => return Err("certificate_invalid"),
+            };
+            let pivot = json_i128(object.get("pivot"))?;
+            let left = object.get("left").ok_or("certificate_invalid")?;
+            let right = object.get("right").ok_or("certificate_invalid")?;
+            let mut left_branch = inequalities.to_vec();
+            left_branch.push(Inequality::le(
+                Affine::var(variable, 1)
+                    .add(&Affine::constant(pivot.checked_neg().ok_or("coefficient_overflow")?))
+                    .map_err(|_| "coefficient_overflow")?,
+            ));
+            let mut right_branch = inequalities.to_vec();
+            right_branch.push(Inequality::le(
+                Affine::var(variable, -1)
+                    .add(&Affine::constant(
+                        pivot.checked_add(1).ok_or("coefficient_overflow")?,
+                    ))
+                    .map_err(|_| "coefficient_overflow")?,
+            ));
+            check_certificate_node(left, &left_branch)?;
+            check_certificate_node(right, &right_branch)
+        }
+        "assumption" => Err("certificate_invalid"),
+        _ => Err("certificate_invalid"),
+    }
+}
+
+pub(crate) fn evidence_json(item: &SolverEvidence, diagnostic_indexes: &str) -> String {
     let formula_sha = item.obligation.formula.hash();
     let backend = json_str(BACKEND);
     let backend_version = json_str(BACKEND_VERSION);
@@ -732,36 +1478,51 @@ pub(crate) fn evidence_json(item: &SolverEvidence) -> String {
         } => (
             "proved",
             format!(
-                "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"formulaSha256\":{formula_sha_json},\"certificate\":{certificate},\"certificateSha256\":{},\"steps\":{steps}}}",
-                json_str(certificate_sha256)
+                "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"certificate\":{certificate},\"certificateSha256\":{},\"counterexample\":null,\"formulaSha256\":{formula_sha_json},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"reason\":null,\"status\":\"proved\",\"stepLimit\":{MAX_STEPS},\"steps\":{steps}}}",
+                json_str(certificate_sha256),
             ),
         ),
         SolverOutcome::Disproved { assignment, steps } => {
             let values = assignment
                 .iter()
-                .map(|(k, v)| format!("{}:\"{v}\"", json_str(k)))
+                .map(|(k, v)| format!("{{\"name\":{},\"value\":\"{v}\"}}", json_str(k)))
                 .collect::<Vec<_>>()
                 .join(",");
             (
                 "disproved",
                 format!(
-                    "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"formulaSha256\":{formula_sha_json},\"assignment\":{{{values}}},\"steps\":{steps}}}"
+                    "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"certificate\":null,\"certificateSha256\":null,\"counterexample\":[{values}],\"formulaSha256\":{formula_sha_json},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"reason\":null,\"status\":\"disproved\",\"stepLimit\":{MAX_STEPS},\"steps\":{steps}}}"
                 ),
             )
         }
         SolverOutcome::Unknown { reason, steps } => (
             "unknown",
             format!(
-                "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"formulaSha256\":{formula_sha_json},\"reason\":{},\"steps\":{steps}}}",
+                "{{\"backend\":{backend},\"backendVersion\":{backend_version},\"certificate\":null,\"certificateSha256\":null,\"counterexample\":null,\"formulaSha256\":{formula_sha_json},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"reason\":{},\"status\":\"unknown\",\"stepLimit\":{MAX_STEPS},\"steps\":{steps}}}",
                 json_str(reason)
             ),
         ),
     };
+    let (line, column) = span_start(&item.obligation.span);
     format!(
-        "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"solver\",\"id\":{},\"kind\":\"solver\",\"outcome\":\"{outcome}\",\"producer\":\"native-presburger\",\"property\":null,\"reason\":null,\"solver\":{solver_payload},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}",
+        "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"solver\",\"id\":{},\"kind\":\"solver\",\"outcome\":\"{outcome}\",\"producer\":\"native-presburger\",\"property\":null,\"reason\":null,\"solver\":{solver_payload},\"source\":{{\"column\":{column},\"line\":{line},\"path\":{}}},\"state\":\"checked\"}}",
         json_str(&item.evidence_id),
         json_str(&item.obligation.origin)
     )
+}
+
+fn span_start(span: &str) -> (u64, u64) {
+    let Some((line, column)) = span.split_once(':') else {
+        return (1, 1);
+    };
+    let line = line.parse::<u64>().unwrap_or(1).max(1);
+    let column = column
+        .split('-')
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1)
+        .max(1);
+    (line, column)
 }
 
 pub(crate) fn summarize(items: &[SolverEvidence]) -> (usize, usize, usize, usize, usize) {
@@ -817,7 +1578,7 @@ mod tests {
             claim: vec![Inequality::le(Affine::var("value", -1))],
         };
         match prove_obligation(&formula) {
-            SolverOutcome::Proved { .. } => {}
+            Ok(SolverOutcome::Proved { .. }) => {}
             other => panic!("expected proved, got {other:?}"),
         }
     }

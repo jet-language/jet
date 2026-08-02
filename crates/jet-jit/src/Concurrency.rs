@@ -215,6 +215,11 @@ extern "C" fn jet_jit_generator_channel_new() -> i64 {
 
 /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
 extern "C" fn jet_jit_time_now() -> i64 {
+    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
         if let Ok(n) = s.parse::<i64>() {
             return n;

@@ -657,9 +657,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             } = inner.as_ref()
             {
                 let recv = lower_expr(base, cx, env);
-                let elem = match &recv.ty {
-                    Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-                    _ => Type::Int,
+                let is_tensor = match &recv.ty {
+                    Type::Named(name) | Type::Apply { name, .. } if name == "Tensor" => true,
+                    _ => false,
+                };
+                let elem = if is_tensor {
+                    Type::Float
+                } else {
+                    match &recv.ty {
+                        Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                        _ => Type::Int,
+                    }
                 };
                 let mutable = *access == crate::AST::PlaceAccess::Write;
                 let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
@@ -676,9 +684,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::BuiltinMethod {
                         recv: Box::new(recv),
                         op: if mutable {
-                            TBuiltinOp::ViewMutNew { line }
+                            if is_tensor {
+                                TBuiltinOp::ComputeViewMutNew { line }
+                            } else {
+                                TBuiltinOp::ViewMutNew { line }
+                            }
                         } else {
-                            TBuiltinOp::ViewNew { line }
+                            if is_tensor {
+                                TBuiltinOp::ComputeViewNew { line }
+                            } else {
+                                TBuiltinOp::ViewNew { line }
+                            }
                         },
                         args,
                     },

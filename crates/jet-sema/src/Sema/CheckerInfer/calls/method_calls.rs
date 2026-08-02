@@ -4,7 +4,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::e0901;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
-    alloc_method_return, args_spec_method_return, binary_reader_method_return,
+    alloc_method_return, args_spec_method_return, binary_reader_method_return, is_allocator_type,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
     devserver_method_return, webapp_method_return, db_value_method_return, expiring_method_return,
     email_method_return, encoding_handle_method_return, file_handle_method_return, http_type_method_return, is_db_value_type_name,
@@ -96,9 +96,18 @@ impl<'a> Checker<'a> {
             type_args: &mut Vec<Type>,
             args: &mut Vec<crate::AST::CallArg>,
             recv_type_out: &mut Option<String>,
-            resolved_ret_out: &mut Option<Type>,
-        ) -> Option<Type> {
-            self.check_call_receiver_evaluation(receiver, span);
+        resolved_ret_out: &mut Option<Type>,
+    ) -> Option<Type> {
+        // D-ALLOC2: allocator methods operate through the runtime's audited
+        // interior-mutable storage. `alloc` may coexist with existing views;
+        // `reset` invalidates them. Do not run the ordinary owner-read check
+        // for either operation, or a valid live view produces E0220 before the
+        // allocator-specific transition can run.
+        let allocator_view_preserving_receiver = matches!(method, "alloc" | "reset")
+            && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
+                .lookup(name)
+                .is_some_and(|info| is_allocator_type(&info.ty)));
+        self.check_call_receiver_evaluation(receiver, span);
             // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
             // range-shaped recovery long enough to point at the old spelling,
             // but never admit it to the type system.
@@ -1402,7 +1411,15 @@ impl<'a> Checker<'a> {
             if recv_is_exempt_view {
                 self.allow_string_view_read = true;
             }
-            let recv_ty = self.infer(receiver);
+            let recv_ty = if allocator_view_preserving_receiver {
+                let saved = self.suppress_partial_move_root_read;
+                self.suppress_partial_move_root_read = true;
+                let recv_ty = self.infer(receiver);
+                self.suppress_partial_move_root_read = saved;
+                recv_ty
+            } else {
+                self.infer(receiver)
+            };
             if recv_is_exempt_view {
                 self.allow_string_view_read = false;
             }

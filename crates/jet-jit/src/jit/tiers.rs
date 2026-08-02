@@ -45,6 +45,11 @@ pub fn take_last_trace() -> Vec<TierRow> {
     LAST_TRACE.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
 }
 
+/// Move tier rows from a compiler worker back to its caller thread.
+pub fn publish_trace(rows: Vec<TierRow>) {
+    LAST_TRACE.with(|slot| *slot.borrow_mut() = rows);
+}
+
 pub fn record_trace(rows: Vec<TierRow>) {
     if trace_tiers_enabled() {
         for row in &rows {

@@ -72,4 +72,36 @@ impl BuildRecipe {
         }
         format!("sha256-{}", SHA256::sha256_hex(&data))
     }
+
+    /// The exact authority requested by this recipe. This is deliberately
+    /// derived from the finite step graph, not from a host environment or a
+    /// caller-supplied label.
+    pub fn declared_capabilities(&self) -> Vec<String> {
+        let mut capabilities = Vec::new();
+        for step in &self.steps {
+            let capability = match step {
+                BuildStep::Fetch { .. } => "net.fetch".to_string(),
+                BuildStep::Exec { tool, .. } => format!("exec:{tool}"),
+                BuildStep::Install { .. } | BuildStep::InstallTree { .. } => "fs.write".to_string(),
+            };
+            if !capabilities.iter().any(|existing| existing == &capability) {
+                capabilities.push(capability);
+            }
+        }
+        capabilities.sort();
+        capabilities
+    }
+
+    /// Bind a build hook to every fact that can change its authority or
+    /// result. The returned identity is suitable for both the action-cache key
+    /// and a reviewed trust grant: package, staged source, platform, recipe,
+    /// and the complete declared capability set all participate.
+    pub fn build_identity(&self, package: &str, source_digest: &str, platform: &str) -> String {
+        let capabilities = self.declared_capabilities().join(",");
+        let identity = format!(
+            "jet-build-hook-v1\npackage={package}\nsource={source_digest}\nplatform={platform}\nrecipe={}\ncapabilities={capabilities}\n",
+            self.recipe_hash()
+        );
+        format!("build-sha256:{}", SHA256::sha256_hex(identity.as_bytes()))
+    }
 }

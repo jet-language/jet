@@ -140,32 +140,72 @@
         out
     }
 
-    fn db_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
-        let tag = *bytes.get(*pos)? as char;
+    const DB_MAX_WIRE_BYTES: usize = 64 * 1024 * 1024;
+    const DB_MAX_ROWS: usize = 1_000_000;
+    const DB_MAX_COLUMNS: usize = 100_000;
+
+    fn db_read_tagged(bytes: &[u8], pos: &mut usize) -> Result<(char, String), String> {
+        let tag = *bytes
+            .get(*pos)
+            .ok_or_else(|| "database wire ended before a value tag".to_string())?
+            as char;
         *pos += 1;
         let len_start = *pos;
-        while *bytes.get(*pos)? != b':' {
+        while let Some(byte) = bytes.get(*pos) {
+            if *byte == b':' {
+                break;
+            }
+            if !byte.is_ascii_digit() {
+                return Err("database wire length is not decimal".to_string());
+            }
             *pos += 1;
         }
+        if *pos == len_start || bytes.get(*pos) != Some(&b':') {
+            return Err("database wire has no value length delimiter".to_string());
+        }
         let len: usize = std::str::from_utf8(&bytes[len_start..*pos])
-            .ok()?
+            .map_err(|_| "database wire length is not UTF-8".to_string())?
             .parse()
-            .ok()?;
+            .map_err(|_| "database wire value length overflows usize".to_string())?;
         *pos += 1; // skip ':'
-        let payload = std::str::from_utf8(bytes.get(*pos..*pos + len)?)
-            .ok()?
-            .to_string();
-        *pos += len;
-        Some((tag, payload))
+        let end = (*pos)
+            .checked_add(len)
+            .ok_or_else(|| "database wire value length overflows the input".to_string())?;
+        let payload = std::str::from_utf8(
+            bytes
+                .get(*pos..end)
+                .ok_or_else(|| "database wire value is truncated".to_string())?,
+        )
+        .map_err(|_| "database wire value is not UTF-8".to_string())?
+        .to_string();
+        *pos = end;
+        Ok((tag, payload))
     }
 
-    fn db_decode_value(tag: char, payload: &str) -> DBValue {
+    fn db_decode_value(tag: char, payload: &str) -> Result<DBValue, String> {
         match tag {
-            'I' => DBValue::Int(payload.parse().unwrap_or(0)),
-            'F' => DBValue::Float(payload.parse().unwrap_or(0.0)),
-            'T' => DBValue::Text(payload.to_string()),
-            'B' => DBValue::Bool(payload == "1"),
-            _ => DBValue::Null,
+            'N' if payload.is_empty() => Ok(DBValue::Null),
+            'I' => payload
+                .parse()
+                .map(DBValue::Int)
+                .map_err(|_| "database integer value is invalid".to_string()),
+            'F' => {
+                let value: f64 = payload
+                    .parse()
+                    .map_err(|_| "database float value is invalid".to_string())?;
+                if !value.is_finite() {
+                    return Err("database float value is not finite".to_string());
+                }
+                Ok(DBValue::Float(value))
+            }
+            'T' => Ok(DBValue::Text(payload.to_string())),
+            'B' => match payload {
+                "0" => Ok(DBValue::Bool(false)),
+                "1" => Ok(DBValue::Bool(true)),
+                _ => Err("database boolean value is invalid".to_string()),
+            },
+            'N' => Err("database null value has a non-empty payload".to_string()),
+            _ => Err("database wire contains an unknown value tag".to_string()),
         }
     }
 
@@ -173,6 +213,11 @@
     pub fn jet_db_decode_query_result(
         wire: &str,
     ) -> Result<Vec<std::collections::BTreeMap<String, DBValue>>, DBError> {
+        if wire.len() > DB_MAX_WIRE_BYTES {
+            return Err(DBError {
+                message: "database result exceeds the wire-size limit".to_string(),
+            });
+        }
         let Some(body) = wire.strip_prefix("O:") else {
             let msg = wire.strip_prefix("E:").unwrap_or(wire);
             return Err(DBError {
@@ -182,44 +227,110 @@
         let bytes = body.as_bytes();
         let mut pos = 0usize;
         let Some(colon) = bytes.iter().position(|b| *b == b':') else {
-            return Ok(Vec::new());
+            return Err(DBError {
+                message: "database result is missing its row-count delimiter".to_string(),
+            });
         };
         let row_count: usize = std::str::from_utf8(&bytes[..colon])
-            .unwrap_or("0")
+            .map_err(|_| DBError {
+                message: "database row count is not UTF-8".to_string(),
+            })?
             .parse()
-            .unwrap_or(0);
+            .map_err(|_| DBError {
+                message: "database row count is invalid".to_string(),
+            })?;
+        if row_count > DB_MAX_ROWS {
+            return Err(DBError {
+                message: "database row count exceeds the wire limit".to_string(),
+            });
+        }
         pos = colon + 1;
         let mut rows = Vec::with_capacity(row_count);
         for _ in 0..row_count {
-            let Some(col_colon) = bytes[pos..].iter().position(|b| *b == b':') else {
-                break;
+            let row_start = pos;
+            let Some(col_colon) = bytes
+                .get(pos..)
+                .and_then(|rest| rest.iter().position(|b| *b == b':'))
+            else {
+                return Err(DBError {
+                    message: "database row is missing its column-count delimiter".to_string(),
+                });
             };
             let col_count: usize = std::str::from_utf8(&bytes[pos..pos + col_colon])
-                .unwrap_or("0")
+                .map_err(|_| DBError {
+                    message: "database column count is not UTF-8".to_string(),
+                })?
                 .parse()
-                .unwrap_or(0);
+                .map_err(|_| DBError {
+                    message: "database column count is invalid".to_string(),
+                })?;
+            if col_count > DB_MAX_COLUMNS {
+                return Err(DBError {
+                    message: "database column count exceeds the wire limit".to_string(),
+                });
+            }
             pos += col_colon + 1;
             let mut row = std::collections::BTreeMap::new();
             for _ in 0..col_count {
-                let Some((_, name)) = db_read_tagged(bytes, &mut pos) else {
-                    break;
-                };
-                let Some((vtag, vpayload)) = db_read_tagged(bytes, &mut pos) else {
-                    break;
-                };
-                row.insert(name, db_decode_value(vtag, &vpayload));
+                let (tag, name) = db_read_tagged(bytes, &mut pos).map_err(|message| DBError {
+                    message,
+                })?;
+                if tag != 'C' {
+                    return Err(DBError {
+                        message: "database row column has an invalid tag".to_string(),
+                    });
+                }
+                let (vtag, vpayload) = db_read_tagged(bytes, &mut pos).map_err(|message| DBError {
+                    message,
+                })?;
+                let value = db_decode_value(vtag, &vpayload).map_err(|message| DBError {
+                    message,
+                })?;
+                if row.insert(name, value).is_some() {
+                    return Err(DBError {
+                        message: "database row contains a duplicate column".to_string(),
+                    });
+                }
             }
             rows.push(row);
+            if pos <= row_start {
+                return Err(DBError {
+                    message: "database row decoder made no progress".to_string(),
+                });
+            }
+        }
+        if pos != bytes.len() {
+            return Err(DBError {
+                message: "database result contains trailing wire bytes".to_string(),
+            });
         }
         Ok(rows)
     }
 
     /// Decode the `"O:" + count`/`"E:" + message` wire produced by `jet_db_execute`.
     pub fn jet_db_decode_execute_result(wire: &str) -> Result<i64, DBError> {
+        if wire.len() > DB_MAX_WIRE_BYTES {
+            return Err(DBError {
+                message: "database execute result exceeds the wire-size limit".to_string(),
+            });
+        }
         if let Some(n) = wire.strip_prefix("O:") {
-            return Ok(n.parse().unwrap_or(0));
+            let count = n.parse::<i64>().map_err(|_| DBError {
+                message: "database affected-row count is invalid".to_string(),
+            })?;
+            if count < 0 {
+                return Err(DBError {
+                    message: "database affected-row count is negative".to_string(),
+                });
+            }
+            return Ok(count);
         }
         let msg = wire.strip_prefix("E:").unwrap_or(wire);
+        if msg.is_empty() {
+            return Err(DBError {
+                message: "database execute result has no error message".to_string(),
+            });
+        }
         Err(DBError {
             message: msg.to_string(),
         })
@@ -336,4 +447,3 @@
             None => Err("plugin returned a malformed result".to_string()),
         }
     }
-

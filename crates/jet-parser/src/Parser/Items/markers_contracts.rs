@@ -130,6 +130,7 @@ impl<'a> Parser<'a> {
             // schedule-as-code. Either order, alongside the other markers above.
             let mut is_task = false;
             let mut task_span = None;
+            let mut task_metadata = None;
             let mut every = None;
             // D-PREPOST1: `#Pre(cond, "msg")` / `#Post(cond, "msg")` — repeatable,
             // any order, alongside the typestate/web markers above.
@@ -160,6 +161,12 @@ impl<'a> Parser<'a> {
                     replayable_span = Some(Span::new(start, end));
                 } else if meta.is_none() && self.at_meta_attr() {
                     meta = Some(self.parse_meta_attr()?);
+                } else if !is_task && self.at_task_fn() && matches!(self.peek3().kind, TokKind::LParen) {
+                    let marker = self.parse_rule_marker()?;
+                    self.validate_registered_rule_arguments(&marker)?;
+                    is_task = true;
+                    task_span = Some(marker.span);
+                    task_metadata = self.task_metadata_from_marker(&marker)?;
                 } else if !is_task && self.at_task_fn() {
                     let start = self.bump().span.start; // `@`
                     let end = self.bump().span.end; // `Task`
@@ -232,6 +239,7 @@ impl<'a> Parser<'a> {
                 is_task,
                 task_span,
                 every,
+                task_metadata,
                 ..f
             })
         }

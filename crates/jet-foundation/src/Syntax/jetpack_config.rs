@@ -65,6 +65,8 @@ pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
 
 /// D-JPK14: env var carrying the realized package refs inside a Jetpack shell.
 pub const JETPACK_REF_VAR: &str = "JETPACK_REF";
+/// D-ENV-LIFECYCLE1: prompt hook activation identity.
+pub const ENV_HOOK_ACTIVE_HASH_VAR: &str = "JETPACK_ENV_HASH";
 
 /// D-JPK3/17: the directive calls an `env.jet` author writes. `pkg.source`
 /// takes one arg (default built-in source) or two (named source + upstream/pin,
@@ -232,16 +234,22 @@ pub const SERVICE_FIELD_ENABLE: &str = "enable";
 /// `SYSTEM_FIELD_SERVICES`/`SERVICE_FIELD_ENABLE` reused verbatim) — only the
 /// dev-runtime tier (`Jetpack::Services`) interprets these particular keys,
 /// to start/probe/stop the supervised process: `ports` (the `[Int]` TCP ports
-/// it listens on), `init` (the shell command that starts it), `shutdown` (the
-/// shell command that stops it, else a plain signal), `data_dir` (its
+/// it listens on), `run` (the executable plus argv that starts it), `shutdown`
+/// (the typed stop policy, else a bounded signal sequence), `data_dir` (its
 /// persisted-state directory, else `.jet/services/<name>/data`), and `ready`
 /// (a shell command polled until it exits 0 — the readiness contract, else a
 /// TCP probe on `ports[0]`, else a bare process-alive check).
 pub const DEV_SERVICE_FIELD_PORTS: &str = "ports";
-pub const DEV_SERVICE_FIELD_INIT: &str = "init";
+pub const DEV_SERVICE_FIELD_RUN: &str = "run";
 pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
 pub const DEV_SERVICE_FIELD_DATA_DIR: &str = "data_dir";
 pub const DEV_SERVICE_FIELD_READY: &str = "ready";
+pub const DEV_SERVICE_FIELD_RESTART: &str = "restart";
+pub const DEV_SERVICE_FIELD_WATCH: &str = "watch";
+pub const DEV_SERVICE_FIELD_AFTER: &str = "after";
+pub const DEV_SERVICE_FIELD_DEPENDS_ON: &str = "depends_on";
+pub const DEV_SERVICE_FIELD_BEFORE_START: &str = "before_start";
+pub const DEV_SERVICE_FIELD_SOCKETS: &str = "sockets";
 
 /// D-JPK-PLATFORM1: the typed platform values a `System.target` (and a
 /// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
@@ -264,8 +272,8 @@ pub const IMAGE_FORMAT_QCOW: &str = "qcow";
 pub const IMAGE_FORMAT_RAW: &str = "raw";
 
 /// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the keyword after
-/// `from:` that selects the OCI-container referent (`from: packages.<name>`,
-/// the sibling of the original `from: system.<name>`, `NS_SYSTEM`).
+/// `from:` that selects the OCI-container referent (`from: packages.<name>` or
+/// `from: env.<name>`), siblings of the original `from: system.<name>`.
 pub const IMAGE_FROM_PACKAGES: &str = "packages";
 
 /// D-JPK-IMAGE1: an `Image`'s optional `kind:` — a leading-dot enum literal
@@ -285,6 +293,11 @@ pub const IMAGE_FIELD_EXPOSE: &str = "expose";
 pub const IMAGE_FIELD_ENV_VARS: &str = "env_vars";
 pub const IMAGE_FIELD_FILES: &str = "files";
 pub const IMAGE_FIELD_BASE: &str = "base";
+/// D-ENV-IMAGE1: optional environment-image projection controls.
+pub const IMAGE_FIELD_SERVICES: &str = "services";
+pub const IMAGE_FIELD_HEALTH: &str = "health";
+pub const IMAGE_FIELD_ENTRYPOINT: &str = "entrypoint";
+pub const IMAGE_FIELD_USER: &str = "user";
 /// The `oci(...)` call name inside `base: oci("<ref>")`.
 pub const IMAGE_BASE_FN: &str = "oci";
 
@@ -292,6 +305,10 @@ pub const IMAGE_BASE_FN: &str = "oci";
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
 pub const ENV_FILE: &str = "env.jet";
 pub const CONFIG_FILE: &str = "config.jet";
+
+/// D-ECO-FILEROOT1=A: the one reserved Package source filename. `pkg.jet`
+/// remains a migration-era fallback until old workspaces are folded.
+pub const PACKAGE_FILE: &str = "package.jet";
 
 /// D-WORKSPACE1 (B) + D-WORKSPACE2 (A), ratified 2026-06-25: the monorepo index
 /// is a `module workspace { members: … }` written in `workspace.jet`, parallel to
@@ -481,6 +498,19 @@ pub const DEFAULT_SOURCE: &str = "default";
 
 /// U3/U8: the `Env` contribution field carrying the shell prompt label.
 pub const ENV_FIELD_PROMPT: &str = "prompt";
+/// D-ENV-LIFECYCLE1: typed environment lifecycle fields.
+pub const ENV_FIELD_DOTENV: &str = "dotenv";
+pub const ENV_FIELD_UNSET: &str = "unset";
+pub const ENV_FIELD_ON_ENTER: &str = "on_enter";
+pub const ENV_FIELD_CHECKS: &str = "checks";
+pub const ENV_FIELD_RELOAD: &str = "reload";
+/// D-ENV-PROFILE1/D-ENV-LANGPACK1: typed environment composition fields.
+pub const ENV_FIELD_PROFILES: &str = "profiles";
+pub const ENV_FIELD_LANGUAGES: &str = "languages";
+pub const ENV_FIELD_VARIABLES: &str = "variables";
+/// D-ENV-FILES1: managed project-relative file declarations.
+pub const ENV_FIELD_FILES: &str = "files";
+pub const ENV_FLAG_PROFILE: &str = "--profile";
 /// D-FE-PROMPT-STRIP1: `Prompt.{ label: "...", path: .Short, strip: .On }`.
 pub const PROMPT_FIELD_LABEL: &str = "label";
 pub const PROMPT_FIELD_PATH: &str = "path";

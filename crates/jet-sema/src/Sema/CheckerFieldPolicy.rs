@@ -384,6 +384,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         is_task: false,
         task_span: None,
         every: None,
+        task_metadata: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,

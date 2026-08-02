@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
             self.diags.push(soft_public_use(public_name, span));
         }
 
-        fn check_declared_type_rules(&mut self, ty: &Type, span: Span) {
+        pub(in crate::Sema) fn check_declared_type_rules(&mut self, ty: &Type, span: Span) {
             if let Some(chain) = generic_depth_exceeded(ty) {
                 self.diags.push(e0909(&chain, span));
             }

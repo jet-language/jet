@@ -2614,7 +2614,25 @@ impl<'a> Checker<'a> {
                 // its own region (a closure / block / dead branch in codegen), so its
                 // bindings are scoped — referencing them later is a normal unknown-name
                 // error, never reaching codegen.
-                Stmt::ScopeMember { name, body, .. } => {
+                Stmt::ScopeMember {
+                    name,
+                    args,
+                    body,
+                    ..
+                } => {
+                    // D-DSLBLOCK1: the optional SQL row header is a type
+                    // position, not a runtime expression. Validate it through
+                    // the ordinary declared-type rules so local, imported,
+                    // generic, alias, and unknown names all receive the same
+                    // visibility and teaching diagnostics as any other type.
+                    if name == Syntax::DSL_BLOCK_SQL {
+                        if let [Expr::Ident(type_name, type_span)] = args.as_slice() {
+                            self.check_declared_type_rules(
+                                &Type::Named(type_name.clone()),
+                                *type_span,
+                            );
+                        }
+                    }
                     let leak = name == crate::Syntax::SCOPE_TEST_SETUP;
                     self.check_block(body, !leak);
                 }

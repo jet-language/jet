@@ -497,6 +497,18 @@ pub(super) fn load_view_mut_owner_list(
         .ok_or_else(|| unsupported("view-mut owner", span))?;
     match project_list_place(root, &path, span)? {
         CtValue::List(items) => Ok(items.clone()),
+        CtValue::Struct { type_name, fields }
+            if path.is_empty() && (type_name == "Tensor" || type_name == "JetTensor") =>
+        {
+            fields
+                .iter()
+                .find_map(|(name, value)| (name == "data").then_some(value))
+                .and_then(|value| match value {
+                    CtValue::List(items) => Some(items.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| unsupported("Tensor view owner data", span))
+        }
         _ => Err(unsupported("view-mut owner list", span)),
     }
 }
@@ -513,6 +525,13 @@ pub(super) fn store_view_mut_owner_list(
         .get(&base)
         .cloned()
         .ok_or_else(|| unsupported("view-mut owner", span))?;
+    if path.is_empty()
+        && matches!(&root, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
+    {
+        let updated = crate::Comptime::ComputeLite::tensor_replace_data(&root, items, span)?;
+        scope.insert(base, updated);
+        return Ok(());
+    }
     let updated = replace_list_place(root, &path, CtValue::List(items), span)?;
     scope.insert(base, updated);
     Ok(())

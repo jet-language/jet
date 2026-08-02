@@ -73,6 +73,13 @@ pub struct PackageOverride {
     pub source: Option<String>,
     pub version: Option<String>,
     pub flags: Vec<String>,
+    /// D-JOS-PRIORITY1 tier for scalar/environment facts in this record.
+    /// Ordinary is `0`; `Default`, `Force`, and `Priority(n)` are explicit.
+    pub priority: i32,
+    /// Environment overrides are stored as typed key/value facts.  The
+    /// keyed-record parser and the legacy dotted spelling both lower here so
+    /// provider consumers never need a second representation.
+    pub env: Vec<(String, String)>,
     pub patches: Vec<String>,
     pub allow_unfree: bool,
 }
@@ -84,6 +91,8 @@ impl PackageOverride {
             source: None,
             version: None,
             flags: Vec::new(),
+            priority: 0,
+            env: Vec::new(),
             patches: Vec::new(),
             allow_unfree: false,
         }
@@ -100,13 +109,25 @@ impl PackageOverride {
                     .unwrap_or_else(|| p.provider.clone())
             })
             .unwrap_or_else(|| "provider:unchanged".to_string());
+        let mut env = self.env.clone();
+        env.sort();
         format!(
-            "workspace.overlay.{}:{}:{}:{}:{}:{}",
+            "workspace.overlay.{}:{}:{}:{}:{}:{}:{}:{}",
             overlay.name,
             self.package,
             provider,
-            self.version.as_deref().unwrap_or("version:unchanged"),
+            format!(
+                "{}@{}",
+                self.version.as_deref().unwrap_or("version:unchanged"),
+                self.priority
+            ),
             self.source.as_deref().unwrap_or("source:unchanged"),
+            self.flags.join("+"),
+            env
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("+"),
             self.patches.join("+")
         )
     }
@@ -158,9 +179,14 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
             OverlayError::Malformed(format!("`overlay {name}` needs a `{{ … }}` body"))
         })?;
         let (overlay_body, consumed) = balanced_with_len(block_src, '{', '}');
-        policy
-            .overlays
-            .push(parse_overlay_set(name, &overlay_body)?);
+        let parsed = parse_overlay_set(name, &overlay_body)?;
+        if policy.overlays.iter().any(|overlay| overlay.name == parsed.name) {
+            return Err(OverlayError::Malformed(format!(
+                "overlay `{}` is declared more than once",
+                parsed.name
+            )));
+        }
+        policy.overlays.push(parsed);
         pos = at + Syntax::WORKSPACE_OVERLAY.len() + rest.len() - after_name.len() + 1 + consumed;
     }
     Ok(policy)
@@ -184,7 +210,221 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
             merge_package_override(&mut overlay.packages, pkg);
         }
     }
+    if let Some(overrides) = named_record(body, "overrides")? {
+        for package in parse_keyed_overrides(&overrides)? {
+            merge_package_override(&mut overlay.packages, package);
+        }
+    }
     Ok(overlay)
+}
+
+/// Parse the ratified keyed override record:
+///
+/// ```text
+/// overrides: { mpv: .{ version: "0.38.0", flags: .{ vapoursynth: true } } }
+/// ```
+///
+/// This is intentionally a source-level parser. `workspace.jet` policy is
+/// stripped before Jet's normal evaluator runs, so accepting the record here
+/// keeps policy facts out of the compiler's ordinary module evaluator while
+/// still giving every consumer one typed `PackageOverride` value.
+fn parse_keyed_overrides(body: &str) -> Result<Vec<PackageOverride>, OverlayError> {
+    let mut packages = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    for entry in top_level_commas(body) {
+        let entry = entry.trim();
+        let Some((raw_package, raw_record)) = split_top_level_colon(entry) else {
+            return Err(OverlayError::Malformed(
+                "each `overrides` entry needs `<package>: .{ … }`".to_string(),
+            ));
+        };
+        let package = unquote(raw_package.trim());
+        if package.is_empty() {
+            return Err(OverlayError::Malformed(
+                "`overrides` package names cannot be empty".to_string(),
+            ));
+        }
+        if !names.insert(package.clone()) {
+            return Err(OverlayError::Malformed(format!(
+                "override `{package}` is declared more than once"
+            )));
+        }
+        let record = raw_record.trim();
+        let Some(record) = record.strip_prefix(".{") else {
+            return Err(OverlayError::Malformed(format!(
+                "override `{package}` must use the standard `.{{ … }}` record"
+            )));
+        };
+        let Some(record) = record.strip_suffix('}') else {
+            return Err(OverlayError::Malformed(format!(
+                "override `{package}` record is not closed"
+            )));
+        };
+        packages.push(parse_keyed_override_record(package, record)?);
+    }
+    Ok(packages)
+}
+
+fn parse_keyed_override_record(
+    package: String,
+    body: &str,
+) -> Result<PackageOverride, OverlayError> {
+    let mut result = PackageOverride::new(package);
+    let mut seen = std::collections::BTreeMap::<String, String>::new();
+    for entry in top_level_commas(body) {
+        let entry = entry.trim();
+        let Some((field, value)) = split_top_level_colon(entry) else {
+            return Err(OverlayError::Malformed(
+                "each package override field needs `name: value`".to_string(),
+            ));
+        };
+        let field = field.trim();
+        let value = value.trim();
+        if let Some(previous) = seen.get(field) {
+            if previous != value {
+                return Err(OverlayError::Malformed(format!(
+                    "override `{}` has conflicting `{field}` fields",
+                    result.package
+                )));
+            }
+            continue;
+        }
+        seen.insert(field.to_string(), value.to_string());
+        match field {
+            "source" => {
+                let (source, priority) = parse_priority_value(value)?;
+                result.source = Some(source);
+                result.priority = result.priority.max(priority);
+            }
+            "version" => {
+                let (version, priority) = parse_priority_value(value)?;
+                result.version = Some(version);
+                result.priority = result.priority.max(priority);
+            }
+            "flags" => result.flags = parse_flag_record(value)?,
+            "env" => result.env = parse_env_record(value)?,
+            "patches" => result.patches = parse_patch_list(value)?,
+            "allowUnfree" => result.allow_unfree = parse_bool(value)?,
+            other => {
+                return Err(OverlayError::Malformed(format!(
+                    "unknown package override field `{other}`"
+                )))
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn parse_priority_value(raw: &str) -> Result<(String, i32), OverlayError> {
+    let raw = raw.trim().trim_end_matches(',');
+    for (wrapper, priority) in [("Force(", 100), ("Default(", -100)] {
+        if let Some(inner) = raw.strip_prefix(wrapper).and_then(|v| v.strip_suffix(')')) {
+            return Ok((unquote(inner), priority));
+        }
+    }
+    if let Some(inner) = raw
+        .strip_prefix("Priority(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let (weight, value) = if let Some((weight, value)) = split_top_level_colon(inner) {
+            (weight.trim().to_string(), value.trim().to_string())
+        } else {
+            let parts = top_level_commas(inner);
+            if parts.len() < 2 {
+                return Err(OverlayError::Malformed(
+                    "`Priority(n)` override needs `n: value`".to_string(),
+                ));
+            }
+            (parts[0].trim().to_string(), parts[1..].join(",").trim().to_string())
+        };
+        let priority = weight.parse::<i32>().map_err(|_| {
+            OverlayError::Malformed("`Priority(n)` needs an integer weight".to_string())
+        })?;
+        return Ok((unquote(&value), priority));
+    }
+    Ok((unquote(raw), 0))
+}
+
+fn parse_flag_record(raw: &str) -> Result<Vec<String>, OverlayError> {
+    let raw = raw.trim();
+    let Some(inner) = raw.strip_prefix(".{").and_then(|v| v.strip_suffix('}')) else {
+        return Err(OverlayError::Malformed(
+            "`flags` must be a typed record like `.{ feature: true }`".to_string(),
+        ));
+    };
+    let mut flags = Vec::new();
+    for entry in top_level_commas(inner) {
+        let Some((name, value)) = split_top_level_colon(entry.trim()) else {
+            return Err(OverlayError::Malformed(
+                "each `flags` entry needs `name: true|false`".to_string(),
+            ));
+        };
+        match parse_bool(value)? {
+            true => flags.push(unquote(name.trim())),
+            false => {}
+        }
+    }
+    Ok(flags)
+}
+
+fn parse_env_record(raw: &str) -> Result<Vec<(String, String)>, OverlayError> {
+    let raw = raw.trim();
+    let Some(inner) = raw.strip_prefix(".{").and_then(|v| v.strip_suffix('}')) else {
+        return Err(OverlayError::Malformed(
+            "`env` must be a typed record like `.{ CC: \"clang\" }`".to_string(),
+        ));
+    };
+    let mut values = Vec::new();
+    for entry in top_level_commas(inner) {
+        let Some((key, value)) = split_top_level_colon(entry.trim()) else {
+            return Err(OverlayError::Malformed(
+                "each `env` entry needs `NAME: \"value\"`".to_string(),
+            ));
+        };
+        let key = unquote(key.trim());
+        if !valid_env_name(&key) {
+            return Err(OverlayError::Malformed(
+                format!("`env` variable name `{key}` is invalid"),
+            ));
+        }
+        let value = unquote(value);
+        if let Some((_, previous)) = values.iter().find(|(existing, _)| existing == &key) {
+            if previous != &value {
+                return Err(OverlayError::Malformed(format!(
+                    "`env.{key}` is declared with conflicting values"
+                )));
+            }
+            continue;
+        }
+        values.push((key, value));
+    }
+    Ok(values)
+}
+
+fn named_record(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
+    let Some(rel) = body.find(name) else {
+        return Ok(None);
+    };
+    let at = rel;
+    let after = at + name.len();
+    if !word_boundary_before(body, at)
+        || body[after..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Ok(None);
+    }
+    let rest = body[after..].trim_start();
+    let Some(rest) = rest.strip_prefix(':').map(str::trim_start) else {
+        return Err(OverlayError::Malformed(format!("`{name}` needs `:`")));
+    };
+    let Some(rest) = rest.strip_prefix('{') else {
+        return Err(OverlayError::Malformed(format!(
+            "`{name}` must be a record"
+        )));
+    };
+    Ok(Some(balanced_policy_body(rest)?))
 }
 
 fn parse_provider_override(raw: &str) -> Result<ProviderOverride, OverlayError> {
@@ -242,8 +482,17 @@ fn parse_package_override_line(line: &str) -> Result<Option<PackageOverride>, Ov
     match field {
         "patches" => pkg.patches = parse_patch_list(op_value.1)?,
         "flags" => pkg.flags = parse_string_list(op_value.1)?,
-        "version" => pkg.version = Some(unquote(op_value.1)),
-        "source" => pkg.source = Some(unquote(op_value.1)),
+        "env" => pkg.env = parse_env_record(op_value.1)?,
+        "version" => {
+            let (version, priority) = parse_priority_value(op_value.1)?;
+            pkg.version = Some(version);
+            pkg.priority = priority;
+        }
+        "source" => {
+            let (source, priority) = parse_priority_value(op_value.1)?;
+            pkg.source = Some(source);
+            pkg.priority = priority;
+        }
         "allowUnfree" => pkg.allow_unfree = parse_bool(op_value.1)?,
         other => {
             return Err(OverlayError::Malformed(format!(
@@ -514,18 +763,45 @@ fn split_top_level_colon(value: &str) -> Option<(&str, &str)> {
 
 fn merge_package_override(packages: &mut Vec<PackageOverride>, incoming: PackageOverride) {
     if let Some(existing) = packages.iter_mut().find(|p| p.package == incoming.package) {
-        if incoming.source.is_some() {
+        if incoming.priority >= existing.priority && incoming.source.is_some() {
             existing.source = incoming.source;
         }
-        if incoming.version.is_some() {
+        if incoming.priority >= existing.priority && incoming.version.is_some() {
             existing.version = incoming.version;
         }
         existing.flags.extend(incoming.flags);
+        for (key, value) in incoming.env {
+            if let Some(existing_value) = existing.env.iter_mut().find(|(k, _)| k == &key) {
+                if incoming.priority >= existing.priority {
+                    existing_value.1 = value;
+                }
+            } else {
+                existing.env.push((key, value));
+            }
+        }
         existing.patches.extend(incoming.patches);
         existing.allow_unfree |= incoming.allow_unfree;
+        existing.priority = existing.priority.max(incoming.priority);
+        existing.flags.sort();
+        existing.flags.dedup();
+        existing.env.sort();
+        existing.patches.sort();
+        existing.patches.dedup();
     } else {
+        let mut incoming = incoming;
+        incoming.flags.sort();
+        incoming.flags.dedup();
+        incoming.env.sort();
+        incoming.patches.sort();
+        incoming.patches.dedup();
         packages.push(incoming);
     }
+}
+
+fn valid_env_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
 pub fn strip_overlay_policy(src: &str) -> String {
@@ -780,5 +1056,50 @@ module workspace {
         assert!(stripped.contains("members:"));
         assert!(!stripped.contains("overlay test"));
         assert!(!stripped.contains("policy.allowUnfree"));
+    }
+
+    #[test]
+    fn keyed_overrides_merge_typed_environment_by_priority() {
+        let policy = parse_workspace_policy(
+            r#"
+module workspace {
+    overlay dev {
+        overrides: {
+            "app": .{ version: Priority(10: "2"), env: .{ CC: "clang", CFLAGS: "-O2" }, flags: .{ lto: true } }
+        }
+        package("app").version = "1"
+        package("app").env += .{ CC: "gcc", RUST_LOG: "debug" }
+    }
+}
+"#,
+        )
+        .unwrap();
+        let app = policy.package_override("dev", "app").unwrap();
+        assert_eq!(app.version.as_deref(), Some("2"));
+        assert_eq!(
+            app.env,
+            vec![
+                ("CC".into(), "clang".into()),
+                ("CFLAGS".into(), "-O2".into()),
+                ("RUST_LOG".into(), "debug".into()),
+            ]
+        );
+        assert_eq!(app.flags, vec!["lto"]);
+        assert_eq!(app.priority, 10);
+    }
+
+    #[test]
+    fn malformed_or_duplicate_environment_facts_fail_closed() {
+        let invalid = parse_workspace_policy(
+            "module workspace { overlay dev { overrides: { app: .{ env: .{ 1BAD: \"x\" } } } } }",
+        )
+        .unwrap_err();
+        assert!(invalid.message().contains("variable name"));
+
+        let duplicate = parse_workspace_policy(
+            "module workspace { overlay dev { overrides: { app: .{ version: \"1\" }, app: .{ version: \"2\" } } } }",
+        )
+        .unwrap_err();
+        assert!(duplicate.message().contains("declared more than once"));
     }
 }

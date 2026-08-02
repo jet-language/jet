@@ -77,6 +77,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.text.unicode"
         | "core.args"
         | "core.reflect"
+        | "core.compiler"
         | "core.game"
         | "core.reactive.loadable"
         | "core.event"

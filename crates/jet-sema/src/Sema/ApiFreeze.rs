@@ -779,6 +779,7 @@ mod tests {
             is_task: false,
             task_span: None,
             every: None,
+            task_metadata: None,
             inline_foreign: None,
             is_sanitizer: false,
             scrub_tag: None,

@@ -9,10 +9,25 @@ include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Sync.rs");
 fn text_to_ct(doc: &JetSyncText) -> CtValue {
     CtValue::Struct {
         type_name: "SyncText".to_string(),
-        fields: vec![(
-            "show".to_string(),
-            CtValue::Str(jet_sync_text_show(doc)),
-        )],
+        fields: vec![
+            ("show".to_string(), CtValue::Str(jet_sync_text_show(doc))),
+            (
+                "replicas".to_string(),
+                CtValue::List(
+                    doc.replicas
+                        .iter()
+                        .map(|(replica, text, clock)| CtValue::Struct {
+                            type_name: "SyncTextReplica".to_string(),
+                            fields: vec![
+                                ("replica".to_string(), CtValue::Str(replica.clone())),
+                                ("text".to_string(), CtValue::Str(text.clone())),
+                                ("clock".to_string(), CtValue::Str(clock.to_string())),
+                            ],
+                        })
+                        .collect(),
+                ),
+            ),
+        ],
     }
 }
 
@@ -24,12 +39,13 @@ fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
             CtValue::List(
                 c.counts
                     .iter()
-                    .map(|(replica, value)| {
+                    .map(|(replica, positive, negative)| {
                         CtValue::Struct {
                             type_name: "SyncCounterEntry".to_string(),
                             fields: vec![
                                 ("replica".to_string(), CtValue::Str(replica.clone())),
-                                ("value".to_string(), CtValue::Int(*value)),
+                                ("positive".to_string(), CtValue::Str(positive.to_string())),
+                                ("negative".to_string(), CtValue::Str(negative.to_string())),
                             ],
                         }
                     })
@@ -42,14 +58,50 @@ fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
 fn map_to_ct(m: &JetSyncMap) -> CtValue {
     CtValue::Struct {
         type_name: "SyncMap".to_string(),
-        fields: vec![("show".to_string(), CtValue::Str(jet_sync_map_show(m)))],
+        fields: vec![
+            ("show".to_string(), CtValue::Str(jet_sync_map_show(m))),
+            (
+                "entries".to_string(),
+                CtValue::List(
+                    m.entries
+                        .iter()
+                        .map(|(key, value, clock, writer)| CtValue::Struct {
+                            type_name: "SyncMapEntry".to_string(),
+                            fields: vec![
+                                ("key".to_string(), CtValue::Str(key.clone())),
+                                ("value".to_string(), CtValue::Str(value.clone())),
+                                ("clock".to_string(), CtValue::Str(clock.to_string())),
+                                ("writer".to_string(), CtValue::Str(writer.clone())),
+                            ],
+                        })
+                        .collect(),
+                ),
+            ),
+        ],
     }
 }
 
 fn list_to_ct(l: &JetSyncList) -> CtValue {
     CtValue::Struct {
         type_name: "SyncList".to_string(),
-        fields: vec![("show".to_string(), CtValue::Str(jet_sync_list_show(l)))],
+        fields: vec![
+            ("show".to_string(), CtValue::Str(jet_sync_list_show(l))),
+            (
+                "items".to_string(),
+                CtValue::List(
+                    l.items
+                        .iter()
+                        .map(|(replica, item)| CtValue::Struct {
+                            type_name: "SyncListItem".to_string(),
+                            fields: vec![
+                                ("replica".to_string(), CtValue::Str(replica.clone())),
+                                ("item".to_string(), CtValue::Str(item.clone())),
+                            ],
+                        })
+                        .collect(),
+                ),
+            ),
+        ],
     }
 }
 
@@ -68,28 +120,77 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncText" || type_name == "JetSyncText" =>
         {
-            let show = fields
-                .iter()
-                .find(|(n, _)| n == "show")
-                .and_then(|(_, v)| match v {
-                    CtValue::Str(s) => Some(s.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
+            if let Some(value) = fields.iter().find(|(n, _)| n == "replicas").map(|(_, v)| v) {
+                let CtValue::List(entries) = value else {
+                    return Err(unsupported("SyncText replicas", span));
+                };
+                if entries.len() > MAX_SYNC_REPLICAS {
+                    return Err(unsupported("SyncText replica limit", span));
+                }
+                let mut replicas = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let CtValue::Struct { type_name, fields } = entry else {
+                        return Err(unsupported("SyncText replica", span));
+                    };
+                    if type_name != "SyncTextReplica" {
+                        return Err(unsupported("SyncText replica", span));
+                    }
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, v)| v)
+                            .ok_or_else(|| unsupported("SyncText replica field", span))
+                    };
+                    let replica = match field("replica")? {
+                        CtValue::Str(s) => s.clone(),
+                        _ => return Err(unsupported("SyncText replica id", span)),
+                    };
+                    let text = match field("text")? {
+                        CtValue::Str(s) => s.clone(),
+                        _ => return Err(unsupported("SyncText replica text", span)),
+                    };
+                    let clock = match field("clock")? {
+                        CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+                            .map_err(|_| unsupported("SyncText replica clock", span))?,
+                        CtValue::Str(value) => value
+                            .parse::<u64>()
+                            .map_err(|_| unsupported("SyncText replica clock", span))?,
+                        _ => return Err(unsupported("SyncText replica clock", span)),
+                    };
+                    if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
+                        return Err(unsupported("SyncText replica value", span));
+                    }
+                    replicas.push((replica, text, clock));
+                }
+                return Ok(JetSyncText { replicas });
+            }
+            let show = match fields.iter().find(|(n, _)| n == "show") {
+                Some((_, CtValue::Str(s))) => s.clone(),
+                Some(_) => return Err(unsupported("SyncText show", span)),
+                None => return Err(unsupported("SyncText replicas", span)),
+            };
             // Round-trip via replica encoding `SyncText(a:x|b:y)`.
             let body = show
                 .strip_prefix("SyncText(")
                 .and_then(|s| s.strip_suffix(')'))
-                .unwrap_or("");
+                .ok_or_else(|| unsupported("SyncText show", span))?;
             let mut doc = JetSyncText {
                 replicas: Vec::new(),
             };
             if !body.is_empty() {
                 for part in body.split('|') {
-                    if let Some((r, t)) = part.split_once(':') {
-                        doc.replicas.push((r.to_string(), t.to_string()));
+                    let (r, t) = part
+                        .split_once(':')
+                        .ok_or_else(|| unsupported("SyncText show", span))?;
+                    if !jet_sync_token_is_valid(r) || t.len() > MAX_SYNC_TEXT {
+                        return Err(unsupported("SyncText show", span));
                     }
+                    doc.replicas.push((r.to_string(), t.to_string(), 1));
                 }
+            }
+            if doc.replicas.len() > MAX_SYNC_REPLICAS {
+                return Err(unsupported("SyncText replica limit", span));
             }
             Ok(doc)
         }
@@ -102,11 +203,13 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
         CtValue::Struct { type_name, fields }
             if type_name == "SyncCounter" || type_name == "JetSyncCounter" =>
         {
-            if let Some(CtValue::List(entries)) = fields
-                .iter()
-                .find(|(n, _)| n == "counts")
-                .map(|(_, v)| v)
-            {
+            if let Some(value) = fields.iter().find(|(n, _)| n == "counts").map(|(_, v)| v) {
+                let CtValue::List(entries) = value else {
+                    return Err(unsupported("SyncCounter counts", span));
+                };
+                if entries.len() > MAX_SYNC_REPLICAS {
+                    return Err(unsupported("SyncCounter replica limit", span));
+                }
                 let mut counts = Vec::new();
                 for entry in entries {
                     match entry {
@@ -122,15 +225,48 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
                                     _ => None,
                                 })
                                 .ok_or_else(|| unsupported("SyncCounter replica", span))?;
-                            let value = entry_fields
+                            let positive = entry_fields
                                 .iter()
-                                .find(|(n, _)| n == "value")
+                                .find(|(n, _)| n == "positive")
                                 .and_then(|(_, v)| match v {
-                                    CtValue::Int(n) => Some(*n),
+                                    CtValue::Int(n) if *n >= 0 => u64::try_from(*n).ok(),
+                                    CtValue::Str(value) => value.parse::<u64>().ok(),
                                     _ => None,
                                 })
-                                .ok_or_else(|| unsupported("SyncCounter value", span))?;
-                            counts.push((replica, value));
+                                .ok_or_else(|| unsupported("SyncCounter positive", span))?;
+                            let negative = entry_fields
+                                .iter()
+                                .find(|(n, _)| n == "negative")
+                                .and_then(|(_, v)| match v {
+                                    CtValue::Int(n) if *n >= 0 => u64::try_from(*n).ok(),
+                                    CtValue::Str(value) => value.parse::<u64>().ok(),
+                                    _ => None,
+                                })
+                                .ok_or_else(|| unsupported("SyncCounter negative", span))?;
+                            if !jet_sync_token_is_valid(&replica) {
+                                return Err(unsupported("SyncCounter replica", span));
+                            }
+                            counts.push((replica, positive, negative));
+                        }
+                        CtValue::List(parts) if parts.len() == 3 => {
+                            let replica = match &parts[0] {
+                                CtValue::Str(s) => s.clone(),
+                                _ => return Err(unsupported("SyncCounter replica", span)),
+                            };
+                            let positive = match &parts[1] {
+                                CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+                                    .map_err(|_| unsupported("SyncCounter positive", span))?,
+                                _ => return Err(unsupported("SyncCounter positive", span)),
+                            };
+                            let negative = match &parts[2] {
+                                CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+                                    .map_err(|_| unsupported("SyncCounter negative", span))?,
+                                _ => return Err(unsupported("SyncCounter negative", span)),
+                            };
+                            if !jet_sync_token_is_valid(&replica) {
+                                return Err(unsupported("SyncCounter replica", span));
+                            }
+                            counts.push((replica, positive, negative));
                         }
                         CtValue::List(parts) if parts.len() == 2 => {
                             let replica = match &parts[0] {
@@ -141,7 +277,14 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
                                 CtValue::Int(n) => *n,
                                 _ => return Err(unsupported("SyncCounter value", span)),
                             };
-                            counts.push((replica, value));
+                            if !jet_sync_token_is_valid(&replica) {
+                                return Err(unsupported("SyncCounter replica", span));
+                            }
+                            counts.push((
+                                replica,
+                                if value >= 0 { value as u64 } else { 0 },
+                                if value < 0 { value.unsigned_abs() } else { 0 },
+                            ));
                         }
                         _ => return Err(unsupported("SyncCounter entry", span)),
                     }
@@ -149,16 +292,19 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
                 return Ok(JetSyncCounter { counts });
             }
             // Legacy ambient shape stored only the summed value.
-            let value = fields
-                .iter()
-                .find(|(n, _)| n == "value")
-                .and_then(|(_, v)| match v {
-                    CtValue::Int(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
+            let value = match fields.iter().find(|(n, _)| n == "value") {
+                Some((_, CtValue::Int(n))) => *n,
+                Some(_) => return Err(unsupported("SyncCounter value", span)),
+                None => return Err(unsupported("SyncCounter counts", span)),
+            };
             Ok(JetSyncCounter {
-                counts: vec![("ambient".to_string(), value)],
+                counts: vec![
+                    (
+                        "ambient".to_string(),
+                        if value >= 0 { value as u64 } else { 0 },
+                        if value < 0 { value.unsigned_abs() } else { 0 },
+                    ),
+                ],
             })
         }
         _ => Err(unsupported("SyncCounter", span)),
@@ -170,27 +316,84 @@ fn ct_to_map(v: &CtValue, span: Span) -> Result<JetSyncMap, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncMap" || type_name == "JetSyncMap" =>
         {
-            let show = fields
-                .iter()
-                .find(|(n, _)| n == "show")
-                .and_then(|(_, v)| match v {
-                    CtValue::Str(s) => Some(s.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
+            if let Some(value) = fields.iter().find(|(n, _)| n == "entries").map(|(_, v)| v) {
+                let CtValue::List(entries) = value else {
+                    return Err(unsupported("SyncMap entries", span));
+                };
+                if entries.len() > MAX_SYNC_ENTRIES {
+                    return Err(unsupported("SyncMap entry limit", span));
+                }
+                let mut map_entries = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let CtValue::Struct { type_name, fields } = entry else {
+                        return Err(unsupported("SyncMap entry", span));
+                    };
+                    if type_name != "SyncMapEntry" {
+                        return Err(unsupported("SyncMap entry", span));
+                    }
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, v)| v)
+                            .ok_or_else(|| unsupported("SyncMap entry field", span))
+                    };
+                    let key = match field("key")? {
+                        CtValue::Str(s) => s.clone(),
+                        _ => return Err(unsupported("SyncMap key", span)),
+                    };
+                    let value = match field("value")? {
+                        CtValue::Str(s) => s.clone(),
+                        _ => return Err(unsupported("SyncMap value", span)),
+                    };
+                    let clock = match field("clock")? {
+                        CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+                            .map_err(|_| unsupported("SyncMap clock", span))?,
+                        CtValue::Str(value) => value
+                            .parse::<u64>()
+                            .map_err(|_| unsupported("SyncMap clock", span))?,
+                        _ => return Err(unsupported("SyncMap clock", span)),
+                    };
+                    let writer = match field("writer")? {
+                        CtValue::Str(s) => s.clone(),
+                        _ => return Err(unsupported("SyncMap writer", span)),
+                    };
+                    if !jet_sync_token_is_valid(&key)
+                        || !jet_sync_token_is_valid(&writer)
+                        || value.len() > MAX_SYNC_TEXT
+                    {
+                        return Err(unsupported("SyncMap entry value", span));
+                    }
+                    map_entries.push((key, value, clock, writer));
+                }
+                return Ok(JetSyncMap { entries: map_entries });
+            }
+            let show = match fields.iter().find(|(n, _)| n == "show") {
+                Some((_, CtValue::Str(s))) => s.clone(),
+                Some(_) => return Err(unsupported("SyncMap show", span)),
+                None => return Err(unsupported("SyncMap entries", span)),
+            };
             let body = show
                 .strip_prefix("SyncMap(")
                 .and_then(|s| s.strip_suffix(')'))
-                .unwrap_or("");
+                .ok_or_else(|| unsupported("SyncMap show", span))?;
             let mut map = JetSyncMap {
                 entries: Vec::new(),
             };
             if !body.is_empty() {
                 for part in body.split(',') {
-                    if let Some((k, val)) = part.split_once('=') {
-                        map.entries.push((k.to_string(), val.to_string()));
+                    let (k, val) = part
+                        .split_once('=')
+                        .ok_or_else(|| unsupported("SyncMap show", span))?;
+                    if !jet_sync_token_is_valid(k) || val.len() > MAX_SYNC_TEXT {
+                        return Err(unsupported("SyncMap show", span));
                     }
+                    map.entries
+                        .push((k.to_string(), val.to_string(), 1, "ambient".to_string()));
                 }
+            }
+            if map.entries.len() > MAX_SYNC_ENTRIES {
+                return Err(unsupported("SyncMap entry limit", span));
             }
             Ok(map)
         }
@@ -203,25 +406,66 @@ fn ct_to_list(v: &CtValue, span: Span) -> Result<JetSyncList, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncList" || type_name == "JetSyncList" =>
         {
-            let show = fields
-                .iter()
-                .find(|(n, _)| n == "show")
-                .and_then(|(_, v)| match v {
-                    CtValue::Str(s) => Some(s.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
+            if let Some(items) = fields.iter().find(|(n, _)| n == "items").map(|(_, v)| v) {
+                let CtValue::List(items) = items else {
+                    return Err(unsupported("SyncList items", span));
+                };
+                if items.len() > MAX_SYNC_ENTRIES {
+                    return Err(unsupported("SyncList item limit", span));
+                }
+                let mut list = JetSyncList { items: Vec::with_capacity(items.len()) };
+                for item in items {
+                    let CtValue::Struct { type_name, fields } = item else {
+                        return Err(unsupported("SyncList item", span));
+                    };
+                    if type_name != "SyncListItem" {
+                        return Err(unsupported("SyncList item", span));
+                    }
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, v)| v)
+                            .ok_or_else(|| unsupported("SyncList item field", span))
+                    };
+                    let replica = match field("replica")? {
+                        CtValue::Str(value) => value.clone(),
+                        _ => return Err(unsupported("SyncList replica", span)),
+                    };
+                    let value = match field("item")? {
+                        CtValue::Str(value) => value.clone(),
+                        _ => return Err(unsupported("SyncList item value", span)),
+                    };
+                    if !jet_sync_token_is_valid(&replica) || value.len() > MAX_SYNC_TEXT {
+                        return Err(unsupported("SyncList item value", span));
+                    }
+                    list.items.push((replica, value));
+                }
+                return Ok(list);
+            }
+            let show = match fields.iter().find(|(n, _)| n == "show") {
+                Some((_, CtValue::Str(s))) => s.clone(),
+                Some(_) => return Err(unsupported("SyncList show", span)),
+                None => return Err(unsupported("SyncList items", span)),
+            };
             let body = show
                 .strip_prefix("SyncList(")
                 .and_then(|s| s.strip_suffix(')'))
-                .unwrap_or("");
+                .ok_or_else(|| unsupported("SyncList show", span))?;
             let mut list = JetSyncList { items: Vec::new() };
             if !body.is_empty() {
                 for part in body.split('|') {
-                    if let Some((r, i)) = part.split_once(':') {
-                        list.items.push((r.to_string(), i.to_string()));
+                    let (r, i) = part
+                        .split_once(':')
+                        .ok_or_else(|| unsupported("SyncList show", span))?;
+                    if !jet_sync_token_is_valid(r) || i.len() > MAX_SYNC_TEXT {
+                        return Err(unsupported("SyncList show", span));
                     }
+                    list.items.push((r.to_string(), i.to_string()));
                 }
+            }
+            if list.items.len() > MAX_SYNC_ENTRIES {
+                return Err(unsupported("SyncList item limit", span));
             }
             Ok(list)
         }
@@ -252,7 +496,8 @@ fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
             _ => None,
         })
         .ok_or_else(|| unsupported("expression", span))?;
-    Ok(JetRowPolicy { table, expression })
+    jet_db_policy_new(table, expression)
+        .map_err(|_| unsupported("unsupported row policy", span))
 }
 
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
@@ -336,6 +581,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             one(0)?, span,
         )?))),
         "sync_over" => Ok(CtValue::Str(jet_app_sync_over(as_str(0)?, as_str(1)?))),
+        "sync" => Ok(CtValue::Str(jet_app_sync(as_str(0)?, as_str(1)?))),
         _ => Err(unsupported(&format!("`core.sync.{method}()`"), span)),
     }
 }

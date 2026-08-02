@@ -4,7 +4,6 @@
 
 const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
-const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024;
 const JET_HTTP_MAX_CHUNK_FRAMING_BYTES: usize = 32 * 1024;
 
 type JetHTTPMiddleware = std::sync::Arc<dyn Fn(JetHTTPHandler) -> JetHTTPHandler + Send + Sync>;
@@ -5094,4 +5093,3 @@ fn jet_http_serve_router(addr: &String, router: JetHTTPRouter) {
 fn jet_http_request_param(req: &JetHTTPRequest, name: &String) -> Option<String> {
     req.params.get(name.as_str()).cloned()
 }
-

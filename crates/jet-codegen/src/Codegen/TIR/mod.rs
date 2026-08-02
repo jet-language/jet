@@ -3940,6 +3940,15 @@ pub enum TBuiltinOp {
     ViewMutNew {
         line: usize,
     },
+    /// D-SHAPE-PLACE1=A: a checked rank-preserving Tensor window. The ambient
+    /// evaluator materializes the read view and tracks the mutable view handle;
+    /// AOT calls the same Prelude bounds law directly.
+    ComputeViewNew {
+        line: usize,
+    },
+    ComputeViewMutNew {
+        line: usize,
+    },
     /// D-MEMDISJOINT1=A: checked runtime split into two tracked mutable views.
     SplitWrite {
         tuple_struct: String,

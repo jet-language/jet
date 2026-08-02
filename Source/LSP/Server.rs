@@ -959,7 +959,6 @@ fn range_format_response(
 
 fn format_requested_lines(src: &str, requested: LspRange) -> Option<(LspRange, String)> {
     apply_lsp_edit(src, requested, None, "")?;
-    let formatted = crate::format_source(src).ok()?;
     let start_line = requested.start.line;
     let end_line = requested
         .end
@@ -970,14 +969,34 @@ fn format_requested_lines(src: &str, requested: LspRange) -> Option<(LspRange, S
     }
     let source_start = line_boundary(src, start_line)?;
     let source_end = line_boundary(src, end_line).unwrap_or(src.len());
-    let formatted_start = line_boundary(&formatted, start_line)?;
-    let formatted_end = line_boundary(&formatted, end_line).unwrap_or(formatted.len());
     let range = byte_span_to_range(
         src,
         crate::Diagnostics::Span::new(source_start, source_end),
     );
-    let new_text = formatted[formatted_start..formatted_end].to_string();
+    let selected = &src[source_start..source_end];
+    let formatted = crate::format_source(selected).ok()?;
+    let indent = selected
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| &line[..line.len() - line.trim_start().len()])
+        .unwrap_or("");
+    let new_text = indent_formatted_fragment(&formatted, indent);
     (src[source_start..source_end] != new_text).then_some((range, new_text))
+}
+
+fn indent_formatted_fragment(formatted: &str, indent: &str) -> String {
+    if indent.is_empty() {
+        return formatted.to_string();
+    }
+    let mut out = String::with_capacity(formatted.len() + indent.len());
+    for segment in formatted.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if !line.trim().is_empty() {
+            out.push_str(indent);
+        }
+        out.push_str(segment);
+    }
+    out
 }
 
 fn line_boundary(src: &str, line: u32) -> Option<usize> {
@@ -2872,7 +2891,7 @@ mod project_part_tests {
             format_requested_lines(source, requested).expect("range formatting edit");
         let edited = apply_lsp_edit(source, range, None, &new_text).expect("valid edit");
 
-        assert!(edited.starts_with("fn one() {\n    print(1)\n}\n"), "{edited}");
+        assert!(edited.starts_with("fn one() { print(1) }\n"), "{edited}");
         assert!(edited.ends_with("fn two(){\nprint(2)\n}\n"), "{edited}");
         assert_eq!(range.start, requested.start);
         assert_eq!(range.end, requested.end);

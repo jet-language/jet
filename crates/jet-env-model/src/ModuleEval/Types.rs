@@ -7,6 +7,9 @@ use crate::AST::Namespace;
 use super::super::Merge::{self, EntryContribution};
 use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
+use super::Environment::{
+    EnvironmentLifecycle, LanguagePack, LanguageSpec, ProfileSpec, ResolvedProfile,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptPathMode {
@@ -65,6 +68,14 @@ pub struct EvaluatedModule {
     /// They ride alongside ordinary package refs and realize into normal
     /// hangar objects.
     pub adapters: Vec<AdapterPlan>,
+    /// D-ENV-LIFECYCLE1: typed lifecycle facts captured from env fields.
+    pub lifecycle: EnvironmentLifecycle,
+    /// D-ENV-PROFILE1: named profile contributions.
+    pub profiles: Vec<ProfileSpec>,
+    /// D-ENV-LANGPACK1: typed language-pack selections from this module.
+    pub languages: Vec<LanguageSpec>,
+    /// D-ENV-FILES1: managed environment-file declarations.
+    pub files: Vec<super::Environment::ManagedFile>,
 }
 
 /// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
@@ -135,13 +146,13 @@ pub struct DevServicePlan {
     /// `ports: [Int]` — TCP ports the service listens on. The first port is
     /// the default readiness probe target when no explicit `ready:` is given.
     pub ports: Vec<i64>,
-    /// `init: "…"` — the shell command that starts the service. Falls back to
-    /// the built-in catalog's command when the name matches a known service
-    /// and this is unset.
-    pub init: Option<String>,
-    /// `shutdown: "…"` — the shell command that stops the service. Falls back
-    /// to a plain `SIGTERM`/`SIGKILL` of the supervised pid when unset.
-    pub shutdown: Option<String>,
+    /// `run: ["program", "arg", …]` — the executable and argv that start the
+    /// service. Falls back to the built-in catalog when the name matches a
+    /// known service and this is unset.
+    pub run: Option<Vec<String>>,
+    /// `shutdown: .Term(...)`/`.Kill` — typed process shutdown policy. Falls
+    /// back to a bounded TERM-then-KILL sequence when unset.
+    pub shutdown: Option<ShutdownPolicy>,
     /// `data_dir: "…"` — override for the persisted-state directory, which
     /// otherwise defaults to `.jet/services/<name>/data`.
     pub data_dir: Option<String>,
@@ -149,10 +160,56 @@ pub struct DevServicePlan {
     /// contract. Falls back to a TCP connect on `ports[0]` when unset and
     /// `ports` is non-empty, else to a bare process-alive check.
     pub ready: Option<String>,
+    /// D-JPK-SERVICEDEPTH1: typed readiness without shell-command parsing.
+    pub ready_probe: Option<ReadyProbe>,
+    /// D-JPK-SERVICEDEPTH1: bounded restart behavior.
+    pub restart: Option<RestartPolicy>,
+    /// Files whose changes may trigger a bounded restart.
+    pub watch: Vec<String>,
+    /// Service names that must be healthy before this service starts.
+    pub after: Vec<String>,
+    /// Compatibility spelling accepted by the older dev-only surface. New
+    /// declarations use `after`; both lists are merged before supervision.
+    pub depends_on: Vec<String>,
+    /// Ordinary `#Task` names to run successfully immediately before start.
+    pub before_start: Vec<String>,
+    /// Named sockets reserved by the service.
+    pub sockets: Vec<String>,
     /// Any further field, captured verbatim as a display string (open record,
     /// U12) — checked against the known keys above at supervision time, not
     /// at field-check time (E1262).
     pub extra: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadyProbe {
+    Exec(String),
+    Http { url: String, status: Option<u16> },
+    Notify { path: String },
+    Tcp { host: String, port: u16 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestartPolicy {
+    Never,
+    OnFailure {
+        max: u32,
+        backoff_ms: u64,
+        exponential: bool,
+    },
+    Always {
+        max: u32,
+        backoff_ms: u64,
+        exponential: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShutdownPolicy {
+    /// Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
+    Term { grace_ms: u64 },
+    /// Skip the graceful signal and terminate the verified process group.
+    Kill,
 }
 
 /// U13: one captured `options:` entry — a dotted key path and its value, rendered
@@ -188,11 +245,15 @@ pub struct ImagePlan {
     /// `Iso`: the source system's name (`from: system.<name>`).
     /// `Oci`: the source package's name (`from: packages.<name>`).
     pub from: String,
+    /// D-ENV-IMAGE1: true when `from:` projects an `env.<name>` into an OCI
+    /// shell image. The source kind stays explicit in the plan so realization
+    /// cannot confuse an environment with an executable package.
+    pub from_environment: bool,
     /// `Iso` only: the disk-image format (`iso` default / `qcow` / `raw`).
     /// Empty for `Oci`.
     pub format: String,
-    /// `Iso` only: an explicit cross-compile target, if any (else inherited
-    /// from system). `None` for `Oci`.
+    /// An explicit target platform, if any. ISO realizes it through its
+    /// referenced system; OCI records it for the image realization path.
     pub target: Option<String>,
     /// `Oci` only: `expose: [Int]` — TCP ports recorded as `ExposedPorts` in
     /// the OCI image config. Sorted + deduped for reproducibility.
@@ -211,6 +272,12 @@ pub struct ImagePlan {
     /// image` reports this honestly rather than silently building from
     /// scratch instead.
     pub base: Option<String>,
+    /// D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
+    /// default for an environment image.
+    pub services: Vec<String>,
+    pub health: Option<String>,
+    pub entrypoint: Option<String>,
+    pub user: Option<u32>,
 }
 
 /// U15: a field-checked `fleet.<name>: { hosts: { … } }` contribution, captured
@@ -279,4 +346,26 @@ pub struct EnvPlan {
     /// validate every name exists in the encrypted store at env entry
     /// (E1263); the jetos tier never reads this.
     pub secrets: Vec<String>,
+    /// Typed lifecycle facts for activation, checks, and reload.
+    pub lifecycle: EnvironmentLifecycle,
+    /// Named profiles before CLI/host selection.
+    pub profiles: Vec<ProfileSpec>,
+    /// Typed language-pack selections before catalog expansion.
+    pub languages: Vec<LanguageSpec>,
+    /// The profile selected by the evaluator/runtime, if one was requested.
+    pub selected_profile: Option<ResolvedProfile>,
+    /// Expanded language packs, kept in the plan for disclosure and hashing.
+    pub language_packs: Vec<LanguagePack>,
+    /// Managed environment-file declarations before `jet env sync` applies them.
+    pub files: Vec<super::Environment::ManagedFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EnvironmentFacts {
+    pub lifecycle: EnvironmentLifecycle,
+    pub profiles: Vec<ProfileSpec>,
+    pub languages: Vec<LanguageSpec>,
+    pub selected_profile: Option<ResolvedProfile>,
+    pub language_packs: Vec<LanguagePack>,
+    pub files: Vec<super::Environment::ManagedFile>,
 }

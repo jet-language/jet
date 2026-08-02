@@ -518,6 +518,11 @@ impl<'a> Checker<'a> {
                     "net.unix_connect", args, &[(1, "deadline")], span, &mut self.diags,
                 );
             }
+            if matches!(module, "app" | "core.web") && name == "sync" && args.len() == 2 {
+                super::net_text_time::require_exact_labels(
+                    "app.sync", args, &[(1, "over")], span, &mut self.diags,
+                );
+            }
             let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len()) {
                 let mut params = vec![
                     (AccessConvention::Read, Type::String),
@@ -4198,6 +4203,13 @@ impl<'a> Checker<'a> {
                 let _ = alias_span;
                 return None;
             };
+            // D-COMPUTE-RAW1/I1: a raw kernel contract is an expert escape
+            // hatch, not a safe compute constructor. Keep the fixed signature
+            // and normal type checking, but require the same lexical audit
+            // gate as the other low-level memory/device operations.
+            if module == "core.compute" && name == "raw_kernel_contract" && !self.in_unsafe {
+                self.diags.push(e3101("core.compute.raw_kernel_contract", span));
+            }
             if module == "core.crypto.expert" && name == "x25519" {
                 let validation_diag_start = self.diags.len();
                 if !(2..=3).contains(&args.len()) {

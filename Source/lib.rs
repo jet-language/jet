@@ -60,6 +60,7 @@ pub use jet_driver::{
     Loader,
     Lock,
     Manifest,
+    Package,
     PackageManifest,
     Parser,
     Policy,
@@ -560,6 +561,9 @@ fn absolute_source_path(file: &str) -> std::path::PathBuf {
 
 fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::PathBuf {
     let member_root = root.join(member);
+    if let Some(entry) = package_output_entry(&member_root) {
+        return entry;
+    }
     for candidate in [
         member_root.join(Syntax::DEFAULT_ENTRY_FILE),
         member_root.join("src").join(Syntax::DEFAULT_ENTRY_FILE),
@@ -592,6 +596,15 @@ fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::Pa
         }
     }
     member_root.join(Syntax::DEFAULT_ENTRY_FILE)
+}
+
+fn package_output_entry(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let package = Package::PackageFacts::load(root)?.ok()?;
+    let output = package.select_output("run", None, None).ok()?;
+    package.entry_path(root, output).or_else(|| {
+        let candidate = root.join(format!("{}.{}", output.name, Syntax::FILE_EXT));
+        candidate.is_file().then_some(candidate)
+    })
 }
 
 fn read_real_generated_file(

@@ -161,7 +161,7 @@ pub use api_debug::{
 pub use backend::CraneliftBackend;
 pub use backend::plan_bundle_tiers;
 pub use gap::{entry_run_name, is_e2211, JitGap};
-pub use tiers::{set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier, TierPlan, TierRow};
+pub use tiers::{publish_trace, set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier, TierPlan, TierRow};
 pub use tier_cache::{run_cached_module, take_last_tier_artifact};
 pub use trace::{
     fallback_invoked_for_test, jit_executed_for_test, note_fallback_invoked_for_test,

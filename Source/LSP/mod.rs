@@ -458,7 +458,7 @@ fn run() {
         let else_start = src.find("else {").unwrap() + "else {".len();
         let else_end = src.rfind("    }\n}").unwrap() + 4;
         assert!(db.slot_boundaries.iter().any(|boundary| {
-            boundary.slot == "then_body"
+            boundary.slot == "body"
                 && boundary.span.start == then_start
                 && boundary.span.end == then_end
         }));

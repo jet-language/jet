@@ -679,11 +679,79 @@ impl<'a> Fmt<'a> {
         for (enabled, name) in [
             (f.is_reactive, Syntax::KW_REACTIVE),
             (f.is_replayable, Syntax::ATTR_REPLAYABLE),
-            (f.is_task, Syntax::KW_TASK),
         ] {
             if enabled {
                 start_rule!();
                 self.write(name);
+            }
+        }
+        if f.is_task {
+            start_rule!();
+            if let Some(metadata) = &f.task_metadata {
+                self.write(Syntax::KW_TASK);
+                self.write("(");
+                let mut fields = Vec::new();
+                if !metadata.packages.is_empty() {
+                    fields.push(format!(
+                        "packages: [{}]",
+                        metadata
+                            .packages
+                            .iter()
+                            .map(|value| format!("\"{}\"", escape_str_lit(value)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if let Some(cwd) = &metadata.cwd {
+                    fields.push(format!("cwd: \"{}\"", escape_str_lit(cwd)));
+                }
+                if !metadata.inputs.is_empty() {
+                    fields.push(format!(
+                        "inputs: [{}]",
+                        metadata
+                            .inputs
+                            .iter()
+                            .map(|value| format!("\"{}\"", escape_str_lit(value)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if !metadata.outputs.is_empty() {
+                    fields.push(format!(
+                        "outputs: [{}]",
+                        metadata
+                            .outputs
+                            .iter()
+                            .map(|value| format!("\"{}\"", escape_str_lit(value)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if let Some(skip) = &metadata.skip {
+                    fields.push(format!("skip: \"{}\"", escape_str_lit(skip)));
+                }
+                let cache = match metadata.cache {
+                    crate::AST::TaskCachePolicy::Uncached => ".Uncached",
+                    crate::AST::TaskCachePolicy::Local => ".Local",
+                    crate::AST::TaskCachePolicy::Shared => ".Shared",
+                };
+                fields.push(format!("cache: {cache}"));
+                if let Some(authority) = &metadata.authority {
+                    fields.push(format!("authority: \"{}\"", escape_str_lit(authority)));
+                }
+                if !metadata.limits.is_empty() {
+                    let values = metadata
+                        .limits
+                        .iter()
+                        .map(|(key, value)| format!("\"{}\": \"{}\"", escape_str_lit(key), escape_str_lit(value)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    fields.push(format!("limits: {{{values}}}"));
+                }
+                self.write(&fields.join(", "));
+                self.write(")");
+            } else {
+                self.write(Syntax::KW_TASK);
             }
         }
         if let Some(every) = &f.every {

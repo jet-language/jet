@@ -2429,6 +2429,9 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
 /// `src/run.jet` and `<package>.jet`. Old `main.jet` locations remain fallback
 /// inputs, never defaults. Missing-entry errors name `run.jet`.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
+    if let Some(entry) = package_output_entry(root) {
+        return entry;
+    }
     let default = root.join(jet::Syntax::DEFAULT_ENTRY_FILE);
     if default.is_file() {
         return default;
@@ -2458,6 +2461,19 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         }
     }
     default
+}
+
+/// D-ENV-PACKAGE1 / #1003: select the singular runnable Package output before
+/// the migration-era `run.jet` convention. Invalid or incomplete package
+/// output paths are not trusted as filesystem paths; the compiler/manifest
+/// diagnostics remain the authority for the malformed Package itself.
+fn package_output_entry(root: &Path) -> Option<PathBuf> {
+    let package = jet::Package::PackageFacts::load(root)?.ok()?;
+    let output = package.select_output("run", None, None).ok()?;
+    package.entry_path(root, output).or_else(|| {
+        let candidate = root.join(format!("{}.{}", output.name, jet::Syntax::FILE_EXT));
+        candidate.is_file().then_some(candidate)
+    })
 }
 
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/

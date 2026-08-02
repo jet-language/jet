@@ -908,9 +908,12 @@ pub fn core_fixed_sig(
         )),
         ("core.compute", "raw_kernel_contract") => Some((
             vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::String, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Named("RawKernelContract".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
-        ("core.compute", "jvp_mul") => Some((
+        ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => Some((
             vec![
                 (read, Type::Named("Tensor".to_string())),
                 (read, Type::Named("Tensor".to_string())),
@@ -919,6 +922,17 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(
                 Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
+        ("core.compute", "vjp_add" | "vjp_mul" | "vjp_matmul") => Some((
+            vec![
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+                (read, Type::Named("Tensor".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("GradTriple".to_string()),
                 Type::Named("ComputeError".to_string()),
             )),
         )),
@@ -2766,7 +2780,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named("Auth".to_string()))],
             Some(Type::String),
         )),
-        ("app" | "core.web", "sync_over") => Some((
+        ("app" | "core.web", "sync_over" | "sync") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),
         )),

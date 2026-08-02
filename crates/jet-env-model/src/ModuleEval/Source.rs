@@ -18,6 +18,9 @@ use super::Diagnostics::{
     oci_from_non_executable,
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
+use super::Environment::{
+    EnvironmentLifecycle, LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
+};
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
     SystemPlan,
@@ -45,9 +48,22 @@ pub fn is_module_surface(src: &str) -> bool {
 /// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
 /// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
 /// (U5); package sugar resolves to `package@source` refs; the `prompt`
-/// scalar becomes the label. `imports: find(…)` is parsed but not yet walked
-/// (U4 discovery is a separate chunk).
+/// scalar becomes the label. `imports: find(…)` is walked before evaluation,
+/// so all reachable modules participate in the same source and environment
+/// graph.
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
+    evaluate_env_with_profile(src, base_dir, None)
+}
+
+/// Evaluate a typed environment with one authoritative profile selection.
+/// An explicit CLI choice is resolved before ambient hostname/user matching,
+/// so an unrelated ambient profile cannot reject or augment the requested
+/// plan.
+pub fn evaluate_env_with_profile(
+    src: &str,
+    base_dir: &Path,
+    requested_profile: Option<&str>,
+) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
 
     // The root `env.jet` plus every file reachable through `imports: find(…)`
@@ -81,14 +97,117 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
     let mut secrets: Vec<String> = Vec::new();
     let mut adapters: Vec<AdapterPlan> = Vec::new();
+    let mut lifecycle = EnvironmentLifecycle::default();
+    let mut profiles = ProfileSet::default();
+    let mut languages = Vec::new();
+    let mut files: Vec<ManagedFile> = Vec::new();
+    let environment_names: std::collections::BTreeSet<String> = modules
+        .iter()
+        .flat_map(|module| module.entries.iter())
+        .filter_map(|((namespace, name), _)| (*namespace == Namespace::Env).then_some(name.clone()))
+        .collect();
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
         fleets.extend(module.fleets.iter().cloned());
         vmtests.extend(module.vmtests.iter().cloned());
-        dev_services.extend(module.dev_services.iter().cloned());
-        secrets.extend(module.secrets.iter().cloned());
+        for service in &module.dev_services {
+            if dev_services
+                .iter()
+                .any(|existing: &super::Types::DevServicePlan| existing.name == service.name)
+            {
+                return Err(Diagnostic::error(
+                    "E1262",
+                    format!("service `{}` is declared more than once", service.name),
+                    "one environment supervisor owns each service name and cannot choose between different process facts".to_string(),
+                    "merge the service records or give them distinct names".to_string(),
+                    None,
+                ));
+            }
+            dev_services.push(service.clone());
+        }
+        for secret in &module.secrets {
+            push_unique(&mut secrets, secret.clone());
+        }
         adapters.extend(module.adapters.iter().cloned());
+        for dotenv in &module.lifecycle.dotenv {
+            if let Some(existing) = lifecycle.dotenv.iter().find(|item| item.file == dotenv.file) {
+                if existing != dotenv {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        format!("dotenv file `{}` has conflicting lifecycle policies", dotenv.file),
+                        "one environment graph cannot silently choose different allowlists or secret classifications for the same dotenv file".to_string(),
+                        "merge the declarations so their policies agree, or use different files".to_string(),
+                        None,
+                    ));
+                }
+            } else {
+                lifecycle.dotenv.push(dotenv.clone());
+            }
+        }
+        lifecycle.unset.extend(module.lifecycle.unset.iter().cloned());
+        lifecycle.on_enter.extend(module.lifecycle.on_enter.iter().cloned());
+        lifecycle.checks.extend(module.lifecycle.checks.iter().cloned());
+        if module.lifecycle.reload_explicit {
+            if lifecycle.reload_explicit && lifecycle.reload != module.lifecycle.reload {
+                return Err(Diagnostic::error(
+                    "E1333",
+                    format!(
+                        "reload policy in module `{}` conflicts with another module",
+                        module.name
+                    ),
+                    "one environment graph cannot silently choose between different reload policies".to_string(),
+                    "merge the reload declarations so they agree, or keep one policy owner".to_string(),
+                    None,
+                ));
+            }
+            lifecycle.reload = module.lifecycle.reload.clone();
+            lifecycle.reload_explicit = true;
+        }
+        for profile in &module.profiles {
+            profiles.insert_checked(profile.clone()).map_err(|error| {
+                Diagnostic::error(
+                    "E1332",
+                    format!("environment profile composition failed: {error}"),
+                    "one environment graph cannot silently choose between different facts for the same profile".to_string(),
+                    "merge the profile declarations so they are identical, or give them different names".to_string(),
+                    None,
+                )
+            })?;
+        }
+        for language in &module.languages {
+            if let Some(existing) = languages
+                .iter()
+                .find(|existing: &&LanguageSpec| existing.key() == language.key())
+            {
+                if !existing.same_selection(language) {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        format!("language pack `{}` has conflicting selection facts", language.name),
+                        "one environment graph cannot silently choose a version, channel, venv, or extra-package selection".to_string(),
+                        "merge the language records so their typed facts agree".to_string(),
+                        None,
+                    ));
+                }
+            } else {
+                languages.push(language.clone());
+            }
+        }
+        for file in &module.files {
+            if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
+                if existing != file {
+                    return Err(Diagnostic::error(
+                        "E1326",
+                        format!("managed file `{}` has conflicting declarations", file.destination),
+                        "one environment graph cannot apply two different owners to the same destination".to_string(),
+                        "merge the file declarations or choose distinct destinations".to_string(),
+                        None,
+                    ));
+                }
+            } else {
+                files.push(file.clone());
+            }
+        }
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
@@ -108,6 +227,18 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
                 }
             }
             ImageKind::Oci => {
+                if image.from_environment {
+                    if !environment_names.contains(&image.from) {
+                        return Err(Diagnostic::error(
+                            "E1327",
+                            format!("the image `{}` names unknown environment `{}`", image.name, image.from),
+                            "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image".to_string(),
+                            format!("declare `module env.{} {{ … }}`, or point `from:` at an existing environment", image.from),
+                            None,
+                        ));
+                    }
+                    continue;
+                }
                 let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
                 let is_executable = matches!(
                     kind,
@@ -171,7 +302,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     for key in &env_keys {
         let entry = &merged[key];
         for pkg in &entry.packages {
-            package_refs.push(pkg_ref(pkg));
+            push_unique(&mut package_refs, pkg_ref(pkg));
         }
         if prompt.is_none() {
             if let Some(label) = entry.settings.get(Syntax::ENV_FIELD_PROMPT) {
@@ -185,6 +316,49 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
             prompt_strip = prompt_strip_mode(strip);
         }
     }
+    let selected_name = requested_profile.map(str::to_string).or_else(|| {
+        profiles.auto_select(
+            &std::env::var("HOSTNAME").unwrap_or_default(),
+            &std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_default(),
+        )
+    });
+    let selected_profile = selected_name
+        .map(|name| profiles.resolve(&name))
+        .transpose()
+        .map_err(|error| {
+            Diagnostic::error(
+                "E1332",
+                format!("environment profile could not be resolved: {error}"),
+                "profile inheritance is resolved parent-first and must remain acyclic".to_string(),
+                "fix the profile name, parent reference, or inheritance cycle".to_string(),
+                None,
+            )
+        })?;
+    if let Some(profile) = &selected_profile {
+        for package in &profile.packages {
+            push_unique(&mut package_refs, package.clone());
+        }
+    }
+    let catalog = LanguagePackCatalog::builtin();
+    let language_expansion = catalog.expand(&languages).map_err(|error| {
+        Diagnostic::error(
+            "E1333",
+            format!("environment language pack could not be expanded: {error}"),
+            "language packs expand through one closed catalog into ordinary package refs".to_string(),
+            "choose a language name from the catalog exposed by `jet env info`".to_string(),
+            None,
+        )
+    })?;
+    for package in &language_expansion.packages {
+        push_unique(&mut package_refs, package.clone());
+    }
+    let language_packs = language_expansion
+        .applied
+        .iter()
+        .filter_map(|name| catalog.get(name).cloned())
+        .collect();
     Ok(EnvPlan {
         table,
         package_refs,
@@ -198,7 +372,19 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         vmtests,
         dev_services,
         secrets,
+        lifecycle,
+        profiles: profiles.profiles.values().cloned().collect(),
+        languages,
+        selected_profile,
+        language_packs,
+        files,
     })
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
 }
 
 fn prompt_path_mode(value: &str) -> PromptPathMode {
@@ -239,7 +425,33 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
         }
         for imp in &m.imports {
             let rel = find_dir_arg(imp)?;
+            let relative = Path::new(&rel);
+            if relative.is_absolute()
+                || relative
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                return Err(Diagnostic::error(
+                    "E1331",
+                    format!("module import `{rel}` escapes the environment root"),
+                    "one environment graph may compose files below its root, but an import cannot escape it".to_string(),
+                    "use a project-relative directory without `..`".to_string(),
+                    Some(imp.span()),
+                ));
+            }
             let dir = base_dir.join(&rel);
+            let root = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
+            if let Ok(real) = std::fs::canonicalize(&dir) {
+                if !real.starts_with(&root) {
+                    return Err(Diagnostic::error(
+                        "E1331",
+                        format!("module import `{rel}` resolves outside the environment root"),
+                        "imports follow physical paths and cannot cross the project boundary".to_string(),
+                        "remove the escaping symlink or move the imported directory below the project root".to_string(),
+                        Some(imp.span()),
+                    ));
+                }
+            }
             for file in list_jet_files(&dir, imp)? {
                 let file_src = std::fs::read_to_string(&file)
                     .map_err(|_| find_dir_missing(&dir, imp.span()))?;
@@ -382,7 +594,9 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
             } else {
                 base_dir.join(target)
             };
-            if dir.join(Syntax::PAYLOAD_FILE).is_file() {
+            if dir.join(Syntax::PACKAGE_FILE).is_file()
+                || dir.join(Syntax::PAYLOAD_FILE).is_file()
+            {
                 ProviderKind::Core
             } else {
                 ProviderKind::Nix

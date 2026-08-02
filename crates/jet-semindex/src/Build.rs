@@ -439,7 +439,13 @@ fn structural_slot<T>(
                 .iter()
                 .filter(|span| {
                     parent_start <= span.start
-                        && (!exact_parent_end || span.end <= parent_end)
+                        // Classic `if` lowers to a private arm whose AST span
+                        // ends at the condition. Its body still owns the next
+                        // parser block span; keep the exact upper bound for
+                        // real arm spans, but allow this head-only shape.
+                        && (!exact_parent_end
+                            || span.end <= parent_end
+                            || parent_end <= span.start)
                         && !ctx.claimed_block_spans.contains(&(span.start, span.end))
                 })
                 .min_by_key(|span| span.start)

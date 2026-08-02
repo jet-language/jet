@@ -427,6 +427,7 @@ pub use jet_crypto_entropy::{
 pub use jet_crypto_entropy::JetCryptoError;
 #[allow(unused_imports)]
 pub(crate) use jet_crypto_entropy::jet_crypto_entropy_zeroize;
+#[allow(unused_imports)]
 pub(crate) use jet_crypto_entropy::JetCryptoSecretBytes;
 
 #[cfg(test)]

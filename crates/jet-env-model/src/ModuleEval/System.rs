@@ -1,7 +1,7 @@
 //! U11–U14/U18: the jetos-tier field checks. Validate and capture
 //! `system.<name>: { … }` and `image.<name>: { … }` contributions as
-//! `SystemPlan`/`ServicePlan`/`OptionPlan`/`ImagePlan` (pure data — realize
-//! logic lives in the jetos tier, gap #4).
+//! `SystemPlan`/`ServicePlan`/`OptionPlan`/`ImagePlan`. OCI realization consumes
+//! the typed image plan in jetpack; disk-image realization remains jetos-owned.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -35,6 +35,7 @@ pub(super) fn evaluate_system(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
 ) -> Result<SystemPlan, Diagnostic> {
     let mut target = None;
     let mut packages = Vec::new();
@@ -50,7 +51,7 @@ pub(super) fn evaluate_system(
             }
             SystemFieldValue::Services(entries) => {
                 for e in entries {
-                    services.push(evaluate_service(e, base_dir, funcs)?);
+                    services.push(evaluate_service(e, base_dir, funcs, globals)?);
                 }
             }
             SystemFieldValue::Options(entries) => {
@@ -102,12 +103,13 @@ fn evaluate_service(
     entry: &ServiceEntry,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
 ) -> Result<ServicePlan, Diagnostic> {
     let mut enable = None;
     let mut extra = Vec::new();
     for (name, span, value) in &entry.fields {
         check_build_io(value)?;
-        let v = Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
+        let v = Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, globals)?;
         if name == Syntax::SERVICE_FIELD_ENABLE {
             match v {
                 Comptime::CtValue::Bool(b) => enable = Some(b),
@@ -127,7 +129,7 @@ fn evaluate_service(
 
 /// U14/U18/D-JPK-IMAGE1: field-check an `image.<name>: { … }` record and capture
 /// it as an `ImagePlan`. `from:` is required and names either a `System`
-/// (`.Iso` disk-image tier) or a `Package` (`.Oci` container tier); `kind:` is
+/// (`.Iso` disk-image tier), a `Package`, or an `Environment` (`.Oci` tiers); `kind:` is
 /// optional and, when written, must agree with which one `from:` names.
 /// `format`/`target` are `.Iso`-only (`format` defaults to `iso`); `expose`/
 /// `env_vars`/`files`/`base` are `.Oci`-only. Every other field is rejected —
@@ -138,6 +140,7 @@ pub(super) fn evaluate_image(
     _src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
 ) -> Result<ImagePlan, Diagnostic> {
     let mut from: Option<ImageFromRef> = None;
     let mut from_span = lit.span;
@@ -148,6 +151,10 @@ pub(super) fn evaluate_image(
     let mut env_vars = Vec::new();
     let mut files = Vec::new();
     let mut base = None;
+    let mut services = Vec::new();
+    let mut health = None;
+    let mut entrypoint = None;
+    let mut user = None;
     for field in &lit.fields {
         match &field.value {
             ImageFieldValue::From { source, span } => {
@@ -162,16 +169,28 @@ pub(super) fn evaluate_image(
                 kind_word = Some((bare_enum_word(expr, field.name_span)?, field.name_span));
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_EXPOSE => {
-                expose = eval_expose(expr, base_dir, funcs, field.name_span)?;
+                expose = eval_expose(expr, base_dir, funcs, globals, field.name_span)?;
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_ENV_VARS => {
-                env_vars = eval_env_vars(expr, base_dir, funcs, field.name_span)?;
+                env_vars = eval_env_vars(expr, base_dir, funcs, globals, field.name_span)?;
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_FILES => {
-                files = eval_files(expr, base_dir, funcs, field.name_span)?;
+                files = eval_files(expr, base_dir, funcs, globals, field.name_span)?;
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_BASE => {
-                base = Some(eval_base(expr, base_dir, funcs, field.name_span)?);
+                base = Some(eval_base(expr, base_dir, funcs, globals, field.name_span)?);
+            }
+            ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_SERVICES => {
+                services = eval_names(expr, Syntax::IMAGE_FIELD_SERVICES, base_dir, funcs, globals, field.name_span)?;
+            }
+            ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_HEALTH => {
+                health = Some(eval_string(expr, Syntax::IMAGE_FIELD_HEALTH, base_dir, funcs, globals, field.name_span)?);
+            }
+            ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_ENTRYPOINT => {
+                entrypoint = Some(eval_string(expr, Syntax::IMAGE_FIELD_ENTRYPOINT, base_dir, funcs, globals, field.name_span)?);
+            }
+            ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_USER => {
+                user = Some(eval_user(expr, field.name_span, base_dir, funcs, globals)?);
             }
             ImageFieldValue::Other(_) => {
                 return Err(image_restated_field(&field.name, field.name_span));
@@ -181,7 +200,7 @@ pub(super) fn evaluate_image(
     let from = from.ok_or_else(|| image_missing_from(lit.span))?;
     let inferred_kind = match &from {
         ImageFromRef::System(_) => ImageKind::Iso,
-        ImageFromRef::Package(_) => ImageKind::Oci,
+        ImageFromRef::Package(_) | ImageFromRef::Environment(_) => ImageKind::Oci,
     };
     let kind = match &kind_word {
         None => inferred_kind,
@@ -202,14 +221,16 @@ pub(super) fn evaluate_image(
     let name = match &from {
         ImageFromRef::System(s) => s.clone(),
         ImageFromRef::Package(p) => p.clone(),
+        ImageFromRef::Environment(e) => e.clone(),
     };
+    let from_environment = matches!(from, ImageFromRef::Environment(_));
     if kind == ImageKind::Oci {
         // `.Oci` never reads `format:`/`target:` — those are the `.Iso` disk-image
         // fields, and an `.Oci` image has no system to cross-compile for.
         if format.is_some() {
             return Err(image_restated_field(Syntax::IMAGE_FIELD_FORMAT, from_span));
         }
-        if target.is_some() {
+        if target.is_some() && !from_environment {
             return Err(image_restated_field(Syntax::SYSTEM_FIELD_TARGET, from_span));
         }
     } else if !expose.is_empty() || !env_vars.is_empty() || !files.is_empty() || base.is_some() {
@@ -220,12 +241,17 @@ pub(super) fn evaluate_image(
         name: path.to_string(),
         kind,
         from: name,
+        from_environment,
         format: format.unwrap_or_else(|| Syntax::IMAGE_FORMAT_ISO.to_string()),
         target,
         expose,
         env_vars,
         files,
         base,
+        services,
+        health,
+        entrypoint,
+        user,
     })
 }
 
@@ -233,7 +259,56 @@ fn clone_from_ref(r: &ImageFromRef) -> ImageFromRef {
     match r {
         ImageFromRef::System(s) => ImageFromRef::System(s.clone()),
         ImageFromRef::Package(p) => ImageFromRef::Package(p.clone()),
+        ImageFromRef::Environment(e) => ImageFromRef::Environment(e.clone()),
     }
+}
+
+fn eval_string(
+    expr: &Expr,
+    field: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    match Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)? {
+        CtValue::Str(value) => Ok(value),
+        _ => Err(image_field_shape(field, "a string", span)),
+    }
+}
+
+fn eval_names(
+    expr: &Expr,
+    field: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
+    match Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)? {
+        CtValue::List(values) => values
+            .into_iter()
+            .map(|value| match value {
+                CtValue::Str(value) => Ok(value),
+                _ => Err(image_field_shape(field, "a list of strings", span)),
+            })
+            .collect(),
+        _ => Err(image_field_shape(field, "a list of strings", span)),
+    }
+}
+
+fn eval_user(
+    expr: &Expr,
+    span: Span,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<u32, Diagnostic> {
+    let value = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
+    let CtValue::Int(value) = value else {
+        return Err(image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span));
+    };
+    u32::try_from(value).map_err(|_| image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span))
 }
 
 /// D-JPK-IMAGE1: `kind: .Oci` / `kind: .Iso` — a bare leading-dot enum literal
@@ -258,10 +333,11 @@ fn eval_expose(
     expr: &Expr,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<i64>, Diagnostic> {
     check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
+    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
     let CtValue::List(items) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_EXPOSE,
@@ -291,10 +367,11 @@ fn eval_env_vars(
     expr: &Expr,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<(String, String)>, Diagnostic> {
     check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
+    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
     let CtValue::Map(m) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_ENV_VARS,
@@ -329,10 +406,11 @@ fn eval_files(
     expr: &Expr,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
     check_build_io(expr)?;
-    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
+    let v = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)?;
     let CtValue::List(items) = v else {
         return Err(image_field_shape(
             Syntax::IMAGE_FIELD_FILES,
@@ -362,6 +440,7 @@ fn eval_base(
     expr: &Expr,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<String, Diagnostic> {
     let shape_err = || {
@@ -383,7 +462,7 @@ fn eval_base(
         funcs,
         &HashSet::new(),
         base_dir,
-        &HashMap::new(),
+        globals,
     )?;
     let CtValue::Str(s) = v else {
         return shape_err();

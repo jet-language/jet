@@ -246,6 +246,7 @@ impl<'a> Parser<'a> {
                 is_task: false,
                 task_span: None,
                 every: None,
+                task_metadata: None,
                 declared_effects,
                 effect_via,
                 state_requires: None,

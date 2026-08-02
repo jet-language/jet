@@ -442,7 +442,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_fs_runtime = needs_files
         || core_usage_matches(
             used_core,
-            &["core.process", "core.testing", "core.perf", "core.scope"],
+            &[
+                "core.args",
+                "core.process",
+                "core.testing",
+                "core.perf",
+                "core.scope",
+            ],
         );
     let needs_crypto = core_usage_matches(
         used_core,
@@ -551,6 +557,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
@@ -569,6 +576,12 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
     }
     if needs_files {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+    }
+    if needs_fs_runtime && !needs_files {
+        // FSIoEnvOsTesting uses the Path value and atomic-write helpers even
+        // for `core.testing`-only programs (for example `testing.snap`).
+        // Keep that transitive prelude dependency in the shared closure.
         out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
     }
     if needs_text {
@@ -607,6 +620,11 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"));
+    } else if needs_ws || needs_browser {
+        // Ws.rs shares the canonical HTTP request/header value types even for
+        // browser-only programs; keep the reachability split without emitting
+        // the full HTTP client/server surface.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
     }
     if needs_ws || needs_http || needs_browser {
         out.push_str(include_str!("../Prelude/CoreLib/Top/WsClient.rs"));
@@ -2647,6 +2665,10 @@ pub fn emit_bundle_tests_cov(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+    out.push_str(&format!(
+        "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
+    ));
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }

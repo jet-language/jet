@@ -546,6 +546,11 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         };
     }
     Some(match module {
+        // D-COMPUTE-PLACE1=D: `.Auto` is the beginner placement default and
+        // may select an accelerator, so compute operations carry GPU until an
+        // explicit CPU placement narrows the call site. The CPU oracle remains
+        // the deterministic implementation when no accelerator is installed.
+        "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
         "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,

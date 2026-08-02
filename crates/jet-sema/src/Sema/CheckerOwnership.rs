@@ -620,6 +620,7 @@ impl<'a> Checker<'a> {
             Some(Type::Apply { name, .. }) if matches!(name.as_str(), "Matrix" | "Tensor") => {
                 ViewKind::Matrix
             }
+            Some(Type::Named(name)) if name == "Tensor" => ViewKind::Matrix,
             _ => ViewKind::List,
         }
     }

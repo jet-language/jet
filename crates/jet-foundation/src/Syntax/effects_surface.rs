@@ -501,6 +501,13 @@ pub const ENV_HOOK_VERB: &str = "hook";
 /// activate/deactivate. Users never type this themselves; the installed hook
 /// calls it (direnv's `direnv export` shape).
 pub const ENV_EXPORT_VERB: &str = "export";
+/// D-ENV-FILES1=A: inspect the composed environment and run its declared
+/// checks in a clean process environment.
+pub const ENV_TEST_VERB: &str = "test";
+/// D-ENV-FILES1=A: plan and apply the managed-file graph for the active env.
+pub const ENV_SYNC_VERB: &str = "sync";
+/// D-ENV-PROFILE1=C: disclose the selected profile and typed environment facts.
+pub const ENV_INFO_VERB: &str = "info";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
 /// Documented in docs/reference/environment.md.
@@ -602,11 +609,17 @@ pub const SERVICES_VERB_UP: &str = "up";
 pub const SERVICES_VERB_DOWN: &str = "down";
 pub const SERVICES_VERB_HEALTH: &str = "health";
 pub const SERVICES_VERB_LOGS: &str = "logs";
+pub const SERVICES_VERB_RESTART: &str = "restart";
+pub const SERVICES_VERB_WAIT: &str = "wait";
+pub const SERVICES_VERB_WATCH: &str = "watch";
 pub const SERVICES_VERBS: &[&str] = &[
     SERVICES_VERB_UP,
     SERVICES_VERB_DOWN,
     SERVICES_VERB_HEALTH,
     SERVICES_VERB_LOGS,
+    SERVICES_VERB_RESTART,
+    SERVICES_VERB_WAIT,
+    SERVICES_VERB_WATCH,
 ];
 
 /// U12: the per-project supervised-services state dir name, nested under the

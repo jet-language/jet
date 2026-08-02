@@ -20,6 +20,7 @@
 
 mod DevService;
 mod Diagnostics;
+mod Environment;
 mod Eval;
 mod Source;
 mod System;
@@ -27,11 +28,16 @@ mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
-pub use Source::{evaluate_env, is_module_surface};
+pub use Source::{evaluate_env, evaluate_env_with_profile, is_module_surface};
 pub use Types::{
-    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
-    ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode, ServicePlan, SystemPlan,
-    VmTestPlan,
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
+    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode,
+    ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
+};
+pub use Environment::{
+    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookSpec, LanguageExpansion, LanguagePack,
+    LanguagePackCatalog, LanguageSpec, ManagedFile, ManagedFileError, ProfileError, ProfileSet,
+    ProfileSpec, ReloadPolicy, ResolvedProfile,
 };
 
 #[cfg(test)]
@@ -127,11 +133,53 @@ module dev {
     }
 
     #[test]
+    fn explicit_profile_selection_ignores_a_cyclic_ambient_match() {
+        let hostname = std::env::var("HOSTNAME").unwrap_or_default();
+        let source = format!(
+            r#"
+module env.dev {{
+    profiles: [
+        "ambient": .{{ hostname: "{hostname}", extends: ["cycle"] }},
+        "cycle": .{{ extends: ["ambient"] }},
+        "explicit": .{{ packages: ["git@nixpkgs"] }}
+    ]
+}}
+"#
+        );
+        let plan = evaluate_env_with_profile(&source, &base_dir(), Some("explicit")).unwrap();
+        assert_eq!(
+            plan.selected_profile.as_ref().map(|profile| profile.name.as_str()),
+            Some("explicit")
+        );
+        assert!(plan.package_refs.contains(&"git@nixpkgs".to_string()));
+    }
+
+    #[test]
+    fn conflicting_reload_policies_are_rejected_with_module_provenance() {
+        let source = r#"
+module first {
+    env.one: Env.{ reload: "never" }
+}
+module second {
+    env.two: Env.{ reload: "prompt" }
+}
+"#;
+        let error = evaluate_env(source, &base_dir())
+            .expect_err("reload conflict must be explicit");
+        assert_eq!(error.code, "E1333");
+        assert!(
+            error.what.contains("reload policy") && error.what.contains("second"),
+            "{}",
+            error.what
+        );
+    }
+
+    #[test]
     fn evaluates_computed_scalar_via_if_else() {
         let src = r#"
 module dev {
     env.dev: Env.{
-        prompt: if 3 > 2 { "yes" } else { "no" },
+        prompt: if 3 > 2 -> { "yes" } else -> { "no" },
     }
 }
 "#;
@@ -167,6 +215,24 @@ module dev {
     }
 
     #[test]
+    fn computed_module_fields_consume_top_level_known_values() {
+        let src = r#"
+#Known base :: 8000
+module dev {
+    env.dev: Env.{
+        port: base + 1,
+    }
+}
+"#;
+        let modules = evaluate_source(src, &base_dir()).unwrap();
+        let (_, entry) = &modules[0].entries[0];
+        assert_eq!(
+            entry.settings.get("port"),
+            Some(&vec![Scalar::normal("8001")])
+        );
+    }
+
+    #[test]
     fn computed_module_field_cycles_are_reported_before_evaluation() {
         let src = r#"
 module dev {
@@ -179,6 +245,20 @@ module dev {
         let error = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(error.code, "E0338");
         assert!(error.what.contains("first -> second -> first"));
+    }
+
+    #[test]
+    fn computed_module_field_self_cycles_are_reported_before_evaluation() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        port: port + 1,
+    }
+}
+"#;
+        let error = evaluate_source(src, &base_dir()).unwrap_err();
+        assert_eq!(error.code, "E0338");
+        assert!(error.what.contains("port -> port"), "{}", error.what);
     }
 
     #[test]
@@ -603,6 +683,21 @@ module installer {
         assert_eq!(plan.images[0].target, None);
     }
 
+    #[test]
+    fn computed_system_service_fields_consume_top_level_known_values() {
+        let src = r#"
+#Known enabled :: true
+module system.host {
+    target: linux.x64,
+    services: { ssh: { enable: enabled } },
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.systems.len(), 1);
+        assert_eq!(plan.systems[0].services[0].name, "ssh");
+        assert!(plan.systems[0].services[0].enable);
+    }
+
     /// S84: hyphenated System name + hyphenated `from:` reference parse,
     /// elaborate, field-check, and cross-match (E0978 still string-matches the
     /// kebab-case name end-to-end).
@@ -855,6 +950,21 @@ module image.server {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn computed_image_fields_consume_top_level_known_values() {
+        let dir = oci_base_dir("computed-fields");
+        let src = r#"
+#Known port :: 8080
+module image.server {
+    from: packages.app,
+    expose: [port],
+}
+"#;
+        let plan = evaluate_env(src, &dir).unwrap();
+        assert_eq!(plan.images[0].expose, vec![8080]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// `kind:` is optional — omitted, it infers `Oci` from `from: packages.*`
     /// (mirroring the pre-existing `from: system.*` → `Iso` inference).
     #[test]
@@ -1035,7 +1145,7 @@ module fleet.prod { hosts: { only: system.web } }
 
     /// The canonical role-module form captures a `services:` map into
     /// `DevServicePlan`s, distinct from (and alongside) ordinary scalar/
-    /// `packages:` fields — the recognized control fields (`ports`/`init`/
+    /// `packages:` fields — the recognized control fields (`ports`/`run`/
     /// `ready`) come back typed, not as display-string `extra`.
     #[test]
     fn dev_services_are_captured_with_typed_fields() {
@@ -1043,7 +1153,7 @@ module fleet.prod { hosts: { only: system.web } }
 module env.dev {
     prompt: "wordstats",
     services: {
-        redis: { enable: true, ports: [6380], init: "redis-server --port 6380", ready: "redis-cli -p 6380 ping" },
+        redis: { ports: [6380], run: ["redis-server", "--port", "6380"], ready: "redis-cli -p 6380 ping" },
         worker: { enable: false },
     }
 }
@@ -1055,7 +1165,12 @@ module env.dev {
         assert_eq!(redis.name, "redis");
         assert!(redis.enable);
         assert_eq!(redis.ports, vec![6380]);
-        assert_eq!(redis.init.as_deref(), Some("redis-server --port 6380"));
+        let redis_run = vec![
+            "redis-server".to_string(),
+            "--port".to_string(),
+            "6380".to_string(),
+        ];
+        assert_eq!(redis.run.as_deref(), Some(redis_run.as_slice()));
         assert_eq!(redis.ready.as_deref(), Some("redis-cli -p 6380 ping"));
         assert!(redis.extra.is_empty());
         let worker = &plan.dev_services[1];
@@ -1123,11 +1238,12 @@ module system.box {
         let redis = &plan.dev_services[0];
         assert_eq!(redis.name, "redis");
         assert!(redis.enable);
-        assert!(redis.init.is_none(), "redis relies on the built-in catalog");
+        assert!(redis.run.is_none(), "redis relies on the built-in catalog");
         let worker = &plan.dev_services[1];
         assert_eq!(worker.name, "worker");
         assert_eq!(worker.ports, vec![8080]);
-        assert_eq!(worker.init.as_deref(), Some("worker --port 8080"));
+        let worker_run = vec!["worker".to_string(), "--port".to_string(), "8080".to_string()];
+        assert_eq!(worker.run.as_deref(), Some(worker_run.as_slice()));
         assert!(worker.ready.is_some());
         let cache = &plan.dev_services[2];
         assert_eq!(cache.name, "cache");

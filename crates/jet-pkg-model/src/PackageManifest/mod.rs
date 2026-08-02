@@ -328,7 +328,12 @@ const RESERVED_SECTIONS: &[&str] = &["dev_deps", "patch", "workspace"];
 impl PackManifest {
     /// The path to the package manifest in a project dir.
     pub fn path_in(dir: &std::path::Path) -> std::path::PathBuf {
-        dir.join(Syntax::PAYLOAD_FILE)
+        let canonical = dir.join(Syntax::PACKAGE_FILE);
+        if canonical.is_file() {
+            canonical
+        } else {
+            dir.join(Syntax::PAYLOAD_FILE)
+        }
     }
 
     /// Load and parse the package manifest in `dir`, if present.

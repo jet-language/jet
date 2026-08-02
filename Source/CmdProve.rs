@@ -1,16 +1,17 @@
 //! D-PROVE-SEM1: first real `jet prove` producer tranche.
 //!
-//! This owns target discovery and front-end evidence. Runtime producers and
-//! artifacts are deliberately not represented here until they can contribute
-//! genuine typed evidence to the same report.
+//! This owns target discovery, front-end evidence, runtime producers, and the
+//! canonical ProofReport/artifact boundary.
 
 use std::fs;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use jet::AST::{Func, Item};
 use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
 use jet::ExitCodes;
 
@@ -25,6 +26,7 @@ struct Target {
     kind: &'static str,
     root: String,
     members: Vec<Member>,
+    identity_members: Vec<(String, String)>,
     input_sha256: String,
 }
 
@@ -33,6 +35,18 @@ struct FrontEndItem {
     path: String,
     diagnostic: Option<Diagnostic>,
     source: String,
+    facet: &'static str,
+    line: usize,
+    column: usize,
+}
+
+struct ContractDeclaration {
+    id: String,
+    path: String,
+    line: usize,
+    column: usize,
+    marker: &'static str,
+    claim: String,
 }
 
 struct TestItem {
@@ -136,35 +150,64 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         entry: target.root.clone(),
         source_digest: target.input_sha256.clone(),
         execution_adapter: "dev-tir-v1".to_string(),
-        target_triple: "x86_64-linux".to_string(),
+        target_triple: host_target_triple(),
     };
-    if let Some(opts) = capture {
-        exit(crate::ProveReplay::run_safe_capture(&identity, &opts, json));
-    }
-    if let Some(path) = replay {
-        exit(crate::ProveReplay::run_replay(&identity, &path, json));
-    }
+    let capture_authority = if let Some(opts) = capture {
+        match crate::ProveReplay::prepare_safe_capture(&opts, json) {
+            Ok(authority) => Some(authority),
+            Err(status) => exit(status),
+        }
+    } else {
+        None
+    };
+    let replay_authority = if let Some(path) = replay {
+        match crate::ProveReplay::prepare_replay(&identity, &path) {
+            Ok(authority) => {
+                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
+                eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+                Some(authority)
+            }
+            Err((code, why)) => {
+                eprintln!("Error [{code}]: {why}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+    // Only a validated replay artifact may add replay evidence to the report.
+    // The environment variable is an execution-tier adapter, not proof that a
+    // replay was requested; accepting it here would let ambient process state
+    // forge a replay claim.
+    let replay_time_ms = replay_authority.as_ref().map(|authority| authority.time_ms);
 
     let mut items = Vec::new();
+    let mut declarations = Vec::new();
     for member in &target.members {
         let source = String::from_utf8_lossy(&member.bytes).into_owned();
+        let (semantic_items, member_declarations) = semantic_front_end_items(&target, &member.path, &source);
+        declarations.extend(member_declarations);
         let diagnostics = jet::check_with_path(&member.path);
         if diagnostics.is_empty() {
-            items.push(FrontEndItem {
-                id: evidence_id(&target, "front_end", &member.path, "0:0-0:0", "program checked"),
-                path: member.path.clone(),
-                diagnostic: None,
-                source,
-            });
+            items.extend(semantic_items.into_iter().map(|mut item| {
+                item.source = source.clone();
+                item
+            }));
         } else {
             for diagnostic in diagnostics {
                 let span = diagnostic_span(&source, &diagnostic);
+                let (line, column) = diagnostic.span
+                    .map(|span| span_line_col(&source, span.start))
+                    .unwrap_or((1, 1));
                 let claim = format!("{}:{}", diagnostic.code, diagnostic.what);
                 items.push(FrontEndItem {
                     id: evidence_id(&target, "front_end", &member.path, &span, &claim),
                     path: member.path.clone(),
                     diagnostic: Some(diagnostic),
+                    facet: "all",
                     source: source.clone(),
+                    line,
+                    column,
                 });
             }
         }
@@ -191,7 +234,11 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             )
         })
         .collect();
-    let solver = match crate::ProveSolver::run_solver_producer(&solver_members, enable_solver) {
+    let solver = match crate::ProveSolver::run_solver_producer(
+        &solver_members,
+        &target.input_sha256,
+        enable_solver,
+    ) {
         Ok(items) => items,
         Err(message) => {
             eprintln!("error: solver producer failed: {message}");
@@ -210,6 +257,21 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         ExitCodes::OK
     };
+    if let Some(authority) = replay_authority.as_ref() {
+        let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
+            "panic"
+        } else {
+            "exit"
+        };
+        if authority.expected_status != exit_code || authority.expected_outcome != outcome {
+            eprintln!(
+                "Error [E3628]: replay diverged: captured outcome={} status={}, current outcome={} status={}",
+                authority.expected_outcome, authority.expected_status, outcome, exit_code
+            );
+            eprintln!(" Fix: recapture with `--capture` so the normal producer result is authoritative");
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
     let report = render_report(
         &target,
         &items,
@@ -217,15 +279,31 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         &budgets,
         &solver,
         &lenses,
+        &declarations,
+        replay_time_ms,
         proved,
         failed,
         exit_code,
     );
     // D-JPROOF1=A (#1127): persist the exact ProofReport under the canonical
-    // `.jetproof` envelope. `--json` still prints only the ProofReport object.
-    if let Err(message) = write_jetproof(&target, &report) {
-        eprintln!("error: failed to write .jetproof: {message}");
-        exit(ExitCodes::ICE);
+    // `.jetproof` envelope. Usage errors and internal compiler errors do not
+    // produce evidence artifacts; `--json` still prints only the ProofReport
+    // object for every producer outcome that has a valid report.
+    if exit_code != ExitCodes::ICE {
+        if let Err(message) = write_jetproof(&target, &report) {
+            eprintln!("error: failed to write .jetproof: {message}");
+            exit(ExitCodes::ICE);
+        }
+    }
+    if let Some(authority) = capture_authority.as_ref() {
+        if let Err(status) = crate::ProveReplay::finalize_safe_capture(
+            &identity,
+            authority,
+            exit_code,
+            json,
+        ) {
+            exit(status);
+        }
     }
     if json {
         println!("{report}");
@@ -259,6 +337,9 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 let warned = budgets.facts.len() - met - failed;
                 println!("BUDGETS  {met} met, {failed} failed, {warned} warned · verified canonical reports");
             }
+        }
+        if replay_time_ms.is_some() && (show("replay") || lenses.is_empty()) {
+            println!("REPLAY   exact Time authority; execution adapter matched");
         }
         if enable_solver {
             let (selected, proved_s, disproved_s, unknown_s, _) =
@@ -313,6 +394,232 @@ fn lens_shows(lenses: &[String], facet: &str) -> bool {
         return facet != "solver";
     }
     lenses.iter().any(|lens| lens == facet)
+}
+
+fn semantic_front_end_items(
+    target: &Target,
+    path: &str,
+    source: &str,
+) -> (Vec<FrontEndItem>, Vec<ContractDeclaration>) {
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
+    let program = if lex_diagnostics.is_empty() {
+        jet::Parser::parse(&tokens).ok()
+    } else {
+        None
+    };
+    let Some(program) = program else {
+        return (
+            vec![generic_front_end_item(target, path, source)],
+            Vec::new(),
+        );
+    };
+
+    let mut facts = Vec::new();
+    let mut declarations = Vec::new();
+    collect_semantic_items(
+        target,
+        path,
+        source,
+        &program.items,
+        &mut facts,
+        &mut declarations,
+    );
+    if facts.is_empty() {
+        facts.push(generic_front_end_item(target, path, source));
+    }
+    (facts, declarations)
+}
+
+fn generic_front_end_item(target: &Target, path: &str, source: &str) -> FrontEndItem {
+    FrontEndItem {
+        id: evidence_id(target, "front_end", path, "1:1-1:1", "program checked"),
+        path: path.to_string(),
+        diagnostic: None,
+        source: source.to_string(),
+        facet: "all",
+        line: 1,
+        column: 1,
+    }
+}
+
+fn collect_semantic_items(
+    target: &Target,
+    path: &str,
+    source: &str,
+    items: &[Item],
+    facts: &mut Vec<FrontEndItem>,
+    declarations: &mut Vec<ContractDeclaration>,
+) {
+    for item in items {
+        match item {
+            Item::Func(func) => collect_func_semantics(target, path, source, func, facts, declarations),
+            Item::Impl(implementation) => {
+                for func in &implementation.methods {
+                    collect_func_semantics(target, path, source, func, facts, declarations);
+                }
+            }
+            Item::Struct(definition) => {
+                for func in &definition.methods {
+                    collect_func_semantics(target, path, source, func, facts, declarations);
+                }
+            }
+            Item::Enum(definition) => {
+                for func in &definition.methods {
+                    collect_func_semantics(target, path, source, func, facts, declarations);
+                }
+            }
+            Item::Distinct(definition) => {
+                if let Some((lower, upper, span)) = definition.range {
+                    push_front_end_fact(
+                        target,
+                        path,
+                        source,
+                        facts,
+                        "refinements",
+                        "refinement",
+                        span,
+                        format!("{} range [{lower}, {upper}]", definition.name),
+                    );
+                }
+                if let Some((invariant, span)) = &definition.invariant {
+                    push_front_end_fact(
+                        target,
+                        path,
+                        source,
+                        facts,
+                        "refinements",
+                        "refinement",
+                        *span,
+                        format!("{} invariant {invariant}", definition.name),
+                    );
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_semantic_items(target, path, source, body, facts, declarations);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_func_semantics(
+    target: &Target,
+    path: &str,
+    source: &str,
+    func: &Func,
+    facts: &mut Vec<FrontEndItem>,
+    declarations: &mut Vec<ContractDeclaration>,
+) {
+    for (marker, clauses) in [("Pre", &func.pre), ("Post", &func.post)] {
+        for clause in clauses {
+            let span = clause.cond.span();
+            let (line, column) = span_line_col(source, span.start);
+            let span_text = span_text(source, span);
+            let claim = normalized_claim(source, span);
+            declarations.push(ContractDeclaration {
+                id: evidence_id(target, "contract", path, &span_text, &claim),
+                path: path.to_string(),
+                line,
+                column,
+                marker,
+                claim,
+            });
+        }
+    }
+    if let Some(effects) = &func.declared_effects {
+        let span = effects.first().map(|(_, span)| *span).unwrap_or(func.span);
+        let names = effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(",");
+        push_front_end_fact(
+            target,
+            path,
+            source,
+            facts,
+            "effects",
+            "effect",
+            span,
+            format!("{} effect bound [{names}]", func.name),
+        );
+    }
+    if let Some((callback, span)) = &func.effect_via {
+        push_front_end_fact(
+            target,
+            path,
+            source,
+            facts,
+            "effects",
+            "effect",
+            *span,
+            format!("{} effects via {callback}", func.name),
+        );
+    }
+    if let Some(tag) = &func.scrub_tag {
+        push_front_end_fact(
+            target,
+            path,
+            source,
+            facts,
+            "taint",
+            "taint",
+            func.span,
+            format!("{} scrubs {tag}", func.name),
+        );
+    }
+    if func.is_replayable {
+        push_front_end_fact(
+            target,
+            path,
+            source,
+            facts,
+            "replay",
+            "replayability",
+            func.replayable_span.unwrap_or(func.span),
+            format!("{} is replayable", func.name),
+        );
+    }
+}
+
+fn push_front_end_fact(
+    target: &Target,
+    path: &str,
+    source: &str,
+    facts: &mut Vec<FrontEndItem>,
+    facet: &'static str,
+    id_kind: &str,
+    span: jet::Diagnostics::Span,
+    claim: String,
+) {
+    let span_text = span_text(source, span);
+    let (line, column) = span_line_col(source, span.start);
+    facts.push(FrontEndItem {
+        id: evidence_id(target, id_kind, path, &span_text, &claim),
+        path: path.to_string(),
+        diagnostic: None,
+        source: source.to_string(),
+        facet,
+        line,
+        column,
+    });
+}
+
+fn span_text(source: &str, span: jet::Diagnostics::Span) -> String {
+    let (start_line, start_column) = span_line_col(source, span.start);
+    let (end_line, end_column) = span_line_col(source, span.end);
+    format!("{start_line}:{start_column}-{end_line}:{end_column}")
+}
+
+fn normalized_claim(source: &str, span: jet::Diagnostics::Span) -> String {
+    source
+        .get(span.start..span.end)
+        .unwrap_or("")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn host_target_triple() -> String {
+    format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
 }
 
 const PROOF_LENSES: &[&str] = &[
@@ -411,30 +718,67 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
 }
 
 fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
-    command.stdout(Stdio::null()).stderr(Stdio::null());
+    // Keep the producer's stdout/stderr out of the user's proof stdout, but
+    // drain both pipes concurrently so a noisy child cannot deadlock on a full
+    // OS pipe. The privacy policy intentionally does not persist these
+    // transcripts in ProofReport; they are bounded diagnostic material for the
+    // supervising process only.
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return ChildOutcome::LaunchFailed,
     };
+    let stdout = child.stdout.take().map(|mut stream| {
+        std::thread::spawn(move || capture_child_stream(&mut stream))
+    });
+    let stderr = child.stderr.take().map(|mut stream| {
+        std::thread::spawn(move || capture_child_stream(&mut stream))
+    });
+    let finish = |outcome| {
+        if let Some(thread) = stdout {
+            let _ = thread.join();
+        }
+        if let Some(thread) = stderr {
+            let _ = thread.join();
+        }
+        outcome
+    };
     let started = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return ChildOutcome::Exited(status.code()),
+            Ok(Some(status)) => return finish(ChildOutcome::Exited(status.code())),
             Ok(None) if started.elapsed() < deadline => {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return ChildOutcome::TimedOut;
+                return finish(ChildOutcome::TimedOut);
             }
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return ChildOutcome::Exited(None);
+                return finish(ChildOutcome::Exited(None));
             }
         }
     }
+}
+
+fn capture_child_stream(stream: &mut impl std::io::Read) -> Vec<u8> {
+    const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
+    let mut captured = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                let remaining = MAX_TRANSCRIPT_BYTES.saturating_sub(captured.len());
+                captured.extend_from_slice(&buffer[..count.min(remaining)]);
+            }
+            Err(_) => break,
+        }
+    }
+    captured
 }
 
 fn read_test_report(path: &Path) -> Result<Vec<ProducerRecord>, String> {
@@ -466,18 +810,31 @@ fn read_test_report_bytes(bytes: &[u8]) -> Result<Vec<ProducerRecord>, String> {
 }
 
 fn read_u64(bytes: &[u8], at: &mut usize) -> Result<u64, String> {
-    let raw: [u8; 8] = bytes.get(*at..*at + 8).ok_or("truncated test producer report")?.try_into().unwrap();
-    *at += 8;
+    let end = (*at)
+        .checked_add(8)
+        .ok_or("test producer report offset overflow")?;
+    let raw: [u8; 8] = bytes
+        .get(*at..end)
+        .ok_or("truncated test producer report")?
+        .try_into()
+        .map_err(|_| "invalid test producer integer")?;
+    *at = end;
     Ok(u64::from_be_bytes(raw))
 }
 
 fn read_string(bytes: &[u8], at: &mut usize) -> Result<String, String> {
-    let len = read_u64(bytes, at)? as usize;
+    let len = usize::try_from(read_u64(bytes, at)?)
+        .map_err(|_| "test producer field length is too large")?;
     if len > 1024 * 1024 {
         return Err("oversized test producer field".into());
     }
-    let raw = bytes.get(*at..*at + len).ok_or("truncated test producer report")?;
-    *at += len;
+    let end = (*at)
+        .checked_add(len)
+        .ok_or("test producer report offset overflow")?;
+    let raw = bytes
+        .get(*at..end)
+        .ok_or("truncated test producer report")?;
+    *at = end;
     String::from_utf8(raw.to_vec()).map_err(|_| "non-UTF-8 test producer report".into())
 }
 
@@ -577,16 +934,32 @@ mod supervision_tests {
 
 fn resolve_target(raw: &str) -> Result<Target, String> {
     let path = Path::new(raw);
-    if !path.exists() {
-        return Err(format!("can't find proof target `{raw}`"));
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("can't find proof target `{raw}`")
+        } else {
+            format!("can't inspect proof target `{raw}`: {error}")
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("proof target `{raw}` must not be a symlink"));
     }
-    let (kind, mut paths) = if path.is_file() {
+    let (kind, mut paths) = if metadata.is_file() {
         if path.extension().and_then(|ext| ext.to_str()) != Some(jet::Syntax::FILE_EXT) {
             return Err(format!("proof target `{raw}` is not a .jet file"));
         }
         ("file", vec![path.to_path_buf()])
     } else {
-        let kind = if path.join("pkg.jet").is_file() { "package" } else { "workspace" };
+        if !metadata.is_dir() {
+            return Err(format!("proof target `{raw}` is not a file or directory"));
+        }
+        let kind = match fs::symlink_metadata(path.join("pkg.jet")) {
+            Ok(metadata) if metadata.is_file() => "package",
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!("proof manifest `{}` is a symlink", path.join("pkg.jet").display()));
+            }
+            _ => "workspace",
+        };
         let mut found = Vec::new();
         collect_jet_files(path, &mut found)?;
         if found.is_empty() {
@@ -604,16 +977,33 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             bytes,
         });
     }
+    let mut identity_members = members
+        .iter()
+        .map(|member| (member.path.clone(), member.sha256.clone()))
+        .collect::<Vec<_>>();
+    if metadata.is_dir() {
+        let mut closure_paths = Vec::new();
+        collect_identity_files(path, &mut closure_paths)?;
+        for closure_path in closure_paths {
+            let bytes = fs::read(&closure_path)
+                .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
+            let closure_path = normalized(&closure_path);
+            if !identity_members.iter().any(|(member_path, _)| member_path == &closure_path) {
+                identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
+            }
+        }
+    }
+    identity_members.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let mut identity = Vec::new();
-    for member in &members {
+    for (path, sha256) in &identity_members {
         identity.extend_from_slice(
-            format!("{{\"path\":{},\"sha256\":{}}}\n", json(&member.path), json(&member.sha256))
-                .as_bytes(),
+            format!("{{\"path\":{},\"sha256\":{}}}\n", json(path), json(sha256)).as_bytes(),
         );
     }
     Ok(Target {
         kind,
         root: normalized(path),
+        identity_members,
         input_sha256: jet::SHA256::sha256_hex(&identity),
         members,
     })
@@ -623,13 +1013,50 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let entries = fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
     for entry in entries {
         let path = entry.map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?.path();
-        if path.is_dir() {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("proof target contains symlink `{}`", path.display()));
+        }
+        if metadata.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name == "build" || name.starts_with('.') {
                 continue;
             }
             collect_jet_files(&path, out)?;
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT) {
+        } else if metadata.is_file()
+            && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?
+            .path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("proof target contains symlink `{}`", path.display()));
+        }
+        if metadata.is_dir() {
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            if name == "build" || name.starts_with('.') {
+                continue;
+            }
+            collect_identity_files(&path, out)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            continue;
+        }
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        if matches!(name, "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet") {
             out.push(path);
         }
     }
@@ -685,35 +1112,114 @@ fn render_report(
     budgets: &jet::BudgetView::BudgetProjection,
     solver: &[crate::ProveSolver::SolverEvidence],
     _lenses: &[String],
+    declarations: &[ContractDeclaration],
+    replay_time_ms: Option<i64>,
     proved: usize,
     failed: usize,
     exit_code: i32,
 ) -> String {
-    let members = target.members.iter().map(|m| format!("{{\"path\":{},\"sha256\":{}}}", json(&m.path), json(&m.sha256))).collect::<Vec<_>>().join(",");
+    let members = target
+        .identity_members
+        .iter()
+        .map(|(path, sha256)| format!("{{\"path\":{},\"sha256\":{}}}", json(path), json(sha256)))
+        .collect::<Vec<_>>()
+        .join(",");
     let mut diagnostics = items.iter().filter_map(|item| item.diagnostic.as_ref().map(|d| diagnostic_json(&item.path, &item.source, d))).collect::<Vec<_>>();
     let mut diagnostic_index = 0usize;
     let mut evidence_rows = items.iter().map(|item| {
         let (outcome, indexes) = if item.diagnostic.is_some() { let i = diagnostic_index; diagnostic_index += 1; ("failed", format!("[{i}]")) } else { ("proved", "[]".into()) };
-        format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"all\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&item.id), json(&item.path))
+        format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"{}\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":{},\"line\":{},\"path\":{}}},\"state\":\"checked\"}}", item.facet, json(&item.id), item.column, item.line, json(&item.path))
     }).collect::<Vec<_>>();
+
+    let mut used_contract_records = BTreeSet::new();
+    for declaration in declarations {
+        let matching = tests.iter().enumerate().find(|(index, item)| {
+            item.kind == 1
+                && !used_contract_records.contains(index)
+                && item.name == declaration.marker
+                && item.line as usize == declaration.line
+                && source_paths_match(&item.path, &declaration.path)
+        });
+        let (id, attachment, state, outcome, reason, observation, diagnostic_indexes) =
+            if let Some((index, item)) = matching {
+                used_contract_records.insert(index);
+                let (state, outcome, reason, observation) = match item.state {
+                    0 => ("executed", "passed", "null", "reached_pass"),
+                    1 => ("executed", "failed", "null", "reached_fail"),
+                    2 => ("skipped", "not_run", "\"fail_fast_policy\"", "not_reached"),
+                    _ => ("unavailable", "unavailable", "\"producer_start_failed\"", "not_reached"),
+                };
+                let diagnostic_indexes = if item.state == 1 {
+                    let index = diagnostics.len();
+                    diagnostics.push(runtime_contract_diagnostic(&declaration.path, item));
+                    format!("[{index}]")
+                } else {
+                    "[]".to_string()
+                };
+                (
+                    declaration.id.clone(),
+                    if item.state == 0 || item.state == 1 {
+                        format!("{{\"testEvidenceId\":{}}}", json(&item.id))
+                    } else {
+                        "null".to_string()
+                    },
+                    state,
+                    outcome,
+                    reason,
+                    observation,
+                    diagnostic_indexes,
+                )
+            } else {
+                (
+                    declaration.id.clone(),
+                    "null".to_string(),
+                    "declared",
+                    "not_observed",
+                    "null",
+                    "not_reached",
+                    "[]".to_string(),
+                )
+            };
+        let contract = format!(
+            "{{\"marker\":{},\"observation\":\"{observation}\",\"site\":{{\"column\":{},\"line\":{},\"path\":{}}}}}",
+            json(declaration.marker),
+            declaration.column,
+            declaration.line,
+            json(&declaration.path)
+        );
+        evidence_rows.push(format!(
+            "{{\"attachment\":{attachment},\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"contracts\",\"id\":{},\"kind\":\"contract\",\"outcome\":\"{outcome}\",\"producer\":\"jet-runtime\",\"property\":null,\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":{},\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}",
+            json(&id),
+            declaration.column,
+            declaration.line,
+            json(&declaration.path)
+        ));
+    }
     for item in tests {
+        if item.kind == 1 {
+            continue;
+        }
+        if item.kind == 2 {
+            // Runtime panics are diagnostics, not a fifth evidence kind. The
+            // existing producer record still controls exit precedence.
+            let diagnostic_index = diagnostics.len();
+            diagnostics.push(runtime_item_diagnostic(item));
+            let _ = diagnostic_index;
+            continue;
+        }
         let (kind, facet, producer) = match item.kind {
-            1 => ("contract", "contracts", "jet-runtime"),
             3 => ("property", "tests", "jet-property"),
             4 => ("doctest", "tests", "jet-doctest"),
             _ => ("unit", "tests", "jet-test"),
         };
         let (state, outcome, reason) = match item.state { 0 => ("executed", "passed", "null"), 1 => ("executed", "failed", "null"), 2 => ("skipped", "not_run", "\"fail_fast_policy\""), _ => ("unavailable", "unavailable", "\"producer_start_failed\"") };
-        let diagnostic_indexes = if item.kind == 2 || (item.kind == 1 && item.state == 1) {
+        let diagnostic_indexes = if item.state == 1 {
             let index = diagnostics.len();
-            let code = if item.kind == 1 { "E3005" } else { "E3001" };
-            diagnostics.push(format!("{{\"caret\":null,\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":1,\"endLine\":{},\"path\":{},\"sourceLine\":null,\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}", json(code), json(&item.message), item.line, json(&item.path), item.line));
+            diagnostics.push(runtime_item_diagnostic(item));
             format!("[{index}]")
         } else { "[]".into() };
-        if item.kind == 2 { continue; }
-        let contract = if item.kind == 1 { format!("{{\"marker\":{},\"observation\":\"{}\",\"site\":{{\"column\":1,\"line\":{},\"path\":{}}}}}", json(&item.name), if item.state == 0 { "reached_pass" } else { "reached_fail" }, item.line, json(&item.path)) } else { "null".into() };
-        let property = if item.kind == 3 { format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH)) } else { "null".into() };
-        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
+        let property = if item.kind == 3 { format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple())) } else { "null".into() };
+        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
     }
     for fact in &budgets.facts {
         let kind = if fact.statistical { "statistical_budget" } else { "deterministic_budget" };
@@ -723,23 +1229,69 @@ fn render_report(
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
     }
     for item in solver {
-        evidence_rows.push(crate::ProveSolver::evidence_json(item));
+        let diagnostic_indexes = if let crate::ProveSolver::SolverOutcome::Disproved {
+            assignment,
+            ..
+        } = &item.outcome
+        {
+            let index = diagnostics.len();
+            let values = assignment
+                .iter()
+                .map(|(name, value)| format!("{name} = {value}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            diagnostics.push(format!(
+                "{{\"caret\":null,\"code\":\"E2950\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"native-presburger\",\"stage\":\"solver\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":1,\"endLine\":1,\"path\":{},\"sourceLine\":null,\"startColumn\":1,\"startLine\":1}},\"type\":\"producer\"}}",
+                json(&format!(
+                    "solver found a counterexample to {}",
+                    item.obligation.kind
+                )),
+                json(&format!(
+                    "Why: these values satisfy every assumption but make the claim false: {values}"
+                )),
+                json(&format!(
+                    "Fix: change {} so every admitted input satisfies the claim, or correct the contract",
+                    item.obligation.origin
+                )),
+                json(&item.obligation.origin),
+            ));
+            format!("[{index}]")
+        } else {
+            "[]".to_string()
+        };
+        evidence_rows.push(crate::ProveSolver::evidence_json(item, &diagnostic_indexes));
+    }
+    if let Some(time_ms) = replay_time_ms {
+        let claim = format!("replayed Time authority at {time_ms} ms");
+        let id = evidence_id(target, "replay", &target.root, "1:1-1:1", &claim);
+        evidence_rows.push(format!(
+            "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"replay\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"observed\",\"producer\":\"jet-replay\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"executed\"}}",
+            json(&id),
+            json(&target.root)
+        ));
     }
     let evidence = evidence_rows.join(",");
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
     let unit_passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
     let unit_failed = tests.iter().filter(|item| item.kind == 0 && item.state == 1).count();
-    let unit_skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
+    let unit_skipped = tests.iter().filter(|item| item.kind == 0 && item.state >= 2).count();
     let unit_unavailable = tests.iter().filter(|item| item.kind == 0 && item.state == 3).count();
-    let contract_passed = tests.iter().filter(|item| item.kind == 1 && item.state == 0).count();
-    let contract_failed = tests.iter().filter(|item| item.kind == 1 && item.state == 1).count();
-    let contract_selected = contract_passed + contract_failed;
+    let contract_selected = declarations.len();
+    let (contract_passed, contract_failed, contract_not_observed, contract_skipped) =
+        contract_summary(declarations, tests);
+    let contract_observed = contract_passed + contract_failed;
     let property_passed = tests.iter().filter(|item| item.kind == 3 && item.state == 0).count();
     let property_failed = tests.iter().filter(|item| item.kind == 3 && item.state == 1).count();
     let property_cases: u32 = tests.iter().filter(|item| item.kind == 3).map(|item| item.line).sum();
+    let property_shrunk_failures = tests
+        .iter()
+        .filter(|item| item.kind == 3 && item.state == 1 && !item.message.is_empty())
+        .count();
     let doctest_passed = tests.iter().filter(|item| item.kind == 4 && item.state == 0).count();
     let doctest_failed = tests.iter().filter(|item| item.kind == 4 && item.state == 1).count();
+    let doctest_skipped = tests.iter().filter(|item| item.kind == 4 && item.state >= 2).count();
+    let doctest_selected = doctest_passed + doctest_failed + doctest_skipped;
     let unit_selected = unit_passed + unit_failed + unit_skipped;
     let deterministic_selected = budgets.facts.iter().filter(|fact| !fact.statistical).count();
     let deterministic_failed = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "fail").count();
@@ -749,47 +1301,122 @@ fn render_report(
     let statistical_failed = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "fail").count();
     let statistical_met = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "pass").count();
     let statistical_unavailable = budgets.facts.iter().filter(|fact| fact.statistical && fact.evidence == "unavailable").count();
-    format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{},\"skipped\":0}},\"property\":{{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), if failed == 0 && unit_failed == 0 { if unit_unavailable > 0 { "pass_incomplete" } else { "pass" } } else { "fail" }, items.len(), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH))
-    .replace(
-        "\"deterministicBudget\":{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}",
-        &format!("\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}}"),
-    )
-    .replace(
-        "\"statisticalBudget\":{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}",
-        &format!("\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}}"),
-    )
-    .replace(
-        "\"contract\":{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}",
-        &format!("\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":0,\"observed\":{contract_selected},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":0}}"),
-    )
-    .replace(
-        "\"property\":{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}",
-        &format!("\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{},\"shrunkFailures\":{property_failed},\"skipped\":0}}", property_passed + property_failed),
-    )
-    .replace(
-        "\"doctest\":{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}",
-        &format!("\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{},\"skipped\":0}}", doctest_passed + doctest_failed),
-    )
-    .replace(
-        "\"solver\":{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}",
-        &format!(
-            "\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}}"
-        ),
-    )
-    .replace(
-        "\"result\":\"pass\"",
-        if exit_code != ExitCodes::OK || contract_failed > 0 {
-            "\"result\":\"fail\""
-        } else {
-            "\"result\":\"pass\""
-        },
-    )
+    let front_end_selected = proved + failed;
+    let property_skipped = tests.iter().filter(|item| item.kind == 3 && item.state >= 2).count();
+    let property_selected = property_passed + property_failed + property_skipped;
+    let result = if exit_code != ExitCodes::OK {
+        "fail"
+    } else if unit_unavailable > 0
+        || deterministic_unavailable > 0
+        || statistical_unavailable > 0
+        || solver_unknown > 0
+    {
+        "pass_incomplete"
+    } else {
+        "pass"
+    };
+    format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+}
+
+fn contract_summary(
+    declarations: &[ContractDeclaration],
+    tests: &[TestItem],
+) -> (usize, usize, usize, usize) {
+    let mut used = BTreeSet::new();
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut not_observed = 0;
+    let mut skipped = 0;
+    for declaration in declarations {
+        let matching = tests.iter().enumerate().find(|(index, item)| {
+            item.kind == 1
+                && !used.contains(index)
+                && item.name == declaration.marker
+                && item.line as usize == declaration.line
+                && source_paths_match(&item.path, &declaration.path)
+        });
+        let Some((index, item)) = matching else {
+            not_observed += 1;
+            continue;
+        };
+        used.insert(index);
+        match item.state {
+            0 => passed += 1,
+            1 => failed += 1,
+            _ => skipped += 1,
+        }
+    }
+    (passed, failed, not_observed, skipped)
 }
 
 fn diagnostic_json(path: &str, source: &str, d: &Diagnostic) -> String {
     let severity = if matches!(d.severity, Severity::Error) { "error" } else { "warning" };
     let span = d.span.map(|s| { let (sl, sc) = span_line_col(source, s.start); let (el, ec) = span_line_col(source, s.end); format!("{{\"endColumn\":{ec},\"endLine\":{el},\"path\":{},\"sourceLine\":null,\"startColumn\":{sc},\"startLine\":{sl}}}", json(path)) }).unwrap_or_else(|| "null".into());
     format!("{{\"caret\":null,\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-sema\",\"stage\":\"front_end\"}},\"safeLocals\":[],\"severity\":\"{severity}\",\"span\":{span},\"type\":\"front_end\"}}", json(&d.code), json(&d.what), json(&format!("Why: {}", d.why)), json(&format!("Fix: {}", d.fix)))
+}
+
+fn source_paths_match(left: &str, right: &str) -> bool {
+    let normalize = |path: &str| path.trim_start_matches("./").replace('\\', "/");
+    let left = normalize(left);
+    let right = normalize(right);
+    left == right || left.ends_with(&format!("/{right}")) || right.ends_with(&format!("/{left}"))
+}
+
+fn runtime_contract_diagnostic(path: &str, item: &TestItem) -> String {
+    let message = format!("#{} contract failed: {}", item.name, item.message);
+    let why = "Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. The clause's own message string is included. Checked in every build (not a debug/release split).";
+    let fix = "Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).";
+    let source_line = source_line_for(path, item.line);
+    let source_line_json = source_line.as_deref().map(json).unwrap_or_else(|| "null".to_string());
+    let width = source_line.as_deref().map_or(1, |line| line.chars().count().max(1));
+    format!(
+        "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
+        json(&message),
+        json(why),
+        json(fix),
+        width + 1,
+        item.line,
+        json(path),
+        item.line
+    )
+}
+
+fn source_line_for(path: &str, line: u32) -> Option<String> {
+    let line = usize::try_from(line).ok()?.checked_sub(1)?;
+    fs::read_to_string(path)
+        .ok()?
+        .lines()
+        .nth(line)
+        .map(str::to_string)
+}
+
+fn runtime_item_diagnostic(item: &TestItem) -> String {
+    let code = if item.kind == 1 { "E3005" } else { "E3001" };
+    let source_line = source_line_for(&item.path, item.line);
+    let source_line_json = source_line.as_deref().map(json).unwrap_or_else(|| "null".to_string());
+    let width = source_line.as_deref().map_or(1, |line| line.chars().count().max(1));
+    let (why, fix) = if item.kind == 2 {
+        (
+            "the proof child terminated with a panic instead of producing a checked evidence record",
+            "inspect the captured runtime message and fix the panic before relying on this proof",
+        )
+    } else {
+        (
+            "the runtime producer reported a failed checked property or test",
+            "fix the reported property or test, then rerun `jet prove`",
+        )
+    };
+    format!(
+        "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
+        json(code),
+        json(&item.message),
+        json(&format!("Why: {why}")),
+        json(&format!("Fix: {fix}")),
+        width + 1,
+        item.line,
+        json(&item.path),
+        item.line
+    )
 }
 
 fn json(value: &str) -> String {
@@ -804,7 +1431,8 @@ fn json(value: &str) -> String {
 /// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
 /// Identical existing bytes are left unchanged; differing bytes refuse.
 fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
-    let report_id = jet::SHA256::sha256_hex(proof_report.as_bytes());
+    let report_bytes = format!("{proof_report}\n");
+    let report_id = jet::SHA256::sha256_hex(report_bytes.as_bytes());
     let kind = target.kind;
     let name = {
         let root = Path::new(&target.root);
@@ -820,15 +1448,16 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
         &report_id[..16.min(report_id.len())]
     );
     let path = PathBuf::from(&rel);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
     let envelope = format!(
-        "{{\"schema\":\"jet.jproof\",\"version\":1,\"report_id\":{},\"artifact\":{{\"path\":{}}},\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"proofReport\":{proof_report}}}\n",
-        json(&report_id),
-        json(&rel)
+        "{{\"artifact\":{{\"path\":{}}},\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":1}}\n",
+        json(&rel),
+        json(&report_id)
     );
-    if path.exists() {
+    ensure_jetproof_parent(&path)?;
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if !metadata.file_type().is_file() {
+            return Err(format!("final .jetproof path is not a regular file: {rel}"));
+        }
         let existing = fs::read(&path).map_err(|e| e.to_string())?;
         if existing == envelope.as_bytes() {
             return Ok(());
@@ -842,7 +1471,66 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
         std::process::id(),
         &report_id[..8]
     ));
-    fs::write(&tmp, envelope.as_bytes()).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+        }
+        use std::io::Write;
+        file.write_all(envelope.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        fs::hard_link(&tmp, &path).map_err(|e| e.to_string())?;
+        fs::remove_file(&tmp).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)
+                .map_err(|e| e.to_string())?
+                .sync_all()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn ensure_jetproof_parent(path: &Path) -> Result<(), String> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut current = PathBuf::from(".");
+    for component in parent.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(".jetproof parent is a symlink: {}", current.display()));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(".jetproof parent is not a directory: {}", current.display()));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|e| e.to_string())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
     Ok(())
 }

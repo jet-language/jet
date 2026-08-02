@@ -441,14 +441,19 @@ pub fn run_jit_once_with_args_opts(
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
-    let (outcome, trace) = jet_driver::run_compiler_work(|| {
+    let trace_tiers = jet_jit::trace_tiers_enabled();
+    let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
+        jet_jit::set_trace_tiers(trace_tiers);
         let outcome = match checked_bundle(file) {
             Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
             Err(diags) => RunOutcome::Problems(diags),
         };
-        (outcome, jet_jit::jit_trace_flags_for_test())
+        let flags = jet_jit::jit_trace_flags_for_test();
+        let rows = jet_jit::take_last_trace();
+        (outcome, flags, rows)
     });
-    jet_jit::merge_jit_trace_flags_for_test(trace);
+    jet_jit::merge_jit_trace_flags_for_test(flags);
+    jet_jit::publish_trace(rows);
     outcome
 }
 

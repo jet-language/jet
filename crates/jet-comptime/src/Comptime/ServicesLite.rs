@@ -8,6 +8,9 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+include!("../../../jet-codegen/src/Prelude/TaskGroup.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Services.rs");
 
 fn restart_to_ct(r: JetServiceRestart) -> CtValue {
@@ -60,7 +63,7 @@ fn ct_to_delivery(v: &CtValue, span: Span) -> Result<JetServiceDelivery, Diagnos
             "DurableAtLeastOnce" => Ok(JetServiceDelivery::DurableAtLeastOnce),
             _ => Err(unsupported("ServiceDelivery", span)),
         },
-        _ => Ok(JetServiceDelivery::AtMostOnce),
+        _ => Err(unsupported("ServiceDelivery", span)),
     }
 }
 
@@ -73,6 +76,46 @@ fn endpoint_to_ct(e: &JetServiceEndpoint) -> CtValue {
             ("generation".to_string(), CtValue::Int(e.generation)),
         ],
     }
+}
+
+fn bytes_to_ct(bytes: &[u8]) -> CtValue {
+    CtValue::List(
+        bytes
+            .iter()
+            .map(|byte| CtValue::Int(i64::from(*byte)))
+            .collect(),
+    )
+}
+
+fn ct_to_service_string(
+    value: &CtValue,
+    max_len: usize,
+    label: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    let CtValue::Str(value) = value else {
+        return Err(unsupported(label, span));
+    };
+    if value.len() > max_len || value.chars().any(char::is_control) {
+        return Err(unsupported(label, span));
+    }
+    Ok(value.clone())
+}
+
+fn ct_to_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported("service directory key", span));
+    };
+    if values.len() > 32 {
+        return Err(unsupported("service directory key length", span));
+    }
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Int(byte) if (0..=255).contains(byte) => Ok(*byte as u8),
+            _ => Err(unsupported("service directory key byte", span)),
+        })
+        .collect()
 }
 
 fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnostic> {
@@ -101,6 +144,16 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
         CtValue::Int(n) => *n,
         _ => return Err(unsupported("endpoint generation", span)),
     };
+    if tree.trim().is_empty()
+        || worker.trim().is_empty()
+        || tree.chars().any(char::is_control)
+        || worker.chars().any(char::is_control)
+        || tree.len() > MAX_SERVICE_NAME
+        || worker.len() > MAX_SERVICE_NAME
+        || generation < 1
+    {
+        return Err(unsupported("ServiceEndpoint value", span));
+    }
     Ok(JetServiceEndpoint {
         tree,
         worker,
@@ -137,30 +190,33 @@ fn ct_to_mailbox(v: &CtValue, span: Span) -> Result<JetServiceMailbox, Diagnosti
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("mailbox field", span))
     };
-    let messages = match field("messages")? {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Str(s) => Ok(s.clone()),
-                _ => Err(unsupported("mailbox message", span)),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => return Err(unsupported("mailbox messages", span)),
-    };
     let capacity = match field("capacity")? {
         CtValue::Int(n) => *n,
         _ => return Err(unsupported("mailbox capacity", span)),
     };
+    let messages = match field("messages")? {
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_MESSAGES || capacity <= 0 || xs.len() > capacity as usize {
+                return Err(unsupported("mailbox message limit", span));
+            }
+            xs.iter()
+                .map(|x| ct_to_service_string(x, MAX_SERVICE_MESSAGE, "mailbox message", span))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("mailbox messages", span)),
+    };
     let depth = match field("depth")? {
         CtValue::Int(n) => *n,
-        _ => messages.len() as i64,
+        _ => return Err(unsupported("mailbox depth", span)),
     };
-    Ok(JetServiceMailbox {
-        endpoint: ct_to_endpoint(field("endpoint")?, span)?,
-        capacity,
-        depth,
-        messages,
-    })
+    let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
+    let mut mailbox = jet_services_new_mailbox(endpoint, capacity, messages)
+        .map_err(|_| unsupported("ServiceMailbox channel", span))?;
+    if depth < 0 || mailbox.depth != depth {
+        return Err(unsupported("mailbox depth", span));
+    }
+    mailbox.depth = depth;
+    Ok(mailbox)
 }
 
 fn worker_to_ct(w: &JetServiceWorker) -> CtValue {
@@ -191,19 +247,16 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
             .ok_or_else(|| unsupported("worker field", span))
     };
     Ok(JetServiceWorker {
-        name: match field("name")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("worker name", span)),
-        },
+        name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "worker name", span)?,
         endpoint: ct_to_endpoint(field("endpoint")?, span)?,
         mailbox: ct_to_mailbox(field("mailbox")?, span)?,
         restarts: match field("restarts")? {
             CtValue::Int(n) => *n,
-            _ => 0,
+            _ => return Err(unsupported("worker restarts", span)),
         },
         running: match field("running")? {
             CtValue::Bool(b) => *b,
-            _ => false,
+            _ => return Err(unsupported("worker running state", span)),
         },
     })
 }
@@ -232,7 +285,7 @@ fn ct_to_state_adapter(v: &CtValue, span: Span) -> Result<JetServiceStateAdapter
             "EventLog" => Ok(JetServiceStateAdapter::EventLog),
             _ => Err(unsupported("ServiceStateAdapter", span)),
         },
-        _ => Ok(JetServiceStateAdapter::Empty),
+        _ => Err(unsupported("ServiceStateAdapter", span)),
     }
 }
 
@@ -256,9 +309,12 @@ fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
 }
 
 fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnostic> {
-    let CtValue::Struct { fields, .. } = v else {
+    let CtValue::Struct { type_name, fields } = v else {
         return Err(unsupported("ServiceWorkflow", span));
     };
+    if type_name != "ServiceWorkflow" {
+        return Err(unsupported("ServiceWorkflow", span));
+    }
     let field = |name: &str| {
         fields
             .iter()
@@ -268,28 +324,28 @@ fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnos
     };
     let str_list = |name: &str| -> Result<Vec<String>, Diagnostic> {
         match field(name)? {
-            CtValue::List(xs) => xs
-                .iter()
-                .map(|x| match x {
-                    CtValue::Str(s) => Ok(s.clone()),
-                    _ => Err(unsupported("workflow string", span)),
-                })
-                .collect(),
-            _ => Ok(Vec::new()),
+            CtValue::List(xs) => {
+                if xs.len() > MAX_SERVICE_WORKFLOW_STEPS {
+                    return Err(unsupported("workflow string limit", span));
+                }
+                xs.iter()
+                    .map(|x| {
+                        ct_to_service_string(x, MAX_SERVICE_MESSAGE, "workflow string", span)
+                    })
+                    .collect()
+            }
+            _ => Err(unsupported("workflow string list", span)),
         }
     };
     Ok(JetServiceWorkflow {
-        id: match field("id")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("workflow id", span)),
-        },
+        id: ct_to_service_string(field("id")?, MAX_SERVICE_NAME, "workflow id", span)?,
         run_id: match field("run_id")? {
             CtValue::Int(n) => *n,
-            _ => 0,
+            _ => return Err(unsupported("workflow run id", span)),
         },
         version: match field("version")? {
             CtValue::Int(n) => *n,
-            _ => 1,
+            _ => return Err(unsupported("workflow version", span)),
         },
         steps: str_list("steps")?,
         history: str_list("history")?,
@@ -356,8 +412,14 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 CtValue::List(
                     tree.idempotency_seen
                         .iter()
-                        .cloned()
-                        .map(CtValue::Str)
+                        .map(|(key, endpoint, message)| CtValue::Struct {
+                            type_name: "ServiceIdempotencyEntry".to_string(),
+                            fields: vec![
+                                ("key".to_string(), CtValue::Str(key.clone())),
+                                ("endpoint".to_string(), endpoint_to_ct(endpoint)),
+                                ("message".to_string(), CtValue::Str(message.clone())),
+                            ],
+                        })
                         .collect(),
                 ),
             ),
@@ -366,12 +428,13 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 CtValue::List(
                     tree.directory
                         .iter()
-                        .map(|(n, ep)| {
+                        .map(|(n, ep, signature)| {
                             CtValue::Struct {
                                 type_name: "ServiceDirectoryEntry".to_string(),
                                 fields: vec![
                                     ("name".to_string(), CtValue::Str(n.clone())),
                                     ("endpoint".to_string(), endpoint_to_ct(ep)),
+                                    ("signature".to_string(), CtValue::Str(signature.clone())),
                                 ],
                             }
                         })
@@ -391,20 +454,25 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 "previous_generation".to_string(),
                 CtValue::Int(tree.previous_generation),
             ),
+            ("directory_key".to_string(), bytes_to_ct(&tree.directory_key)),
         ],
     }
 }
 
 fn ct_str_list(v: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
     match v {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Str(s) => Ok(s.clone()),
-                _ => Err(unsupported("string list", span)),
-            })
-            .collect(),
-        _ => Ok(Vec::new()),
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_STATE_RECORDS {
+                return Err(unsupported("string list length", span));
+            }
+            xs.iter()
+                .map(|x| match x {
+                    CtValue::Str(s) if s.len() <= MAX_SERVICE_MESSAGE && !s.chars().any(char::is_control) => Ok(s.clone()),
+                    _ => Err(unsupported("string list", span)),
+                })
+                .collect()
+        }
+        _ => Err(unsupported("string list", span)),
     }
 }
 
@@ -422,102 +490,173 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("tree field", span))
     };
-    let opt_field = |name: &str| fields.iter().find(|(n, _)| n == name).map(|(_, v)| v);
     let workers = match field("workers")? {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| ct_to_worker(x, span))
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => Vec::new(),
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_WORKERS {
+                return Err(unsupported("tree worker limit", span));
+            }
+            xs.iter()
+                .map(|x| ct_to_worker(x, span))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("tree workers", span)),
     };
     let groups = match field("groups")? {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| {
-                let CtValue::Struct { fields, .. } = x else {
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_WORKERS {
+                return Err(unsupported("tree group limit", span));
+            }
+            xs.iter()
+                .map(|x| {
+                let CtValue::Struct { type_name, fields } = x else {
                     return Err(unsupported("ServiceGroup", span));
                 };
+                if type_name != "ServiceGroup" {
+                    return Err(unsupported("ServiceGroup", span));
+                }
                 let name = fields
                     .iter()
                     .find(|(n, _)| n == "name")
-                    .and_then(|(_, v)| match v {
-                        CtValue::Str(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| unsupported("group name", span))?;
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| unsupported("group name", span))
+                    .and_then(|value| {
+                        ct_to_service_string(value, MAX_SERVICE_NAME, "group name", span)
+                    })?;
                 let restart = fields
                     .iter()
                     .find(|(n, _)| n == "restart")
                     .map(|(_, v)| ct_to_restart(v, span))
-                    .transpose()?
-                    .unwrap_or(JetServiceRestart::OneForOne);
-                let workers = fields
-                    .iter()
-                    .find(|(n, _)| n == "workers")
-                    .and_then(|(_, v)| match v {
-                        CtValue::List(xs) => Some(
-                            xs.iter()
-                                .filter_map(|x| match x {
-                                    CtValue::Str(s) => Some(s.clone()),
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>(),
-                        ),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                    .ok_or_else(|| unsupported("group restart", span))??;
+                let workers = match fields.iter().find(|(n, _)| n == "workers") {
+                    Some((_, CtValue::List(xs))) => {
+                        if xs.len() > MAX_SERVICE_WORKERS {
+                            return Err(unsupported("group worker limit", span));
+                        }
+                        xs.iter()
+                            .map(|x| {
+                                ct_to_service_string(
+                                    x,
+                                    MAX_SERVICE_NAME,
+                                    "group worker",
+                                    span,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                    }
+                    Some(_) => return Err(unsupported("group workers", span)),
+                    None => return Err(unsupported("group workers", span)),
+                };
                 Ok(JetServiceGroup {
                     name,
                     restart,
                     workers,
                 })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => Vec::new(),
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("tree groups", span)),
     };
-    let directory = match opt_field("directory") {
-        Some(CtValue::List(xs)) => xs
-            .iter()
-            .map(|x| {
-                let CtValue::Struct { fields, .. } = x else {
+    let directory = match field("directory")? {
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_WORKERS {
+                return Err(unsupported("service directory limit", span));
+            }
+            xs.iter()
+                .map(|x| {
+                let CtValue::Struct { type_name, fields } = x else {
                     return Err(unsupported("directory entry", span));
                 };
+                if type_name != "ServiceDirectoryEntry" {
+                    return Err(unsupported("directory entry", span));
+                }
                 let name = fields
                     .iter()
                     .find(|(n, _)| n == "name")
-                    .and_then(|(_, v)| match v {
-                        CtValue::Str(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| unsupported("directory name", span))?;
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| unsupported("directory name", span))
+                    .and_then(|value| {
+                        ct_to_service_string(value, MAX_SERVICE_NAME, "directory name", span)
+                    })?;
                 let endpoint = fields
                     .iter()
                     .find(|(n, _)| n == "endpoint")
                     .ok_or_else(|| unsupported("directory endpoint", span))?;
-                Ok((name, ct_to_endpoint(&endpoint.1, span)?))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => Vec::new(),
+                let signature = fields
+                    .iter()
+                    .find(|(n, _)| n == "signature")
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| unsupported("directory signature", span))
+                    .and_then(|value| {
+                        ct_to_service_string(value, 64, "directory signature", span)
+                    })?;
+                Ok((name, ct_to_endpoint(&endpoint.1, span)?, signature))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("service directory", span)),
     };
-    let workflows = match opt_field("workflows") {
-        Some(CtValue::List(xs)) => xs
-            .iter()
-            .map(|x| ct_to_workflow(x, span))
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => Vec::new(),
+    let workflows = match field("workflows")? {
+        CtValue::List(xs) => {
+            if xs.len() > MAX_SERVICE_WORKFLOW_STEPS {
+                return Err(unsupported("service workflow limit", span));
+            }
+            xs.iter()
+                .map(|x| ct_to_workflow(x, span))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("service workflows", span)),
     };
-    let snapshot = match opt_field("snapshot") {
-        Some(CtValue::Str(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
+    let snapshot = match field("snapshot")? {
+        value => {
+            let value = ct_to_service_string(value, MAX_SERVICE_MESSAGE, "service snapshot", span)?;
+            (!value.is_empty()).then_some(value)
+        }
     };
-    Ok(JetServiceTree {
-        name: match field("name")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("tree name", span)),
-        },
+    let idempotency_seen = match field("idempotency_seen")? {
+        CtValue::List(entries) => {
+            if entries.len() > MAX_SERVICE_IDEMPOTENCY {
+                return Err(unsupported("service idempotency limit", span));
+            }
+            entries
+                .iter()
+                .map(|entry| {
+                let CtValue::Struct { type_name, fields } = entry else {
+                    return Err(unsupported("idempotency entry", span));
+                };
+                if type_name != "ServiceIdempotencyEntry" {
+                    return Err(unsupported("idempotency entry", span));
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("idempotency field", span))
+                };
+                let key = ct_to_service_string(
+                    field("key")?,
+                    MAX_SERVICE_NAME,
+                    "idempotency key",
+                    span,
+                )?;
+                let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
+                let message = ct_to_service_string(
+                    field("message")?,
+                    MAX_SERVICE_MESSAGE,
+                    "idempotency message",
+                    span,
+                )?;
+                Ok((key, endpoint, message))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => return Err(unsupported("service idempotency state", span)),
+    };
+    let tree = JetServiceTree {
+        name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "tree name", span)?,
         generation: match field("generation")? {
             CtValue::Int(n) => *n,
-            _ => 1,
+            _ => return Err(unsupported("tree generation", span)),
         },
         delivery: ct_to_delivery(field("delivery")?, span)?,
         restart: ct_to_restart(field("restart")?, span)?,
@@ -525,40 +664,30 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         groups,
         started: match field("started")? {
             CtValue::Bool(b) => *b,
-            _ => false,
+            _ => return Err(unsupported("tree started state", span)),
         },
-        state_adapter: match opt_field("state_adapter") {
-            Some(v) => ct_to_state_adapter(v, span)?,
-            None => JetServiceStateAdapter::Empty,
-        },
+        state_adapter: ct_to_state_adapter(field("state_adapter")?, span)?,
         snapshot,
-        event_log: match opt_field("event_log") {
-            Some(v) => ct_str_list(v, span)?,
-            None => Vec::new(),
-        },
-        dead_letters: match opt_field("dead_letters") {
-            Some(v) => ct_str_list(v, span)?,
-            None => Vec::new(),
-        },
-        idempotency_seen: match opt_field("idempotency_seen") {
-            Some(v) => ct_str_list(v, span)?,
-            None => Vec::new(),
-        },
+        event_log: ct_str_list(field("event_log")?, span)?,
+        dead_letters: ct_str_list(field("dead_letters")?, span)?,
+        idempotency_seen,
         directory,
-        draining: match opt_field("draining") {
-            Some(v) => ct_str_list(v, span)?,
-            None => Vec::new(),
-        },
+        directory_key: ct_to_bytes(field("directory_key")?, span)?,
+        draining: ct_str_list(field("draining")?, span)?,
         workflows,
-        chaos_fails: match opt_field("chaos_fails") {
-            Some(CtValue::Int(n)) => *n,
-            _ => 0,
+        task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
+        chaos_fails: match field("chaos_fails")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("service chaos counter", span)),
         },
-        previous_generation: match opt_field("previous_generation") {
-            Some(CtValue::Int(n)) => *n,
-            _ => 0,
+        previous_generation: match field("previous_generation")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("previous service generation", span)),
         },
-    })
+    };
+    jet_services_validate_tree(&tree)
+        .map_err(|error| unsupported(&error.jet_show(), span))?;
+    Ok(tree)
 }
 
 fn map_err(err: JetServiceError) -> CtValue {
@@ -603,7 +732,11 @@ pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
                     .iter()
                     .find(|(n, _)| n == "value")
                     .map(|(_, v)| v.clone())
-                    .unwrap_or(CtValue::Unit);
+                    .ok_or_else(|| {
+                        CtValue::ResErr(Box::new(CtValue::Str(
+                            "core.services: missing value write-back".to_string(),
+                        )))
+                    })?;
                 Ok((tree, CtValue::ResOk(Box::new(val))))
             }
             other => Ok((CtValue::Unit, CtValue::ResOk(Box::new(other)))),
@@ -619,8 +752,10 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
     };
     match method {
         "tree" => match one(0)? {
-            CtValue::Str(name) => Ok(tree_to_ct(&jet_services_tree(name.clone()))),
-            _ => Err(unsupported("tree name", span)),
+            value => {
+                let name = ct_to_service_string(value, MAX_SERVICE_NAME, "tree name", span)?;
+                Ok(tree_to_ct(&jet_services_tree(name)))
+            }
         },
         "restart_one_for_one" => Ok(restart_to_ct(jet_services_restart_one_for_one())),
         "restart_one_for_all" => Ok(restart_to_ct(jet_services_restart_one_for_all())),
@@ -646,8 +781,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "worker" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
             let name = match one(1)? {
-                CtValue::Str(s) => s.clone(),
-                _ => return Err(unsupported("worker name", span)),
+                value => ct_to_service_string(value, MAX_SERVICE_NAME, "worker name", span)?,
             };
             let capacity = match one(2)? {
                 CtValue::Int(n) => *n,
@@ -661,17 +795,24 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "group" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
             let name = match one(1)? {
-                CtValue::Str(s) => s.clone(),
-                _ => return Err(unsupported("group name", span)),
+                value => ct_to_service_string(value, MAX_SERVICE_NAME, "group name", span)?,
             };
             let workers = match one(2)? {
-                CtValue::List(xs) => xs
-                    .iter()
-                    .map(|x| match x {
-                        CtValue::Str(s) => Ok(s.clone()),
-                        _ => Err(unsupported("group worker", span)),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
+                CtValue::List(xs) => {
+                    if xs.len() > MAX_SERVICE_WORKERS {
+                        return Err(unsupported("group worker limit", span));
+                    }
+                    xs.iter()
+                        .map(|x| {
+                            ct_to_service_string(
+                                x,
+                                MAX_SERVICE_NAME,
+                                "group worker",
+                                span,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                }
                 _ => return Err(unsupported("group workers", span)),
             };
             Ok(match jet_services_group(&mut tree, name, workers) {
@@ -695,8 +836,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let mut tree = ct_to_tree(one(0)?, span)?;
             let endpoint = ct_to_endpoint(one(1)?, span)?;
             let message = match one(2)? {
-                CtValue::Str(s) => s.clone(),
-                _ => return Err(unsupported("message", span)),
+                value => ct_to_service_string(value, MAX_SERVICE_MESSAGE, "message", span)?,
             };
             Ok(match jet_services_send(&mut tree, &endpoint, message) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),

@@ -13,6 +13,10 @@ use crate::AST::{ContribValue, Contribution, EnvLit, Expr, Func, Item, ModuleDec
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
+use super::Environment::{
+    files_from_value, lifecycle_from_field, languages_from_value, profiles_from_value,
+    EnvironmentLifecycle, LanguageSpec, ProfileSpec,
+};
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
     wrong_namespace_type,
@@ -60,13 +64,14 @@ pub fn evaluate_modules(
     // callers of this public evaluator get the same semantics.
     jet_codegen::Codegen::TIR::install_comptime_bridge();
     let funcs = collect_funcs(items);
+    let globals = collect_comptime_globals(items, &funcs, base_dir)?;
     let mut out = Vec::new();
     for item in items {
         let Item::Module(m) = item else { continue };
         if !m.is_auto_discovered() {
             continue;
         }
-        out.push(evaluate_module(m, src, base_dir, &funcs)?);
+        out.push(evaluate_module(m, src, base_dir, &funcs, &globals)?);
     }
     Ok(out)
 }
@@ -81,11 +86,111 @@ fn collect_funcs(items: &[Item]) -> HashMap<String, &Func> {
         .collect()
 }
 
+/// Resolve module-level immutable comptime values before any namespace field
+/// runs. Module fields are allowed to use these values, but they must enter
+/// through the same dependency, purity, and deterministic-value path as
+/// sibling fields. In particular, a self-reference is a real cycle, not an
+/// unresolved-name fallback.
+fn collect_comptime_globals<'a>(
+    items: &'a [Item],
+    funcs: &HashMap<String, &'a Func>,
+    base_dir: &Path,
+) -> Result<HashMap<String, crate::Comptime::CtValue>, Diagnostic> {
+    let definitions = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Const(def) if def.is_comptime => {
+                Some((def.name.clone(), (def.name_span, &def.value)))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut states = HashMap::<String, u8>::new();
+    let mut resolved = HashMap::new();
+    let mut stack = Vec::new();
+    let mut names = definitions.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+    for name in names {
+        resolve_comptime_global(
+            &name,
+            &definitions,
+            &mut states,
+            &mut resolved,
+            &mut stack,
+            funcs,
+            base_dir,
+        )?;
+    }
+    Ok(resolved)
+}
+
+fn resolve_comptime_global<'a>(
+    name: &str,
+    definitions: &HashMap<String, (crate::Diagnostics::Span, &'a Expr)>,
+    states: &mut HashMap<String, u8>,
+    resolved: &mut HashMap<String, crate::Comptime::CtValue>,
+    stack: &mut Vec<String>,
+    funcs: &HashMap<String, &'a Func>,
+    base_dir: &Path,
+) -> Result<(), Diagnostic> {
+    if matches!(states.get(name), Some(2)) {
+        return Ok(());
+    }
+    if matches!(states.get(name), Some(1)) {
+        let start = stack.iter().position(|item| item == name).unwrap_or(0);
+        let mut cycle = stack[start..].to_vec();
+        cycle.push(name.to_string());
+        let span = definitions
+            .get(name)
+            .map(|(span, _)| *span)
+            .unwrap_or(crate::Diagnostics::Span::new(0, 0));
+        return Err(Diagnostic::error(
+            "E0338",
+            format!("computed module fields form a cycle: {}", cycle.join(" -> ")),
+            "module-level comptime values must have a deterministic dependency order".to_string(),
+            "break the cycle by making one value independent or by moving the shared computation into a pure function".to_string(),
+            Some(span),
+        ));
+    }
+    let Some((span, value)) = definitions.get(name).copied() else {
+        return Ok(());
+    };
+    states.insert(name.to_string(), 1);
+    stack.push(name.to_string());
+    let mut dependencies = Vec::<(String, crate::Diagnostics::Span)>::new();
+    crate::Comptime::walk_identifiers(value, &mut |candidate, candidate_span| {
+        if definitions.contains_key(candidate) {
+            dependencies.push((candidate.to_string(), candidate_span));
+        }
+    });
+    let mut seen = HashSet::new();
+    dependencies.retain(|(dependency, _)| seen.insert(dependency.clone()));
+    for (dependency, _) in dependencies {
+        resolve_comptime_global(
+            &dependency,
+            definitions,
+            states,
+            resolved,
+            stack,
+            funcs,
+            base_dir,
+        )?;
+    }
+    check_build_io(value)?;
+    let value = Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, resolved)?;
+    resolved.insert(name.to_string(), value);
+    stack.pop();
+    states.insert(name.to_string(), 2);
+    let _ = span;
+    Ok(())
+}
+
 fn evaluate_module<'a>(
     m: &ModuleDecl,
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &'a Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
 ) -> Result<EvaluatedModule, Diagnostic> {
     let mut entries = Vec::new();
     let mut systems = Vec::new();
@@ -95,28 +200,57 @@ fn evaluate_module<'a>(
     let mut dev_services = Vec::new();
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
+    let mut lifecycle = EnvironmentLifecycle::default();
+    let mut profiles = Vec::new();
+    let mut languages = Vec::new();
+    let mut files = Vec::new();
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
-                let (entry, names, found_adapters) =
-                    evaluate_env_contribution(c, src, base_dir, funcs)?;
+                let capture = evaluate_env_contribution(c, src, base_dir, funcs, globals)?;
+                let EnvCapture {
+                    entry,
+                    secrets: names,
+                    adapters: found_adapters,
+                    lifecycle: captured_lifecycle,
+                    profiles: captured_profiles,
+                    languages: captured_languages,
+                    files: captured_files,
+                } = capture;
+                lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
+                profiles.extend(captured_profiles);
+                languages.extend(captured_languages);
+                files.extend(captured_files);
                 entries.push(((c.namespace, c.path.clone()), entry));
                 secrets.extend(names);
                 adapters.extend(found_adapters);
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
-                let (entry, services, names, found_adapters) =
-                    evaluate_env_role(lit, src, base_dir, funcs)?;
+                let (capture, services) =
+                    evaluate_env_role(lit, src, base_dir, funcs, globals)?;
+                let EnvCapture {
+                    entry,
+                    secrets: names,
+                    adapters: found_adapters,
+                    lifecycle: captured_lifecycle,
+                    profiles: captured_profiles,
+                    languages: captured_languages,
+                    files: captured_files,
+                } = capture;
+                lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
+                profiles.extend(captured_profiles);
+                languages.extend(captured_languages);
+                files.extend(captured_files);
                 entries.push(((c.namespace, c.path.clone()), entry));
                 dev_services.extend(services);
                 secrets.extend(names);
                 adapters.extend(found_adapters);
             }
             (Namespace::System, ContribValue::System(lit)) => {
-                systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
+                systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             (Namespace::Image, ContribValue::Image(lit)) => {
-                images.push(evaluate_image(&c.path, lit, src, base_dir, funcs)?);
+                images.push(evaluate_image(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             (Namespace::Fleet, ContribValue::Fleet(lit)) => {
                 fleets.push(evaluate_fleet(&c.path, lit, src)?);
@@ -139,7 +273,46 @@ fn evaluate_module<'a>(
         dev_services,
         secrets,
         adapters,
+        lifecycle,
+        profiles,
+        languages,
+        files,
     })
+}
+
+fn lifecycle_merge(
+    target: &mut EnvironmentLifecycle,
+    incoming: EnvironmentLifecycle,
+    module_name: &str,
+) -> Result<(), Diagnostic> {
+    target.dotenv.extend(incoming.dotenv);
+    target.unset.extend(incoming.unset);
+    target.on_enter.extend(incoming.on_enter);
+    target.checks.extend(incoming.checks);
+    if incoming.reload_explicit {
+        if target.reload_explicit && target.reload != incoming.reload {
+            return Err(Diagnostic::error(
+                "E1333",
+                format!("reload policy is declared more than once in module `{module_name}`"),
+                "one module cannot silently choose between different reload policies".to_string(),
+                "merge the reload declarations so they agree, or keep one policy owner".to_string(),
+                None,
+            ));
+        }
+        target.reload = incoming.reload;
+        target.reload_explicit = true;
+    }
+    Ok(())
+}
+
+struct EnvCapture {
+    entry: EntryContribution,
+    secrets: Vec<String>,
+    adapters: Vec<AdapterPlan>,
+    lifecycle: EnvironmentLifecycle,
+    profiles: Vec<ProfileSpec>,
+    languages: Vec<LanguageSpec>,
+    files: Vec<super::Environment::ManagedFile>,
 }
 
 fn namespace_type(ns: Namespace) -> &'static str {
@@ -191,7 +364,8 @@ fn evaluate_env_contribution(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<String>, Vec<AdapterPlan>), Diagnostic> {
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Result<EnvCapture, Diagnostic> {
     let expected = namespace_type(c.namespace);
     let ContribValue::Expr(value) = &c.value else {
         unreachable!("evaluate_env_contribution called on a non-env contribution")
@@ -209,8 +383,7 @@ fn evaluate_env_contribution(
         return Err(wrong_namespace_type(expected, type_name, value.span()));
     }
 
-    let (entry, names, adapters) = evaluate_env_fields(fields, src, base_dir, funcs)?;
-    Ok((entry, names, adapters))
+    Ok(evaluate_env_fields(fields, src, base_dir, funcs, globals)?)
 }
 
 /// Shared field-loop for both `env.<name>:` producer shapes (the legacy
@@ -222,10 +395,15 @@ fn evaluate_env_fields(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<String>, Vec<AdapterPlan>), Diagnostic> {
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Result<EnvCapture, Diagnostic> {
     let mut entry = EntryContribution::default();
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
+    let mut lifecycle = EnvironmentLifecycle::default();
+    let mut profiles = Vec::new();
+    let mut languages = Vec::new();
+    let mut files = Vec::new();
     let extern_names = HashSet::new();
     // Module fields are a small pure dependency graph.  The old source-order
     // loop made a valid `port: base + 1, base: 8000` fail or, worse, made the
@@ -238,7 +416,7 @@ fn evaluate_env_fields(
         .map(|(name, span, value)| (name.as_str(), (*span, value)))
         .collect::<HashMap<_, _>>();
     let mut states = HashMap::<String, u8>::new();
-    let mut resolved = HashMap::<String, crate::Comptime::CtValue>::new();
+    let mut resolved = globals.clone();
     let mut stack = Vec::<String>::new();
     for (name, span, _) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
@@ -262,7 +440,7 @@ fn evaluate_env_fields(
             funcs,
         )?;
     }
-    for (name, _span, value) in fields {
+    for (name, span, value) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
             continue;
         } else if name == Syntax::ENV_FIELD_PROMPT {
@@ -293,6 +471,61 @@ fn evaluate_env_fields(
                         .push(Scalar::normal(v.jet_show()));
                 }
             }
+        } else if name == Syntax::ENV_FIELD_PROFILES {
+            if let Some(value) = resolved.get(name) {
+                profiles.extend(profiles_from_value(value).map_err(|error| {
+                    Diagnostic::error(
+                        "E1332",
+                        format!("environment profile declaration is invalid: {error}"),
+                        "profiles are named typed records with string package, variable, and inheritance facts".to_string(),
+                        "use `profiles: { dev: .{ packages: [\"tool@nixpkgs\"] } }`".to_string(),
+                        Some(*span),
+                    )
+                })?);
+            }
+        } else if name == Syntax::ENV_FIELD_LANGUAGES {
+            if let Some(value) = resolved.get(name) {
+                languages.extend(languages_from_value(value).map_err(|error| {
+                    Diagnostic::error(
+                        "E1333",
+                        format!("language-pack declaration is invalid: {error}"),
+                        "languages is a typed map of Lang records that expands through Jet's catalog".to_string(),
+                        "use `languages: { rust: Lang.{ enable: true } }` or another name from `jet env info`".to_string(),
+                        Some(*span),
+                    )
+                })?);
+            }
+        } else if name == Syntax::ENV_FIELD_FILES {
+            if let Some(value) = resolved.get(name) {
+                files.extend(files_from_value(value).map_err(|error| {
+                    Diagnostic::error(
+                        "E1326",
+                        format!("environment file declaration is invalid: {error}"),
+                        "managed files use project-relative destinations and typed Symlink, Seed, or Copy records".to_string(),
+                        "fix the file destination and source/content shape before running `jet env sync`".to_string(),
+                        Some(*span),
+                    )
+                })?);
+            }
+        } else if matches!(
+            name.as_str(),
+            Syntax::ENV_FIELD_DOTENV
+                | Syntax::ENV_FIELD_UNSET
+                | Syntax::ENV_FIELD_ON_ENTER
+                | Syntax::ENV_FIELD_CHECKS
+                | Syntax::ENV_FIELD_RELOAD
+        ) {
+            if let Some(value) = resolved.get(name) {
+                lifecycle_from_field(&mut lifecycle, name, value).map_err(|error| {
+                    Diagnostic::error(
+                        "E1333",
+                        format!("environment lifecycle declaration is invalid: {error}"),
+                        "lifecycle fields use typed dotenv, unset, hook, and reload records".to_string(),
+                        "fix the field shape, for example `dotenv: [\".env\"]` or `reload: .Prompt`".to_string(),
+                        Some(*span),
+                    )
+                })?;
+            }
         } else {
             let v = resolved
                 .get(name)
@@ -305,7 +538,15 @@ fn evaluate_env_fields(
                 .push(Scalar::normal(v.jet_show()));
         }
     }
-    Ok((entry, secrets, adapters))
+    Ok(EnvCapture {
+        entry,
+        secrets,
+        adapters,
+        lifecycle,
+        profiles,
+        languages,
+        files,
+    })
 }
 
 fn resolve_env_field(
@@ -334,14 +575,14 @@ fn resolve_env_field(
             Some(span),
         ));
     }
-    let Some((field_span, value)) = fields.get(name).copied() else {
+    let Some((_field_span, value)) = fields.get(name).copied() else {
         return Ok(());
     };
     states.insert(name.to_string(), 1);
     stack.push(name.to_string());
     let mut dependencies = Vec::<(String, crate::Diagnostics::Span)>::new();
     crate::Comptime::walk_identifiers(value, &mut |candidate, candidate_span| {
-        if candidate != name && fields.contains_key(candidate) {
+        if fields.contains_key(candidate) {
             dependencies.push((candidate.to_string(), candidate_span));
         }
     });
@@ -367,7 +608,6 @@ fn resolve_env_field(
     resolved.insert(name.to_string(), v);
     stack.pop();
     states.insert(name.to_string(), 2);
-    let _ = field_span;
     Ok(())
 }
 
@@ -492,21 +732,20 @@ fn evaluate_env_role(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
 ) -> Result<
     (
-        EntryContribution,
+        EnvCapture,
         Vec<DevServicePlan>,
-        Vec<String>,
-        Vec<AdapterPlan>,
     ),
     Diagnostic,
 > {
-    let (entry, secrets, adapters) = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
+    let capture = evaluate_env_fields(&lit.fields, src, base_dir, funcs, globals)?;
     let mut services = Vec::new();
     for s in &lit.services {
-        services.push(evaluate_dev_service(s, base_dir, funcs)?);
+        services.push(evaluate_dev_service(s, base_dir, funcs, globals)?);
     }
-    Ok((entry, services, secrets, adapters))
+    Ok((capture, services))
 }
 
 /// Pull the package list out of a `packages: [ … ]` field by slicing its

@@ -72,20 +72,31 @@ fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> St
             {
                 args[0].clone()
             }
-            _ => panic!("SharedGuard projection TIR lost its guarded type"),
+            _ => jet_foundation::ice!(
+                None,
+                "SharedGuard projection TIR lost its guarded type"
+            ),
         },
         Type::Apply { name, args }
             if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
         {
             args[0].clone()
         }
-        _ => panic!("SharedGuard projection TIR has a non-guard receiver"),
+        _ => jet_foundation::ice!(
+            None,
+            "SharedGuard projection TIR has a non-guard receiver"
+        ),
     };
     for field in path {
         projection.push('.');
         projection.push_str(&emit_field_rust(cx, &value_ty, field));
         value_ty = struct_field_type(cx, &value_ty, field)
-            .unwrap_or_else(|| panic!("SharedGuard projection TIR has unknown field `{field}`"));
+            .unwrap_or_else(|| {
+                jet_foundation::ice!(
+                    None,
+                    "SharedGuard projection TIR has unknown field `{field}`"
+                )
+            });
     }
     projection
 }
@@ -1243,6 +1254,50 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         )
                     }
                 }
+                TBuiltinOp::ComputeViewNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "{}jet_compute_view_range(&({}), &({}), {:?}, {})",
+                            cx.root_prefix,
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "{}jet_compute_view(&({}), {}, {}, false, {:?}, {})",
+                            cx.root_prefix,
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
+                TBuiltinOp::ComputeViewMutNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "{}jet_compute_view_mut_range(&mut ({}), &({}), {:?}, {})",
+                            cx.root_prefix,
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "{}jet_compute_view_mut(&mut ({}), {}, {}, false, {:?}, {})",
+                            cx.root_prefix,
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
                 TBuiltinOp::SplitWrite { tuple_struct } => format!(
                     "jet_split_write(&mut ({}), {}).map(|(left, right)| {} {{ user_left: left, user_right: right }})",
                     recv,
@@ -2046,9 +2101,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
         } => {
             let b = emit_tir_expr(base, cx);
+            let is_tensor = matches!(&base.ty, Type::Named(name) if name == "Tensor")
+                || matches!(&base.ty, Type::Apply { name, .. } if name == "Tensor");
             if let Some(range) = range {
                 return format!(
-                    "jet_slice_range(&({}), &({}), {:?}, {})",
+                    "{}(&({}), &({}), {:?}, {})",
+                    if is_tensor {
+                        format!("{}jet_compute_slice_range", cx.root_prefix)
+                    } else {
+                        "jet_slice_range".to_string()
+                    },
                     b,
                     emit_tir_expr(range, cx),
                     cx.file,
@@ -2057,10 +2119,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let a = emit_tir_expr(start, cx);
             let e = emit_tir_expr(end, cx);
-            format!(
-                "jet_slice_vec(&({}), {}, {}, {:?}, {})",
-                b, a, e, cx.file, line
-            )
+            if is_tensor {
+                format!(
+                    "{}jet_compute_slice(&({}), {}, {}, false, {:?}, {})",
+                    cx.root_prefix, b, a, e, cx.file, line
+                )
+            } else {
+                format!("jet_slice_vec(&({}), {}, {}, {:?}, {})", b, a, e, cx.file, line)
+            }
         }
         // c109 Phase 8: `value(x)` → `Some(x)` / `null` → `None`. Mirrors the AST
         // `Expr::Present`/`Expr::Absent` exactly.

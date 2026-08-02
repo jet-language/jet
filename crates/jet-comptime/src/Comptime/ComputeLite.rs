@@ -10,6 +10,26 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+// The shared compute core uses the same range law as the rest of the
+// evaluator.  Comptime has its own value boundary, so it supplies only the
+// small range carrier and panic adapter needed to include that core source.
+mod compute_range_semantics {
+    use jet_foundation::StructuralDebug::jet_debug_range;
+    include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+}
+use compute_range_semantics::jet_range_bounds;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JetRange {
+    start: i64,
+    end: i64,
+    exclusive: bool,
+}
+
+fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    panic!("{} (at {}:{})", msg, file, line)
+}
+
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
@@ -78,6 +98,71 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
     })
 }
 
+fn transfer_to_ct(transfer: &JetComputeTransferReceipt) -> CtValue {
+    CtValue::Struct {
+        type_name: "ComputeTransfer".to_string(),
+        fields: vec![
+            ("from".to_string(), device_to_ct(transfer.from)),
+            ("to".to_string(), device_to_ct(transfer.to)),
+            ("bytes".to_string(), CtValue::Int(transfer.bytes)),
+            ("fallback".to_string(), CtValue::Str(transfer.fallback.clone())),
+        ],
+    }
+}
+
+fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferReceipt, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ComputeTransfer", span));
+    };
+    if type_name != "ComputeTransfer" && type_name != "JetComputeTransferReceipt" {
+        return Err(unsupported("ComputeTransfer", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .ok_or_else(|| unsupported("ComputeTransfer field", span))
+    };
+    let from = ct_to_device(field("from")?, span)?;
+    let to = ct_to_device(field("to")?, span)?;
+    let bytes = match field("bytes")? {
+        CtValue::Int(n) if *n >= 0 => *n,
+        _ => return Err(unsupported("transfer bytes", span)),
+    };
+    let fallback = match field("fallback")? {
+        CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
+        _ => return Err(unsupported("transfer fallback", span)),
+    };
+    Ok(JetComputeTransferReceipt {
+        from,
+        to,
+        bytes,
+        fallback,
+    })
+}
+
+fn raw_kernel_to_ct(contract: &JetRawKernelContract) -> CtValue {
+    CtValue::Struct {
+        type_name: "RawKernelContract".to_string(),
+        fields: vec![
+            ("reason".to_string(), CtValue::Str(contract.reason.clone())),
+            ("arity".to_string(), CtValue::Int(contract.arity)),
+            ("bounds".to_string(), CtValue::Bool(contract.bounds)),
+            ("alias_free".to_string(), CtValue::Bool(contract.alias_free)),
+            ("race_free".to_string(), CtValue::Bool(contract.race_free)),
+            (
+                "barrier_uniform".to_string(),
+                CtValue::Bool(contract.barrier_uniform),
+            ),
+            (
+                "differential".to_string(),
+                CtValue::Str(contract.differential.clone()),
+            ),
+        ],
+    }
+}
+
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
     CtValue::Struct {
         type_name: "Tensor".to_string(),
@@ -104,6 +189,17 @@ fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
             (
                 "last_placement".to_string(),
                 receipt_to_ct(&tensor.last_placement),
+            ),
+            (
+                "last_transfer".to_string(),
+                tensor
+                    .last_transfer
+                    .as_ref()
+                    .map(transfer_to_ct)
+                    .map(|value| CtValue::Some(Box::new(value)))
+                    .unwrap_or_else(|| {
+                        CtValue::None(Type::Named("ComputeTransfer".to_string()))
+                    }),
             ),
         ],
     }
@@ -150,13 +246,127 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("Tensor field", span))
     };
-    Ok(JetTensor {
+    let last_transfer = match field("last_transfer")? {
+        CtValue::Some(value) => Some(ct_to_transfer(value, span)?),
+        CtValue::None(_) => None,
+        _ => return Err(unsupported("Tensor last_transfer", span)),
+    };
+    let tensor = JetTensor {
         shape: as_i64_list(field("shape")?, span)?,
         strides: as_i64_list(field("strides")?, span)?,
-        data: as_f64_list(field("data")?, span)?,
+        data: std::sync::Arc::new(as_f64_list(field("data")?, span)?),
         device: ct_to_device(field("device")?, span)?,
         last_placement: ct_to_receipt(field("last_placement")?, span)?,
-    })
+        last_transfer,
+    };
+    jet_compute_validate_tensor(&tensor)
+        .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
+    if tensor.device != tensor.last_placement.selected
+        || tensor.last_placement.selected != JetComputeDevice::Cpu
+        || tensor.last_placement.reason.is_empty()
+    {
+        return Err(unsupported("Tensor placement metadata", span));
+    }
+    if let Some(receipt) = &tensor.last_transfer {
+        let expected_bytes = tensor
+            .data
+            .len()
+            .checked_mul(std::mem::size_of::<f64>())
+            .and_then(|bytes| i64::try_from(bytes).ok())
+            .ok_or_else(|| unsupported("Tensor transfer byte count", span))?;
+        if receipt.bytes != expected_bytes || receipt.to != tensor.device {
+            return Err(unsupported("Tensor transfer metadata", span));
+        }
+    }
+    Ok(tensor)
+}
+
+fn tensor_window_args(
+    args: &[CtValue],
+    span: Span,
+) -> Result<(i64, i64, bool), Diagnostic> {
+    match args {
+        [CtValue::Struct { type_name, fields }] if type_name == crate::Syntax::TYPE_RANGE => {
+            let field = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let start = match field("start") {
+                Some(CtValue::Int(value)) => *value,
+                _ => return Err(unsupported("Range.start", span)),
+            };
+            let end = match field("end") {
+                Some(CtValue::Int(value)) => *value,
+                _ => return Err(unsupported("Range.end", span)),
+            };
+            Ok((start, end, matches!(field("exclusive"), Some(CtValue::Bool(true)))))
+        }
+        [CtValue::Int(start), CtValue::Int(end)] => Ok((*start, *end, false)),
+        _ => Err(unsupported("Tensor view range", span)),
+    }
+}
+
+/// Ambient marshalling for a read-only Tensor view.  The CtValue boundary has
+/// no borrowed slice carrier, so the view is materialized only at this engine
+/// boundary; bounds and first-axis slab selection still come from Prelude.
+pub fn tensor_view_window(
+    value: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<(usize, usize), Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    jet_compute_window_bounds(&tensor, start, end, exclusive)
+        .map(|bounds| (bounds.start, bounds.end))
+        .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))
+}
+
+pub fn tensor_view_list(
+    value: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    let (start, end, exclusive) = tensor_window_args(args, span)?;
+    let bounds = jet_compute_window_bounds(&tensor, start, end, exclusive)
+        .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
+    Ok(CtValue::List(
+        tensor.data[bounds]
+            .iter()
+            .map(|value| CtValue::Float(CtFloat::f64(*value)))
+            .collect(),
+    ))
+}
+
+pub fn tensor_slice_value(
+    value: &CtValue,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let tensor = ct_to_tensor(value, span)?;
+    jet_compute_slice_checked(&tensor, start, end, exclusive)
+        .map(|slice| tensor_to_ct(&slice))
+        .map_err(|error| unsupported(&format!("Tensor slice: {}", error.jet_show()), span))
+}
+
+pub fn tensor_replace_data(
+    value: &CtValue,
+    items: Vec<CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut tensor = ct_to_tensor(value, span)?;
+    let values = as_f64_list(&CtValue::List(items), span)?;
+    if values.len() != tensor.data.len() {
+        return Err(unsupported("Tensor write-back length", span));
+    }
+    tensor.data = std::sync::Arc::new(values);
+    jet_compute_validate_tensor(&tensor)
+        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
+    Ok(tensor_to_ct(&tensor))
 }
 
 fn map_err(err: JetComputeError) -> CtValue {
@@ -165,6 +375,9 @@ fn map_err(err: JetComputeError) -> CtValue {
         JetComputeError::RankMismatch(m) => ("RankMismatch", m),
         JetComputeError::OutOfBounds(m) => ("OutOfBounds", m),
         JetComputeError::Device(m) => ("Device", m),
+        JetComputeError::Unsupported(m) => ("Unsupported", m),
+        JetComputeError::Arithmetic(m) => ("Arithmetic", m),
+        JetComputeError::Serialization(m) => ("Serialization", m),
     };
     CtValue::Enum {
         type_name: "ComputeError".to_string(),
@@ -231,8 +444,8 @@ fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnos
     };
     Ok(JetComputeStream {
         id: match field("id")? {
-            CtValue::Int(n) => *n,
-            _ => 1,
+            CtValue::Int(n) if *n > 0 => *n,
+            _ => return Err(unsupported("compute stream id", span)),
         },
         device: ct_to_device(field("device")?, span)?,
     })
@@ -279,7 +492,7 @@ fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic>
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("SparseTensor field", span))
     };
-    Ok(JetSparseCsr {
+    let sparse = JetSparseCsr {
         rows: match field("rows")? {
             CtValue::Int(n) => *n,
             _ => return Err(unsupported("sparse rows", span)),
@@ -291,7 +504,10 @@ fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic>
         row_ptr: as_i64_list(field("row_ptr")?, span)?,
         col_idx: as_i64_list(field("col_idx")?, span)?,
         values: as_f64_list(field("values")?, span)?,
-    })
+    };
+    jet_compute_validate_sparse(&sparse)
+        .map_err(|error| unsupported(&format!("SparseTensor metadata: {}", error.jet_show()), span))?;
+    Ok(sparse)
 }
 
 fn ok_grad(g: JetComputeGradTriple) -> CtValue {
@@ -549,18 +765,56 @@ pub fn apply(
             };
             Ok(
                 match jet_compute_raw_kernel_contract(reason, as_int(one(1)?, span)?) {
-                    Ok(s) => CtValue::ResOk(Box::new(CtValue::Str(s))),
+                    Ok(contract) => CtValue::ResOk(Box::new(raw_kernel_to_ct(&contract))),
                     Err(e) => err_compute(e),
                 },
             )
         }
-        "jvp_mul" => Ok(match jet_compute_jvp_mul(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-            &ct_to_tensor(one(2)?, span)?,
-            &ct_to_tensor(one(3)?, span)?,
-        ) {
+        "jvp_add" | "jvp_mul" | "jvp_matmul" => Ok(match if method == "jvp_add" {
+            jet_compute_jvp_add(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+                &ct_to_tensor(one(3)?, span)?,
+            )
+        } else if method == "jvp_matmul" {
+            jet_compute_jvp_matmul(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+                &ct_to_tensor(one(3)?, span)?,
+            )
+        } else {
+            jet_compute_jvp_mul(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+                &ct_to_tensor(one(3)?, span)?,
+            )
+        } {
             Ok(t) => ok_tensor(t),
+            Err(e) => err_compute(e),
+        }),
+        "vjp_add" | "vjp_mul" | "vjp_matmul" => Ok(match if method == "vjp_add" {
+            jet_compute_vjp_add_value(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+            )
+        } else if method == "vjp_matmul" {
+            jet_compute_vjp_matmul_value(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+            )
+        } else {
+            jet_compute_vjp_mul_value(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                &ct_to_tensor(one(2)?, span)?,
+            )
+        } {
+            Ok(g) => ok_grad(g),
             Err(e) => err_compute(e),
         }),
         "value_and_grad_mul" => Ok(match jet_compute_value_and_grad_mul(

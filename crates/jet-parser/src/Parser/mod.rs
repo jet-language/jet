@@ -516,14 +516,15 @@ fn value_end_image(v: &crate::AST::ImageFieldValue) -> usize {
     }
 }
 
-/// U14/D-JPK-IMAGE1: `from:` must be written `system.<name>` (the `.Iso` disk-image
-/// tier) or `packages.<name>` (the `.Oci` container tier).
+/// U14/D-JPK-IMAGE1/D-ENV-IMAGE1: `from:` must be written `system.<name>`
+/// (the `.Iso` disk-image tier), `packages.<name>` (a package OCI image), or
+/// `env.<name>` (a runnable environment OCI image).
 fn image_from_not_system(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0003",
-        "an image's `from:` must name a system or a package".to_string(),
-        "an `Image` is built either from a `System` (`from: system.<name>`, disk images) or a `Package` (`from: packages.<name>`, OCI containers)".to_string(),
-        "write `from: system.<name>` or `from: packages.<name>`".to_string(),
+        "an image's `from:` must name a system, package, or environment".to_string(),
+        "an `Image` is built from a `System` (`from: system.<name>`, disk images), a `Package` (`from: packages.<name>`, OCI containers), or an `Environment` (`from: env.<name>`, runnable shell images)".to_string(),
+        "write `from: system.<name>`, `from: packages.<name>`, or `from: env.<name>`".to_string(),
         Some(span),
     )
 }

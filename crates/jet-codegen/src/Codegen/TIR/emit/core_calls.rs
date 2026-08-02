@@ -1000,13 +1000,20 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.compute", "jvp_mul") => format!(
+        ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => format!(
             "{}(&({}), &({}), &({}), &({}))",
-            helper("jet_compute_jvp_mul"),
+            helper(&format!("jet_compute_{method}")),
             arg(0),
             arg(1),
             arg(2),
             arg(3)
+        ),
+        ("core.compute", "vjp_add" | "vjp_mul" | "vjp_matmul") => format!(
+            "{}(&({}), &({}), &({}))",
+            helper(&format!("jet_compute_{method}_value")),
+            arg(0),
+            arg(1),
+            arg(2)
         ),
         ("core.compute", "value_and_grad_mul") => format!(
             "{}(&({}), &({}))",
@@ -3363,6 +3370,12 @@ pub(crate) fn emit_tir_core_call(
         }
         ("app" | "core.web", "sync_over") => format!(
             "{}jet_app_sync_over(({}).clone(), ({}).clone())",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
+        ("app" | "core.web", "sync") => format!(
+            "{}jet_app_sync(({}).clone(), ({}).clone())",
             cx.root_prefix,
             arg(0),
             arg(1)

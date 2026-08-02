@@ -1253,22 +1253,28 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "after an `Image` field name")?;
         let value = match name.as_str() {
             Syntax::IMAGE_FIELD_FROM => {
-                // D-JPK-IMAGE1: `from: system.<name>` (the `.Iso` tier) or
-                // `from: packages.<name>` (the `.Oci` tier) — the `system`/
-                // `packages` keyword then the name.
+                // D-JPK-IMAGE1/D-ENV-IMAGE1: `from: system.<name>` (the
+                // `.Iso` tier), `from: packages.<name>` (package `.Oci`), or
+                // `from: env.<name>` (environment `.Oci`) — the namespace
+                // keyword then the name.
                 let (kw, kw_span) = self.expect_ident(
-                    "for `system` or `packages`, e.g. `system.halcyon` or `packages.cli`",
+                    "for `system`, `packages`, or `env`, e.g. `system.halcyon`, `packages.cli`, or `env.dev`",
                 )?;
-                if kw != Syntax::NS_SYSTEM && kw != Syntax::IMAGE_FROM_PACKAGES {
+                if kw != Syntax::NS_SYSTEM
+                    && kw != Syntax::IMAGE_FROM_PACKAGES
+                    && kw != Syntax::NS_ENV
+                {
                     return Err(image_from_not_system(kw_span));
                 }
-                self.expect(TokKind::Dot, "after `system`/`packages`")?;
+                self.expect(TokKind::Dot, "after `system`/`packages`/`env`")?;
                 // S84: `from: system.<name>` may reference a kebab-case System
                 // (or package) name; must read the same way the definition does
                 // so the E0978/E1267 cross-checks still string-match.
                 let (name, name_span) = self.expect_dashed_name("for the name")?;
                 let source = if kw == Syntax::NS_SYSTEM {
                     crate::AST::ImageFromRef::System(name)
+                } else if kw == Syntax::NS_ENV {
+                    crate::AST::ImageFromRef::Environment(name)
                 } else {
                     crate::AST::ImageFromRef::Package(name)
                 };
