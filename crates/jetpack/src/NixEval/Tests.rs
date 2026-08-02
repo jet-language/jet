@@ -1,5 +1,8 @@
 use super::Boundary::NativeBoundary;
 
+const STAGE_A_DERIVATION_FIXTURE: &str =
+    include_str!("../../../tests/fixtures/nix-compat/stage-a-derivation.json");
+
 #[test]
 fn private_integration_has_pinned_product_ready_evaluator() {
     let boundary = NativeBoundary::embedded().expect("committed manifest must validate");
@@ -60,6 +63,47 @@ fn private_integration_materializes_fixed_output_derivation() {
         evaluated.outputs().get("out").map(String::as_str),
         Some("/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed")
     );
+}
+
+#[test]
+fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
+    let fixture = crate::JSON::parse(STAGE_A_DERIVATION_FIXTURE).expect("fixture must parse");
+    let root = fixture.as_object().expect("fixture root");
+    for case in root
+        .get("values")
+        .expect("fixture values")
+        .as_array()
+        .expect("fixture values array")
+    {
+        let case = case.as_object().expect("value case");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let actual = super::evaluate_derivation(source, system).expect("native derivation");
+        let expected = case.get("nix_value").unwrap().as_object().unwrap();
+        assert_eq!(
+            actual.drv_path(),
+            expected.get("drvPath").unwrap().as_str().unwrap()
+        );
+        assert_eq!(
+            actual.outputs().get("out").map(String::as_str),
+            Some(expected.get("out").unwrap().as_str().unwrap())
+        );
+    }
+    for case in root
+        .get("errors")
+        .expect("fixture errors")
+        .as_array()
+        .expect("fixture errors array")
+    {
+        let case = case.as_object().expect("error case");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let error = super::evaluate_derivation(source, system)
+            .expect_err("native evaluator must reject fixture error");
+        assert!(error
+            .to_string()
+            .contains(case.get("jet_error_contains").unwrap().as_str().unwrap()));
+    }
 }
 
 #[test]

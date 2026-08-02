@@ -24,6 +24,7 @@ const MAX_STRING_BYTES: usize = 1 << 20;
 const MAX_DERIVATION_ARGS: usize = 256;
 const MAX_DERIVATION_ENV: usize = 256;
 const MAX_DERIVATION_INPUTS: usize = 256;
+const NIX32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
 
 #[derive(Debug, Clone)]
 enum Error {
@@ -1121,7 +1122,8 @@ enum Value {
 
 #[derive(Clone)]
 struct DerivationValue {
-    evaluation: DerivationEvaluation,
+    fields: BTreeMap<String, Thunk>,
+    evaluation: Option<DerivationEvaluation>,
 }
 
 #[derive(Clone)]
@@ -1213,13 +1215,49 @@ pub(super) fn evaluate_derivation(
     let arena = EvaluationArena::new(system, None);
     let environment = EnvironmentFrame::root(&arena, "");
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
-    match root {
-        Value::Derivation(derivation) => Ok(derivation.evaluation.clone()),
-        value => Err(EvaluationError::Unsupported(format!(
+    derivation_evaluation(root).map_err(Error::public)
+}
+
+pub(super) fn evaluate_derivation_output(
+    source: &str,
+    system: &str,
+    attribute: &str,
+) -> Result<DerivationEvaluation, EvaluationError> {
+    let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
+    let expression = Parser::new(tokens).parse().map_err(Error::public)?;
+    let arena = EvaluationArena::new(system, None);
+    let environment = EnvironmentFrame::root(&arena, "");
+    let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
+    let path = vec![
+        "packages".to_string(),
+        system.to_string(),
+        attribute.to_string(),
+    ];
+    let output = match resolve_path(root.clone(), &path, system, &arena) {
+        Ok(output) => output,
+        Err(Error::Missing(_)) => resolve_path(
+            root,
+            &["legacyPackages".into(), system.to_string(), attribute.to_string()],
+            system,
+            &arena,
+        )
+        .map_err(Error::public)?,
+        Err(error) => return Err(error.public()),
+    };
+    derivation_evaluation(output).map_err(Error::public)
+}
+
+fn derivation_evaluation(value: Value) -> Result<DerivationEvaluation, Error> {
+    let Value::Derivation(derivation) = value else {
+        return Err(Error::Unsupported(format!(
             "derivation evaluation must return a derivation, got {}",
             value_name(&value)
-        ))),
-    }
+        )));
+    };
+    derivation
+        .evaluation
+        .clone()
+        .map_or_else(|| derivation_from_fields(&derivation.fields), Ok)
 }
 
 fn evaluate_expr(
@@ -1659,27 +1697,48 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
         Value::Derivation(derivation) => {
             let value = match field {
                 "type" => Value::String("derivation".into()),
-                "name" => Value::String(derivation.evaluation.name.clone()),
-                "system" => Value::String(derivation.evaluation.system.clone()),
-                "builder" => Value::String(derivation.evaluation.builder.clone()),
-                "args" => Value::List(
-                    derivation
-                        .evaluation
-                        .args
-                        .iter()
-                        .cloned()
-                        .map(|value| Thunk::value(Value::String(value)))
-                        .collect(),
-                ),
                 "drvPath" | "outPath" | "out" => {
                     return Err(Error::Unsupported(
                         "derivation store paths are assigned by Jetpack's private materializer"
                             .into(),
                     ))
                 }
+                "name" | "system" | "builder" => {
+                    if let Some(evaluation) = &derivation.evaluation {
+                        Value::String(match field {
+                            "name" => evaluation.name.clone(),
+                            "system" => evaluation.system.clone(),
+                            _ => evaluation.builder.clone(),
+                        })
+                    } else {
+                        field_value(&derivation.fields, field)?
+                            .ok_or_else(|| Error::Missing(field.into()))?
+                    }
+                }
+                "args" => {
+                    if let Some(evaluation) = &derivation.evaluation {
+                        Value::List(
+                            evaluation
+                                .args
+                                .iter()
+                                .cloned()
+                                .map(|value| Thunk::value(Value::String(value)))
+                                .collect(),
+                        )
+                    } else {
+                        field_value(&derivation.fields, "args")?
+                            .ok_or_else(|| Error::Missing("args".into()))?
+                    }
+                }
                 _ => {
-                    if let Some(value) = derivation.evaluation.env.get(field) {
-                        Value::String(value.clone())
+                    if let Some(evaluation) = &derivation.evaluation {
+                        if let Some(value) = evaluation.env.get(field) {
+                            Value::String(value.clone())
+                        } else {
+                            return Ok(None);
+                        }
+                    } else if let Some(value) = attr_field(&derivation.fields, field) {
+                        return Ok(Some(value));
                     } else {
                         return Ok(None);
                     }
@@ -1846,14 +1905,25 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
     }
 }
 
-fn derivation_from_value(value: Value, _strict: bool) -> Result<Value, Error> {
+fn derivation_from_value(value: Value, strict: bool) -> Result<Value, Error> {
     let Value::AttrSet(fields) = value else {
         return Err(Error::Type {
             expected: "derivation attribute set",
             actual: value_name(&value),
         });
     };
+    let evaluation = if strict {
+        Some(derivation_from_fields(&fields)?)
+    } else {
+        None
+    };
+    Ok(Value::Derivation(Rc::new(DerivationValue {
+        fields,
+        evaluation,
+    })))
+}
 
+fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<DerivationEvaluation, Error> {
     let name = required_string_field(&fields, "name")?;
     validate_derivation_name(&name)?;
     let system = required_string_field(&fields, "system")?;
@@ -1996,21 +2066,19 @@ fn derivation_from_value(value: Value, _strict: bool) -> Result<Value, Error> {
     input_sources.sort();
     input_sources.dedup();
 
-    Ok(Value::Derivation(Rc::new(DerivationValue {
-        evaluation: DerivationEvaluation {
-            name,
-            system,
-            builder,
-            args,
-            env,
-            input_sources,
-            outputs: vec![DerivationOutputEvaluation {
-                name: "out".into(),
-                method_algo,
-                hash_hex,
-            }],
-        },
-    })))
+    Ok(DerivationEvaluation {
+        name,
+        system,
+        builder,
+        args,
+        env,
+        input_sources,
+        outputs: vec![DerivationOutputEvaluation {
+            name: "out".into(),
+            method_algo,
+            hash_hex,
+        }],
+    })
 }
 
 fn field_value(fields: &BTreeMap<String, Thunk>, name: &str) -> Result<Option<Value>, Error> {
@@ -2062,7 +2130,12 @@ fn is_store_path(path: &str) -> bool {
     let Some((hash, label)) = name.split_once('-') else {
         return false;
     };
-    hash.len() == 32 && !label.is_empty() && !label.contains('/')
+    hash.len() == 32
+        && hash.bytes().all(|byte| NIX32_CHARS.contains(&byte))
+        && !label.is_empty()
+        && label.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'_' | b'?' | b'=' | b'-')
+        })
 }
 
 fn validate_derivation_name(name: &str) -> Result<(), Error> {
@@ -2366,14 +2439,10 @@ fn apply_partial(
             let mut output = String::new();
             let mut position = 0;
             while position < subject.len() {
-                let match_index = from
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, needle)| {
-                        !needle.is_empty() && subject[position..].starts_with(needle.as_str())
-                    })
-                    .max_by_key(|(_, needle)| needle.len())
-                    .map(|(index, _)| index);
+                let match_index = from.iter().enumerate().find_map(|(index, needle)| {
+                    (!needle.is_empty() && subject[position..].starts_with(needle.as_str()))
+                        .then_some(index)
+                });
                 if let Some(index) = match_index {
                     output.push_str(&to[index]);
                     position += from[index].len();
@@ -2406,9 +2475,17 @@ fn apply_partial(
                 });
             };
             let (text, contexts) = stringify_value(&arguments[2])?;
-            let start = start.max(0) as usize;
-            let length = length.max(0) as usize;
-            let value: String = text.chars().skip(start).take(length).collect();
+            if start < 0 {
+                return Err(Error::Invalid(
+                    "negative start position in substring".into(),
+                ));
+            }
+            let start = start as usize;
+            let value: String = if length < 0 {
+                text.chars().skip(start).collect()
+            } else {
+                text.chars().skip(start).take(length as usize).collect()
+            };
             if contexts.is_empty() {
                 Ok(Value::String(value))
             } else {

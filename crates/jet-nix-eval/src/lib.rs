@@ -251,6 +251,24 @@ pub fn evaluate_derivation(
     Evaluator::evaluate_derivation(source, system)
 }
 
+/// Evaluate one bounded packages.<system>.<attribute> derivation output.
+///
+/// The output selector is part of Jetpack's private flake bridge. It does not
+/// grant imports, fetches, builder execution, or arbitrary evaluator access.
+pub fn evaluate_derivation_output(
+    source: &str,
+    system: &str,
+    attribute: &str,
+) -> core::result::Result<DerivationEvaluation, EvaluationError> {
+    if source.len() > MAX_EVALUATOR_INPUT_BYTES {
+        return Err(EvaluationError::InputTooLarge);
+    }
+    if !REQUIRED_SYSTEMS.contains(&system) {
+        return Err(EvaluationError::UnsupportedSystem(system.to_string()));
+    }
+    Evaluator::evaluate_derivation_output(source, system, attribute)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundaryError {
     Manifest(String),

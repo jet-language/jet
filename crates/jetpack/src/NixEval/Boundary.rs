@@ -79,6 +79,18 @@ impl NativeBoundary {
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))
     }
 
+    pub(in crate::NixEval) fn evaluate_derivation_output(
+        &self,
+        source: &str,
+        system: &str,
+        attribute: &str,
+    ) -> Result<NativeDerivationEvaluation, BoundaryError> {
+        let evaluation = jet_nix_eval::evaluate_derivation_output(source, system, attribute)
+            .map_err(|error| BoundaryError::Evaluation(error.to_string()))?;
+        materialize_derivation(&evaluation)
+            .map_err(|error| BoundaryError::Evaluation(error.to_string()))
+    }
+
     pub(in crate::NixEval) fn evaluator_identity(
         &self,
         system: &str,

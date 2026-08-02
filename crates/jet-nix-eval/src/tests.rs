@@ -239,7 +239,7 @@ fn native_devshell_keeps_unused_thunks_lazy_and_reports_forced_cycles() {
         "x86_64-linux",
     )
     .expect_err("forcing a recursive thunk must fail closed");
-    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("cyclic")));
+    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("missing foreign flake value `unused`")));
 }
 
 #[test]
@@ -598,7 +598,7 @@ fn native_derivation_builds_a_pure_request_with_required_builtins() {
           builder = "/bin/sh";
           args = builtins.map (value: value) [ "-c" "echo hi > $out" ];
           message = builtins.toJSON (builtins.fromJSON "{\"ok\":true,\"count\":2}");
-          source = builtins.storePath "/nix/store/0123456789abcdef0123456789abcdef-source";
+          source = builtins.storePath "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source";
         }
         "#,
         "x86_64-linux",
@@ -617,11 +617,68 @@ fn native_derivation_builds_a_pure_request_with_required_builtins() {
     );
     assert_eq!(
         evaluated.input_sources(),
-        &["/nix/store/0123456789abcdef0123456789abcdef-source".to_string()]
+        &["/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source".to_string()]
     );
     assert_eq!(evaluated.outputs()[0].name(), "out");
     assert_eq!(evaluated.outputs()[0].method_algo(), "");
     assert_eq!(evaluated.outputs()[0].hash_hex(), "");
+}
+
+#[test]
+fn native_derivation_keeps_lazy_fields_lazy_until_strict() {
+    let evaluated = evaluate_devshell(
+        r#"
+        let d = builtins.derivation {
+          name = "lazy";
+          system = "x86_64-linux";
+          builder = "/bin/sh";
+          unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("derivation must not force unused lazy fields");
+    assert_eq!(evaluated.packages(), &["derivation".to_string()]);
+
+    let error = evaluate_devshell(
+        r#"
+        let d = builtins.derivationStrict {
+          name = "strict";
+          system = "x86_64-linux";
+          builder = "/bin/sh";
+          unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+        "#,
+        "x86_64-linux",
+    )
+    .expect_err("derivationStrict must force unused fields");
+    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("missing foreign flake value `unused`")));
+}
+
+#[test]
+fn native_required_string_builtins_match_nix_edge_ordering() {
+    let evaluated = evaluate_derivation(
+        r#"builtins.derivation { name = builtins.replaceStrings [ "a" "ab" ] [ "X" "Y" ] "ab"; system = "x86_64-linux"; builder = "/bin/sh"; }"#,
+        "x86_64-linux",
+    )
+    .expect("replaceStrings must use Nix list order");
+    assert_eq!(evaluated.name(), "Xb");
+
+    let evaluated = evaluate_derivation(
+        r#"builtins.derivation { name = builtins.substring 1 (-1) "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }"#,
+        "x86_64-linux",
+    )
+    .expect("negative substring length must mean the remainder");
+    assert_eq!(evaluated.name(), "bc");
+
+    let error = evaluate_derivation(
+        r#"builtins.derivation { name = builtins.substring (-1) 2 "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }"#,
+        "x86_64-linux",
+    )
+    .expect_err("negative substring start must fail");
+    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("negative start")));
 }
 
 #[test]

@@ -208,6 +208,31 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     // silently dropping it.
     match FlakeGraph::load(&flake_path) {
         Ok(graph) => {
+            let system = host_system();
+            let native_derivations = std::fs::read_to_string(&flake_path)
+                .ok()
+                .map(|source| {
+                    graph
+                        .outputs
+                        .iter()
+                        .filter(|output| {
+                            matches!(
+                                &output.kind,
+                                super::SemanticLock::FlakeOutputKind::Package
+                            ) && output.system == system
+                        })
+                        .filter_map(|output| {
+                            crate::NixEval::evaluate_derivation_output(
+                                &source,
+                                &system,
+                                &output.attribute,
+                            )
+                            .ok()
+                            .map(|derivation| (output.name.clone(), derivation))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if graph.named_dev_shells().len() > 1
                 && !facts.unmapped.iter().any(|item| item == "named devShells")
             {
@@ -249,7 +274,6 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     }
                 }
             }
-            let system = host_system();
             let evaluator = match crate::NixEval::evaluator_identity(&system) {
                 Ok(identity) => identity,
                 Err(error) => {
@@ -268,16 +292,41 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     key: "flake-evaluator".to_string(),
                     exact: evaluator.clone(),
                     hash: crate::SHA256::sha256_hex(evaluator.as_bytes()),
-                    platform: system,
+                    platform: system.clone(),
                 },
                 super::SemanticLock::LockRationale {
                     source_ref: flake_path.display().to_string(),
                     provider: "native-nix-evaluator".to_string(),
                     exact_output: evaluator,
-                    reason: "bounded native devShell evaluation identity".to_string(),
+                    reason: "bounded native devShell and derivation evaluation identity".to_string(),
                     ..super::SemanticLock::LockRationale::default()
                 },
             ));
+            for (output_name, derivation) in native_derivations {
+                let Some(out) = derivation.outputs().get("out") else {
+                    facts
+                        .unmapped
+                        .push(format!("derivation output {output_name} has no out path"));
+                    continue;
+                };
+                let exact = format!("drvPath={};out={out}", derivation.drv_path());
+                lock.records.push(super::SemanticLock::SemanticRecord::new(
+                    super::SemanticLock::LockIdentity {
+                        kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
+                        key: format!("flake-derivation:{output_name}"),
+                        hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+                        exact: exact.clone(),
+                        platform: system.clone(),
+                    },
+                    super::SemanticLock::LockRationale {
+                        source_ref: flake_path.display().to_string(),
+                        provider: "native-nix-evaluator".to_string(),
+                        exact_output: exact,
+                        reason: "bounded package derivation identity".to_string(),
+                        ..super::SemanticLock::LockRationale::default()
+                    },
+                ));
+            }
             if let Err(error) = super::SemanticLock::atomic_commit(dir, &lock) {
                 theme.error(
                     "couldn't commit foreign graph",
@@ -446,6 +495,34 @@ mod tests {
         assert!(raw.contains("native-nix:2.34.8:"), "{raw}");
         let graph = FlakeGraph::load(&dir.join("flake.nix")).unwrap();
         assert_eq!(graph.unsupported, vec!["shellHook".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_records_native_package_derivation_identity() {
+        let dir = scratch("derivation");
+        let system = host_system();
+        std::fs::write(
+            dir.join("flake.nix"),
+            format!(
+                "{{ packages.{system}.default = builtins.derivation {{ name = \"hello\"; system = \"{system}\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }}; devShells.{system}.default = {{ packages = [ pkgs.fd ]; }}; }}"
+            ),
+        )
+        .unwrap();
+        let fixtures = scratch("derivation_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": ["fd"], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        let code = cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures));
+        assert_eq!(code, 0);
+        let raw = std::fs::read_to_string(crate::SemanticLock::live_path(&dir)).unwrap();
+        assert!(raw.contains("flake-derivation:packages:"));
+        assert!(raw.contains("76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv"));
 
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fixtures).ok();

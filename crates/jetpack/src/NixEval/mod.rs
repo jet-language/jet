@@ -40,3 +40,13 @@ pub(crate) fn evaluate_derivation(
 ) -> Result<NativeDerivationEvaluation, jet_nix_eval::BoundaryError> {
     Boundary::NativeBoundary::embedded()?.evaluate_derivation(source, system)
 }
+
+pub(crate) fn evaluate_derivation_output(
+    source: &str,
+    system: &str,
+    attribute: &str,
+) -> Result<NativeDerivationEvaluation, jet_nix_eval::BoundaryError> {
+    Boundary::NativeBoundary::embedded()?.evaluate_derivation_output(
+        source, system, attribute,
+    )
+}
