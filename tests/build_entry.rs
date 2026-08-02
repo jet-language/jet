@@ -246,6 +246,18 @@ fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
     }
     return b.plan()
 }
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), ci_opts()).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("legacy build wrappers are disabled in CI")),
+        "{errors:#?}"
+    );
+}
 
 #[test]
 fn production_legacy_import_uses_project_contents_for_the_typed_action() {
@@ -376,18 +388,6 @@ fn run() {}
         diagnostic.what.contains("unsupported construct")
             && diagnostic.what.contains("add_custom_command")
     }), "{errors:#?}");
-}
-fn run() {}
-"#,
-    );
-
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), ci_opts()).unwrap_err();
-    assert!(
-        errors
-            .iter()
-            .any(|diagnostic| diagnostic.what.contains("legacy build wrappers are disabled in CI")),
-        "{errors:#?}"
-    );
 }
 
 #[test]
