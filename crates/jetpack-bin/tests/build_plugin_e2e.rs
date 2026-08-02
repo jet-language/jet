@@ -208,7 +208,10 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     std::fs::write(&manifest_path, &manifest).unwrap();
     let mut context = BuildContext::new();
     context
-        .action("baseline", ActionSpec::cached(["baseline"]))
+        .action(
+            "baseline",
+            ActionSpec::cached(["baseline"]).with_outputs(["baseline.out"]),
+        )
         .unwrap();
     let baseline = context.plan().unwrap();
     let policy = BuildPolicy::allow_all().with_plugin_grant("hostile", BuildCapability::FS);
@@ -241,6 +244,7 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
         )
     })
     .unwrap_err();
+    let trap_error = format!("{trap_error:?}");
     assert!(trap_error.contains("trapped") || trap_error.contains("timed out"));
     assert_eq!(context.plan().unwrap(), baseline);
 
@@ -263,6 +267,7 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
         )
     })
     .unwrap_err();
+    let malformed_error = format!("{malformed_error:?}");
     assert!(
         malformed_error.contains("version") || malformed_error.contains("response"),
         "{malformed_error}"
@@ -289,6 +294,7 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
         )
     })
     .unwrap_err();
+    let oversized_error = format!("{oversized_error:?}");
     assert!(oversized_error.contains("exceeds"), "{oversized_error}");
     assert_eq!(context.plan().unwrap(), baseline);
 
@@ -310,7 +316,11 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
         )
     })
     .unwrap_err();
-    assert!(timeout_error.contains("timed out") || timeout_error.contains("trapped"));
+    let timeout_error = format!("{timeout_error:?}");
+    assert!(
+        timeout_error.contains("timed out") || timeout_error.contains("trapped"),
+        "{timeout_error}"
+    );
     assert_eq!(context.plan().unwrap(), baseline);
     let _ = std::fs::remove_dir_all(root);
 }

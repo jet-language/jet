@@ -15,7 +15,8 @@
       (local.get $p))
     (func $build (export "build") (param i32 i32) (result i32)
       (loop
-        (br 0))))
+        (br 0))
+      (i32.const 0)))
   (core instance $i (instantiate $m))
   (type $t (func (param "request" (list u8)) (result (list u8))))
   (func $build (type $t)
