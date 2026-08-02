@@ -1053,6 +1053,7 @@ pub fn query_build_plan_with_overlay(
         file,
         build_query_options(),
         Some((std::path::Path::new(file), source)),
+        None,
     )
     .map(|output| output.build.map(|build| build.plan))
 }
@@ -1094,13 +1095,25 @@ pub fn compile_bundle_path_build(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None)
+    compile_bundle_path_build_inner(file, options, None, None)
+}
+
+/// Compile one workspace member as a dependency authority boundary. Its
+/// source declaration and local gate are checked normally, but a missing
+/// effective grant is reported as dependency denial (`E3504`), not as a root
+/// build policy denial (`E3503`).
+pub fn compile_bundle_path_build_as_dependency(
+    file: &str,
+    options: BuildRunOptions,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(file, options, None, Some(file))
 }
 
 fn compile_bundle_path_build_inner(
     file: &str,
     options: BuildRunOptions,
     overlay: Option<(&std::path::Path, &str)>,
+    dependency_boundary: Option<&str>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let direct_package_overlay = if overlay.is_none() {
         package_manifest_build_overlay(file)
@@ -1456,6 +1469,7 @@ fn compile_bundle_path_build_inner(
             &declared_build_effects,
             has_impure_gate,
             &options,
+            dependency_boundary.map(build_package_name),
             build.name_span,
         )?;
         validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
@@ -2245,6 +2259,7 @@ fn validate_build_authority(
     declared: &std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
     has_impure_gate: bool,
     options: &BuildRunOptions,
+    dependency_name: Option<String>,
     span: crate::Diagnostics::Span,
 ) -> Result<(), Vec<Diagnostic>> {
     let selected = plan
@@ -2283,6 +2298,18 @@ fn validate_build_authority(
             )]);
         }
         if !options.inspect_only && (!options.allow_impure || !effective_grants(options, plan).contains(&effect)) {
+            if let Some(dependency_name) = dependency_name.as_deref() {
+                return Err(vec![Diagnostic::error(
+                    "E3504",
+                    format!(
+                        "dependency `{dependency_name}` build asks for `{}` not granted by the root",
+                        effect.name()
+                    ),
+                    "dependency build code never gets ambient authority unless the workspace names it".to_string(),
+                    format!("grant `{}` explicitly in workspace policy, or remove the dependency action", effect.name()),
+                    Some(span),
+                )]);
+            }
             return Err(vec![Diagnostic::error(
                 "E3503",
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),

@@ -412,7 +412,7 @@ fn compile_workspace_build_opts(
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        let output = Driver::compile_bundle_path_build(
+        let output = Driver::compile_bundle_path_build_as_dependency(
             &entry.to_string_lossy(),
             Driver::BuildRunOptions {
                 grants: member_grants,
