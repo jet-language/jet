@@ -8,11 +8,25 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 const MAX_REMOTE_WIRE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REMOTE_BLOB_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REMOTE_ITEMS: usize = 100_000;
 const MAX_REMOTE_AUTH_KEY_BYTES: usize = 4096;
+
+static REMOTE_EXECUTION_COMMIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn remote_execution_commit_lock() -> Result<std::sync::MutexGuard<'static, ()>, RemoteCacheError> {
+    REMOTE_EXECUTION_COMMIT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| {
+            RemoteCacheError::InvalidRecord(
+                "remote execution commit lock was poisoned".to_string(),
+            )
+        })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionKey(pub(super) String);
@@ -809,6 +823,10 @@ impl RemoteCacheTransport {
         }
     }
 
+    /// Construct an authenticated cache transport. This form is intentionally
+    /// cache-only: remote execution, worker blob exchange, and result
+    /// publication require the binding constructor, which binds the worker
+    /// identity, platform, ABI, and builder trust domain.
     pub fn authenticated(
         root: impl Into<PathBuf>,
         credential: impl AsRef<[u8]>,
@@ -880,6 +898,15 @@ impl RemoteCacheTransport {
     fn require_auth_internal(&self) -> Result<&RemoteCredential, RemoteCacheError> {
         self.credential.as_ref().ok_or_else(|| {
             RemoteCacheError::InvalidRecord("remote transport authentication is not configured".to_string())
+        })
+    }
+
+    fn require_worker_identity(&self) -> Result<&RemoteWorkerIdentity, RemoteCacheError> {
+        self.worker_identity.as_ref().ok_or_else(|| {
+            RemoteCacheError::InvalidRecord(
+                "remote execution requires a bound worker identity, platform, and ABI"
+                    .to_string(),
+            )
         })
     }
 
@@ -1121,6 +1148,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.put_remote_blob(bytes)
     }
@@ -1150,6 +1178,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.read_remote_blob(digest)
     }
@@ -1278,6 +1307,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(
             policy,
@@ -1293,6 +1323,7 @@ impl RemoteCacheTransport {
             self.read_remote_blob_with_len(&input.digest, input.byte_len)?;
         }
         ensure_remote_root(&self.root)?;
+        let _commit = remote_execution_commit_lock()?;
         let result_path = self.execution_result_path(&request.key)?;
         let cancelled_path = self.execution_cancel_path(&request.key)?;
         remove_remote_execution_file(&cancelled_path)?;
@@ -1327,9 +1358,11 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
         ensure_remote_root(&self.root)?;
+        let _commit = remote_execution_commit_lock()?;
         let marker = self.execution_cancel_path(key)?;
         let bytes = self.seal("execution-cancel", key.as_str().as_bytes())?;
         atomic_restore_file(&self.root, &marker, &bytes)?;
@@ -1350,6 +1383,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(
             policy,
@@ -1361,6 +1395,7 @@ impl RemoteCacheTransport {
             self.validate_worker_identity(&result.sandbox, expected)?;
         }
         validate_remote_execution_result(result)?;
+        let _commit = remote_execution_commit_lock()?;
         if self.execution_is_cancelled(&result.key)? {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote execution was cancelled before this result was published".to_string(),
@@ -1398,8 +1433,10 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::Execute)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
+        let _commit = remote_execution_commit_lock()?;
         if self.execution_is_cancelled(key)? {
             remove_remote_execution_file(&self.execution_result_path(key)?)?;
             return Err(RemoteCacheError::Io(io::Error::new(
@@ -1444,6 +1481,7 @@ impl RemoteCacheTransport {
         key: &ActionKey,
     ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
         self.require_auth(RemoteActionRequest::Execute)?;
+        self.require_worker_identity()?;
         if self.execution_is_cancelled(key)? {
             return Err(RemoteCacheError::Io(io::Error::new(
                 io::ErrorKind::NotFound,

@@ -20,7 +20,9 @@ use super::Diagnostics::{
     missing_system_target, service_enable_not_bool, service_missing_enable, unknown_platform,
     unknown_record_field,
 };
-use super::Computed::{evaluate_expression, evaluate_named_fields};
+use super::Computed::{
+    dependencies_for_expression, evaluate_expression, evaluate_named_fields,
+};
 use super::Eval::extract_packages;
 use super::Types::{
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind,
@@ -633,6 +635,7 @@ fn evaluate_host_override(
         "break the cycle by making one field independent or by moving the shared computation into a pure function",
     )?;
     let resolved = computed.values;
+    let field_names = field_exprs.keys().cloned().collect::<HashSet<_>>();
     let mut fields = Vec::new();
     let mut provenance = Vec::new();
     for field in &lit.fields {
@@ -683,11 +686,12 @@ fn evaluate_host_override(
             .provenance
             .iter()
             .find(|candidate| candidate.field == field.name);
+        let dependencies = common
+            .map(|candidate| candidate.dependencies.clone())
+            .unwrap_or_else(|| typed_field_dependencies(&field.value, &field_names));
         provenance.push(HostOverrideProvenance {
             field: field.name.clone(),
-            dependencies: common
-                .map(|candidate| candidate.dependencies.clone())
-                .unwrap_or_default(),
+            dependencies,
             pure: common.map(|candidate| candidate.pure).unwrap_or(true),
             source: common
                 .map(|candidate| candidate.source.clone())
@@ -741,6 +745,39 @@ fn host_field_source(source: &str, span: Span, prefix_len: usize) -> String {
         .unwrap_or(source)
         .trim()
         .to_string()
+}
+
+fn typed_field_dependencies(
+    value: &SystemFieldValue,
+    field_names: &HashSet<String>,
+) -> Vec<String> {
+    let mut dependencies = Vec::new();
+    let mut add = |expr: &Expr| {
+        for dependency in dependencies_for_expression(expr, field_names) {
+            if !dependencies.iter().any(|seen| seen == &dependency) {
+                dependencies.push(dependency);
+            }
+        }
+    };
+    match value {
+        SystemFieldValue::Packages(expr) => add(expr),
+        SystemFieldValue::Services(entries) => {
+            for entry in entries {
+                for (_, _, expr) in &entry.fields {
+                    add(expr);
+                }
+            }
+        }
+        SystemFieldValue::Options(entries) => {
+            for entry in entries {
+                add(&entry.value);
+            }
+        }
+        SystemFieldValue::Other(expr) => add(expr),
+        SystemFieldValue::Platform { .. } => {}
+    }
+    dependencies.sort();
+    dependencies
 }
 
 fn vmtest_assertions(run: &str) -> Vec<String> {

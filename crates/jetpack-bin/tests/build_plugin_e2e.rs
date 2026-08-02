@@ -1,14 +1,11 @@
 //! Real Component Model build-plugin host proof.
 
 use jet_comptime::Comptime::Build::{
-    decode_build_plugin_response, encode_build_plugin_request, with_packaged_plugin_runner,
-    BuildCapability, BuildContext, BuildPolicy, ContentDigest, PackagedPluginContribution,
-    TargetKind, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
-    BUILD_PLUGIN_HOST_SUBCOMMAND,
+    with_packaged_plugin_runner, BuildCapability, BuildContext, BuildPolicy, ContentDigest,
+    PackagedPluginContribution, TargetKind, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+    BUILD_PLUGIN_MAX_RESPONSE_BYTES,
 };
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 fn hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -92,7 +89,7 @@ fn component_for(response: &str) -> Vec<u8> {
     let wat = format!(
         "(component
           (core module $m
-            (memory (export \"memory\") 1)
+            (memory (export \"memory\") 80)
             (global $heap (mut i32) (i32.const 4096))
             (data (i32.const 1024) \"{wat_response}\")
             (func $realloc (export \"cabi_realloc\")
@@ -120,45 +117,18 @@ fn component_for(response: &str) -> Vec<u8> {
     wat::parse_str(wat).unwrap()
 }
 
-fn run_host(
-    manifest_path: &Path,
-    component_path: &Path,
-    spec: &WasmComponentPluginSpec,
-    manifest_digest: &str,
-) -> Result<PackagedPluginContribution, String> {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_jetpack"))
-        .args([
-            BUILD_PLUGIN_HOST_SUBCOMMAND,
-            manifest_path.to_str().unwrap(),
-            component_path.to_str().unwrap(),
-            manifest_digest,
-            spec.component_digest.as_str(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| "host stdin is unavailable".to_string())?
-        .write_all(&encode_build_plugin_request(spec))
-        .map_err(|error| error.to_string())?;
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    decode_build_plugin_response(&output.stdout)
-}
-
 fn production_runner(
     manifest_path: &Path,
     component_path: &Path,
     spec: &WasmComponentPluginSpec,
     manifest_digest: &str,
 ) -> Result<PackagedPluginContribution, String> {
-    run_host(manifest_path, component_path, spec, manifest_digest)
+    jet_driver::BuildPluginHook::run_packaged_build_plugin(
+        manifest_path,
+        component_path,
+        spec,
+        manifest_digest,
+    )
 }
 
 #[test]
@@ -187,7 +157,7 @@ fn sibling_host_instantiates_component_and_applies_guest_graph() {
         component_digest.clone(),
     )
     .with_capability(BuildCapability::FS);
-    let contribution = run_host(
+    let contribution = production_runner(
         &manifest_path,
         &component_path,
         &spec,
@@ -260,7 +230,7 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     let trap_manifest_path = root.join("trap.manifest");
     std::fs::write(&trap_manifest_path, &trap_manifest).unwrap();
     let trap_spec = WasmComponentPluginSpec::new("trap", "1.0.0", trap_digest);
-    let trap_error = run_host(
+    let trap_error = production_runner(
         &trap_manifest_path,
         &trap_path,
         &trap_spec,
@@ -268,5 +238,71 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     )
     .unwrap_err();
     assert!(trap_error.contains("trapped") || trap_error.contains("timed out"));
+
+    let malformed_component = component_for("not-a-build-plugin-response");
+    let malformed_path = root.join("malformed.wasm");
+    std::fs::write(&malformed_path, &malformed_component).unwrap();
+    let malformed_digest = ContentDigest::from_bytes(&malformed_component)
+        .as_str()
+        .to_string();
+    let malformed_manifest = format!(
+        "name = \"malformed\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{malformed_digest}\"\ncapabilities = []\n"
+    );
+    let malformed_manifest_path = root.join("malformed.manifest");
+    std::fs::write(&malformed_manifest_path, &malformed_manifest).unwrap();
+    let malformed_spec = WasmComponentPluginSpec::new("malformed", "1.0.0", malformed_digest);
+    let malformed_error = production_runner(
+        &malformed_manifest_path,
+        &malformed_path,
+        &malformed_spec,
+        ContentDigest::from_bytes(malformed_manifest.as_bytes()).as_str(),
+    )
+    .unwrap_err();
+    assert!(
+        malformed_error.contains("version") || malformed_error.contains("response"),
+        "{malformed_error}"
+    );
+
+    let oversized_response = "x".repeat(BUILD_PLUGIN_MAX_RESPONSE_BYTES + 1);
+    let oversized_component = component_for(&oversized_response);
+    let oversized_path = root.join("oversized.wasm");
+    std::fs::write(&oversized_path, &oversized_component).unwrap();
+    let oversized_digest = ContentDigest::from_bytes(&oversized_component)
+        .as_str()
+        .to_string();
+    let oversized_manifest = format!(
+        "name = \"oversized\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{oversized_digest}\"\ncapabilities = []\n"
+    );
+    let oversized_manifest_path = root.join("oversized.manifest");
+    std::fs::write(&oversized_manifest_path, &oversized_manifest).unwrap();
+    let oversized_spec = WasmComponentPluginSpec::new("oversized", "1.0.0", oversized_digest);
+    let oversized_error = production_runner(
+        &oversized_manifest_path,
+        &oversized_path,
+        &oversized_spec,
+        ContentDigest::from_bytes(oversized_manifest.as_bytes()).as_str(),
+    )
+    .unwrap_err();
+    assert!(oversized_error.contains("exceeds"), "{oversized_error}");
+
+    let timeout_wat = include_str!("../fixtures/build_plugin/timeout.wat");
+    let timeout = wat::parse_str(timeout_wat).unwrap();
+    let timeout_path = root.join("timeout.wasm");
+    std::fs::write(&timeout_path, &timeout).unwrap();
+    let timeout_digest = ContentDigest::from_bytes(&timeout).as_str().to_string();
+    let timeout_manifest = format!(
+        "name = \"timeout\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{timeout_digest}\"\ncapabilities = []\n"
+    );
+    let timeout_manifest_path = root.join("timeout.manifest");
+    std::fs::write(&timeout_manifest_path, &timeout_manifest).unwrap();
+    let timeout_spec = WasmComponentPluginSpec::new("timeout", "1.0.0", timeout_digest);
+    let timeout_error = production_runner(
+        &timeout_manifest_path,
+        &timeout_path,
+        &timeout_spec,
+        ContentDigest::from_bytes(timeout_manifest.as_bytes()).as_str(),
+    )
+    .unwrap_err();
+    assert!(timeout_error.contains("timed out") || timeout_error.contains("trapped"));
     let _ = std::fs::remove_dir_all(root);
 }

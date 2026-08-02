@@ -126,6 +126,13 @@ module fleet.prod {
             ("tuning.retries", "5"),
         ]
     );
+    let retries = override_plan
+        .provenance
+        .iter()
+        .find(|fact| fact.field == "options")
+        .unwrap();
+    assert_eq!(retries.dependencies, vec!["base"]);
+    assert!(retries.pure);
 }
 
 #[test]

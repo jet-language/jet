@@ -1852,15 +1852,20 @@ impl<'a> EvalCtx<'a> {
                     argv.push(self.eval_expr(a, scope)?);
                 }
                 if matches!(op, crate::Codegen::TIR::THandleOp::ReflectValueDisplay) {
-                    if let CtValue::Struct { type_name, fields } = &r {
-                        if type_name == "__Reflect" {
-                            let value = fields
-                                .iter()
-                                .find_map(|(name, value)| (name == "value").then_some(value))
-                                .ok_or_else(|| unsupported("reflect value", self.span()))?;
-                            return self.show_value(value, scope).map(CtValue::Str);
-                        }
+                    let CtValue::Struct { type_name, fields } = &r else {
+                        return Err(unsupported("reflect value", self.span()));
+                    };
+                    if type_name != "__Reflect" {
+                        return Err(unsupported("reflect value", self.span()));
                     }
+                    let value = fields
+                        .iter()
+                        .find_map(|(name, value)| (name == "value").then_some(value))
+                        .ok_or_else(|| unsupported("reflect value", self.span()))?;
+                    // Reflection display is the ordinary Display surface. Keep
+                    // it on the evaluator path so user `display` methods and
+                    // pure core display semantics match AOT `jet_display()`.
+                    return self.show_value(value, scope).map(CtValue::Str);
                 }
                 if let crate::Codegen::TIR::THandleOp::WebAppMethod { method } = op {
                     return self.eval_web_app_method(&r, method, argv);

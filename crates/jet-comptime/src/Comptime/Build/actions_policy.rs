@@ -264,93 +264,198 @@ fn apply_import_directives(
     Ok(())
 }
 
-fn cmake_commands(source: &str, name: &str) -> Vec<Vec<String>> {
-    let mut commands = Vec::new();
-    let mut offset = 0;
-    while let Some(found) = source[offset..].find(name) {
-        let start = offset + found;
-        let before_ok = start == 0
-            || !source[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_');
-        let Some(open) = source[start..].find('(') else { break };
-        let open = start + open;
-        if !before_ok {
-            offset = open + 1;
+fn cmake_command_calls(source: &str) -> Vec<(String, Vec<String>)> {
+    let bytes = source.as_bytes();
+    let mut calls = Vec::new();
+    let mut cursor = 0;
+    let mut quote = None;
+    while cursor < bytes.len() {
+        if let Some(end) = quote {
+            if bytes[cursor] == end && (cursor == 0 || bytes[cursor - 1] != b'\\') {
+                quote = None;
+            }
+            cursor += 1;
             continue;
         }
-        let Some(close) = source[open + 1..].find(')') else { break };
-        let close = open + 1 + close;
-        commands.push(split_import_words(&source[open + 1..close]));
-        offset = close + 1;
+        if bytes[cursor] == b'"' || bytes[cursor] == b'\'' {
+            quote = Some(bytes[cursor]);
+            cursor += 1;
+            continue;
+        }
+        if bytes[cursor] == b'#' {
+            cursor = source[cursor..]
+                .find('\n')
+                .map(|offset| cursor + offset + 1)
+                .unwrap_or(bytes.len());
+            continue;
+        }
+        if !(bytes[cursor].is_ascii_alphabetic() || bytes[cursor] == b'_') {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        cursor += 1;
+        while cursor < bytes.len()
+            && (bytes[cursor].is_ascii_alphanumeric() || bytes[cursor] == b'_')
+        {
+            cursor += 1;
+        }
+        let name = &source[start..cursor];
+        let mut open = cursor;
+        while open < bytes.len() && bytes[open].is_ascii_whitespace() {
+            open += 1;
+        }
+        if open >= bytes.len() || bytes[open] != b'(' {
+            continue;
+        }
+        let mut depth = 1usize;
+        let mut close = open + 1;
+        let mut nested_quote = None;
+        while close < bytes.len() && depth > 0 {
+            if let Some(end) = nested_quote {
+                if bytes[close] == end && (close == 0 || bytes[close - 1] != b'\\') {
+                    nested_quote = None;
+                }
+            } else {
+                match bytes[close] {
+                    b'"' | b'\'' => nested_quote = Some(bytes[close]),
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            close += 1;
+        }
+        if depth != 0 {
+            calls.push((name.to_string(), Vec::new()));
+            break;
+        }
+        calls.push((
+            name.to_string(),
+            split_import_words(&source[open + 1..close - 1]),
+        ));
+        cursor = close;
     }
-    commands
+    calls
+}
+
+fn cmake_commands(source: &str, name: &str) -> Vec<Vec<String>> {
+    cmake_command_calls(source)
+        .into_iter()
+        .filter_map(|(command, args)| command.eq_ignore_ascii_case(name).then_some(args))
+        .collect()
 }
 
 fn parse_cmake_import(source: &str, import: &mut LegacyProjectImport) -> Result<(), BuildError> {
-    for unsupported in [
-        "add_subdirectory",
-        "add_custom_command",
-        "execute_process",
-        "ExternalProject_Add",
-    ] {
-        if source.contains(unsupported) {
+    let calls = cmake_command_calls(source);
+    let allowed = [
+        "cmake_minimum_required",
+        "project",
+        "add_executable",
+        "add_library",
+        "add_custom_target",
+    ];
+    for (command, args) in &calls {
+        if args.is_empty() {
             return Err(legacy_import_error(
                 LegacyWrapperKind::CMake,
-                format!("unsupported construct `{unsupported}`"),
+                format!("malformed command `{command}`"),
+            ));
+        }
+        if !allowed
+            .iter()
+            .any(|allowed| command.eq_ignore_ascii_case(allowed))
+        {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::CMake,
+                format!("unsupported construct `{command}`"),
             ));
         }
     }
-    for command in ["add_executable", "add_library"] {
-        if let Some(args) = cmake_commands(source, command).into_iter().next() {
-            let Some(name) = args.first().cloned() else { continue };
-            import.argv = Some(vec![
-                "cmake".to_string(),
-                "--build".to_string(),
-                "build".to_string(),
-                "--target".to_string(),
-                name.clone(),
-            ]);
-            push_unique(&mut import.outputs, format!("build/{name}"));
-            for path in args.into_iter().skip(1) {
-                if !path.starts_with('-') && !path.contains('$') {
-                    push_unique(&mut import.inputs, path);
-                }
+    let mut targets = Vec::new();
+    for command in ["add_executable", "add_library", "add_custom_target"] {
+        targets.extend(cmake_commands(source, command).into_iter().map(|args| {
+            (command.to_string(), args)
+        }));
+    }
+    if targets.len() != 1 {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::CMake,
+            if targets.is_empty() {
+                "supported import needs one add_executable, add_library, or add_custom_target"
+                    .to_string()
+            } else {
+                "multiple or ambiguous build targets are not supported".to_string()
+            },
+        ));
+    }
+    let (command, args) = targets.pop().expect("one CMake target was checked");
+    let Some(name) = args.first().cloned() else {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::CMake,
+            format!("{command} has no target name"),
+        ));
+    };
+    if name.starts_with('$') || name.contains(' ') {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::CMake,
+            "target name must be a literal word",
+        ));
+    }
+    import.argv = Some(vec![
+        "cmake".to_string(),
+        "--build".to_string(),
+        "build".to_string(),
+        "--target".to_string(),
+        name.clone(),
+    ]);
+    import
+        .labels
+        .insert("legacy.target".to_string(), name.clone());
+    match command.as_str() {
+        "add_custom_target" => {
+            if args.iter().skip(1).any(|arg| arg != "ALL") {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::CMake,
+                    "add_custom_target options and commands are not supported",
+                ));
             }
-            import
-                .labels
-                .insert("legacy.target".to_string(), name.clone());
-            return Ok(());
+            import.cache = Some(ActionCache::UncachedPhony);
         }
+        "add_executable" | "add_library" => {
+            let known_flags = [
+                "WIN32",
+                "MACOSX_BUNDLE",
+                "EXCLUDE_FROM_ALL",
+                "STATIC",
+                "SHARED",
+                "MODULE",
+                "OBJECT",
+                "INTERFACE",
+            ];
+            for path in args.into_iter().skip(1) {
+                if path.starts_with('$') {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::CMake,
+                        "target sources must be literal paths",
+                    ));
+                }
+                if known_flags.contains(&path.as_str()) {
+                    continue;
+                }
+                if path == "IMPORTED" || path == "ALIAS" {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::CMake,
+                        "imported and alias targets are not buildable project targets",
+                    ));
+                }
+                push_unique(&mut import.inputs, path);
+            }
+            push_unique(&mut import.outputs, format!("build/{name}"));
+        }
+        _ => unreachable!("all CMake target commands are handled"),
     }
-    if let Some(args) = cmake_commands(source, "add_custom_target")
-        .into_iter()
-        .next()
-    {
-        let Some(name) = args.first() else {
-            return Err(legacy_import_error(
-                LegacyWrapperKind::CMake,
-                "add_custom_target has no target name",
-            ));
-        };
-        import.argv = Some(vec![
-            "cmake".to_string(),
-            "--build".to_string(),
-            "build".to_string(),
-            "--target".to_string(),
-            name.clone(),
-        ]);
-        import.cache = Some(ActionCache::UncachedPhony);
-        import
-            .labels
-            .insert("legacy.target".to_string(), name.clone());
-        return Ok(());
-    }
-    Err(legacy_import_error(
-        LegacyWrapperKind::CMake,
-        "supported import needs add_executable, add_library, or add_custom_target",
-    ))
+    Ok(())
 }
 
 fn parse_make_import(source: &str, import: &mut LegacyProjectImport) -> Result<(), BuildError> {
@@ -362,32 +467,93 @@ fn parse_make_import(source: &str, import: &mut LegacyProjectImport) -> Result<(
             ));
         }
     }
+    let mut rules = Vec::new();
+    let mut phony_targets = BTreeSet::new();
     for line in source.lines() {
         let line = line.trim_end();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('.') {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let Some((target, prerequisites)) = line.split_once(':') else { continue };
-        let target = target.trim();
-        if target.is_empty() || target.contains(' ') {
+        if line.starts_with('\t') {
             continue;
         }
-        import.argv = Some(vec!["make".to_string(), target.to_string()]);
-        push_unique(&mut import.outputs, target);
-        for path in prerequisites.split_whitespace() {
-            if !path.starts_with('$') {
-                push_unique(&mut import.inputs, path);
+        if let Some((special, targets)) = trimmed.split_once(':') {
+            if special == ".PHONY" {
+                for target in targets.split_whitespace() {
+                    if target.starts_with('$') || target.contains('%') {
+                        return Err(legacy_import_error(
+                            LegacyWrapperKind::Make,
+                            ".PHONY targets must be literal paths",
+                        ));
+                    }
+                    phony_targets.insert(target.to_string());
+                }
+                continue;
+            }
+            if special.starts_with('.') {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Make,
+                    format!("unsupported special target `{special}`"),
+                ));
             }
         }
-        import
-            .labels
-            .insert("legacy.target".to_string(), target.to_string());
-        return Ok(());
+        let Some((target, prerequisites)) = line.split_once(':') else {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Make,
+                "only one literal target rule is supported",
+            ));
+        };
+        let target = target.trim();
+        if target.is_empty() || target.chars().any(char::is_whitespace) || target.contains('%') {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Make,
+                "target rules must name one literal target",
+            ));
+        }
+        if prerequisites.contains('|') {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Make,
+                "order-only prerequisites are not supported",
+            ));
+        }
+        rules.push((target.to_string(), prerequisites.to_string()));
     }
-    Err(legacy_import_error(
-        LegacyWrapperKind::Make,
-        "supported import needs a named target rule",
-    ))
+    if rules.len() != 1 {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Make,
+            if rules.is_empty() {
+                "supported import needs one named target rule".to_string()
+            } else {
+                "multiple or ambiguous target rules are not supported".to_string()
+            },
+        ));
+    }
+    let (target, prerequisites) = rules.pop().expect("one Make rule was checked");
+    import.argv = Some(vec!["make".to_string(), target.clone()]);
+    push_unique(&mut import.outputs, target.clone());
+    for path in prerequisites.split_whitespace() {
+        if path.starts_with('$') {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Make,
+                "prerequisites must be literal paths",
+            ));
+        }
+        push_unique(&mut import.inputs, path);
+    }
+    if phony_targets.iter().any(|phony| phony != &target) {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Make,
+            ".PHONY must name the imported target only",
+        ));
+    }
+    if phony_targets.contains(&target) {
+        import.cache = Some(ActionCache::UncachedPhony);
+    }
+    import
+        .labels
+        .insert("legacy.target".to_string(), target);
+    Ok(())
 }
 
 fn quoted_after(source: &str, marker: &str) -> Option<String> {
@@ -402,23 +568,56 @@ fn quoted_after(source: &str, marker: &str) -> Option<String> {
 }
 
 fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result<(), BuildError> {
-    let task = quoted_after(source, "tasks.register(")
-        .or_else(|| quoted_after(source, "tasks.create("))
-        .or_else(|| {
-            source.lines().find_map(|line| {
-                let line = line.trim();
-                line.strip_prefix("task ")
-                    .and_then(|rest| rest.split_whitespace().next())
-                    .map(str::to_string)
-            })
-        })
-        .ok_or_else(|| {
-            legacy_import_error(
+    for unsupported in [
+        "dependsOn",
+        "commandLine",
+        "doLast",
+        "doFirst",
+        "exec {",
+        "dependencies",
+        "implementation(",
+        "api(",
+        "runtimeOnly(",
+        "testImplementation(",
+        "sourceSets",
+        "publishing",
+    ] {
+        if source.contains(unsupported) {
+            return Err(legacy_import_error(
                 LegacyWrapperKind::Gradle,
-                "supported import needs tasks.register, tasks.create, or task",
-            )
-        })?;
-    import.argv = Some(vec!["gradle".to_string(), task.clone()]);
+                format!("unsupported construct {unsupported}"),
+            ));
+        }
+    }
+    let mut tasks = Vec::new();
+    for marker in ["tasks.register(", "tasks.create("] {
+        if let Some(task) = quoted_after(source, marker) {
+            tasks.push(task);
+        }
+    }
+    tasks.extend(source.lines().filter_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("task ")
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(str::to_string)
+    }));
+    if tasks.len() != 1 {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Gradle,
+            if tasks.is_empty() {
+                "supported import needs tasks.register, tasks.create, or task".to_string()
+            } else {
+                "multiple or ambiguous task declarations are not supported".to_string()
+            },
+        ));
+    }
+    let task = tasks.pop().expect("one Gradle task was checked");
+    if task.is_empty() || task.contains(char::is_whitespace) {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Gradle,
+            "task name must be one literal word",
+        ));
+    }
     let project = quoted_after(source, "rootProject.name");
     if matches!(task.as_str(), "build" | "assemble") && project.is_none() {
         return Err(legacy_import_error(
@@ -426,6 +625,7 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
             "build or assemble import needs rootProject.name",
         ));
     }
+    import.argv = Some(vec!["gradle".to_string(), task.clone()]);
     push_unique(
         &mut import.outputs,
         if task == "build" || task == "assemble" {
@@ -448,7 +648,9 @@ fn parse_cargo_import(
     let mut section = String::new();
     let mut package = None;
     let mut version = None;
-    let mut bin = None;
+    let mut bin_name = None;
+    let mut bin_path = None;
+    let mut bin_count = 0usize;
     let mut dependencies = Vec::new();
     for line in source.lines() {
         let line = line.split('#').next().unwrap_or_default().trim();
@@ -457,15 +659,32 @@ fn parse_cargo_import(
         }
         if line.starts_with('[') && line.ends_with(']') {
             section = line.trim_matches('[').trim_matches(']').to_string();
-            if section == "workspace" || section.starts_with("target.") {
+            if !matches!(
+                section.as_str(),
+                "package" | "bin" | "dependencies" | "package.metadata.jet"
+            ) {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Cargo,
-                    format!("unsupported section `[{section}]`"),
+                    "unsupported Cargo section",
                 ));
+            }
+            if section == "bin" {
+                bin_count += 1;
+                if bin_count > 1 {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Cargo,
+                        "multiple binary targets are not supported",
+                    ));
+                }
             }
             continue;
         }
-        let Some((key, raw)) = line.split_once('=') else { continue };
+        let Some((key, raw)) = line.split_once('=') else {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Cargo,
+                "Cargo fields must use key = value",
+            ));
+        };
         let key = key.trim();
         let value = scalar_import_value(raw);
         match section.as_str() {
@@ -477,10 +696,67 @@ fn parse_cargo_import(
             }
             "package" if key == "name" => package = Some(value),
             "package" if key == "version" => version = Some(value),
-            "bin" if key == "name" => bin = Some(value),
-            "dependencies" => dependencies.push(key.to_string()),
+            "package"
+                if matches!(
+                    key,
+                    "edition"
+                        | "rust-version"
+                        | "authors"
+                        | "description"
+                        | "license"
+                        | "license-file"
+                        | "repository"
+                        | "homepage"
+                        | "documentation"
+                        | "readme"
+                        | "keywords"
+                        | "categories"
+                        | "exclude"
+                        | "include"
+                        | "publish"
+                ) => {}
+            "package" => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Cargo,
+                    format!("unsupported [package] field {}", key),
+                ));
+            }
+            "bin" if key == "name" => {
+                if bin_name.replace(value).is_some() {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Cargo,
+                        "binary target names must be declared once",
+                    ));
+                }
+            }
+            "bin" if key == "path" => {
+                if bin_path.replace(value).is_some() {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Cargo,
+                        "binary target paths must be declared once",
+                    ));
+                }
+            }
+            "bin" if key == "required-features" && value != "[]" => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Cargo,
+                    "binary required-features are not supported",
+                ));
+            }
+            "bin" => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Cargo,
+                    format!("unsupported [[bin]] field {}", key),
+                ));
+            }
+            "dependencies" => dependencies.push((key.to_string(), raw.trim().to_string())),
             "package.metadata.jet" => apply_import_key(LegacyWrapperKind::Cargo, key, raw, import)?,
-            _ => {}
+            _ => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Cargo,
+                    "Cargo field appears outside a supported section",
+                ));
+            }
         }
     }
     let package = package.ok_or_else(|| {
@@ -489,18 +765,25 @@ fn parse_cargo_import(
             "supported import needs [package].name",
         )
     })?;
-    let target = bin.unwrap_or_else(|| package.clone());
-    import.argv = Some(vec![
-        "cargo".to_string(),
-        "build".to_string(),
-        "--bin".to_string(),
-        target.clone(),
-    ]);
+    let target = bin_name.unwrap_or_else(|| package.clone());
+    import.argv = if bin_count == 0 {
+        Some(vec!["cargo".to_string(), "build".to_string()])
+    } else {
+        Some(vec![
+            "cargo".to_string(),
+            "build".to_string(),
+            "--bin".to_string(),
+            target.clone(),
+        ])
+    };
     push_unique(&mut import.outputs, format!("target/debug/{target}"));
-    for dependency in dependencies {
+    if let Some(path) = bin_path {
+        push_unique(&mut import.inputs, path);
+    }
+    for (dependency, requirement) in dependencies {
         import.labels.insert(
             format!("legacy.dependency.{dependency}"),
-            "Cargo.toml".to_string(),
+            requirement,
         );
     }
     if let Some(version) = version {
@@ -521,17 +804,6 @@ fn json_string(value: Option<&jet_foundation::JSON::JSONValue>) -> Option<String
     }
 }
 
-fn json_strings(value: Option<&jet_foundation::JSON::JSONValue>) -> Vec<String> {
-    match value {
-        Some(jet_foundation::JSON::JSONValue::Array(values)) => values
-            .iter()
-            .filter_map(|value| json_string(Some(value)))
-            .collect(),
-        Some(jet_foundation::JSON::JSONValue::String(value)) => vec![value.clone()],
-        _ => Vec::new(),
-    }
-}
-
 fn parse_npm_import(
     root: &Path,
     source: &str,
@@ -545,8 +817,26 @@ fn parse_npm_import(
             "package.json root must be an object",
         ));
     };
+    if object.contains_key("workspaces") {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "workspace packages are not supported by the typed importer",
+        ));
+    }
+    if object.contains_key("name") && json_string(object.get("name")).is_none() {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "package name must be a string",
+        ));
+    }
     if let Some(name) = json_string(object.get("name")) {
         import.labels.insert("legacy.package".to_string(), name.clone());
+    }
+    if object.contains_key("version") && json_string(object.get("version")).is_none() {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "package version must be a string",
+        ));
     }
     if let Some(version) = json_string(object.get("version")) {
         import.labels.insert("legacy.version".to_string(), version);
@@ -557,23 +847,71 @@ fn parse_npm_import(
     }).ok_or_else(|| {
         legacy_import_error(LegacyWrapperKind::Npm, "package.json needs a scripts object")
     })?;
-    let script = scripts
-        .get("build")
-        .map(|_| "build".to_string())
-        .or_else(|| scripts.keys().min().cloned())
-        .ok_or_else(|| legacy_import_error(LegacyWrapperKind::Npm, "scripts object is empty"))?;
-    import.argv = Some(vec!["npm".to_string(), "run".to_string(), script.clone()]);
-    if let Some(command) = json_string(scripts.get(&script)) {
+    let mut script_names = Vec::new();
+    for (name, value) in scripts {
+        let Some(command) = json_string(Some(value)) else {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Npm,
+                "every npm script must be a string command",
+            ));
+        };
         import
             .labels
-            .insert(format!("legacy.script.{script}"), command);
+            .insert(format!("legacy.script.{name}"), command);
+        script_names.push(name.clone());
     }
-    let output = json_string(object.get("main"))
-        .or_else(|| json_strings(object.get("module")).into_iter().next())
-        .unwrap_or_else(|| "dist/index.js".to_string());
+    let script = if scripts.contains_key("build") {
+        "build".to_string()
+    } else if script_names.len() == 1 {
+        script_names.pop().expect("one npm script was checked")
+    } else {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "without a build script, exactly one npm script is required",
+        ));
+    };
+    import.argv = Some(vec!["npm".to_string(), "run".to_string(), script.clone()]);
+    let output = if let Some(value) = object.get("main") {
+        json_string(Some(value)).ok_or_else(|| {
+            legacy_import_error(LegacyWrapperKind::Npm, "package main must be a string")
+        })?
+    } else if let Some(value) = object.get("module") {
+        match value {
+            jet_foundation::JSON::JSONValue::String(path) => path.clone(),
+            jet_foundation::JSON::JSONValue::Array(values) => {
+                if values.len() != 1 {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Npm,
+                        "package module must contain exactly one string path",
+                    ));
+                }
+                let Some(jet_foundation::JSON::JSONValue::String(path)) = values.first() else {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Npm,
+                        "package module must contain one string path",
+                    ));
+                };
+                path.clone()
+            }
+            _ => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    "package module must be a string path",
+                ));
+            }
+        }
+    } else {
+        "dist/index.js".to_string()
+    };
     push_unique(&mut import.outputs, output);
     for section in ["dependencies", "devDependencies", "peerDependencies"] {
-        if let Some(jet_foundation::JSON::JSONValue::Object(values)) = object.get(section) {
+        if let Some(value) = object.get(section) {
+            let jet_foundation::JSON::JSONValue::Object(values) = value else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    format!("package {section} must be an object"),
+                ));
+            };
             for name in values.keys() {
                 import.labels.insert(
                     format!("legacy.dependency.{name}"),

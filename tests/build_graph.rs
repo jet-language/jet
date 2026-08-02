@@ -14,7 +14,7 @@ use jet::Comptime::Build::{
     read_packaged_file_bounded,
 };
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Barrier, Mutex};
 
 static REMOTE_HOST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -922,10 +922,22 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         "roundtrip"
     ));
     let _ = fs::remove_dir_all(&root);
-    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
+    let binding = RemoteBuildBinding::new("builder-roundtrip", &root, b"remote-test-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-roundtrip")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
     let key = ActionKey::new("compile:app");
     let provenance_digest = ContentDigest::from_bytes(b"provenance");
-    let sandbox = RemoteSandboxProof::new("sandbox-1", key.as_str(), provenance_digest.clone());
+    let sandbox = transport
+        .sandbox_proof(
+            "remote:builder-roundtrip:trusted:sandbox-1",
+            key.as_str(),
+            provenance_digest.clone(),
+        )
+        .unwrap();
     let policy = RemoteCachePolicy::granted(sandbox.clone());
     let output_digest = transport.upload_blob(b"compiled", &policy).unwrap();
     assert_eq!(transport.download_blob(&output_digest, &policy).unwrap(), b"compiled");
@@ -975,11 +987,15 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
     transport.publish_execution_result(&result, &policy).unwrap();
     assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
 
-    let wrong_policy = RemoteCachePolicy::granted(RemoteSandboxProof::new(
-        "sandbox-1",
-        "other-action",
-        provenance_digest,
-    ));
+    let wrong_policy = RemoteCachePolicy::granted(
+        transport
+            .sandbox_proof(
+                "remote:builder-roundtrip:trusted:sandbox-other",
+                "other-action",
+                provenance_digest,
+            )
+            .unwrap(),
+    );
     let error = transport.download_action_record(&key, &wrong_policy).unwrap_err();
     assert!(matches!(
         error,
@@ -1058,6 +1074,78 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
         transport.publish_execution_result(&late, &policy),
         Err(RemoteCacheError::InvalidRecord(_))
     ));
+    assert!(matches!(
+        transport.download_execution_result(&key, &policy),
+        Err(RemoteCacheError::Io(error))
+            if error.kind() == std::io::ErrorKind::NotFound
+    ));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn remote_cancel_and_publish_are_one_commit_race() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_cancel_race_{}_{}",
+        std::process::id(),
+        "commit"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let binding = RemoteBuildBinding::new("builder-race", &root, b"race-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-race")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+    let key = ActionKey::new("race-action");
+    let proof = transport
+        .sandbox_proof(
+            "remote:builder-race:trusted:race",
+            key.as_str(),
+            ContentDigest::from_bytes(b"provenance"),
+        )
+        .unwrap();
+    let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: vec!["remote-tool".to_string()],
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+        sandbox: proof.clone(),
+    };
+    transport.submit_execution(&request, &policy).unwrap();
+    let result = RemoteExecutionResult {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: Vec::new(),
+        toolchain_digest: request.toolchain_digest.clone(),
+        sandbox: proof,
+    };
+
+    let barrier = Arc::new(Barrier::new(3));
+    let publish_transport = transport.clone();
+    let publish_policy = policy.clone();
+    let publish_result = result.clone();
+    let publish_barrier = barrier.clone();
+    let cancel_transport = transport.clone();
+    let cancel_policy = policy.clone();
+    let cancel_key = key.clone();
+    let cancel_barrier = barrier.clone();
+    let (publish, cancel) = std::thread::scope(|scope| {
+        let publish = scope.spawn(move || {
+            publish_barrier.wait();
+            publish_transport.publish_execution_result(&publish_result, &publish_policy)
+        });
+        let cancel = scope.spawn(move || {
+            cancel_barrier.wait();
+            cancel_transport.cancel_execution(&cancel_key, &cancel_policy)
+        });
+        barrier.wait();
+        (publish.join().unwrap(), cancel.join().unwrap())
+    });
+    assert!(publish.is_ok() || matches!(publish, Err(RemoteCacheError::InvalidRecord(_))));
+    assert!(cancel.is_ok());
     assert!(matches!(
         transport.download_execution_result(&key, &policy),
         Err(RemoteCacheError::Io(error))
@@ -1300,13 +1388,21 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
         "roundtrip"
     ));
     let _ = fs::remove_dir_all(&root);
-    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
+    let binding = RemoteBuildBinding::new("builder-execute-only", &root, b"remote-test-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-execute-only")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
     let key = ActionKey::new("execute-only");
-    let sandbox = RemoteSandboxProof::new(
-        "sandbox-execute-only",
-        key.as_str(),
-        ContentDigest::from_bytes(b"toolchain"),
-    );
+    let sandbox = transport
+        .sandbox_proof(
+            "remote:builder-execute-only:trusted:sandbox-execute-only",
+            key.as_str(),
+            ContentDigest::from_bytes(b"toolchain"),
+        )
+        .unwrap();
     let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
     let input_digest = transport
         .upload_execution_blob(b"source", &policy)
@@ -1391,11 +1487,21 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     ));
     let _ = fs::remove_dir_all(&root);
     let key = ActionKey::new("hostile-worker");
-    let sandbox = RemoteSandboxProof::new(
-        "remote:builder-a:trusted:job-1",
-        key.as_str(),
-        ContentDigest::from_bytes(b"provenance"),
-    );
+    let worker_binding = RemoteBuildBinding::new("builder-a", &root, b"worker-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-a")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let client = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+    let worker = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+    let sandbox = client
+        .sandbox_proof(
+            "remote:builder-a:trusted:job-1",
+            key.as_str(),
+            ContentDigest::from_bytes(b"provenance"),
+        )
+        .unwrap();
     let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
     let unauthenticated = RemoteCacheTransport::new(&root);
     let auth_error = unauthenticated
@@ -1407,8 +1513,6 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
             if denied.reason == RemoteDeniedReason::MissingAuthentication
     ));
 
-    let client = RemoteCacheTransport::authenticated(&root, b"worker-key").unwrap();
-    let worker = RemoteCacheTransport::authenticated(&root, b"worker-key").unwrap();
     let input_digest = client.upload_execution_blob(b"source", &policy).unwrap();
     let request = RemoteExecutionRequest {
         key: key.clone(),
@@ -1423,7 +1527,13 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
         sandbox: sandbox.clone(),
     };
     client.submit_execution(&request, &policy).unwrap();
-    let wrong_key = RemoteCacheTransport::authenticated(&root, b"wrong-worker-key").unwrap();
+    let wrong_binding = RemoteBuildBinding::new("builder-a", &root, b"wrong-worker-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-a")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let wrong_key = RemoteCacheTransport::for_binding(&wrong_binding).unwrap();
     assert!(matches!(
         wrong_key.read_execution_request(&key),
         Err(RemoteCacheError::InvalidRecord(_))
@@ -1448,11 +1558,13 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     // A second submission for the same action is a new remote attempt. The
     // old result is removed before the new request is visible, so a delayed
     // worker cannot replay a successful result into a changed sandbox.
-    let new_sandbox = RemoteSandboxProof::new(
-        "remote:builder-a:trusted:job-2",
-        key.as_str(),
-        ContentDigest::from_bytes(b"provenance"),
-    );
+    let new_sandbox = client
+        .sandbox_proof(
+            "remote:builder-a:trusted:job-2",
+            key.as_str(),
+            ContentDigest::from_bytes(b"provenance"),
+        )
+        .unwrap();
     let new_policy = RemoteCachePolicy::with_grants(false, false, true, new_sandbox.clone());
     let mut new_request = request.clone();
     new_request.sandbox = new_sandbox.clone();
@@ -1788,6 +1900,64 @@ fn legacy_project_import_reads_one_canonical_file_and_ci_denies_the_wrapper() {
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap_err(),
         BuildError::LegacyProjectFileMissing(LegacyWrapperKind::Cargo)
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_project_import_rejects_ambiguous_targets_and_unmodeled_dependencies() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_legacy_import_strict_{}_{}",
+        std::process::id(),
+        "all"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    fs::write(
+        root.join("CMakeLists.txt"),
+        "project(app)\nadd_executable(app main.cc)\nadd_dependencies(app generated)\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake),
+        Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("add_dependencies")
+    ));
+
+    fs::write(root.join("Makefile"), "all: main.o\nother:\n").unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
+        Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("multiple or ambiguous")
+    ));
+
+    fs::write(
+        root.join("build.gradle"),
+        "tasks.register(\"build\")\ndependencies { implementation(\"x:y:1\") }\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle),
+        Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("depends") || message.contains("dependencies")
+    ));
+
+    fs::write(
+        root.join("package.json"),
+        r#"{"scripts":{"build":"tool"},"dependencies":"not-an-object"}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+        Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("dependencies")
+    ));
+
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"app\"\n[[bin]]\nname = \"one\"\n[[bin]]\nname = \"two\"\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+        Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("multiple binary")
+    ));
     let _ = fs::remove_dir_all(root);
 }
 

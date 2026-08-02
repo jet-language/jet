@@ -23,6 +23,20 @@ pub(crate) struct ComputedFields {
     pub provenance: Vec<ComputedFieldProvenance>,
 }
 
+pub(crate) fn dependencies_for_expression(
+    expr: &Expr,
+    field_names: &HashSet<String>,
+) -> Vec<String> {
+    let mut dependencies = Vec::new();
+    Comptime::walk_identifiers(expr, &mut |name, _| {
+        if field_names.contains(name) && !dependencies.iter().any(|seen| seen == name) {
+            dependencies.push(name.to_string());
+        }
+    });
+    dependencies.sort();
+    dependencies
+}
+
 /// Evaluate one expression through the same purity and build-I/O gate used by
 /// the named-field graph. Namespace-specific record shapes use this helper
 /// for their nested values; they do not create a second evaluator.
@@ -70,16 +84,12 @@ pub(crate) fn evaluate_named_fields<'a>(
         .into_iter()
         .map(|field| {
             let (field_span, expr) = fields.get(&field).expect("computed field name came from map");
-            let mut dependencies = Vec::new();
-            Comptime::walk_identifiers(expr, &mut |name, _| {
-                if fields.contains_key(name) && !dependencies.iter().any(|seen| seen == name) {
-                    dependencies.push(name.to_string());
-                }
-            });
-            dependencies.sort();
             ComputedFieldProvenance {
                 field,
-                dependencies,
+                dependencies: dependencies_for_expression(
+                    expr,
+                    &fields.keys().cloned().collect::<HashSet<_>>(),
+                ),
                 pure: true,
                 source: source
                     .and_then(|text| text.get(field_span.start..field_span.end))
@@ -124,13 +134,10 @@ fn resolve_named_field<'a>(
     }
     states.insert(name.to_string(), 1);
     stack.push(name.to_string());
-    let mut dependencies = Vec::<String>::new();
-    Comptime::walk_identifiers(expr, &mut |candidate, _| {
-        if fields.contains_key(candidate) && !dependencies.iter().any(|seen| seen == candidate) {
-            dependencies.push(candidate.to_string());
-        }
-    });
-    dependencies.sort();
+    let dependencies = dependencies_for_expression(
+        expr,
+        &fields.keys().cloned().collect::<HashSet<_>>(),
+    );
     for dependency in dependencies {
         resolve_named_field(
             &dependency,
