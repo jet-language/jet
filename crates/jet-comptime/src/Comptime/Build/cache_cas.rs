@@ -530,7 +530,7 @@ impl RemoteBuildBinding {
     pub fn load_host(builder: &str) -> Result<Self, String> {
         validate_remote_name(builder, "builder")?;
         let (record_root, path) = remote_host_record_path(builder)?;
-        let bytes = secure_read_file_bounded(&record_root, &path, 64 * 1024)
+        let bytes = secure_read_file_bounded(&record_root, &record_root.join(&path), 64 * 1024)
             .map_err(|error| format!("cannot read remote builder `{builder}`: {error}"))?;
         let fields = parse_remote_host_record(&bytes, builder)?;
         let credential_provider = absolute_host_path(PathBuf::from(
@@ -649,7 +649,7 @@ impl RemoteBuildBinding {
         }
         ensure_real_directory(&record_root)
             .map_err(|error| format!("cannot create remote binding directory: {error}"))?;
-        atomic_restore_file(&record_root, &path, record.as_bytes())
+        atomic_restore_file(&record_root, &record_root.join(&path), record.as_bytes())
             .map_err(|error| format!("cannot save remote builder `{}`: {error}", self.builder))
     }
 }
@@ -692,7 +692,11 @@ fn read_remote_credential_provider(path: &Path) -> Result<Vec<u8>, String> {
     let file_name = path
         .file_name()
         .ok_or_else(|| "credential provider path has no file name".to_string())?;
-    let bytes = secure_read_file_bounded(parent, Path::new(file_name), MAX_REMOTE_CREDENTIAL_BYTES)
+    let bytes = secure_read_file_bounded(
+        parent,
+        &parent.join(file_name),
+        MAX_REMOTE_CREDENTIAL_BYTES,
+    )
         .map_err(|error| format!("cannot read credential provider `{}`: {error}", path.display()))?;
     if bytes.is_empty() {
         return Err("remote credential provider is empty".to_string());

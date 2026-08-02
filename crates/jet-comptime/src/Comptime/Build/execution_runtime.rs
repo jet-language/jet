@@ -456,8 +456,13 @@ fn execute_one_action(
             ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
         ).map_err(|e| io_action(action, e))?;
         if let Some((transport, policy, _)) = &remote {
-            publish_remote_outputs(transport, policy, project_root, &record)
-                .map_err(|detail| remote_action(action, detail))?;
+            if policy
+                .check(super::cache_cas::RemoteActionRequest::CacheWrite)
+                .is_ok()
+            {
+                publish_remote_outputs(transport, policy, project_root, &record)
+                    .map_err(|detail| remote_action(action, detail))?;
+            }
         }
         write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
     }

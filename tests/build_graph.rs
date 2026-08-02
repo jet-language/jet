@@ -1239,10 +1239,10 @@ fn remote_execution_timeout_uses_declared_local_fallback() {
     let action = b
         .action(
             "local-fallback",
-            ActionSpec::uncached_phony([
+            ActionSpec::cached([
                 "sh",
                 "-c",
-                "mkdir -p build && printf fallback > build/fallback.txt",
+                "printf fallback > build/fallback.txt",
             ])
             .with_outputs(["build/fallback.txt"])
             .with_cap(BuildCapability::Exec)
