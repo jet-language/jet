@@ -93,7 +93,6 @@ fn canonical_producer(
 }
 
 const BUILD_SCRATCH_DIR: &str = "build-scratch";
-const ACTIVE_TMP_MARKER: &str = ".active";
 const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
 const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
@@ -2157,7 +2156,7 @@ fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
     };
     for ent in rd.flatten() {
         let path = ent.path();
-        if path.join(ACTIVE_TMP_MARKER).exists() {
+        if super::Provider::active_tmp_marker_is_live(&path) {
             continue;
         }
         report.swept_tmp += 1;
@@ -2174,7 +2173,7 @@ fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
     };
     for ent in rd.flatten() {
         let path = ent.path();
-        if path.join(ACTIVE_TMP_MARKER).exists() {
+        if super::Provider::active_tmp_marker_is_live(&path) {
             continue;
         }
         let bytes = dir_size(&path);

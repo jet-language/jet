@@ -9,7 +9,7 @@ use super::Output::Theme;
 use crate::Syntax;
 use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use jet_foundation::Terminal::Theme as SharedTheme;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The shells Jetpack can decorate. Anything else falls back to `bash`.
@@ -77,6 +77,8 @@ pub struct Env {
     pub bin_dirs: Vec<String>,
     /// Provider-owned runtime search paths projected into child processes.
     pub vars: std::collections::BTreeMap<String, String>,
+    /// Variables that must not leak from the parent shell into this env.
+    pub unset_vars: Vec<String>,
     pub refs: Vec<String>,
     pub label: String,
     pub prompt_path: PromptPathMode,
@@ -114,11 +116,24 @@ impl Env {
         parts.join(&sep.to_string())
     }
 
-    fn apply(&self, cmd: &mut Command) {
+    pub(crate) fn apply_to(&self, cmd: &mut Command) {
         let base = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", self.composed_path(&base));
+        self.apply_to_base(cmd, &base);
+    }
+
+    /// Apply only the declared environment and realized PATH. Callers use
+    /// this after `env_clear` for clean-shell checks and task probes.
+    pub(crate) fn apply_clean_to(&self, cmd: &mut Command) {
+        self.apply_to_base(cmd, "");
+    }
+
+    fn apply_to_base(&self, cmd: &mut Command, base_path: &str) {
+        cmd.env("PATH", self.composed_path(base_path));
         for (name, value) in &self.vars {
             cmd.env(name, value);
+        }
+        for name in &self.unset_vars {
+            cmd.env_remove(name);
         }
         cmd.env(Syntax::JETPACK_ENV_MARKER, "1");
         cmd.env(Syntax::JETPACK_REF_VAR, self.refs.join(" "));
@@ -138,6 +153,12 @@ impl Env {
 /// Run `cmd_args` inside the composed env and return its exit code. The parent
 /// process env is untouched (we mutate only the child's `Command`).
 pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
+    run_command_in(env, cmd_args, None)
+}
+
+/// Run a command with the composed environment and an explicit working
+/// directory. The directory belongs to the child, never to this process.
+pub fn run_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
     if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
         return 126;
     }
@@ -152,13 +173,50 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
         .as_ref()
         .map_or_else(|| Command::new(program), Command::new);
     cmd.args(rest);
-    env.apply(&mut cmd);
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    env.apply_to(&mut cmd);
     let code = match cmd.status() {
         Ok(status) => status
             .code()
             .unwrap_or(if status.success() { 0 } else { 1 }),
         Err(e) => {
             eprintln!("jetpack: could not run `{program}`: {e}");
+            127
+        }
+    };
+    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
+        return 126;
+    }
+    code
+}
+
+/// Run a command with no inherited host variables. Only the composed PATH,
+/// declared variables, Jet markers, and declared unsets enter the child.
+pub fn run_clean_command(env: &Env, cmd_args: &[String]) -> i32 {
+    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
+        return 126;
+    }
+    let Some((program, rest)) = cmd_args.split_first() else {
+        return 0;
+    };
+    let stable_program = env
+        .cache_leases
+        .iter()
+        .find_map(|lease| lease.executable(program));
+    let mut cmd = stable_program
+        .as_ref()
+        .map_or_else(|| Command::new(program), Command::new);
+    cmd.args(rest);
+    cmd.env_clear();
+    env.apply_clean_to(&mut cmd);
+    let code = match cmd.status() {
+        Ok(status) => status
+            .code()
+            .unwrap_or(if status.success() { 0 } else { 1 }),
+        Err(e) => {
+            eprintln!("jetpack: could not run `{program}` in a clean env: {e}");
             127
         }
     };
@@ -189,7 +247,7 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
     ]);
 
     let mut cmd = Command::new(kind.binary());
-    env.apply(&mut cmd);
+    env.apply_to(&mut cmd);
     if theme.color {
         cmd.env_remove("NO_COLOR");
     } else {
@@ -502,6 +560,7 @@ mod tests {
         Env {
             bin_dirs: dirs.iter().map(|s| s.to_string()).collect(),
             vars: std::collections::BTreeMap::new(),
+            unset_vars: Vec::new(),
             refs: vec![],
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: PromptPathMode::Short,

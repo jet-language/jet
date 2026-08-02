@@ -254,25 +254,104 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     if failed {
         return Err(1);
     }
+    let mut composed_vars: std::collections::BTreeMap<String, String> =
+        provider_vars
+            .into_iter()
+            .map(|(name, values)| {
+                let value = match name.as_str() {
+                    "LUA_PATH" | "LUA_CPATH" => format!("{};;", values.join(";")),
+                    "GEM_HOME" => values.into_iter().next().unwrap_or_default(),
+                    _ => values.join(&crate::Platform::path_separator().to_string()),
+                };
+                (name, value)
+            })
+            .collect();
+    if let Some(profile) = &plan.environment.selected_profile {
+        theme.detail(&format!("profile: {}", profile.applied.join(" -> ")));
+        composed_vars.extend(profile.variables.clone());
+    }
+    for pack in &plan.environment.language_packs {
+        composed_vars.extend(pack.variables.clone());
+    }
+    for dotenv in &plan.environment.lifecycle.dotenv {
+        let path = &dotenv.file;
+        let relative = std::path::Path::new(path);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+        {
+            theme.error(
+                "couldn't load dotenv file",
+                &format!("`{path}` is not a project-relative path"),
+                "keep dotenv files inside the project and remove absolute or `..` paths.",
+            );
+            return Err(2);
+        }
+        let dotenv_path = std::env::current_dir().unwrap_or_default().join(relative);
+        match read_dotenv(&dotenv_path) {
+            Ok(values) => {
+                for (name, value) in values {
+                    if !dotenv.allow.is_empty() && !dotenv.allow.iter().any(|item| item == &name) {
+                        continue;
+                    }
+                    composed_vars.insert(name, value);
+                }
+            }
+            Err(error) => {
+                theme.error(
+                    "couldn't load dotenv file",
+                    &format!("{}: {error}", dotenv_path.display()),
+                    "fix the dotenv path and keep each assignment in KEY=value form.",
+                );
+                return Err(2);
+            }
+        }
+    }
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
     // report — `jet env`/`run`/`dev` hand off straight to the shell
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
     Ok(Env {
         bin_dirs,
-        vars: provider_vars.into_iter().map(|(name, values)| {
-            let value = match name.as_str() {
-                "LUA_PATH" | "LUA_CPATH" => format!("{};;", values.join(";")),
-                "GEM_HOME" => values.into_iter().next().unwrap_or_default(),
-                _ => values.join(&crate::Platform::path_separator().to_string()),
-            };
-            (name, value)
-        }).collect(),
+        vars: composed_vars,
+        unset_vars: plan.environment.lifecycle.unset.clone(),
         refs: realized_refs,
         label: plan.label.clone(),
         prompt_path: plan.prompt_path,
         prompt_strip: plan.prompt_strip,
         cache_leases,
     })
+}
+
+fn read_dotenv(
+    path: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut values = std::collections::BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            return Err(format!("line {} has no '='", index + 1));
+        };
+        let name = name.trim();
+        let mut bytes = name.bytes();
+        let valid_start = matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'));
+        if !valid_start || !bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()) {
+            return Err(format!("line {} has an invalid variable name", index + 1));
+        }
+        let mut value = value.trim().to_string();
+        if value.len() >= 2
+            && ((value.starts_with(char::from(34)) && value.ends_with(char::from(34)))
+                || (value.starts_with(char::from(39)) && value.ends_with(char::from(39))))
+        {
+            value = value[1..value.len() - 1].to_string();
+        }
+        values.insert(name.to_string(), value);
+    }
+    Ok(values)
 }
 
 fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<String> {
@@ -370,6 +449,7 @@ pub(crate) fn compose_refs_for_test(roots: &Roots, refs: Vec<RefSpec::RefSpec>) 
             prompt_strip: ModuleEval::PromptStripMode::default(),
             dev_services: Vec::new(),
             secrets: Vec::new(),
+            environment: ModuleEval::EnvironmentFacts::default(),
         },
     )
 }
@@ -508,6 +588,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 prompt_strip: ModuleEval::PromptStripMode::default(),
                 dev_services: Vec::new(),
                 secrets: Vec::new(),
+                environment: ModuleEval::EnvironmentFacts::default(),
             },
             Err(_) => return 2,
         },

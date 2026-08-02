@@ -64,7 +64,7 @@ fn services_up_health_logs_down_roundtrip() {
     let home = Scratch::new("roundtrip-home");
     write_project(
         &proj.path,
-        r#"fixture: { enable: true, init: "echo fixture-started; sleep 30" }"#,
+        r#"fixture: { run: ["sh", "-c", "echo fixture-started; sleep 30"] }"#,
         "fn run() {}\n",
     );
     let env = [
@@ -137,7 +137,7 @@ fn dev_health_gate_waits_for_service_before_running() {
     let home = Scratch::new("health-gate-home");
     write_project(
         &proj.path,
-        r#"fixture: { enable: true, init: "sleep 30" }"#,
+        r#"fixture: { run: ["sleep", "30"] }"#,
         "fn dev() { print(\"DEV-RAN\"); }\n",
     );
     let out = jetpack()
@@ -176,7 +176,7 @@ fn dev_service_never_healthy_is_e1261() {
     write_project(
         &proj.path,
         // `ready: "false"` never passes (exit 1), so this never reports healthy.
-        r#"fixture: { enable: true, init: "sleep 30", ready: "false" }"#,
+        r#"fixture: { run: ["sleep", "30"], ready: "false" }"#,
         "fn dev() { print(\"DEV-RAN\"); }\n",
     );
     let out = jetpack()
@@ -212,7 +212,7 @@ fn dev_unrecognized_service_field_is_e1262() {
     let home = Scratch::new("e1262-home");
     write_project(
         &proj.path,
-        r#"fixture: { enable: true, init: "sleep 30", prot: 5432 }"#,
+        r#"fixture: { run: ["sleep", "30"], prot: 5432 }"#,
         "fn dev() { print(\"DEV-RAN\"); }\n",
     );
     let out = jetpack()
@@ -236,7 +236,7 @@ fn services_up_unrecognized_field_is_e1262() {
     let home = Scratch::new("services-e1262-home");
     write_project(
         &proj.path,
-        r#"fixture: { enable: true, init: "sleep 30", prot: 5432 }"#,
+        r#"fixture: { run: ["sleep", "30"], prot: 5432 }"#,
         "fn run() {}\n",
     );
     let out = jetpack()

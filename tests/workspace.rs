@@ -9,7 +9,7 @@
 //! `jet check`, so coverage is via programmatic assertion rather than .stderr snapshots.
 
 use jetpack::WorkspaceFile;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ──────────────────────────────────────────────
 // Happy-path
@@ -25,13 +25,28 @@ fn empty_member_list_is_valid() {
 
 #[test]
 fn explicit_path_list_yields_members() {
-    // Paths don't need to exist: names fall back to the directory basename.
+    let dir = unique_temp_dir("workspace-explicit");
+    for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
+        let package = dir.join(relative);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("package.jet"), format!("name: \"{name}\"\n")).unwrap();
+    }
     let src = "module workspace {\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}\n";
-    let plan =
-        WorkspaceFile::evaluate(src, Path::new("/tmp")).expect("explicit path list should succeed");
+    let plan = WorkspaceFile::evaluate(src, &dir).expect("explicit path list should succeed");
     assert_eq!(plan.members.len(), 2);
     assert_eq!(plan.members[0].name, "hello");
     assert_eq!(plan.members[1].name, "ranker");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+fn unique_temp_dir(tag: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("jet-{tag}-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
 // ──────────────────────────────────────────────

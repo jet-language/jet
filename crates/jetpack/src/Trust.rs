@@ -251,6 +251,80 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[Str
     crate::SHA256::sha256_hex(content.as_bytes())
 }
 
+/// Extend the trust identity with typed lifecycle facts. Hooks, dotenv paths,
+/// profile selection, and language-pack expansion are executable environment
+/// policy just like package refs, so changing any of them invalidates the old
+/// grant.
+pub fn environment_definition_hash(
+    refs: &[RefSpec],
+    table: &SourceTable,
+    secrets: &[String],
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> String {
+    let mut content = env_definition_hash(refs, table, secrets);
+    content.push_str("\n--lifecycle--\n");
+    content.push_str(&facts.lifecycle.fingerprint());
+    content.push_str("--profiles--\n");
+    for profile in &facts.profiles {
+        content.push_str(&profile.name);
+        content.push('\n');
+        for parent in &profile.extends {
+            content.push_str("extends=");
+            content.push_str(parent);
+            content.push('\n');
+        }
+        for package in &profile.packages {
+            content.push_str("package=");
+            content.push_str(package);
+            content.push('\n');
+        }
+        for (key, value) in &profile.variables {
+            content.push_str("var=");
+            content.push_str(key);
+            content.push('=');
+            content.push_str(value);
+            content.push('\n');
+        }
+    }
+    if let Some(profile) = &facts.selected_profile {
+        content.push_str("selected=");
+        content.push_str(&profile.name);
+        content.push('\n');
+        for package in &profile.packages {
+            content.push_str("selected-package=");
+            content.push_str(package);
+            content.push('\n');
+        }
+    }
+    content.push_str("--languages--\n");
+    for language in &facts.languages {
+        content.push_str(&language.fingerprint());
+        content.push('\n');
+    }
+    for pack in &facts.language_packs {
+        content.push_str("pack=");
+        content.push_str(&pack.name);
+        content.push('\n');
+        for package in &pack.packages {
+            content.push_str("pack-package=");
+            content.push_str(package);
+            content.push('\n');
+        }
+    }
+    content.push_str("--files--\n");
+    let mut files = facts
+        .files
+        .iter()
+        .map(|file| file.fingerprint())
+        .collect::<Vec<_>>();
+    files.sort();
+    for file in files {
+        content.push_str(&file);
+        content.push('\n');
+    }
+    crate::SHA256::sha256_hex(content.as_bytes())
+}
+
 /// Whether this env definition is trust-sensitive at all — i.e. whether
 /// entering it should ever prompt. It declares at least one package ref (any
 /// external code/binary a project pulls in is a supply-chain decision), or
@@ -557,10 +631,96 @@ pub fn gate(
     secrets: &[String],
     bypass: bool,
 ) -> Result<(), i32> {
+    let hash = env_definition_hash(refs, table, secrets);
+    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash)
+}
+
+/// Trust gate variant for a plan whose typed lifecycle facts are part of its
+/// executable identity.
+pub fn gate_with_environment(
+    theme: &Theme,
+    store: &Path,
+    project_dir: &Path,
+    refs: &[RefSpec],
+    table: &SourceTable,
+    secrets: &[String],
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+    bypass: bool,
+) -> Result<(), i32> {
+    let hash = environment_definition_hash(refs, table, secrets, facts);
+    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash)
+}
+
+/// Gate a finite build hook on its exact resolved identity. The subject comes
+/// from the staged source digest, recipe digest, platform, and declared
+/// capabilities; a package or environment grant cannot authorize a different
+/// build graph.
+pub fn gate_build_identity(
+    theme: &Theme,
+    store: &Path,
+    identity: &str,
+    bypass: bool,
+) -> Result<(), i32> {
+    let trusted = list_records(store).iter().any(|record| {
+        matches!(
+            record,
+            TrustRecord::Grant(grant)
+                if grant.authority == AUTH_BUILD
+                    && (grant.subject == identity
+                        || grant.subject == format!("{HASH_PREFIX}{identity}"))
+        )
+    });
+    if bypass || trusted {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        theme.error_coded(
+            "E1255",
+            "this build hook is not trusted yet",
+            "the build action graph has a new source, recipe, platform, or capability identity and stdin is not a terminal to ask interactively",
+            "pass `--trust` for this build, or pre-authorize the exact build identity with `jet trust grant`.",
+        );
+        return Err(2);
+    }
+    theme.note("first build for this exact action graph:");
+    theme.detail(&format!("build identity: {identity}"));
+    eprint!("  trust this build? [y/N] ");
+    {
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+    }
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return Err(2);
+    }
+    if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        add_grant(
+            store,
+            &TrustGrant {
+                authority: AUTH_BUILD.to_string(),
+                subject: identity.to_string(),
+                scope: Syntax::TRUST_SCOPE_USER.to_string(),
+            },
+        );
+        Ok(())
+    } else {
+        theme.status("not trusted — exiting.");
+        Err(2)
+    }
+}
+
+fn gate_with_hash(
+    theme: &Theme,
+    store: &Path,
+    project_dir: &Path,
+    refs: &[RefSpec],
+    secrets: &[String],
+    bypass: bool,
+    hash: String,
+) -> Result<(), i32> {
     if !is_trust_sensitive_ext(refs, !secrets.is_empty()) {
         return Ok(());
     }
-    let hash = env_definition_hash(refs, table, secrets);
     if bypass || is_env_trusted(store, project_dir, &hash, refs, secrets) {
         return Ok(());
     }

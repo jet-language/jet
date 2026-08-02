@@ -148,6 +148,7 @@ fn browser_provision(theme: &Theme, parsed: &Parsed) -> i32 {
         prompt_strip: ModuleEval::PromptStripMode::default(),
         dev_services: Vec::new(),
         secrets: Vec::new(),
+        environment: ModuleEval::EnvironmentFacts::default(),
     };
     let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
         Ok(env) => env,

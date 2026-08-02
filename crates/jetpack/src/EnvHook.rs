@@ -17,6 +17,171 @@ use crate::Shell::ShellKind;
 use crate::Syntax;
 use std::path::{Path, PathBuf};
 
+/// Hash every input that can change the checked activation plan. The prompt
+/// hook uses this read-only fingerprint before it emits anything, so changed
+/// imported modules, dotenv files, managed-file sources, locks, and profile
+/// inputs cannot leave a stale environment active.
+pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> Option<String> {
+    let env_path = root.join(Syntax::ENV_FILE);
+    let source = std::fs::read_to_string(&env_path).ok()?;
+    let mut entries = Vec::<(String, Vec<u8>)>::new();
+    collect_definition_files(root, root, &mut entries);
+
+    if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env(&source, root) {
+        for dotenv in &plan.lifecycle.dotenv {
+            add_input(root, &dotenv.file, "dotenv", &mut entries);
+        }
+        for file in &plan.files {
+            if let Some(relative) = &file.source {
+                add_input(root, relative, "managed", &mut entries);
+            }
+            entries.push((
+                format!("managed-fact:{}", file.destination),
+                file.fingerprint().into_bytes(),
+            ));
+        }
+        entries.push((
+            "lifecycle".to_string(),
+            plan.lifecycle.fingerprint().into_bytes(),
+        ));
+        for profile in &plan.profiles {
+            entries.push((
+                format!("profile:{}", profile.name),
+                format!(
+                    "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+                    profile.extends,
+                    profile.packages,
+                    profile.variables,
+                    profile.hostname,
+                    profile.user,
+                    requested_profile,
+                )
+                .into_bytes(),
+            ));
+        }
+        entries.push((
+            "languages".to_string(),
+            plan.languages
+                .iter()
+                .map(|language| language.fingerprint())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .into_bytes(),
+        ));
+    }
+    for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet", "jetpack.toml"] {
+        add_input(root, relative, "project", &mut entries);
+    }
+    entries.push((
+        "selection".to_string(),
+        format!(
+            "profile={};host={};user={}",
+            requested_profile.unwrap_or_default(),
+            std::env::var("HOSTNAME").unwrap_or_default(),
+            std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_default()
+        )
+        .into_bytes(),
+    ));
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut canonical = Vec::new();
+    for (name, bytes) in entries {
+        canonical.extend_from_slice(name.as_bytes());
+        canonical.push(0);
+        canonical.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        canonical.extend_from_slice(&bytes);
+    }
+    Some(crate::SHA256::sha256_hex(&canonical))
+}
+
+/// Read the typed lifecycle policy without realizing packages or executing
+/// project code. Legacy `pkg.*` env files have the normal prompt policy.
+pub fn reload_policy(root: &Path) -> jet_env_model::ModuleEval::ReloadPolicy {
+    let Ok(source) = std::fs::read_to_string(root.join(Syntax::ENV_FILE)) else {
+        return jet_env_model::ModuleEval::ReloadPolicy::default();
+    };
+    jet_env_model::ModuleEval::evaluate_env(&source, root)
+        .map(|plan| plan.lifecycle.reload)
+        .unwrap_or_default()
+}
+
+/// Coalesce a watched definition change until its debounce window expires.
+/// State is project-local and contains only the definition hash and a clock
+/// value; it never stores environment values or secrets.
+pub fn watch_reload_ready(root: &Path, hash: &str, debounce_ms: u64) -> Result<bool, String> {
+    if debounce_ms == 0 {
+        return Ok(true);
+    }
+    let state_dir = root.join(Syntax::CONFIG_DEFAULT_DIR);
+    let state_path = state_dir.join("env-hook-reload");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    if let Ok(state) = std::fs::read_to_string(&state_path) {
+        let mut lines = state.lines();
+        if lines.next() == Some(hash) {
+            if let Some(started) = lines.next().and_then(|value| value.parse::<u64>().ok()) {
+                return Ok(now.saturating_sub(started) >= debounce_ms);
+            }
+        }
+    }
+    std::fs::create_dir_all(&state_dir)
+        .map_err(|error| format!("couldn't create {}: {error}", state_dir.display()))?;
+    let temporary = state_dir.join(format!(".env-hook-reload.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, format!("{hash}\n{now}\n"))
+        .map_err(|error| format!("couldn't write {}: {error}", state_path.display()))?;
+    std::fs::rename(&temporary, &state_path)
+        .map_err(|error| format!("couldn't commit {}: {error}", state_path.display()))?;
+    Ok(false)
+}
+
+/// Remove the debounce marker after a watched definition has activated.
+pub fn clear_watch_reload(root: &Path) {
+    let _ = std::fs::remove_file(root.join(Syntax::CONFIG_DEFAULT_DIR).join("env-hook-reload"));
+}
+
+fn add_input(root: &Path, relative: &str, kind: &str, entries: &mut Vec<(String, Vec<u8>)>) {
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        entries.push((format!("{kind}:unsafe:{relative}"), Vec::new()));
+        return;
+    }
+    let path = root.join(path);
+    match std::fs::read(&path) {
+        Ok(bytes) => entries.push((format!("{kind}:{relative}"), bytes)),
+        Err(_) => entries.push((format!("{kind}:missing:{relative}"), Vec::new())),
+    }
+}
+
+fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(String, Vec<u8>)>) {
+    let Ok(read_dir) = std::fs::read_dir(current) else {
+        return;
+    };
+    let mut paths = read_dir.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+    paths.sort();
+    for path in paths {
+        if path.file_name().is_some_and(|name| name == ".jet") {
+            continue;
+        }
+        if path.is_dir() {
+            collect_definition_files(root, &path, entries);
+        } else if path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT) {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            add_input(root, &relative, "source", entries);
+        }
+    }
+}
+
 /// Parse the shell argument the user (or the installed hook) passed to
 /// `jet env hook <shell>` / `jet env export <shell>`. `None` falls back to
 /// auto-detection from `$SHELL`.
@@ -56,6 +221,9 @@ pub struct Activation {
     pub refs: String,
     /// The absolute `env.jet` root directory this activation is anchored to.
     pub root: String,
+    pub vars: std::collections::BTreeMap<String, String>,
+    pub unset: Vec<String>,
+    pub plan_hash: String,
 }
 
 /// Render the opt-in shell hook the user installs once. Idempotent to install
@@ -102,28 +270,41 @@ pub fn render_activate(kind: ShellKind, act: &Activation) -> String {
     let marker = Syntax::JETPACK_ENV_MARKER;
     let refs = Syntax::JETPACK_REF_VAR;
     let dir = Syntax::ENV_HOOK_ACTIVE_DIR_VAR;
+    let hash = Syntax::ENV_HOOK_ACTIVE_HASH_VAR;
+    let vars = render_vars(kind, &act.vars);
+    let unset = render_unset(kind, &act.unset);
     match kind {
         ShellKind::Bash | ShellKind::Zsh => format!(
             "export {old}={base}\n\
              export PATH={path}\n\
              export {marker}=1\n\
              export {refs}={refval}\n\
-             export {dir}={root}\n",
+             export {dir}={root}\n\
+             export {hash}={plan_hash}\n\
+             {vars}{unset}",
             base = sh_quote(&act.base_path),
             path = sh_quote(&act.composed_path),
             refval = sh_quote(&act.refs),
             root = sh_quote(&act.root),
+            plan_hash = sh_quote(&act.plan_hash),
+            vars = vars,
+            unset = unset,
         ),
         ShellKind::Fish => format!(
             "set -gx {old} {base}\n\
              set -gx PATH (string split : {path})\n\
              set -gx {marker} 1\n\
              set -gx {refs} {refval}\n\
-             set -gx {dir} {root}\n",
+             set -gx {dir} {root}\n\
+             set -gx {hash} {plan_hash}\n\
+             {vars}{unset}",
             base = fish_quote(&act.base_path),
             path = fish_quote(&act.composed_path),
             refval = fish_quote(&act.refs),
             root = fish_quote(&act.root),
+            plan_hash = fish_quote(&act.plan_hash),
+            vars = vars,
+            unset = unset,
         ),
     }
 }
@@ -135,24 +316,50 @@ pub fn render_unload(kind: ShellKind, base_path: &str) -> String {
     let marker = Syntax::JETPACK_ENV_MARKER;
     let refs = Syntax::JETPACK_REF_VAR;
     let dir = Syntax::ENV_HOOK_ACTIVE_DIR_VAR;
+    let hash = Syntax::ENV_HOOK_ACTIVE_HASH_VAR;
     match kind {
         ShellKind::Bash | ShellKind::Zsh => format!(
             "export PATH={path}\n\
              unset {marker}\n\
              unset {refs}\n\
              unset {dir}\n\
+             unset {hash}\n\
              unset {old}\n",
             path = sh_quote(base_path),
+            hash = hash,
         ),
         ShellKind::Fish => format!(
             "set -gx PATH (string split : {path})\n\
              set -e {marker}\n\
              set -e {refs}\n\
              set -e {dir}\n\
+             set -e {hash}\n\
              set -e {old}\n",
             path = fish_quote(base_path),
+            hash = hash,
         ),
     }
+}
+
+fn render_vars(kind: ShellKind, vars: &std::collections::BTreeMap<String, String>) -> String {
+    vars.iter()
+        .map(|(name, value)| match kind {
+            ShellKind::Bash | ShellKind::Zsh => {
+                format!("export {name}={}\n", sh_quote(value))
+            }
+            ShellKind::Fish => format!("set -gx {name} {}\n", fish_quote(value)),
+        })
+        .collect()
+}
+
+fn render_unset(kind: ShellKind, names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| match kind {
+            ShellKind::Bash | ShellKind::Zsh => format!("unset {name}\n"),
+            ShellKind::Fish => format!("set -e {name}\n"),
+        })
+        .collect()
 }
 
 /// POSIX single-quote (bash/zsh): wrap in `'…'`, closing/escaping/reopening for
@@ -176,6 +383,9 @@ mod tests {
             composed_path: "/nix/store/pkg/bin:/usr/bin:/bin".to_string(),
             refs: "ripgrep@nixpkgs jq@nixpkgs".to_string(),
             root: "/home/dev/router".to_string(),
+            vars: std::collections::BTreeMap::new(),
+            unset: Vec::new(),
+            plan_hash: "hash".to_string(),
         }
     }
 

@@ -69,6 +69,9 @@ pub struct RunReport {
     pub fetches: Vec<FetchRecord>,
     /// Sorted, de-duplicated effect names (`net.fetch`, `exec:<tool>`, `write`).
     pub effects: Vec<String>,
+    /// Fingerprint of the canonical finite action graph that admitted this
+    /// run. A successful report never comes from the raw recipe loop alone.
+    pub plan_fingerprint: String,
 }
 
 impl RunReport {
@@ -87,8 +90,8 @@ pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnost
     for step in &recipe.steps {
         match step {
             BuildStep::Fetch { url, sha256 } => {
-                if sha256.trim().is_empty() {
-                    return Err(e1236(url));
+                if !valid_sha256(sha256) {
+                    return Err(e1236_invalid_hash(url, sha256));
                 }
             }
             BuildStep::Exec { tool, .. } => {
@@ -96,7 +99,12 @@ pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnost
                     return Err(e1238(tool));
                 }
             }
-            BuildStep::Install { dest, .. } | BuildStep::InstallTree { dest, .. } => {
+            BuildStep::Install { src, dest } => {
+                confined_source(ctx.source_dir, src, false)?;
+                confined_dest(ctx.output_root, dest)?;
+            }
+            BuildStep::InstallTree { src, dest } => {
+                confined_source(ctx.source_dir, src, true)?;
                 confined_dest(ctx.output_root, dest)?;
             }
         }
@@ -130,8 +138,10 @@ pub fn lower_to_plan(
                 sha256.as_str(),
             ])
             .with_kind(ActionKind::Generic)
-            .with_outputs([format!(".jet/fetch/{sha256}")])
+            .with_inputs(["."])
+            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
             .with_cap(BuildCapability::Net)
+            .with_env("SOURCE_DATE_EPOCH", "0")
             .with_env_allowlist(["SOURCE_DATE_EPOCH"])
             .with_helper_version("jet-fetch", env!("CARGO_PKG_VERSION"))
             .with_label("recipe.step", "fetch")
@@ -143,8 +153,11 @@ pub fn lower_to_plan(
                 argv.extend(args.iter().cloned());
                 ActionSpec::cached(argv)
                     .with_kind(ActionKind::Compile)
-                    .with_outputs([format!(".jet/recipe/{package}/exec-{idx}.stamp")])
+                    .with_inputs(["."])
+                    .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
                     .with_cap(BuildCapability::Exec)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env("JET_PROFILE", "default")
                     .with_env_allowlist(["SOURCE_DATE_EPOCH", "JET_PROFILE"])
                     .with_helper_version(tool, "declared")
                     .with_label("recipe.step", "exec")
@@ -157,8 +170,9 @@ pub fn lower_to_plan(
             ])
             .with_kind(ActionKind::SourceArchive)
             .with_inputs([src.clone()])
-            .with_outputs([format!(".jet/recipe/{package}/install-{idx}.stamp")])
+            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
             .with_cap(BuildCapability::FS)
+            .with_env("SOURCE_DATE_EPOCH", "0")
             .with_env_allowlist(["SOURCE_DATE_EPOCH"])
             .with_helper_version("jet-install", env!("CARGO_PKG_VERSION"))
             .with_label("recipe.step", "install")
@@ -170,13 +184,21 @@ pub fn lower_to_plan(
             ])
             .with_kind(ActionKind::SourceArchive)
             .with_inputs([src.clone()])
-            .with_outputs([format!(".jet/recipe/{package}/install-tree-{idx}.stamp")])
+            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
             .with_cap(BuildCapability::FS)
+            .with_env("SOURCE_DATE_EPOCH", "0")
             .with_env_allowlist(["SOURCE_DATE_EPOCH"])
             .with_helper_version("jet-install-tree", env!("CARGO_PKG_VERSION"))
             .with_label("recipe.step", "install-tree")
             .with_label("install.dest", dest.clone()),
         };
+        let spec = if idx == 0 {
+            spec
+        } else {
+            spec.with_inputs([format!(".jet/recipe/{package}/step-{}.stamp", idx - 1)])
+        }
+        .with_label("platform.os", std::env::consts::OS)
+        .with_label("platform.arch", std::env::consts::ARCH);
         let handle = plan_ctx.action(name, spec).map_err(|err| {
             Diagnostic::error(
                 "E1238",
@@ -244,57 +266,28 @@ pub fn run(
     validate(recipe, ctx)?;
     // E4-JP2: every recipe run lowers through the one BuildPlan IR before
     // sandbox steps execute (cache identity consumers use the fingerprint).
-    let _plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
-    std::fs::create_dir_all(ctx.output_root).ok();
-    let mut report = RunReport::default();
-    for step in &recipe.steps {
-        match step {
-            BuildStep::Fetch { url, sha256 } => {
-                do_fetch(url, sha256, ctx, transport, &mut report)?;
-            }
-            BuildStep::Exec { tool, args } => {
-                do_exec(tool, args, ctx, &mut report)?;
-            }
-            BuildStep::Install { src, dest } => {
-                let target = confined_dest(ctx.output_root, dest)?;
-                let from = ctx.source_dir.join(src);
-                if let Some(parent) = target.parent() {
-                    std::fs::create_dir_all(parent).ok();
-                }
-                std::fs::copy(&from, &target).map_err(|e| {
-                    Diagnostic::error(
-                        "E1237",
-                        format!("build step could not install `{src}`"),
-                        format!(
-                            "copying `{}` into the output root failed: {e}",
-                            from.display()
-                        ),
-                        "make sure the source file exists in the staged tree.".to_string(),
-                        None,
-                    )
-                })?;
-                report.add_effect("write");
-            }
-            BuildStep::InstallTree { src, dest } => {
-                let target = confined_dest(ctx.output_root, dest)?;
-                let from = ctx.source_dir.join(src);
-                copy_tree(&from, &target).map_err(|e| {
-                    Diagnostic::error(
-                        "E1237",
-                        format!("build step could not install `{src}`"),
-                        format!(
-                            "copying `{}` into the output root failed: {e}",
-                            from.display()
-                        ),
-                        "make sure the source directory exists in the staged tree.".to_string(),
-                        None,
-                    )
-                })?;
-                report.add_effect("write");
-            }
+    let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
+    let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
+    let staged = staged_output_path(ctx.output_root);
+    let staged_ctx = BuildContext {
+        source_dir: ctx.source_dir,
+        output_root: &staged,
+        tools: ctx.tools.clone(),
+        fetch_cache: ctx.fetch_cache,
+        offline: ctx.offline,
+    };
+    let result = run_steps(recipe, &staged_ctx, transport);
+    match result {
+        Ok(mut report) => {
+            commit_staged_output(&staged, ctx.output_root)?;
+            report.plan_fingerprint = plan_fingerprint;
+            Ok(report)
+        }
+        Err(error) => {
+            remove_path(&staged);
+            Err(error)
         }
     }
-    Ok(report)
 }
 
 /// Run with U27 step logging. Used by adapter/core build paths that need
@@ -306,68 +299,39 @@ pub fn run_logged(
     attempt: &mut super::BuildDebug::Attempt,
 ) -> Result<RunReport, Diagnostic> {
     validate(recipe, ctx)?;
-    let _plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
-    std::fs::create_dir_all(ctx.output_root).ok();
+    let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
+    let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
+    let staged = staged_output_path(ctx.output_root);
+    let staged_ctx = BuildContext {
+        source_dir: ctx.source_dir,
+        output_root: &staged,
+        tools: ctx.tools.clone(),
+        fetch_cache: ctx.fetch_cache,
+        offline: ctx.offline,
+    };
     let mut report = RunReport::default();
     let total = recipe.steps.len();
-    for (idx, step) in recipe.steps.iter().enumerate() {
+    let result = (|| {
+        std::fs::create_dir_all(staged_ctx.output_root).map_err(|error| {
+            recipe_io_error("could not create staged recipe output", error)
+        })?;
+        for (idx, step) in recipe.steps.iter().enumerate() {
         let index = idx + 1;
-        let result = match step {
-            BuildStep::Fetch { url, sha256 } => do_fetch(url, sha256, ctx, transport, &mut report),
-            BuildStep::Exec { tool, args } => do_exec_logged(tool, args, ctx, &mut report),
+        let step_result = match step {
+            BuildStep::Fetch { url, sha256 } => {
+                do_fetch(url, sha256, &staged_ctx, transport, &mut report)
+            }
+            BuildStep::Exec { tool, args } => {
+                do_exec_logged(tool, args, &staged_ctx, &mut report)
+            }
             BuildStep::Install { src, dest } => {
-                let target = confined_dest(ctx.output_root, dest);
-                match target {
-                    Ok(target) => {
-                        let from = ctx.source_dir.join(src);
-                        if let Some(parent) = target.parent() {
-                            std::fs::create_dir_all(parent).ok();
-                        }
-                        std::fs::copy(&from, &target)
-                            .map(|_| report.add_effect("write"))
-                            .map_err(|e| {
-                                Diagnostic::error(
-                                    "E1237",
-                                    format!("build step could not install `{src}`"),
-                                    format!(
-                                        "copying `{}` into the output root failed: {e}",
-                                        from.display()
-                                    ),
-                                    "make sure the source file exists in the staged tree."
-                                        .to_string(),
-                                    None,
-                                )
-                            })
-                    }
-                    Err(d) => Err(d),
-                }
+                install_file(src, dest, &staged_ctx, &mut report)
             }
             BuildStep::InstallTree { src, dest } => {
-                let target = confined_dest(ctx.output_root, dest);
-                match target {
-                    Ok(target) => {
-                        let from = ctx.source_dir.join(src);
-                        copy_tree(&from, &target)
-                            .map(|_| report.add_effect("write"))
-                            .map_err(|e| {
-                                Diagnostic::error(
-                                    "E1237",
-                                    format!("build step could not install `{src}`"),
-                                    format!(
-                                        "copying `{}` into the output root failed: {e}",
-                                        from.display()
-                                    ),
-                                    "make sure the source directory exists in the staged tree."
-                                        .to_string(),
-                                    None,
-                                )
-                            })
-                    }
-                    Err(d) => Err(d),
-                }
+                install_tree(src, dest, &staged_ctx, &mut report)
             }
         };
-        match result {
+        match step_result {
             Ok(()) => attempt.push_step(step_log(step, index, total, ctx, "ok", "", "")),
             Err(d) => {
                 attempt.push_step(step_log(
@@ -382,9 +346,145 @@ pub fn run_logged(
                 return Err(d);
             }
         }
+        }
+        Ok(report)
+    })();
+    match result {
+        Ok(mut report) => {
+            commit_staged_output(&staged, ctx.output_root)?;
+            attempt.mark_ok();
+            report.plan_fingerprint = plan_fingerprint;
+            Ok(report)
+        }
+        Err(error) => {
+            remove_path(&staged);
+            Err(error)
+        }
     }
-    attempt.mark_ok();
+}
+
+fn run_steps(
+    recipe: &BuildRecipe,
+    ctx: &BuildContext,
+    transport: Option<Transport>,
+) -> Result<RunReport, Diagnostic> {
+    std::fs::create_dir_all(ctx.output_root).map_err(|error| {
+        recipe_io_error("could not create staged recipe output", error)
+    })?;
+    let mut report = RunReport::default();
+    for step in &recipe.steps {
+        match step {
+            BuildStep::Fetch { url, sha256 } => {
+                do_fetch(url, sha256, ctx, transport, &mut report)?;
+            }
+            BuildStep::Exec { tool, args } => {
+                do_exec(tool, args, ctx, &mut report)?;
+            }
+            BuildStep::Install { src, dest } => install_file(src, dest, ctx, &mut report)?,
+            BuildStep::InstallTree { src, dest } => install_tree(src, dest, ctx, &mut report)?,
+        }
+    }
     Ok(report)
+}
+
+fn install_file(
+    src: &str,
+    dest: &str,
+    ctx: &BuildContext,
+    report: &mut RunReport,
+) -> Result<(), Diagnostic> {
+    let target = confined_dest(ctx.output_root, dest)?;
+    let from = confined_source(ctx.source_dir, src, false)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            recipe_io_error("could not create an install directory", error)
+        })?;
+    }
+    std::fs::copy(&from, &target).map_err(|e| {
+        Diagnostic::error(
+            "E1237",
+            format!("build step could not install `{src}`"),
+            format!("copying `{}` into the output root failed: {e}", from.display()),
+            "make sure the source file exists in the staged tree.".to_string(),
+            None,
+        )
+    })?;
+    report.add_effect("write");
+    Ok(())
+}
+
+fn install_tree(
+    src: &str,
+    dest: &str,
+    ctx: &BuildContext,
+    report: &mut RunReport,
+) -> Result<(), Diagnostic> {
+    let target = confined_dest(ctx.output_root, dest)?;
+    let from = confined_source(ctx.source_dir, src, true)?;
+    copy_tree(&from, &target).map_err(|e| {
+        Diagnostic::error(
+            "E1237",
+            format!("build step could not install `{src}`"),
+            format!("copying `{}` into the output root failed: {e}", from.display()),
+            "make sure the source directory exists in the staged tree.".to_string(),
+            None,
+        )
+    })?;
+    report.add_effect("write");
+    Ok(())
+}
+
+fn staged_output_path(output_root: &Path) -> PathBuf {
+    let parent = output_root.parent().unwrap_or_else(|| Path::new("."));
+    let name = output_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    parent.join(format!(".{name}.jet-stage-{}-{stamp}", std::process::id()))
+}
+
+fn commit_staged_output(staged: &Path, output_root: &Path) -> Result<(), Diagnostic> {
+    let backup = staged.with_extension("previous");
+    let had_previous = output_root.exists();
+    if had_previous {
+        std::fs::rename(output_root, &backup).map_err(|error| {
+            recipe_io_error("could not preserve the previous recipe output", error)
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staged, output_root) {
+        if had_previous {
+            let _ = std::fs::rename(&backup, output_root);
+        }
+        return Err(recipe_io_error("could not publish staged recipe output", error));
+    }
+    if had_previous {
+        remove_path(&backup);
+    }
+    Ok(())
+}
+
+fn remove_path(path: &Path) {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.is_dir() {
+            let _ = std::fs::remove_dir_all(path);
+        } else {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn recipe_io_error(what: &str, error: std::io::Error) -> Diagnostic {
+    Diagnostic::error(
+        "E1238",
+        what.to_string(),
+        error.to_string(),
+        "fix the build workspace permissions and retry the recipe.".to_string(),
+        None,
+    )
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -393,7 +493,14 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
-        if from.is_dir() {
+        let metadata = std::fs::symlink_metadata(&from)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("recipe source contains symlink `{}`", from.display()),
+            ));
+        }
+        if metadata.is_dir() {
             copy_tree(&from, &to)?;
         } else {
             std::fs::copy(&from, &to)?;
@@ -406,6 +513,35 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn confined_source(source_root: &Path, source: &str, directory: bool) -> Result<PathBuf, Diagnostic> {
+    let relative = Path::new(source);
+    if source.is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(e1237_source(source));
+    }
+    let root = source_root.canonicalize().map_err(|error| {
+        recipe_io_error("could not resolve the recipe source root", error)
+    })?;
+    let path = source_root.join(relative);
+    let canonical = path.canonicalize().map_err(|error| {
+        recipe_io_error("could not resolve a recipe source", error)
+    })?;
+    if !canonical.starts_with(&root) {
+        return Err(e1237_source(source));
+    }
+    if directory && !canonical.is_dir() {
+        return Err(e1237_source(source));
+    }
+    if !directory && !canonical.is_file() {
+        return Err(e1237_source(source));
+    }
+    Ok(canonical)
 }
 
 /// Resolve `dest` under `output_root`, rejecting any escape (`..`, absolute
@@ -445,20 +581,28 @@ fn do_fetch(
     transport: Option<Transport>,
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
-    // A locked fetch must carry a hash (checked in validate too, defensively).
-    if sha256.trim().is_empty() {
-        return Err(e1236(url));
+    // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
+    // validate too, defensively). Never let an unchecked lock value select a
+    // cache path.
+    if !valid_sha256(sha256) {
+        return Err(e1236_invalid_hash(url, sha256));
     }
     std::fs::create_dir_all(ctx.fetch_cache).ok();
     let cached = ctx.fetch_cache.join(sha256);
     if cached.is_file() {
-        // Offline-satisfiable: the locked source is already cached, no network.
-        report.fetches.push(FetchRecord {
-            url: url.to_string(),
-            sha256: sha256.to_string(),
-        });
-        report.add_effect("net.fetch");
-        return Ok(());
+        // Offline-satisfiable only after re-verifying the immutable key. A
+        // corrupt or stale cache entry must never become trusted input.
+        let cached_bytes = std::fs::read(&cached)
+            .map_err(|e| e1236_fetch(url, &format!("reading cache: {e}")))?;
+        if SHA256::sha256_hex(&cached_bytes) == sha256 {
+            report.fetches.push(FetchRecord {
+                url: url.to_string(),
+                sha256: sha256.to_string(),
+            });
+            report.add_effect("net.fetch");
+            return Ok(());
+        }
+        let _ = std::fs::remove_file(&cached);
     }
     // Not cached: acquire the bytes. `file://` is std-only and offline-safe.
     let bytes = if let Some(path) = url.strip_prefix("file://") {
@@ -478,13 +622,24 @@ fn do_fetch(
     if got != sha256 {
         return Err(e1236_mismatch(url, sha256, &got));
     }
-    std::fs::write(&cached, &bytes).map_err(|e| e1236_fetch(url, &e.to_string()))?;
+    let temporary = ctx
+        .fetch_cache
+        .join(format!(".{sha256}.tmp-{}", std::process::id()));
+    std::fs::write(&temporary, &bytes).map_err(|e| e1236_fetch(url, &e.to_string()))?;
+    if let Err(error) = std::fs::rename(&temporary, &cached) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(e1236_fetch(url, &format!("publishing cache: {error}")));
+    }
     report.fetches.push(FetchRecord {
         url: url.to_string(),
         sha256: sha256.to_string(),
     });
     report.add_effect("net.fetch");
     Ok(())
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn do_exec(
@@ -699,6 +854,18 @@ fn e1236_mismatch(url: &str, want: &str, got: &str) -> Diagnostic {
     )
 }
 
+fn e1236_invalid_hash(url: &str, hash: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1236",
+        "a locked build fetch has an invalid sha256".to_string(),
+        format!(
+            "the fetch of `{url}` uses `{hash}`; a locked fetch needs exactly 64 hexadecimal SHA-256 characters."
+        ),
+        "replace it with the source's canonical SHA-256 hash, or vendor the source.".to_string(),
+        None,
+    )
+}
+
 /// E1237 — a build step wrote outside the package output root.
 pub fn e1237(dest: &str) -> Diagnostic {
     Diagnostic::error(
@@ -708,6 +875,16 @@ pub fn e1237(dest: &str) -> Diagnostic {
          would let a build mutate the machine or other packages."
             .to_string(),
         "install into a path under the output root (no `..`, no absolute paths).".to_string(),
+        None,
+    )
+}
+
+fn e1237_source(source: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1237",
+        format!("a build step tried to read an unsafe recipe source: `{source}`"),
+        "recipe inputs must be existing files or directories below the staged source root; absolute, parent, and escaping symlink paths are rejected".to_string(),
+        "use a project-relative source path inside the staged tree".to_string(),
         None,
     )
 }

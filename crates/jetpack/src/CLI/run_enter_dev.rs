@@ -1,13 +1,18 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
-use super::realize::{apply_locked_channels, classify_or_report, load_project_plan, RunPlan};
+use super::realize::{
+    apply_locked_channels, classify_or_report, load_project_plan_with_profile, RunPlan,
+};
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
-    validate_declared_secrets, wait_for_services_ready,
+    project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    validate_declared_secrets,
+    wait_for_services_ready,
 };
 use super::trust_env_build::compose_env;
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::EnvFile;
+use crate::EnvFiles;
 use crate::EnvHook;
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
@@ -58,7 +63,10 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                         }
                         match &parsed.command {
                             Some(cmd) if !cmd.is_empty() => {
-                                let mut plan = match load_project_plan(theme) {
+                                let mut plan = match load_project_plan_with_profile(
+                                    theme,
+                                    parsed.flags.profile.as_deref(),
+                                ) {
                                     Ok(plan) => plan,
                                     Err(code) => return code,
                                 };
@@ -112,6 +120,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                     prompt_strip: ModuleEval::PromptStripMode::default(),
                     dev_services: Vec::new(),
                     secrets: Vec::new(),
+                    environment: ModuleEval::EnvironmentFacts::default(),
                 }
             }
             Err(_) => {
@@ -130,7 +139,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
         },
-        None => match load_project_plan(theme) {
+        None => match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
             Ok(plan) => plan,
             Err(code) => return code,
         },
@@ -143,6 +152,15 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    if let Err(code) = run_lifecycle_hooks(
+        theme,
+        &project_dir,
+        &env,
+        &plan.environment.lifecycle.on_enter,
+        "on_enter",
+    ) {
+        return code;
+    }
 
     let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => run_visible_command(theme, &env, &plan.refs, cmd),
@@ -163,7 +181,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
 
 /// D-JPK-TASKRUN1: realize the project env (when present), then shell out to
 /// `jet run --task <name> <entry> -- <task-args>` (D-JPK-DISPATCH1).
-fn run_project_task(
+pub(super) fn run_project_task(
     theme: &Theme,
     parsed: &Parsed,
     roots: &Store::Roots,
@@ -171,47 +189,127 @@ fn run_project_task(
     entry: &Path,
     task: &str,
 ) -> i32 {
-    // Env optional for task-only projects (no env.jet) — host PATH still works.
-    // Probe the file first so a missing env doesn't print load_project_plan's
-    // "nothing to do" error before we fall through to an empty Env.
-    let env = if EnvFile::path_in(project_dir).is_file() {
-        match load_project_plan(theme) {
-            Ok(mut plan) => {
-                if let Err(code) = apply_locked_channels(theme, project_dir, &mut plan.table) {
-                    return code;
-                }
-                if let Err(code) = Trust::gate(
-                    theme,
-                    &Trust::store_path(),
-                    project_dir,
-                    &plan.refs,
-                    &plan.table,
-                    &plan.secrets,
-                    parsed.flags.trust,
-                ) {
-                    return code;
-                }
-                if let Err(code) = validate_declared_secrets(theme, project_dir, &plan.secrets) {
-                    return code;
-                }
-                match compose_env(theme, roots, &parsed.flags, &plan) {
-                    Ok(env) => env,
-                    Err(code) => return code,
-                }
-            }
+    let metadata = project_task_metadata(entry, task).unwrap_or_default();
+    if let Some(reason) = metadata.skip.as_deref() {
+        theme.status(&format!("skipping task {}: {}", theme.bold(task), reason));
+        return 0;
+    }
+
+    let has_env = EnvFile::path_in(project_dir).is_file();
+    // Env is optional for task-only projects. A task may still add package
+    // metadata, in which case it is composed through the same RunPlan path as
+    // `jet env` rather than by mutating PATH in this dispatcher.
+    let mut plan = if has_env {
+        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+            Ok(plan) => plan,
             Err(code) => return code,
         }
     } else {
-        Env {
-            bin_dirs: Vec::new(),
-            vars: std::collections::BTreeMap::new(),
-            refs: Vec::new(),
-            label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
-            prompt_path: ModuleEval::PromptPathMode::default(),
-            prompt_strip: ModuleEval::PromptStripMode::default(),
-            cache_leases: Vec::new(),
+        empty_task_plan()
+    };
+    if let Err(code) = apply_locked_channels(theme, project_dir, &mut plan.table) {
+        return code;
+    }
+    for raw in &metadata.packages {
+        let spec = match RefSpec::classify_in(raw, &plan.table) {
+            Ok(spec) => spec,
+            Err(error) => {
+                crate::Output::ref_error(theme, &error);
+                return 2;
+            }
+        };
+        if !plan.refs.iter().any(|existing| existing.raw == spec.raw) {
+            plan.refs.push(spec);
+        }
+    }
+
+    if let Err(code) = Trust::gate_with_environment(
+        theme,
+        &Trust::store_path(),
+        project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    if let Err(code) = validate_declared_secrets(theme, project_dir, &plan.secrets) {
+        return code;
+    }
+    let mut env = if has_env || !plan.refs.is_empty() {
+        match compose_env(theme, roots, &parsed.flags, &plan) {
+            Ok(env) => env,
+            Err(code) => return code,
+        }
+    } else {
+        empty_task_env()
+    };
+    if let Some(authority) = &metadata.authority {
+        env.vars
+            .insert("JET_TASK_AUTHORITY".to_string(), authority.clone());
+    }
+    for (name, value) in &metadata.limits {
+        let key = task_limit_env_name(name);
+        env.vars.insert(key, value.clone());
+    }
+
+    let task_cwd = match task_path(project_dir, metadata.cwd.as_deref(), "cwd", false) {
+        Ok(path) => path,
+        Err(message) => {
+            theme.error_coded(
+                "E1330",
+                &format!("task `{task}` has an unsafe cwd"),
+                &message,
+                "use a project-relative path without `..`.",
+            );
+            return 2;
         }
     };
+    if !task_cwd.is_dir() {
+        theme.error_coded(
+            "E1330",
+            &format!("task `{task}` has a non-directory cwd"),
+            &format!("task cwd `{}` is not a directory", task_cwd.display()),
+            "use a project-relative directory for `cwd`.",
+        );
+        return 2;
+    }
+    let cache_key = match task_cache_key(
+        project_dir,
+        entry,
+        task,
+        &metadata,
+        &plan.refs,
+        &plan.table,
+    ) {
+        Ok(key) => key,
+        Err(message) => {
+            theme.error_coded(
+                "E1330",
+                &format!("task `{task}` has invalid cache inputs or outputs"),
+                &message,
+                "use existing project-relative input and output paths.",
+            );
+            return 2;
+        }
+    };
+    if metadata.cache != crate::AST::TaskCachePolicy::Uncached
+        && metadata.outputs.is_empty()
+    {
+        theme.error_coded(
+            "E1330",
+            &format!("task `{task}` enables caching without outputs"),
+            "a cached task needs at least one declared output so a later run can prove that the result still exists.",
+            "add `outputs: [\"path\"]`, or use `cache: .Uncached`.",
+        );
+        return 2;
+    }
+    if task_cache_hit(project_dir, roots, &metadata, &cache_key) {
+        theme.status(&format!("task {} is up to date", theme.bold(task)));
+        return 0;
+    }
 
     theme.status(&format!(
         "running task {} ({})",
@@ -234,11 +332,218 @@ fn run_project_task(
         argv.push("--".to_string());
         argv.extend(task_args);
     }
-    let code = Shell::run_command(&env, &argv);
+    let code = Shell::run_command_in(&env, &argv, Some(&task_cwd));
     if code == 0 {
+        if metadata.cache != crate::AST::TaskCachePolicy::Uncached {
+            if !task_outputs_exist(project_dir, &metadata) {
+                theme.error_coded(
+                    "E1330",
+                    &format!("task `{task}` did not produce its declared outputs"),
+                    "a successful cached task must leave every declared output in place before its result can be recorded",
+                    "write each declared output, or remove it from `outputs` and keep the task uncached",
+                );
+                return 1;
+            }
+            if let Err(error) = write_task_cache(project_dir, roots, &metadata, &cache_key) {
+                theme.error(
+                    "task completed but its cache record could not be written",
+                    &error,
+                    "fix permissions for `.jet/tasks` or the Jet state directory, then rerun the task.",
+                );
+                return 1;
+            }
+        }
         auto_clean_after_success(theme, roots);
     }
     code
+}
+
+fn empty_task_plan() -> RunPlan {
+    RunPlan {
+        refs: Vec::new(),
+        adapters: Vec::new(),
+        table: RefSpec::SourceTable::empty(),
+        label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+        prompt_path: ModuleEval::PromptPathMode::default(),
+        prompt_strip: ModuleEval::PromptStripMode::default(),
+        dev_services: Vec::new(),
+        secrets: Vec::new(),
+        environment: ModuleEval::EnvironmentFacts::default(),
+    }
+}
+
+fn empty_task_env() -> Env {
+    Env {
+        bin_dirs: Vec::new(),
+        vars: std::collections::BTreeMap::new(),
+        unset_vars: Vec::new(),
+        refs: Vec::new(),
+        label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+        prompt_path: ModuleEval::PromptPathMode::default(),
+        prompt_strip: ModuleEval::PromptStripMode::default(),
+        cache_leases: Vec::new(),
+    }
+}
+
+fn task_limit_env_name(name: &str) -> String {
+    let mut out = String::from("JET_TASK_LIMIT_");
+    for ch in name.chars() {
+        out.push(if ch.is_ascii_alphanumeric() { ch.to_ascii_uppercase() } else { '_' });
+    }
+    out
+}
+
+fn task_path(
+    project_dir: &Path,
+    raw: Option<&str>,
+    field: &str,
+    allow_missing: bool,
+) -> Result<PathBuf, String> {
+    let relative = raw.unwrap_or(".");
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(format!("task {field} `{relative}` must stay inside the project"));
+    }
+    let root = project_dir
+        .canonicalize()
+        .map_err(|error| format!("couldn't resolve project root: {error}"))?;
+    let candidate = project_dir.join(path);
+    if !allow_missing && !candidate.exists() {
+        return Err(format!("task {field} `{relative}` does not exist"));
+    }
+    let resolved = if candidate.exists() {
+        candidate
+            .canonicalize()
+            .map_err(|error| format!("couldn't resolve task {field} `{relative}`: {error}"))?
+    } else {
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| format!("task {field} `{relative}` has no parent"))?
+            .canonicalize()
+            .map_err(|error| format!("couldn't resolve task {field} parent: {error}"))?;
+        let name = candidate
+            .file_name()
+            .ok_or_else(|| format!("task {field} `{relative}` has no file name"))?;
+        parent.join(name)
+    };
+    if !resolved.starts_with(&root) {
+        return Err(format!("task {field} `{relative}` escapes the project"));
+    }
+    Ok(resolved)
+}
+
+fn task_cache_key(
+    project_dir: &Path,
+    entry: &Path,
+    task: &str,
+    metadata: &crate::AST::TaskMetadata,
+    refs: &[RefSpec::RefSpec],
+    table: &RefSpec::SourceTable,
+) -> Result<String, String> {
+    let mut identity = String::from("jet-task-cache-v2\n");
+    identity.push_str(task);
+    identity.push('\n');
+    identity.push_str(
+        &crate::SHA256::sha256_file_hex(entry)
+            .map_err(|error| format!("couldn't hash task entry: {error}"))?,
+    );
+    identity.push('\n');
+    identity.push_str(&format!("packages={:?}\n", metadata.packages));
+    identity.push_str(&format!("inputs={:?}\n", metadata.inputs));
+    identity.push_str(&format!("outputs={:?}\n", metadata.outputs));
+    identity.push_str(&format!("skip={:?}\n", metadata.skip));
+    identity.push_str(&format!("cwd={:?}\n", metadata.cwd));
+    identity.push_str(&format!("cache={:?}\nauthority={:?}\n", metadata.cache, metadata.authority));
+    for (name, value) in &metadata.limits {
+        identity.push_str(&format!("limit={name}:{value}\n"));
+    }
+    for reference in refs {
+        identity.push_str("ref=");
+        identity.push_str(&reference.raw);
+        identity.push('\n');
+    }
+    for (name, upstream, provider) in table.declarations() {
+        identity.push_str(&format!("source={name}:{upstream}:{}\n", provider.label()));
+    }
+    for relative in [Syntax::ENV_FILE, "jetpack.toml", Syntax::UNIFIED_LOCK_FILE] {
+        let path = project_dir.join(relative);
+        if path.is_file() {
+            identity.push_str(&format!("project-input={relative}:{}\n", crate::SHA256::sha256_file_hex(&path).map_err(|error| format!("couldn't hash `{relative}`: {error}"))?));
+        }
+    }
+    if metadata.inputs.is_empty() {
+        identity.push_str("inputs=<none>\n");
+    }
+    for input in &metadata.inputs {
+        let path = task_path(project_dir, Some(input), "input", false)?;
+        let digest = if path.is_dir() {
+            crate::SHA256::tree_hash(&path)
+        } else if path.is_file() {
+            crate::SHA256::sha256_file_hex(&path)
+                .map_err(|error| format!("couldn't hash task input `{input}`: {error}"))?
+        } else {
+            return Err(format!("task input `{input}` is not a regular file or directory"));
+        };
+        identity.push_str(&format!("input={input}:{digest}\n"));
+    }
+    for output in &metadata.outputs {
+        let path = task_path(project_dir, Some(output), "output", true)?;
+        identity.push_str(&format!("output={output}:{}\n", path.display()));
+    }
+    Ok(crate::SHA256::sha256_hex(identity.as_bytes()))
+}
+
+fn task_cache_path(
+    project_dir: &Path,
+    roots: &Store::Roots,
+    metadata: &crate::AST::TaskMetadata,
+    key: &str,
+) -> PathBuf {
+    match metadata.cache {
+        crate::AST::TaskCachePolicy::Local => project_dir.join(Syntax::SOURCE_ROOT_DIR).join("tasks").join(format!("{key}.done")),
+        crate::AST::TaskCachePolicy::Shared => roots.root.join("tasks").join(format!("{key}.done")),
+        crate::AST::TaskCachePolicy::Uncached => PathBuf::new(),
+    }
+}
+
+fn task_outputs_exist(project_dir: &Path, metadata: &crate::AST::TaskMetadata) -> bool {
+    metadata
+        .outputs
+        .iter()
+        .all(|output| task_path(project_dir, Some(output), "output", false).is_ok())
+}
+
+fn task_cache_hit(
+    project_dir: &Path,
+    roots: &Store::Roots,
+    metadata: &crate::AST::TaskMetadata,
+    key: &str,
+) -> bool {
+    if metadata.cache == crate::AST::TaskCachePolicy::Uncached || !task_outputs_exist(project_dir, metadata) {
+        return false;
+    }
+    let path = task_cache_path(project_dir, roots, metadata, key);
+    matches!(std::fs::read_to_string(path), Ok(value) if value.trim() == key)
+}
+
+fn write_task_cache(
+    project_dir: &Path,
+    roots: &Store::Roots,
+    metadata: &crate::AST::TaskMetadata,
+    key: &str,
+) -> Result<(), String> {
+    let path = task_cache_path(project_dir, roots, metadata, key);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "task cache has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = parent.join(format!(".{key}.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, format!("{key}\n")).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|error| error.to_string())
 }
 
 fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd: &[String]) -> i32 {
@@ -276,6 +581,9 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::ENV_HOOK_VERB => return cmd_env_hook(theme, parsed),
         Some(v) if v == Syntax::ENV_EXPORT_VERB => return cmd_env_export(theme, parsed),
+        Some(v) if v == Syntax::ENV_TEST_VERB => return cmd_env_test(theme, parsed),
+        Some(v) if v == Syntax::ENV_SYNC_VERB => return cmd_env_sync(theme, parsed),
+        Some(v) if v == Syntax::ENV_INFO_VERB => return cmd_env_info(theme, parsed),
         _ => {}
     }
 
@@ -321,7 +629,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // present.
     let has_env_file = EnvFile::path_in(&project_dir).is_file();
     let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
-        match load_project_plan(theme) {
+        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
             Ok(plan) => plan,
             Err(code) => return code,
         }
@@ -335,6 +643,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             prompt_strip: ModuleEval::PromptStripMode::default(),
             dev_services: Vec::new(),
             secrets: Vec::new(),
+            environment: ModuleEval::EnvironmentFacts::default(),
         }
     };
 
@@ -360,13 +669,14 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // U19: `jet env` never runs a project function (the invariant this card
     // confirms), but it DOES realize the project's own declared packages —
     // first entry to a repo whose env is trust-sensitive gates on it.
-    if let Err(code) = Trust::gate(
+    if let Err(code) = Trust::gate_with_environment(
         theme,
         &Trust::store_path(),
         &project_dir,
         &plan.refs,
         &plan.table,
         &plan.secrets,
+        &plan.environment,
         parsed.flags.trust,
     ) {
         return code;
@@ -380,6 +690,15 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    if let Err(code) = run_lifecycle_hooks(
+        theme,
+        &project_dir,
+        &env,
+        &plan.environment.lifecycle.on_enter,
+        "on_enter",
+    ) {
+        return code;
+    }
 
     let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
@@ -389,6 +708,266 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         auto_clean_after_success(theme, &roots);
     }
     code
+}
+
+/// `jet env test [-- command]`: run lifecycle hooks and checks with a clean
+/// child environment. A command is optional; without one the declared checks
+/// are the complete operation.
+fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let roots = Store::resolve();
+    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+        return code;
+    }
+    if let Err(code) = Trust::gate_with_environment(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        return code;
+    }
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
+    };
+    if let Err(code) = run_lifecycle_hooks_clean(
+        theme,
+        &project_dir,
+        &env,
+        &plan.environment.lifecycle.on_enter,
+        "on_enter",
+    ) {
+        return code;
+    }
+    if let Err(code) = run_lifecycle_hooks_clean(
+        theme,
+        &project_dir,
+        &env,
+        &plan.environment.lifecycle.checks,
+        "check",
+    ) {
+        return code;
+    }
+    if let Some(command) = parsed.command.as_ref().filter(|command| !command.is_empty()) {
+        return Shell::run_clean_command(&env, command);
+    }
+    theme.ok("environment checks passed in a clean process");
+    0
+}
+
+/// `jet env sync`: show and optionally apply the complete managed-file plan.
+fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+        return code;
+    }
+    if let Err(code) = Trust::gate_with_environment(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        return code;
+    }
+    let file_plan = match EnvFiles::plan(&project_dir, &plan.environment.files) {
+        Ok(plan) => plan,
+        Err(error) => {
+            theme.error(
+                "couldn't plan managed environment files",
+                &error,
+                "resolve the reported path or ownership conflict, then run `jet env sync` again.",
+            );
+            return 2;
+        }
+    };
+    for action in &file_plan.actions {
+        let verb = match action.kind {
+            EnvFiles::FileActionKind::Create => "create",
+            EnvFiles::FileActionKind::ReplaceOwned => "update",
+            EnvFiles::FileActionKind::Preserve => "preserve",
+            EnvFiles::FileActionKind::Unchanged => "unchanged",
+        };
+        let detail = if action.sensitive { " sensitive" } else { "" };
+        theme.status(&format!(
+            "{verb} {} ({}, sha256={}){detail}",
+            action.destination,
+            action.mode.as_str(),
+            action.digest
+        ));
+    }
+    if !file_plan.has_changes() {
+        theme.ok("managed environment files are up to date");
+        return 0;
+    }
+    if !theme.confirm_apply(parsed.flags.assume_yes) {
+        return 0;
+    }
+    match file_plan.apply() {
+        Ok(report) => {
+            theme.ok(&format!(
+                "managed environment files synced ({} applied, {} preserved)",
+                report.applied, report.preserved
+            ));
+            0
+        }
+        Err(error) => {
+            theme.error("managed environment file sync failed", &error, "no partial file change was retained.");
+            2
+        }
+    }
+}
+
+/// `jet env info`: disclose the selected profile and the typed environment
+/// facts without realizing packages or executing lifecycle commands.
+fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
+    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let profile = plan
+        .environment
+        .selected_profile
+        .as_ref()
+        .map(|profile| profile.name.as_str())
+        .unwrap_or("<none>");
+    let packages = plan
+        .refs
+        .iter()
+        .map(|reference| reference.raw.as_str())
+        .collect::<Vec<_>>();
+    if parsed.flags.json {
+        let quote_list = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| crate::JSON::quote(value))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let files = plan
+            .environment
+            .files
+            .iter()
+            .map(|file| file.destination.as_str())
+            .collect::<Vec<_>>();
+        let dotenv = plan
+            .environment
+            .lifecycle
+            .dotenv
+            .iter()
+            .map(|item| {
+                format!(
+                    "{{\"file\":{},\"allow\":[{}],\"secrets\":[{}]}}",
+                    crate::JSON::quote(&item.file),
+                    item.allow
+                        .iter()
+                        .map(|name| crate::JSON::quote(name))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    item.secrets
+                        .iter()
+                        .map(|name| crate::JSON::quote(name))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+            })
+            .collect::<Vec<_>>();
+        let languages = plan
+            .environment
+            .languages
+            .iter()
+            .map(|language| {
+                let extras = language
+                    .extra_packages
+                    .iter()
+                    .map(|package| crate::JSON::quote(package))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"extra\":[{}]}}",
+                    crate::JSON::quote(&language.name),
+                    language.enable,
+                    language
+                        .version
+                        .as_deref()
+                        .map(|value| crate::JSON::quote(value))
+                        .unwrap_or_else(|| "null".to_string()),
+                    language
+                        .channel
+                        .as_deref()
+                        .map(|value| crate::JSON::quote(value))
+                        .unwrap_or_else(|| "null".to_string()),
+                    language.venv,
+                    extras,
+                )
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{{\"profile\":{},\"profiles\":[{}],\"languages\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}]}}",
+            crate::JSON::quote(profile),
+            quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
+            languages.join(","),
+            quote_list(&packages),
+            quote_list(&files),
+            dotenv.join(","),
+        );
+        return 0;
+    }
+    theme.status(&format!("profile: {profile}"));
+    let applied = plan
+        .environment
+        .selected_profile
+        .as_ref()
+        .map(|profile| profile.applied.join(" -> "))
+        .unwrap_or_else(|| "<none>".to_string());
+    theme.detail(&format!("profiles: {applied}"));
+    let languages = plan
+        .environment
+        .languages
+        .iter()
+        .map(|language| {
+            let mut label = language.name.clone();
+            if !language.enable {
+                label.push_str(" (disabled)");
+            }
+            if let Some(version) = &language.version {
+                label.push_str(&format!("@{version}"));
+            }
+            if let Some(channel) = &language.channel {
+                label.push_str(&format!(" [{channel}]"));
+            }
+            if language.venv {
+                label.push_str(" +venv");
+            }
+            label
+        })
+        .collect::<Vec<_>>();
+    theme.detail(&format!("languages: {}", if languages.is_empty() { "<none>".to_string() } else { languages.join(", ") }));
+    theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
+    theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
+    0
 }
 
 /// D-ENVHOOK1=A: `jet env hook <shell>` — print the opt-in shell hook the user
@@ -443,11 +1022,40 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let active_s = std::env::var(Syntax::ENV_HOOK_ACTIVE_DIR_VAR)
         .ok()
         .filter(|s| !s.is_empty());
+    let active_hash = std::env::var(Syntax::ENV_HOOK_ACTIVE_HASH_VAR)
+        .ok()
+        .filter(|s| !s.is_empty());
+    let target_hash = target
+        .as_ref()
+        .and_then(|root| EnvHook::definition_fingerprint(root, parsed.flags.profile.as_deref()));
 
     // Nothing changed since the last prompt — stay silent so the hook is a
     // no-op on the vast majority of prompts (and never re-realizes).
-    if target_s == active_s {
+    if target_s == active_s && target_hash == active_hash {
         return 0;
+    }
+
+    // A changed definition does not always mean an immediate reload. `Never`
+    // keeps the current activation, while `Watch` records the first changed
+    // hash and coalesces prompt callbacks until its debounce window expires.
+    let mut watched_reload_ready = false;
+    if target_s == active_s && target_hash != active_hash {
+        if let (Some(root), Some(hash)) = (target.as_ref(), target_hash.as_deref()) {
+            match EnvHook::reload_policy(root) {
+                ModuleEval::ReloadPolicy::Never => return 0,
+                ModuleEval::ReloadPolicy::Prompt => {}
+                ModuleEval::ReloadPolicy::Watch { debounce_ms, .. } => {
+                    match EnvHook::watch_reload_ready(root, hash, debounce_ms) {
+                        Ok(true) => watched_reload_ready = true,
+                        Ok(false) => return 0,
+                        Err(error) => {
+                            theme.detail(&format!("environment reload is waiting: {error}"));
+                            return 0;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // The PATH to restore on unload / build on top of when activating: the
@@ -461,10 +1069,10 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         std::env::var("PATH").unwrap_or_default()
     };
 
+    // Do not emit an unload until the replacement environment is fully
+    // realized, trusted, composed, and entered. A failed reload must leave
+    // the caller's previous activation usable.
     let mut script = String::new();
-    if active_s.is_some() {
-        script.push_str(&EnvHook::render_unload(kind, &base_path));
-    }
 
     if let Some(root_s) = &target_s {
         let root = PathBuf::from(root_s);
@@ -474,17 +1082,14 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // changing its own cwd affects nothing else.
         let _ = std::env::set_current_dir(&root);
         let roots = Store::resolve();
-        let mut plan = match load_project_plan(theme) {
+        let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
             Ok(plan) => plan,
             Err(_) => {
-                // Malformed / foreign-only env here: don't activate, but the
-                // unload (if any) still stands.
-                print!("{script}");
+                // Malformed / foreign-only env: keep the previous activation.
                 return 0;
             }
         };
         if apply_locked_channels(theme, &root, &mut plan.table).is_err() {
-            print!("{script}");
             return 0;
         }
 
@@ -492,26 +1097,30 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // trust-sensitive env prompts (interactive) or is refused with a hint
         // (non-interactive). A trusted or non-sensitive env activates silently.
         let store = Trust::store_path();
-        let hash =
-            Trust::env_definition_hash(&plan.refs, &plan.table, &plan.secrets);
+        let hash = Trust::environment_definition_hash(
+            &plan.refs,
+            &plan.table,
+            &plan.secrets,
+            &plan.environment,
+        );
         let sensitive =
             Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
         let trusted = !sensitive
             || Trust::is_env_trusted(&store, &root, &hash, &plan.refs, &plan.secrets);
         if !trusted {
             if std::io::stdin().is_terminal() {
-                if Trust::gate(
+                if Trust::gate_with_environment(
                     theme,
                     &store,
                     &root,
                     &plan.refs,
                     &plan.table,
                     &plan.secrets,
+                    &plan.environment,
                     parsed.flags.trust,
                 )
                 .is_err()
                 {
-                    print!("{script}");
                     return 0;
                 }
             } else {
@@ -519,7 +1128,6 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                     "{} here is not trusted — run `jet env` to approve it once",
                     Syntax::ENV_FILE
                 ));
-                print!("{script}");
                 return 0;
             }
         }
@@ -527,10 +1135,24 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
             Ok(env) => env,
             Err(_) => {
-                print!("{script}");
                 return 0;
             }
         };
+        let plan_hash = target_hash.clone().unwrap_or_default();
+        if run_lifecycle_hooks(
+            theme,
+            &root,
+            &env,
+            &plan.environment.lifecycle.on_enter,
+            "on_enter",
+        )
+        .is_err()
+        {
+            return 0;
+        }
+        if active_s.is_some() {
+            script.push_str(&EnvHook::render_unload(kind, &base_path));
+        }
         let composed_path = env.composed_path(&base_path);
         script.push_str(&EnvHook::render_activate(
             kind,
@@ -539,8 +1161,16 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 composed_path,
                 refs: env.refs.join(" "),
                 root: root_s.clone(),
+                vars: env.vars.clone(),
+                unset: env.unset_vars.clone(),
+                plan_hash,
             },
         ));
+        if watched_reload_ready {
+            EnvHook::clear_watch_reload(&root);
+        }
+    } else if active_s.is_some() {
+        script.push_str(&EnvHook::render_unload(kind, &base_path));
     }
 
     print!("{script}");
@@ -722,7 +1352,7 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    let mut plan = match load_project_plan(theme) {
+    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -730,13 +1360,14 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    if let Err(code) = Trust::gate(
+    if let Err(code) = Trust::gate_with_environment(
         theme,
         &Trust::store_path(),
         &project_dir,
         &plan.refs,
         &plan.table,
         &plan.secrets,
+        &plan.environment,
         parsed.flags.trust,
     ) {
         return code;
@@ -750,8 +1381,25 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    if let Err(code) = run_lifecycle_hooks(
+        theme,
+        &project_dir,
+        &env,
+        &plan.environment.lifecycle.on_enter,
+        "on_enter",
+    ) {
+        return code;
+    }
 
-    if let Err(code) = wait_for_services_ready(theme, &project_dir, &env, &plan.dev_services) {
+    if let Err(code) = wait_for_services_ready(
+        theme,
+        parsed,
+        &roots,
+        &project_dir,
+        &entry,
+        &env,
+        &plan.dev_services,
+    ) {
         return code;
     }
 

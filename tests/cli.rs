@@ -4928,7 +4928,7 @@ fn service_probe_unavailable_without_dev_reports_diagnostic() {
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
     fs::write(dir.join("src/main.jet"), r#"module env.dev {
-    services: { mydb: { enable: true, init: "echo mydb", ready: "true" } }
+    services: { mydb: { run: ["echo", "mydb"], ready: "true" } }
 }
 
 module perf.package {
@@ -4978,7 +4978,7 @@ fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
     fs::write(
         dir.join("env.jet"),
         r#"module env.dev {
-    services: { mydb: { enable: true, init: "sleep 30", ready: "true" } }
+    services: { mydb: { run: ["sleep", "30"], ready: "true" } }
 }
 "#,
     )

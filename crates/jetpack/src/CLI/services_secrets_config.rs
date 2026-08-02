@@ -1,5 +1,5 @@
 use super::parse::Parsed;
-use super::realize::load_project_plan;
+use super::realize::load_project_plan_with_profile;
 use super::trust_env_build::compose_env;
 use jet_env_model::ModuleEval;
 use crate::Output::Theme;
@@ -11,6 +11,7 @@ use crate::Store;
 use crate::Syntax;
 use crate::Trust;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 /// U13: before `jet env`/`jet dev` enters a trusted project environment, every
 /// declared `secrets: ["name", …]` entry must exist in `.jet/secrets.age`.
@@ -49,19 +50,183 @@ pub(super) fn validate_declared_secrets(
 /// on PATH the same way the project's own command does.
 pub(super) fn wait_for_services_ready(
     theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
     project_dir: &Path,
+    entry: &Path,
     env: &Env,
     services: &[ModuleEval::DevServicePlan],
 ) -> Result<(), i32> {
-    for svc in services {
-        if !svc.enable {
-            continue;
+    let order = match Services::dependency_order(services) {
+        Ok(order) => order,
+        Err(error) => {
+            theme.error(
+                "service dependency graph is invalid",
+                &error,
+                "declare each dependency once, keep it enabled, and remove dependency cycles.",
+            );
+            return Err(2);
+        }
+    };
+    for index in order {
+        let svc = &services[index];
+        if let Err(()) = run_before_start_tasks(theme, parsed, roots, project_dir, entry, svc) {
+            return Err(2);
         }
         theme.detail(&format!(
             "waiting for service `{}` to become healthy…",
             svc.name
         ));
         bring_up_one(theme, project_dir, env, svc).map_err(|_| 2)?;
+    }
+    Ok(())
+}
+
+fn run_before_start_tasks(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    service: &ModuleEval::DevServicePlan,
+) -> Result<(), ()> {
+    for task in &service.before_start {
+        let task_parsed = Parsed {
+            flags: parsed.flags.clone(),
+            positional: vec![task.clone()],
+            command: None,
+        };
+        let code = super::run_enter_dev::run_project_task(
+            theme,
+            &task_parsed,
+            roots,
+            project_dir,
+            entry,
+            task,
+        );
+        if code != 0 {
+            theme.error(
+                &format!("service `{}` prerequisite task `{task}` failed", service.name),
+                "the service was not started because its declared finite task did not complete.",
+                "fix the task, then run the service again.",
+            );
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+/// Run typed lifecycle hooks through the same composed environment used by
+/// commands and services. A hook with an inline command is already covered by
+/// the environment trust grant; structured hooks additionally require the
+/// explicit trusted bit before they may execute.
+pub(super) fn run_lifecycle_hooks(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    hooks: &[ModuleEval::HookSpec],
+    phase: &str,
+) -> Result<(), i32> {
+    run_lifecycle_hooks_with_mode(theme, project_dir, env, hooks, phase, false, false)
+}
+
+/// Run lifecycle hooks with only the declared environment visible. This is
+/// used by `jet env test`: checks must not accidentally pass because a host
+/// variable or host-installed executable leaked into the process.
+pub(super) fn run_lifecycle_hooks_clean(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    hooks: &[ModuleEval::HookSpec],
+    phase: &str,
+) -> Result<(), i32> {
+    run_lifecycle_hooks_with_mode(theme, project_dir, env, hooks, phase, true, true)
+}
+
+fn run_lifecycle_hooks_with_mode(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    hooks: &[ModuleEval::HookSpec],
+    phase: &str,
+    clean: bool,
+    strict: bool,
+) -> Result<(), i32> {
+    for hook in hooks {
+        if !hook.trusted {
+            if !strict {
+                theme.detail(&format!(
+                    "skipping untrusted lifecycle {phase} hook `{}`",
+                    hook.name
+                ));
+                continue;
+            }
+            theme.error_coded(
+                "E1329",
+                &format!("lifecycle hook '{}' is not trusted", hook.name),
+                "background environment hooks execute project commands and require an explicit trusted record.",
+                "set trusted: true after reviewing the hook, then approve the environment again.",
+            );
+            return Err(2);
+        }
+        let cwd = hook
+            .cwd
+            .as_deref()
+            .map(PathBuf::from)
+            .map(|path| {
+                if path.is_absolute()
+                    || path
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
+                {
+                    None
+                } else {
+                    Some(project_dir.join(path))
+                }
+            });
+        let Some(cwd) = cwd.flatten().or_else(|| {
+            if hook.cwd.is_some() {
+                None
+            } else {
+                Some(project_dir.to_path_buf())
+            }
+        }) else {
+            theme.error(
+                &format!("lifecycle {phase} hook '{}' has an unsafe cwd", hook.name),
+                "hook working directories must stay inside the project",
+                "use a project-relative path without `..`.",
+            );
+            return Err(2);
+        };
+        let mut command = crate::Platform::shell_command(&hook.command);
+        command
+            .current_dir(&cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        if clean {
+            command.env_clear();
+            env.apply_clean_to(&mut command);
+        } else {
+            env.apply_to(&mut command);
+        }
+        let output = command.output().map_err(|error| {
+            theme.error(
+                &format!("couldn't run {phase} hook '{}'", hook.name),
+                &error.to_string(),
+                "check the hook command and its working directory.",
+            );
+            2
+        })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            theme.error(
+                &format!("lifecycle {phase} hook '{}' failed", hook.name),
+                stderr.trim(),
+                "fix the hook or remove it from the environment lifecycle.",
+            );
+            return Err(2);
+        }
     }
     Ok(())
 }
@@ -81,22 +246,34 @@ fn bring_up_one(
             "E1262",
             &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
             "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
-            "rename it to one of `enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`, or remove it.",
+            "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
         );
         return Err(());
     }
+    let already_running = matches!(
+        Services::health_one_with_env(project_dir, Some(env), svc),
+        Services::Health::Healthy | Services::Health::Unhealthy
+    );
     if let Err(msg) = Services::up_one(project_dir, env, svc) {
         theme.error(&format!("couldn't start service `{}`", svc.name), &msg, "");
         return Err(());
     }
-    if Services::wait_healthy(project_dir, svc, service_health_timeout()) {
+    if Services::wait_healthy_with_env(
+        project_dir,
+        Some(env),
+        svc,
+        service_health_timeout(),
+    ) {
         Ok(())
     } else {
+        if !already_running {
+            let _ = Services::down_one(project_dir, svc);
+        }
         theme.error_coded(
             "E1261",
             &format!("service `{}` never became healthy", svc.name),
             "jetpack waited for its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) and it never passed.",
-            &format!("check `jetpack services logs {}` for what it printed, and confirm its `init`/`ready` commands are correct.", svc.name),
+            &format!("check `jetpack services logs {}` for what it printed, and confirm its `run`/`ready` declarations are correct.", svc.name),
         );
         Err(())
     }
@@ -116,6 +293,33 @@ fn service_health_timeout() -> std::time::Duration {
         .unwrap_or(std::time::Duration::from_secs(15))
 }
 
+fn selected_service_order(
+    services: &[ModuleEval::DevServicePlan],
+    name: Option<&str>,
+) -> Result<Vec<usize>, String> {
+    let order = Services::dependency_order(services)?;
+    let Some(name) = name else { return Ok(order) };
+    let Some(target) = services.iter().position(|service| service.name == name) else {
+        return Ok(Vec::new());
+    };
+    let mut needed = std::collections::BTreeSet::new();
+    let mut pending = vec![target];
+    while let Some(index) = pending.pop() {
+        if !needed.insert(index) {
+            continue;
+        }
+        for dependency in Services::dependency_names(&services[index]) {
+            if let Some(index) = services.iter().position(|service| service.name == dependency) {
+                pending.push(index);
+            }
+        }
+    }
+    Ok(order
+        .into_iter()
+        .filter(|index| needed.contains(index))
+        .collect())
+}
+
 /// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
 /// every declared dev service is targeted; `logs` requires exactly one name.
 pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -129,11 +333,35 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let name = parsed.positional.get(1).cloned();
 
-    let plan = match load_project_plan(theme) {
+    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
     let project_dir = std::env::current_dir().unwrap_or_default();
+    if matches!(
+        verb.as_str(),
+        v if v == Syntax::SERVICES_VERB_UP
+            || v == Syntax::SERVICES_VERB_RESTART
+            || v == Syntax::SERVICES_VERB_WATCH
+            || v == Syntax::SERVICES_VERB_HEALTH
+            || v == Syntax::SERVICES_VERB_WAIT
+    ) {
+        if let Err(code) = Trust::gate_with_environment(
+            theme,
+            &Trust::store_path(),
+            &project_dir,
+            &plan.refs,
+            &plan.table,
+            &plan.secrets,
+            &plan.environment,
+            parsed.flags.trust,
+        ) {
+            return code;
+        }
+        if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+            return code;
+        }
+    }
     let targets: Vec<&ModuleEval::DevServicePlan> = plan
         .dev_services
         .iter()
@@ -149,6 +377,13 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             "declare one under an `env.<name> { services: { … } }` role-module (U12).",
             "",
         );
+        if name.is_none() {
+            let presets = Services::catalog_presets()
+                .into_iter()
+                .map(|preset| format!("{} ({})", preset.name, preset.package))
+                .collect::<Vec<_>>();
+            theme.detail(&format!("available typed presets: {}", presets.join(", ")));
+        }
         return 2;
     }
 
@@ -174,15 +409,85 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 Ok(env) => env,
                 Err(code) => return code,
             };
-            for svc in &targets {
+            let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
+                Ok(order) => order,
+                Err(error) => {
+                    theme.error(
+                        "service dependency graph is invalid",
+                        &error,
+                        "declare each dependency once, keep it enabled, and remove dependency cycles.",
+                    );
+                    return 2;
+                }
+            };
+            for index in order {
+                let svc = &plan.dev_services[index];
                 if !svc.enable {
                     theme.detail(&format!("service `{}` is disabled, skipping", svc.name));
                     continue;
+                }
+                if let Err(()) = run_before_start_tasks(
+                    theme,
+                    parsed,
+                    &roots,
+                    &project_dir,
+                    &find_project_entry(&project_dir),
+                    svc,
+                ) {
+                    return 2;
                 }
                 if bring_up_one(theme, &project_dir, &env, svc).is_err() {
                     return 2;
                 }
                 theme.ok(&format!("service `{}` is up", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_RESTART => {
+            let roots = Store::resolve();
+            let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                Ok(env) => env,
+                Err(code) => return code,
+            };
+            let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
+                Ok(order) => order,
+                Err(error) => {
+                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    return 2;
+                }
+            };
+            let entry = find_project_entry(&project_dir);
+            for index in order {
+                let svc = &plan.dev_services[index];
+                if let Err(()) = run_before_start_tasks(
+                    theme,
+                    parsed,
+                    &roots,
+                    &project_dir,
+                    &entry,
+                    svc,
+                ) {
+                    return 2;
+                }
+                if let Err(error) = Services::restart_one(&project_dir, &env, svc) {
+                    theme.error(&format!("couldn't restart service `{}`", svc.name), &error, "check the service logs and restart policy.");
+                    return 2;
+                }
+                if !Services::wait_healthy_with_env(
+                    &project_dir,
+                    Some(&env),
+                    svc,
+                    service_health_timeout(),
+                ) {
+                    theme.error_coded(
+                        "E1261",
+                        &format!("service `{}` never became healthy after restart", svc.name),
+                        "the service restart completed, but its declared readiness probe did not pass.",
+                        &format!("check `jetpack services logs {}` and its `ready` declaration.", svc.name),
+                    );
+                    return 2;
+                }
+                theme.ok(&format!("service `{}` restarted", svc.name));
             }
             0
         }
@@ -197,9 +502,18 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         v if v == Syntax::SERVICES_VERB_HEALTH => {
+            let roots = Store::resolve();
+            let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                Ok(env) => env,
+                Err(code) => return code,
+            };
             let mut all_healthy = true;
             for svc in &targets {
-                let (label, healthy) = match Services::health_one(&project_dir, svc) {
+                let (label, healthy) = match Services::health_one_with_env(
+                    &project_dir,
+                    Some(&env),
+                    svc,
+                ) {
                     Services::Health::Disabled => ("disabled", true),
                     Services::Health::NotRunning => ("not running", false),
                     Services::Health::Unhealthy => ("unhealthy", false),
@@ -217,6 +531,65 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             } else {
                 1
             }
+        }
+        v if v == Syntax::SERVICES_VERB_WAIT => {
+            let roots = Store::resolve();
+            let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                Ok(env) => env,
+                Err(code) => return code,
+            };
+            let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
+                Ok(order) => order,
+                Err(error) => {
+                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    return 2;
+                }
+            };
+            for index in order {
+                let svc = &plan.dev_services[index];
+                if !Services::wait_healthy_with_env(
+                    &project_dir,
+                    Some(&env),
+                    svc,
+                    service_health_timeout(),
+                ) {
+                    theme.error_coded(
+                        "E1261",
+                        &format!("service `{}` is not ready", svc.name),
+                        "jetpack waited for the service's typed readiness contract and it did not pass.",
+                        &format!("start it with `jetpack services up {}` or inspect its logs.", svc.name),
+                    );
+                    return 1;
+                }
+                theme.ok(&format!("service `{}` is ready", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_WATCH => {
+            let roots = Store::resolve();
+            let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                Ok(env) => env,
+                Err(code) => return code,
+            };
+            let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
+                Ok(order) => order,
+                Err(error) => {
+                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    return 2;
+                }
+            };
+            for index in order {
+                let svc = &plan.dev_services[index];
+                match Services::watch_once(&project_dir, &env, svc) {
+                    Ok(true) => theme.ok(&format!("service `{}` restarted after a watched-file change", svc.name)),
+                    Ok(false) => theme.detail(&format!("service `{}` watch baseline is current", svc.name)),
+                    Err(error) => {
+                        theme.error(&format!("couldn't watch service `{}`", svc.name), &error, "declare project-relative files in `watch`.");
+                        return 2;
+                    }
+                }
+            }
+            0
         }
         other => {
             theme.error(
@@ -242,7 +615,7 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let plan = match load_project_plan(theme) {
+    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -263,19 +636,35 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = Trust::gate_with_environment(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        return code;
+    }
+
     let roots = Store::resolve();
     let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
         Ok(env) => env,
         Err(code) => return code,
     };
-    let project_dir = std::env::current_dir().unwrap_or_default();
     let samples = match Services::measure_readiness(&project_dir, &env, service, 20) {
         Ok(samples) => samples,
         Err(message) => {
             theme.error(
                 &format!("couldn't measure service `{name}`"),
                 &message,
-                "check the service init, shutdown, and readiness declarations.",
+            "check the service run, shutdown, and readiness declarations.",
             );
             return 2;
         }
@@ -462,6 +851,9 @@ pub(super) fn find_jet_binary() -> String {
 /// Project entry for bare `jetpack dev`, matching `jet`'s run-first convention.
 /// Kept local because jetpack and jet are separate binaries (D-JPK-DISPATCH1).
 pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
+    if let Some(entry) = package_output_entry(project_dir) {
+        return entry;
+    }
     let default = project_dir.join(Syntax::DEFAULT_ENTRY_FILE);
     if default.is_file() {
         return default;
@@ -488,6 +880,18 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
         }
     }
     default
+}
+
+/// D-ENV-PACKAGE1 / #1003: a canonical Package output is the first entry
+/// selection rule. Legacy `run.jet` remains the fallback for projects that do
+/// not declare a typed Package output.
+fn package_output_entry(project_dir: &Path) -> Option<PathBuf> {
+    let package = jet_pkg_model::Package::PackageFacts::load(project_dir)?.ok()?;
+    let output = package.select_output("run", None, None).ok()?;
+    package.entry_path(project_dir, output).or_else(|| {
+        let candidate = project_dir.join(format!("{}.{}", output.name, Syntax::FILE_EXT));
+        candidate.is_file().then_some(candidate)
+    })
 }
 
 /// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's
@@ -534,6 +938,27 @@ pub(super) fn list_project_tasks(file: &Path) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+/// D-TASK-META1: return the checked static metadata for one task. A parse
+/// failure is intentionally treated as absence here; the compiler invocation
+/// below remains the source of the complete diagnostic.
+pub(super) fn project_task_metadata(
+    file: &Path,
+    task: &str,
+) -> Option<crate::AST::TaskMetadata> {
+    let src = std::fs::read_to_string(file).ok()?;
+    let (toks, diags) = crate::Lexer::lex(&src);
+    if !diags.is_empty() {
+        return None;
+    }
+    let prog = crate::Parser::parse(&toks).ok()?;
+    prog.items.iter().find_map(|item| match item {
+        crate::AST::Item::Func(function) if function.name == task && function.is_task => {
+            function.task_metadata.clone()
+        }
+        _ => None,
+    })
 }
 
 /// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns

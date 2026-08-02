@@ -10,6 +10,7 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
+use jet_pkg_model::Package::PackageFacts;
 use super::PackageManifest;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
@@ -18,8 +19,11 @@ use crate::SHA256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod remote;
+mod package;
 mod cran;
 mod fetch;
 mod luarocks;
@@ -31,6 +35,10 @@ use script_registry::{Kind as ScriptRegistryKind, ScriptRegistryProvider};
 use remote::{
     copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
     source_repo, tree_fingerprint, RemoteSource,
+};
+use package::{
+    canonical_package_kind, canonical_source_dir, core_recipe_identity, toolchain_facts,
+    validate_core_source_tree,
 };
 #[cfg(test)]
 use remote::file_has_top_level_run;
@@ -164,64 +172,6 @@ fn ensure_locked_authority(
     }
 }
 
-fn core_recipe_identity(
-    src_dir: &Path,
-    package: &str,
-    manifest: Option<&PackageManifest::PackManifest>,
-    kind: PackageManifest::PackageKind,
-) -> String {
-    let toolchain = super::Toolchain::Toolchain::resolve();
-    let artifact = if kind == PackageManifest::PackageKind::Library
-        && src_dir.join("Cargo.toml").is_file()
-    {
-        "cargo-rlib"
-    } else if kind == PackageManifest::PackageKind::Library {
-        "jet-library-source"
-    } else {
-        "executable-tree"
-    };
-    let version = manifest.map_or("", |manifest| manifest.package.version.as_str());
-    let semantics = normalized_manifest_semantics(manifest);
-    format!(
-        "core-provider-recipe-v2\npackage={package}\nversion={version}\nkind={kind:?}\nartifact={artifact}\nmanifest={}\ntoolchain={}:{}:{}\n",
-        SHA256::sha256_hex(semantics.as_bytes()),
-        toolchain.as_ref().map_or("missing", |tc| tc.id.as_str()),
-        toolchain.as_ref().map_or("", |tc| tc.version.as_str()),
-        toolchain
-            .as_ref()
-            .map_or_else(String::new, |tc| tc.cargo.to_string_lossy().into_owned()),
-    )
-}
-
-fn normalized_manifest_semantics(
-    manifest: Option<&PackageManifest::PackManifest>,
-) -> String {
-    let Some(manifest) = manifest else {
-        return "manifest=absent".to_string();
-    };
-    let mut manifest = manifest.clone();
-    manifest.deps.sort_by(|a, b| a.name.cmp(&b.name));
-    manifest.packages.sort_by(|a, b| a.name.cmp(&b.name));
-    for package in &mut manifest.packages {
-        package.targets.sort_by_key(|target| format!("{target:?}"));
-    }
-    manifest.build_profiles.sort_by(|a, b| a.name.cmp(&b.name));
-    manifest.grants.sort_by(|a, b| a.0.cmp(&b.0));
-    for (_, effects) in &mut manifest.grants {
-        effects.sort();
-    }
-    if let Some(effects) = &mut manifest.effects_allow {
-        effects.sort();
-    }
-    if let Some(effects) = &mut manifest.effects_deny {
-        effects.sort();
-    }
-    if let Some(policy) = &mut manifest.trust_policy {
-        policy.services.sort_by(|a, b| a.0.cmp(&b.0));
-    }
-    format!("{manifest:?}")
-}
-
 /// Independently derive every fact required to trust an existing cache record.
 /// A provider that cannot derive exact current source/recipe identity gets no
 /// early cache path.
@@ -234,19 +184,47 @@ pub fn cache_expectation(
         ProviderKind::Core => {
             let upstream = table.upstream(spec.source.label())?;
             let repo = source_repo(upstream, &spec.package, ctx).ok()?;
-            let src_dir = PackageManifest::discover_module_in(&repo, &spec.package).ok()?;
+            let canonical = if repo.join("package.jet").is_file() {
+                match PackageFacts::load(&repo) {
+                    Some(Ok(facts)) => Some(facts),
+                    Some(Err(_)) => return None,
+                    None => None,
+                }
+            } else {
+                None
+            };
+            let src_dir = canonical
+                .as_ref()
+                .and_then(|facts| canonical_source_dir(&repo, facts))
+                .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
+            validate_core_source_tree(&src_dir).ok()?;
             let source_fingerprint =
                 super::Envelope::try_output_hash_of(&src_dir.to_string_lossy()).ok()?;
-            let manifest = PackageManifest::PackManifest::load(&repo).and_then(Result::ok);
-            let kind = manifest
+            let (manifest, canonical) = if canonical.is_some() {
+                (None, canonical)
+            } else {
+                let manifest = match PackageManifest::PackManifest::load(&repo) {
+                    None => None,
+                    Some(Ok(manifest)) => Some(manifest),
+                    Some(Err(_)) => return None,
+                };
+                (manifest, None)
+            };
+            let kind = canonical
                 .as_ref()
-                .and_then(|manifest| manifest.package_kind(&spec.package))
+                .and_then(|facts| canonical_package_kind(facts, &spec.package))
+                .or_else(|| {
+                    manifest
+                        .as_ref()
+                        .and_then(|manifest| manifest.package_kind(&spec.package))
+                })
                 .unwrap_or_else(|| infer_package_kind(&src_dir));
             let recipe = core_recipe_identity(
                 &src_dir,
                 &spec.package,
                 manifest.as_ref(),
                 kind,
+                canonical.as_ref(),
             );
             let fp = tree_fingerprint(&src_dir);
             Some(super::Store::CacheExpectation {
@@ -353,18 +331,23 @@ pub fn adapter_cache_expectation(
         ))
     })?;
     let staged = stage_adapter_source(&source_ref, ctx)?;
-    let recipe_hash = adapter_recipe_to_build(&plan.recipe).recipe_hash();
+    let recipe = adapter_recipe_to_build(&plan.recipe);
     let source_hash = tree_fingerprint(&staged);
+    let build_identity = recipe.build_identity(
+        &plan.name,
+        &source_hash,
+        &super::Envelope::host_platform(),
+    );
     let id_input = format!(
-        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nrecipe={}\n",
-        plan.name, plan.source, source_hash, recipe_hash
+        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nidentity={}\n",
+        plan.name, plan.source, source_hash, build_identity
     );
     let fp = SHA256::sha256_hex(id_input.as_bytes());
     Ok(super::Store::CacheExpectation {
         identity: cache_identity(
             &super::Envelope::try_output_hash_of(&staged.to_string_lossy())
                 .map_err(ProviderError::Adapter)?,
-            &format!("adapter-v1:{recipe_hash}"),
+            &format!("adapter-v1:{build_identity}"),
             ctx,
         ),
         owned_output: Some(
@@ -487,7 +470,7 @@ const NIX_RECIPE_ID: &str = "nix-compat-v1";
 /// package as a flake attr: `<upstream>#<package>`.
 pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
     match &spec.source {
-        Source::Nixpkgs => format!("nixpkgs#{}", spec.package),
+        Source::Nixpkgs => format!("nixpkgs#{}", nix_package_name(&spec.package)),
         Source::Github => format!("github:{}", spec.package),
         Source::Path => format!("path:{}", spec.package),
         Source::Cran => format!("cran:{}", spec.package),
@@ -497,9 +480,18 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::Packagist => format!("php:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
-            format!("{upstream}#{}", spec.package)
+            let package = if table.provider(name) == ProviderKind::Nix {
+                nix_package_name(&spec.package)
+            } else {
+                &spec.package
+            };
+            format!("{upstream}#{package}")
         }
     }
+}
+
+fn nix_package_name(package: &str) -> &str {
+    package.split_once("#version=").map_or(package, |(name, _)| name)
 }
 
 /// The fixture filename for a ref, e.g. `nixpkgs-fastfetch.json`.
@@ -644,33 +636,73 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, &spec.package, ctx)?;
-        let src_dir =
-            PackageManifest::discover_module_in(&repo, &spec.package).map_err(|e| match e {
-                PackageManifest::DiscoveryError::NotFound { name } => {
-                    ProviderError::CoreBuild(format!(
-                        "source repo at {} has no `module {name}` — add a .{} file declaring it",
-                        repo.display(),
-                        crate::Syntax::FILE_EXT,
-                    ))
+        let (src_dir, canonical, canonical_kind, canonical_version) =
+            if repo.join("package.jet").is_file() {
+                let facts = PackageFacts::load(&repo)
+                    .ok_or_else(|| {
+                        ProviderError::CoreBuild(format!(
+                            "canonical Package {} could not be read",
+                            repo.join("package.jet").display()
+                        ))
+                    })?
+                    .map_err(|error| {
+                        ProviderError::CoreBuild(format!(
+                            "canonical Package {} is invalid: {error}",
+                            repo.join("package.jet").display()
+                        ))
+                    })?;
+                let source = facts.source.as_deref().unwrap_or(".");
+                let source_path = Path::new(source);
+                if source_path.is_absolute()
+                    || source_path
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
+                {
+                    return Err(ProviderError::CoreBuild(format!(
+                        "canonical Package source `{source}` escapes {}",
+                        repo.display()
+                    )));
                 }
-                PackageManifest::DiscoveryError::Ambiguous { name, paths } => {
-                    let list = paths
-                        .iter()
-                        .map(|p| p.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    ProviderError::CoreBuild(format!(
-                        "source repo at {} has `module {name}` in multiple files: {list}",
-                        repo.display(),
-                    ))
-                }
-            })?;
+                let source_dir = repo.join(source_path);
+                let kind = canonical_package_kind(&facts, &spec.package)
+                    .unwrap_or_else(|| infer_package_kind(&source_dir));
+                (
+                    source_dir,
+                    Some(facts.clone()),
+                    Some(kind),
+                    facts.version.clone().unwrap_or_default(),
+                )
+            } else {
+                let source_dir = PackageManifest::discover_module_in(&repo, &spec.package)
+                    .map_err(|e| match e {
+                        PackageManifest::DiscoveryError::NotFound { name } => {
+                            ProviderError::CoreBuild(format!(
+                                "source repo at {} has no `module {name}` — add a .{} file declaring it",
+                                repo.display(),
+                                crate::Syntax::FILE_EXT,
+                            ))
+                        }
+                        PackageManifest::DiscoveryError::Ambiguous { name, paths } => {
+                            let list = paths
+                                .iter()
+                                .map(|p| p.display().to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            ProviderError::CoreBuild(format!(
+                                "source repo at {} has `module {name}` in multiple files: {list}",
+                                repo.display(),
+                            ))
+                        }
+                    })?;
+                (source_dir, None, None, String::new())
+            };
         if !src_dir.is_dir() {
             return Err(ProviderError::CoreBuild(format!(
                 "package source {} does not exist",
                 src_dir.display()
             )));
         }
+        validate_core_source_tree(&src_dir).map_err(ProviderError::CoreBuild)?;
         // Content-address the materialized package so identical sources share a
         // store entry and changes get a fresh one.
         let fp = tree_fingerprint(&src_dir);
@@ -693,20 +725,40 @@ impl Provider for CoreProvider {
         // PATH entry (an empty `bin`). With no manifest entry — a bare `core`
         // source declared by marker, no `pkg.jet` — we default to
         // `executable`, today's behavior.
-        let manifest = PackageManifest::PackManifest::load(&repo).and_then(|r| r.ok());
+        let manifest = match if canonical.is_some() {
+            None
+        } else {
+            PackageManifest::PackManifest::load(&repo)
+        } {
+            None => None,
+            Some(Ok(manifest)) => Some(manifest),
+            Some(Err(error)) => {
+                return Err(ProviderError::CoreBuild(format!(
+                    "package manifest {} is invalid: {error:?}",
+                    PackageManifest::PackManifest::path_in(&repo).display()
+                )));
+            }
+        };
         // D-ILE1: `kind` is inferred when `pkg.jet` omits it (or there is no
         // `pkg.jet`): a top-level `fn run` in the package source means
         // executable, otherwise library. An explicit `library`/`executable`
         // always wins.
-        let kind = manifest
-            .as_ref()
-            .and_then(|pm| pm.package_kind(&spec.package))
+        let kind = canonical_kind
+            .or_else(|| {
+                manifest
+                    .as_ref()
+                    .and_then(|pm| pm.package_kind(&spec.package))
+            })
             .unwrap_or_else(|| infer_package_kind(&out_dir));
         // `pkg.jet` carries the real version for core packages (U10).
-        let version = manifest
+        let version = if canonical.is_some() {
+            canonical_version
+        } else {
+            manifest
             .as_ref()
             .map(|pm| pm.package.version.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+        };
         let (bin, rlib, recipe_id) = match kind {
             PackageManifest::PackageKind::Executable => (
                 out_dir.join("bin").to_string_lossy().into_owned(),
@@ -728,9 +780,19 @@ impl Provider for CoreProvider {
                     // host dev toolchain when no pin is configured; only a machine
                     // with neither a toolchain object nor `cargo` yields `None`,
                     // the E1240 case (surfaced by the build reporting layer).
-                    let rlib = super::Toolchain::Toolchain::resolve()
-                        .and_then(|tc| build_rlib_from_cargo(&out_dir, ctx.store_dir, &tc))
-                        .unwrap_or_default();
+                    let toolchain = super::Toolchain::Toolchain::resolve().ok_or_else(|| {
+                        ProviderError::CoreBuild(
+                            "core library carries Cargo.toml but no pinned Jet toolchain is available"
+                                .to_string(),
+                        )
+                    })?;
+                    let rlib = build_rlib_from_cargo_mode(
+                        &out_dir,
+                        ctx.store_dir,
+                        &toolchain,
+                        ctx.offline,
+                    )
+                        .map_err(ProviderError::CoreBuild)?;
                     (String::new(), rlib, "core-cargo-rlib")
                 } else {
                     (String::new(), String::new(), "core-source")
@@ -749,6 +811,7 @@ impl Provider for CoreProvider {
             &spec.package,
             manifest.as_ref(),
             kind,
+            canonical.as_ref(),
         );
         let identity = cache_identity(&source_fingerprint, &recipe_identity, ctx);
         let toolchain = super::Toolchain::Toolchain::resolve();
@@ -760,9 +823,17 @@ impl Provider for CoreProvider {
                 ("action.kind".into(), "core-build".into()),
                 ("action.recipe".into(), recipe_identity.clone()),
             ]),
-            &format!("{toolchain:?}"),
+            &toolchain_facts(toolchain.as_ref()),
             &identity,
-            BTreeMap::from([("source.path".into(), src_dir.to_string_lossy().into_owned())]),
+            BTreeMap::from([
+                ("source.path".into(), src_dir.to_string_lossy().into_owned()),
+                ("source.tree_fingerprint".into(), fp.clone()),
+                ("artifact.kind".into(), recipe_id.to_string()),
+                (
+                    "execution.platform".into(),
+                    super::Envelope::host_platform(),
+                ),
+            ]),
         )?;
         Ok(Realized {
             name: spec.package.clone(),
@@ -786,6 +857,48 @@ impl Provider for CoreProvider {
 /// sibling of the store root.
 pub const BUILD_SCRATCH_DIR: &str = "build-scratch";
 pub const ACTIVE_TMP_MARKER: &str = ".active";
+static NEXT_BUILD_SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+/// Return whether a scratch marker belongs to a process that can still be
+/// using the directory. A bare marker from an older build is stale and may be
+/// reclaimed; a live marker protects an in-flight build from GC.
+pub(crate) fn active_tmp_marker_is_live(path: &Path) -> bool {
+    let marker = path.join(ACTIVE_TMP_MARKER);
+    let Ok(contents) = std::fs::read_to_string(marker) else {
+        return false;
+    };
+    // Older Jetpack versions used an empty marker as a conservative lock. Keep
+    // that meaning: cleanup must never delete a directory whose owner only
+    // wrote the legacy marker before crashing or being interrupted.
+    if contents.trim().is_empty() {
+        return true;
+    }
+    let mut pid = None;
+    let mut started = None;
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("pid=") {
+            pid = value.parse::<u32>().ok();
+        } else if let Some(value) = line.strip_prefix("started=") {
+            started = value.parse::<u64>().ok();
+        }
+    }
+    let Some(pid) = pid else { return false; };
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(unix)]
+    if Path::new("/proc").join(pid.to_string()).exists() {
+        return true;
+    }
+    // Platforms without a process table still get a conservative grace
+    // period. A malformed or very old marker is safe to reclaim.
+    let Some(started) = started else { return false; };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(started);
+    now.saturating_sub(started) < 24 * 60 * 60
+}
 
 /// Remove every transient build-scratch dir under the hangar. Idempotent; used
 /// to sweep scratch left behind by a crashed build (D-JPK-GC1). Returns the
@@ -795,7 +908,7 @@ pub fn sweep_build_scratch(hangar_dir: &Path) -> usize {
     let mut removed = 0;
     if let Ok(rd) = std::fs::read_dir(&root) {
         for ent in rd.flatten() {
-            if ent.path().join(ACTIVE_TMP_MARKER).exists() {
+            if active_tmp_marker_is_live(&ent.path()) {
                 continue;
             }
             if std::fs::remove_dir_all(ent.path()).is_ok() {
@@ -814,12 +927,50 @@ struct BuildScratch {
 }
 
 impl BuildScratch {
-    fn new(hangar_dir: &Path, key: &str) -> BuildScratch {
-        let path = hangar_dir.join(BUILD_SCRATCH_DIR).join(key);
-        let _ = std::fs::remove_dir_all(&path);
-        let _ = std::fs::create_dir_all(&path);
-        let _ = std::fs::write(path.join(ACTIVE_TMP_MARKER), b"");
-        BuildScratch { path }
+    fn new(hangar_dir: &Path, key: &str) -> Result<BuildScratch, String> {
+        if key.is_empty()
+            || key.contains(std::path::MAIN_SEPARATOR)
+            || key == "."
+            || key == ".."
+        {
+            return Err("cargo scratch key is not a safe single path component".to_string());
+        }
+        let root = hangar_dir.join(BUILD_SCRATCH_DIR);
+        match std::fs::symlink_metadata(&root) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(format!("build scratch root is not a directory: {}", root.display()));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(&root)
+                    .map_err(|error| format!("could not create build scratch root: {error}"))?;
+            }
+            Err(error) => return Err(format!("could not inspect build scratch root: {error}")),
+        }
+        let nonce = NEXT_BUILD_SCRATCH.fetch_add(1, Ordering::Relaxed);
+        let path = root.join(format!("{key}-{}-{nonce}", std::process::id()));
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(format!("build scratch path is not a directory: {}", path.display()));
+            }
+            if active_tmp_marker_is_live(&path) {
+                return Err(format!("build scratch path is already active: {}", path.display()));
+            }
+            std::fs::remove_dir_all(&path)
+                .map_err(|error| format!("could not clear build scratch: {error}"))?;
+        }
+        std::fs::create_dir(&path)
+            .map_err(|error| format!("could not create build scratch: {error}"))?;
+        let started = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        std::fs::write(
+            path.join(ACTIVE_TMP_MARKER),
+            format!("pid={}\nstarted={started}\n", std::process::id()),
+        )
+            .map_err(|error| format!("could not mark build scratch active: {error}"))?;
+        Ok(BuildScratch { path })
     }
 }
 
@@ -837,42 +988,67 @@ impl Drop for BuildScratch {
 /// after the build and on crash (D-JPK-GC1). A prior realize of the same
 /// content-addressed object leaves the rlib in place, so the rebuild is skipped
 /// (cache hit). Returns the absolute path to the rlib inside the object, or an
-/// empty string if the build is unavailable or fails.
+/// error. Every failure is returned to the caller. A missing rlib is not a valid
+/// library realization: silently returning an empty artifact would make the
+/// package appear built while leaving the eventual failure to an unrelated
+/// linker or importer.
 ///
 /// `toolchain` is the resolved pinned/realized build toolchain
 /// (D-JPK-BUILDTOOL1=A): the build execs *its* `cargo`, so a bridge's output
 /// hash does not depend on whatever host `cargo` happens to be on PATH when the
 /// toolchain is a pinned object.
+#[cfg(test)]
 pub(crate) fn build_rlib_from_cargo(
     pkg_dir: &Path,
     hangar_dir: &Path,
     toolchain: &super::Toolchain::Toolchain,
-) -> Option<String> {
+) -> Result<String, String> {
+    build_rlib_from_cargo_mode(pkg_dir, hangar_dir, toolchain, false)
+}
+
+fn build_rlib_from_cargo_mode(
+    pkg_dir: &Path,
+    hangar_dir: &Path,
+    toolchain: &super::Toolchain::Toolchain,
+    offline: bool,
+) -> Result<String, String> {
     // Cache hit: a previously realized object already carries its rlib.
     if let Some(existing) = find_rlib_in(pkg_dir) {
-        return Some(existing);
+        return Ok(existing);
     }
     let cache_key = pkg_dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "pkg".to_string());
-    let scratch = BuildScratch::new(hangar_dir, &cache_key);
-    let out = Command::new(&toolchain.cargo)
+    let scratch = BuildScratch::new(hangar_dir, &cache_key)?;
+    let mut command = Command::new(&toolchain.cargo);
+    command
         .arg("build")
         .arg("--lib")
         .arg("--release")
         .arg("--manifest-path")
-        .arg(pkg_dir.join("Cargo.toml"))
+        .arg(pkg_dir.join("Cargo.toml"));
+    if offline {
+        command.arg("--offline");
+    }
+    let out = command
         .env("CARGO_TARGET_DIR", &scratch.path)
         .output()
-        .ok()?;
+        .map_err(|error| format!("could not execute pinned cargo: {error}"))?;
     if !out.status.success() {
-        return None;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        return Err(format!(
+            "pinned cargo failed with {}{}{}",
+            out.status,
+            if stderr.is_empty() { "" } else { ": " },
+            if stderr.is_empty() { stdout.trim() } else { stderr.trim() }
+        ));
     }
     // Find the rlib in the scratch `release/` dir and copy it into the object.
     let release = scratch.path.join("release");
     let built = std::fs::read_dir(&release)
-        .ok()?
+        .map_err(|error| format!("pinned cargo produced no release directory: {error}"))?
         .flatten()
         .map(|e| e.path())
         .find(|p| {
@@ -881,10 +1057,15 @@ pub(crate) fn build_rlib_from_cargo(
                     .and_then(|n| n.to_str())
                     .map(|n| n.starts_with("lib"))
                     .unwrap_or(false)
-        })?;
-    let dest = pkg_dir.join(built.file_name()?);
-    std::fs::copy(&built, &dest).ok()?;
-    Some(dest.to_string_lossy().into_owned())
+        })
+        .ok_or_else(|| "pinned cargo produced no lib*.rlib artifact".to_string())?;
+    let file_name = built
+        .file_name()
+        .ok_or_else(|| "pinned cargo rlib has no file name".to_string())?;
+    let dest = pkg_dir.join(file_name);
+    std::fs::copy(&built, &dest)
+        .map_err(|error| format!("could not copy rlib into package object: {error}"))?;
+    Ok(dest.to_string_lossy().into_owned())
     // `scratch` drops here → the cargo target dir is swept.
 }
 
@@ -1031,9 +1212,14 @@ pub(crate) fn realize_adapter(
     let recipe = adapter_recipe_to_build(&plan.recipe);
     let recipe_hash = recipe.recipe_hash();
     let source_hash = tree_fingerprint(&staged);
+    let build_identity = recipe.build_identity(
+        &plan.name,
+        &source_hash,
+        &super::Envelope::host_platform(),
+    );
     let id_input = format!(
-        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nrecipe={}\n",
-        plan.name, plan.source, source_hash, recipe_hash
+        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nidentity={}\n",
+        plan.name, plan.source, source_hash, build_identity
     );
     let fp = SHA256::sha256_hex(id_input.as_bytes());
     let out_dir = ctx
@@ -1086,13 +1272,13 @@ pub(crate) fn realize_adapter(
     let envelope = super::Envelope::Envelope::for_output(
         &out,
         &format!("adapt:{}:{}", plan.name, plan.source),
-        &format!("adapter:{recipe_hash}"),
+        &format!("adapter:{build_identity}"),
     );
     let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
         .map_err(ProviderError::Adapter)?;
     let identity = cache_identity(
         &source_fingerprint,
-        &format!("adapter-v1:{recipe_hash}"),
+        &format!("adapter-v1:{build_identity}"),
         ctx,
     );
     let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
@@ -1104,9 +1290,17 @@ pub(crate) fn realize_adapter(
         format!("cas:{source_fingerprint}"),
         &source_fingerprint,
         replay,
-        format!("declared-tools:{:?}", build_ctx.tools),
+        format!(
+            "declared-tools:{:?}\nbuild-identity={build_identity}\ncapabilities={}",
+            build_ctx.tools,
+            recipe.declared_capabilities().join(",")
+        ),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
-        BTreeMap::from([("adapter.source".into(), plan.source.clone())]),
+        BTreeMap::from([
+            ("adapter.source".into(), plan.source.clone()),
+            ("build.identity".into(), build_identity),
+            ("build.capabilities".into(), recipe.declared_capabilities().join(",")),
+        ]),
     )
     .map_err(ProviderError::Adapter)?;
     Ok(Realized {
@@ -1371,7 +1565,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
 
     let bin_root = named_outputs.get("bin").map(String::as_str).unwrap_or(out);
     let bin = format!("{}/bin", bin_root.trim_end_matches('/'));
-    let name = spec.short_name().to_string();
+    let name = nix_package_name(spec.short_name()).to_string();
     let envelope = super::Envelope::Envelope::for_output(out, &spec.raw, "nix");
     let provisional_identity = super::Store::CacheIdentity {
         source_fingerprint: envelope.output_hash.clone(),
@@ -1400,8 +1594,16 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         &provisional_identity,
         facts,
     )?;
+    let version = nix_store_version(out, &name);
+    if let Some((_, expected)) = spec.package.split_once("#version=") {
+        if version != expected {
+            return Err(ProviderError::BuildFailed(format!(
+                "Nix package `{name}` realized as version `{version}`, expected `{expected}`"
+            )));
+        }
+    }
     Ok(Realized {
-        version: nix_store_version(out, &name),
+        version,
         name,
         reference: spec.raw.clone(),
         out: out.to_string(),
@@ -1532,6 +1734,14 @@ mod tests {
             flake_ref(&classify("o/r@github").unwrap(), &empty()),
             "github:o/r"
         );
+    }
+
+    #[test]
+    fn flake_ref_strips_jet_version_selector_only_for_nix() {
+        let nix = classify("rustc#version=1.80.0@nixpkgs").unwrap();
+        assert_eq!(flake_ref(&nix, &empty()), "nixpkgs#rustc");
+        let cran = classify("jsonlite#version=1.9.0@cran").unwrap();
+        assert_eq!(flake_ref(&cran, &empty()), "cran:jsonlite#version=1.9.0");
     }
 
     #[test]

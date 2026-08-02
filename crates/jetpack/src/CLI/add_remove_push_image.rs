@@ -458,30 +458,37 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    // D-JPK-IMAGE1: build from what `jet build` already realized. Jetpack has
+    // D-JPK-IMAGE1/D-ENV-IMAGE1: build from what `jet build` already realized.
+    // Jetpack has
     // no dependency on the compiler's own build machinery (the dependency
     // runs the other way — `jet` depends on `jet-driver`, not vice versa), so
     // this mirrors, rather than calls into, `jet build`'s `build/<name>`
     // output convention (`Source/CmdCompile.rs::bin_path`).
-    let bin_path = dir.join("build").join(&image.from);
-    let Ok(bin_data) = std::fs::read(&bin_path) else {
-        theme.error(
-            &format!("`{}` isn't built yet", image.from),
-            &format!(
-                "`jet image {name}` needs `{}` already built at `{}`.",
-                image.from,
-                bin_path.display()
-            ),
-            &format!("run `jet build` first, then `jet image {name}`."),
-        );
-        return 2;
+    let mut files = if image.from_environment {
+        environment_image_files(theme, &dir, &plan, image, name)
+    } else {
+        let bin_path = dir.join("build").join(&image.from);
+        let Ok(bin_data) = std::fs::read(&bin_path) else {
+            theme.error(
+                &format!("`{}` isn't built yet", image.from),
+                &format!(
+                    "`jet image {name}` needs `{}` already built at `{}`.",
+                    image.from,
+                    bin_path.display()
+                ),
+                &format!("run `jet build` first, then `jet image {name}`"),
+            );
+            return 2;
+        };
+        vec![Image::LayerFile {
+            path: format!("usr/local/bin/{}", image.from),
+            data: bin_data,
+            mode: 0o755,
+        }]
     };
-
-    let mut files = vec![Image::LayerFile {
-        path: format!("usr/local/bin/{}", image.from),
-        data: bin_data,
-        mode: 0o755,
-    }];
+    if files.is_empty() {
+        return 2;
+    }
     for rel in &image.files {
         let Ok(data) = std::fs::read(dir.join(rel)) else {
             theme.error(
@@ -500,9 +507,17 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let spec = Image::BuildSpec {
         files,
-        entrypoint: vec![format!("/usr/local/bin/{}", image.from)],
+        entrypoint: vec![image.entrypoint.clone().unwrap_or_else(|| {
+            if image.from_environment {
+                "/bin/sh".to_string()
+            } else {
+                format!("/usr/local/bin/{}", image.from)
+            }
+        })],
         env: image.env_vars.clone(),
         expose: image.expose.clone(),
+        user: image.user.unwrap_or(10_001),
+        healthcheck: image.health.clone(),
     };
     let out_dir = dir.join(".jet").join("images").join(name);
     match Image::build(&spec, &out_dir, name) {
@@ -523,4 +538,80 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             2
         }
     }
+}
+
+fn environment_image_files(
+    theme: &Theme,
+    dir: &std::path::Path,
+    plan: &ModuleEval::EnvPlan,
+    image: &ModuleEval::ImagePlan,
+    name: &str,
+) -> Vec<Image::LayerFile> {
+    let mut package_names = plan
+        .package_refs
+        .iter()
+        .filter_map(|reference| reference.split('@').next())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for service in &image.services {
+        let Some(declaration) = plan.dev_services.iter().find(|candidate| candidate.name == *service) else {
+            theme.error(
+                &format!("environment image `{name}` names unknown service `{service}`"),
+                "an image can project only services declared by the source environment",
+                "declare the service under `env.<name>`, or remove it from `services:`",
+            );
+            return Vec::new();
+        };
+        if !declaration.enable {
+            theme.error(
+                &format!("environment image `{name}` selects disabled service `{service}`"),
+                "disabled services are not part of the environment projection",
+                "enable the service or remove it from the image projection",
+            );
+            return Vec::new();
+        }
+        if let Some(reference) = crate::Services::catalog_pkg_ref(service) {
+            if let Some(package) = reference.split('@').next() {
+                package_names.push(package.to_string());
+            }
+        }
+    }
+    package_names.sort();
+    package_names.dedup();
+
+    let mut files = Vec::new();
+    let mut shell_source = None;
+    for package in package_names {
+        let path = dir.join("build").join(&package);
+        let Ok(data) = std::fs::read(&path) else {
+            theme.error(
+                &format!("environment package `{package}` isn't built yet"),
+                &format!("the environment image needs `{}` at `{}`", package, path.display()),
+                &format!("run `jet build` for the environment packages, then `jet image {name}`"),
+            );
+            return Vec::new();
+        };
+        if shell_source.is_none() && matches!(package.as_str(), "bash" | "busybox" | "dash" | "sh") {
+            shell_source = Some(data.clone());
+        }
+        files.push(Image::LayerFile {
+            path: format!("usr/local/bin/{package}"),
+            data,
+            mode: 0o755,
+        });
+    }
+    let Some(shell) = shell_source else {
+        theme.error(
+            &format!("environment image `{name}` has no shell"),
+            "D-ENV-IMAGE1's beginner image is a runnable shell image and cannot copy a host shell or invent one",
+            "add `bash`, `busybox`, `dash`, or `sh` to the environment packages and build it first",
+        );
+        return Vec::new();
+    };
+    files.push(Image::LayerFile {
+        path: "bin/sh".to_string(),
+        data: shell,
+        mode: 0o755,
+    });
+    files
 }

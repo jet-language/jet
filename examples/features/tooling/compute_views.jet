@@ -1,0 +1,13 @@
+// D-SHAPE-PLACE1=A / D-COMPUTE-TYPE1=D (#443): Tensor bracket slices use
+// first-axis windows. Bare slices copy; `&` creates a mutable write-through view.
+use core.compute as compute
+
+fn run() {
+    tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+    copied :: tensor[1..2]
+    print("copied:{compute.to_list(copied)}")
+
+    edit :: &tensor[1..2]
+    edit[0] = 9.0
+    print("edited:{compute.to_list(tensor)}")
+}

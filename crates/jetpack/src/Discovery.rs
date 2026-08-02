@@ -259,18 +259,21 @@ pub fn service_option_fields() -> Vec<OptionField> {
     vec![
         field("enable", "required", "Turn the service on or off."),
         field("ports", "[]", "TCP ports the service listens on."),
-        field("init", "catalog", "Shell command that starts the service."),
+        field("run", "[String]", "Executable and arguments that start the service."),
         field(
             "shutdown",
-            "process group",
-            "Shell command that stops the service.",
+            ".Term/.Kill",
+            "Typed process-group shutdown policy.",
         ),
         field(
             "data_dir",
             ".jet/services/<name>/data",
             "Persisted state directory.",
         ),
-        field("ready", "process/port probe", "Command polled until ready."),
+        field("ready", "ServiceProbe", "Typed readiness probe polled until ready."),
+        field("after", "[String]", "Services that must be healthy first."),
+        field("before_start", "[String]", "Finite tasks to run before start."),
+        field("sockets", "[String]", "Project-relative Unix sockets reserved before start."),
     ]
 }
 

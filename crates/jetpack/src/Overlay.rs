@@ -322,16 +322,19 @@ fn draft_block(
             None => out.push_str(&format!("        provider: Provider.{provider}\n")),
         }
     }
+    out.push_str("        overrides: {\n");
+    out.push_str(&format!("            \"{package}\": .{{\n"));
     if let Some(patch) = patch {
         out.push_str(&format!(
-            "        package(\"{package}\").patches += [patch(\"{patch}\")]\n"
+            "                patches: [patch(\"{patch}\")],\n"
         ));
     }
     if allow_unfree {
         out.push_str(&format!(
-            "        package(\"{package}\").allowUnfree: true\n"
+            "                allowUnfree: true,\n"
         ));
     }
+    out.push_str("            },\n        }\n");
     out.push_str("    }\n");
     out
 }

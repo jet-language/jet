@@ -25,10 +25,14 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
     let source = dir.join("main.rs");
     let binary = dir.join("main");
     let observe = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap();
+    let uninit = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
+mod jet_uninit_semantics {{
+{uninit}
+}}
 {prelude}
 {body}
 "#
@@ -261,7 +265,10 @@ fn run() {
     let over = compile_jet(over_src)
         .expect("Fixed.over should accept one mutable inline byte array");
     let over_user = common::strip_vetted_prelude_modules(&over.rust);
-    assert!(over_user.contains("JetFixed::over(&mut user_bytes)"), "{over_user}");
+    assert!(
+        over_user.contains("JetFixed::over_uninit_fixed(&mut user_bytes)"),
+        "{over_user}"
+    );
     if Command::new("rustc").arg("--version").output().is_ok() {
         let (code, stdout, stderr) = run_jet("fixed_over", over_src);
         assert_eq!(code, 0, "{stderr}");

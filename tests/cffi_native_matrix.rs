@@ -105,6 +105,14 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
     let mut archive = command(&ar);
     archive.arg("rcs").arg(&library).arg(&object);
     run_ok(&mut archive, "C archiver");
+    fs::write(
+        root.join("pkg.jet"),
+        format!(
+            "payload: {{ name: \"jet-cffi-matrix\", version: \"0.1.0\" }}\ndeps: {{ jetmatrix: c@\"{}\" }}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
 
     let explicit_abi = match abi.as_str() {
         "sysv64" => "#ABI(sysv64) ",
@@ -162,7 +170,7 @@ fn run() {{
     print(c.callback_twice(increment, 40))
     print(c.callback_parallel(increment))
     print((load(7) ?? panic("success expected")).id)
-    if load(8) == {{ Ok(v) -> {{ print("unexpected {{v.id}}") }} Err(e) -> {{ print(e) }} }}
+    if load(8) == {{ .Ok(v) -> {{ print("unexpected {{v.id}}") }} .Err(e) -> {{ print(e) }} }}
     print(c.abi_default(20, 22))
     print(c.abi_explicit(19, 23))
 }}

@@ -616,6 +616,19 @@ renumbered, and no new `W` code may be allocated.
 | E1318 | sema  | a `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name (D-CLI-FIELD-MARKERS1) |
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
+| E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
+| E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root (D-ECO-MEMBERS1) |
+| E1324 | jetpack | two workspace member paths resolve to the same physical directory (D-ECO-MEMBERS1) |
+| E1325 | jetpack | two workspace members claim the same stable package name (D-ECO-MEMBERS1) |
+| E1326 | jetpack | a managed environment file has an invalid destination, source, mode, permission, or content shape (D-ENV-FILES1) |
+| E1327 | jetpack | an environment image references an unknown environment (D-ENV-IMAGE1) |
+| E1328 | sema | a typed service readiness probe has the wrong arguments or an unsafe path (D-JPK-SERVICEDEPTH1) |
+| E1329 | jetpack | a lifecycle hook is not explicitly trusted (D-ENV-LIFECYCLE2) |
+| E1330 | sema/jetpack | task metadata has the wrong shape or an unsafe project path (D-TASK-META1) |
+| E1331 | sema | an environment module import escapes its project root (D-ENV-FLAKEPARTS1) |
+| E1332 | sema | one named environment profile is composed with conflicting definitions (D-ENV-PROFILE1) |
+| E1333 | sema | a dotenv declaration has an unsafe path or invalid allowlist/secret shape (D-ENV-LIFECYCLE2) |
+| E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -865,6 +878,27 @@ names never provide an alternate lookup path.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `Void` or `Void ?`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
+
+### Ecosystem and environment composition diagnostics
+
+These diagnostics protect the single Package/environment graph. They fire before
+membership, profile, managed-file, service, or task state is applied.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1322 | the workspace member path escapes the workspace root | Membership is rooted in the workspace, including the physical target behind a symlink. | Use a relative path below the workspace root and remove escaping symlinks. |
+| E1323 | a member Package declares `members` | Membership has one level: the workspace root owns discovery. | Remove the nested `members:` field and declare those paths at the workspace root. |
+| E1324 | two member paths resolve to one physical directory | Two spellings cannot create two Package identities. | Keep one member path for the directory. |
+| E1325 | two members claim the same Package name | Stable package references need one owner. | Rename one Package or remove the duplicate member. |
+| E1326 | a managed environment file declaration is invalid | Managed files are typed and plan before apply; unsafe paths or ambiguous ownership must fail closed. | Use a project-relative destination and a valid `source`/`content`, mode, and permission record. |
+| E1327 | an environment image names an unknown environment | An image may project only a declared environment fact graph. | Declare the environment or change `from:` to an existing one. |
+| E1328 | a typed service readiness probe is invalid | Probe arguments and notify paths are checked before a process can start. | Use the documented `exec`, `http`, `notify`, or `tcp` shape and a project-relative path. |
+| E1329 | a lifecycle hook is not explicitly trusted | Hooks execute project commands during activation. | Set `trusted: true` after review and approve the changed environment. |
+| E1330 | task metadata or a task path is invalid | Task packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
+| E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
+| E1332 | profile definitions conflict | Composition cannot silently choose one profile's packages or variables over another's. | Merge equal facts or give the profiles different names. |
+| E1333 | a dotenv declaration is invalid | Dotenv is part of the typed lifecycle plan. Paths stay inside the project, and expert allowlists make secret handling explicit. | Use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
+| E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1688,8 +1722,8 @@ front-end `.jet` diagnostics).
 | E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
 | E1259 | Couldn't build the plugin's WASM Component. | Building a `target: plugin` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |
 | E1260 | A plugin's exported function has an unsupported signature. | v1 plugin exports (D-PLUGIN-EXPORT1=A) support only functions whose parameters and return type are all `Int` or all `Float` — Bool/Text need more of the Component Model's ABI machinery, a real follow-on rather than this increment's scope. | Narrow the signature to all-`Int`/all-`Float`, or drop `pub` if this function isn't meant to be called across the plugin boundary. |
-| E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `init`/`ready` commands are correct, or raise the timeout isn't configurable yet — fix the service itself. |
-| E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`), or remove it. |
+| E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `run`/`ready` declarations are correct, or raise the timeout isn't configurable yet — fix the service itself. |
+| E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `after`, `before_start`, `sockets`), or remove it. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |

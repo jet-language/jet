@@ -66,6 +66,36 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "include_str! allocator runtime template — user-program RUNTIME_PANIC path, not compiler code",
     ),
     (
+        "crates/jet-codegen/src/Prelude/LocalCell.rs",
+        4,
+        "include_str! local-cell runtime template — user-program borrow-conflict panic path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs",
+        1,
+        "include_str! task runtime template — user-program already-joined-task panic path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs",
+        3,
+        "include_str! HTTP server runtime template — user-program serving panic path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/WebApp.rs",
+        1,
+        "include_str! web-app runtime template — user-program serving panic path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/TaskGroup.rs",
+        4,
+        "#[cfg(test)] task-group assertion fixtures; exact audited count",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/SharedProtocol.rs",
+        1,
+        "#[cfg(test)] shared-protocol panic waiter fixture",
+    ),
+    (
         "crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs",
         1,
         "include_str! runtime template — cbor.encode user-program runtime panic, not compiler code",
@@ -164,6 +194,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-driver/src/CompilerExtensionHook.rs",
         8,
         "#[cfg(test)] compiler-extension assertion fixtures",
+    ),
+    (
+        "Source/ProveSolver.rs",
+        1,
+        "#[test]-only solver assertion fixture",
     ),
 ];
 

@@ -6,7 +6,7 @@ macOS/Windows execution remains Epoch 9 (owner-directed deferral).
 | Case | Expected | Linux evidence |
 |------|----------|----------------|
 | Unknown `--lens` | E2941 exit 2, no `.jetproof` | CLI validation in `CmdProve` |
-| Sensitive capture non-TTY | E3627 exit 1 | `ProveReplay::run_safe_capture` |
+| Sensitive capture non-TTY | E3627 exit 1 | `ProveReplay::prepare_safe_capture` |
 | Corrupt `.jetproof-replay` | E3622 | footer/frame hash checks |
 | Schema mismatch | E3620 | major/minor gate |
 | Identity mismatch | E3621 | entry/source/adapter/triple |

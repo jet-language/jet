@@ -3,11 +3,12 @@
 //! own `env.*` module form (D-JPK-MODBODY1's already-ratified `module
 //! env.dev { packages: […] }` shape — no new syntax needed).
 //!
-//! Never touches the project's `env.jet`: the shim prints to stdout so the
-//! user reviews and merges it themselves (I8 — one canonical env surface, no
-//! silent second manifest). Fields the shim can't express (`shellHook`, a
-//! second named devShell, …) come back as `unmapped` and fire L0204, one
-//! warning per field, without blocking the print.
+//! Writes the validated foreign graph to the project's `.jet/lock`, but never
+//! touches `env.jet`: the shim prints to stdout so the user reviews and merges
+//! it themselves (I8 — one canonical env surface, no silent second manifest).
+//! Fields the shim can't express (`shellHook`, a second named devShell, …)
+//! remain in the lock as `unmapped` facts and fire L0204, one warning per
+//! field, without blocking the print.
 //!
 //! Determinism for tests: mirrors `Provider.rs`'s fixture convention — a
 //! captured `nix eval --json` payload can stand in for the real binary, so
@@ -16,6 +17,7 @@
 
 use super::Output::Theme;
 use super::Provider::ProviderError;
+use super::SemanticLock::FlakeGraph;
 use super::JSON;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
@@ -149,37 +151,120 @@ pub fn l0204_unmappable(field: &str, file: &str) -> Diagnostic {
     )
 }
 
-/// `jetpack bridge flake` — read `flake.nix` in `dir`, print the generated
-/// shim to stdout, and print any L0204 warnings to stderr. Returns the exit
-/// code. `nix` missing is E1256, checked by the caller before this runs (so
-/// the message names the right command).
+/// `jetpack bridge flake` — read `flake.nix` in `dir`, commit its typed graph
+/// to `.jet/lock`, print the generated shim to stdout, and print any L0204
+/// warnings to stderr. Returns the exit code. `nix` missing is E1256, checked
+/// by the caller before this runs (so the message names the right command).
 pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
-    let flake_path = dir.join(Syntax::FOREIGN_FLAKE_FILE);
-    if !flake_path.is_file() {
+    let flake_path = [
+        dir.join(Syntax::FOREIGN_FLAKE_FILE),
+        dir.join(Syntax::FOREIGN_DEVENV_FILE),
+    ]
+    .into_iter()
+    .find(|path| path.is_file());
+    let Some(flake_path) = flake_path else {
         theme.error(
-            "no flake.nix here",
+            "no foreign flake here",
             &format!(
-                "`jet bridge flake` translates a {} in the current directory; none was found.",
-                Syntax::FOREIGN_FLAKE_FILE
+                "`jet bridge flake` translates `{}` or `{}` in the current directory; neither was found.",
+                Syntax::FOREIGN_FLAKE_FILE,
+                Syntax::FOREIGN_DEVENV_FILE
             ),
-            "run this from the directory that has the flake.nix, or write env.* by hand.",
+            "run this from the directory that has the foreign file, or write env.* by hand.",
         );
         return 2;
-    }
-    let facts = match read_devshell_facts(dir, fixtures) {
+    };
+    let mut facts = match read_devshell_facts(dir, fixtures) {
         Ok(f) => f,
         Err(e) => {
             super::CLI::report_provider_error(theme, &e);
             return 1;
         }
     };
+    // The bridge consumes the same typed foreign graph used by `.jet/lock`.
+    // Keep the best-effort devShell translation usable when arbitrary Nix is
+    // present, but surface every known projection loss instead of silently
+    // dropping it.
+    match FlakeGraph::load(&flake_path) {
+        Ok(graph) => {
+            if graph.named_dev_shells().len() > 1
+                && !facts.unmapped.iter().any(|item| item == "named devShells")
+            {
+                facts.unmapped.push("named devShells".to_string());
+            }
+            for field in &graph.unsupported {
+                if !facts.unmapped.iter().any(|item| item == field) {
+                    facts.unmapped.push(field.clone());
+                }
+            }
+            for output in &graph.outputs {
+                let label = if output.system.is_empty() {
+                    format!("{}:{}", output.kind.as_str(), output.attribute)
+                } else {
+                    format!("{}:{}:{}", output.kind.as_str(), output.system, output.attribute)
+                };
+                match &output.kind {
+                    super::SemanticLock::FlakeOutputKind::Package => {
+                        if !output.attribute.is_empty()
+                            && !facts.packages.iter().any(|package| package == &output.attribute)
+                        {
+                            facts.packages.push(output.attribute.clone());
+                        }
+                    }
+                    super::SemanticLock::FlakeOutputKind::DevShell => {
+                        if output.attribute != "default"
+                            && !facts.unmapped.iter().any(|item| item == &label)
+                        {
+                            facts.unmapped.push(label);
+                        }
+                    }
+                    super::SemanticLock::FlakeOutputKind::App
+                    | super::SemanticLock::FlakeOutputKind::Check
+                    | super::SemanticLock::FlakeOutputKind::Formatter
+                    | super::SemanticLock::FlakeOutputKind::Other(_) => {
+                        if !facts.unmapped.iter().any(|item| item == &label) {
+                            facts.unmapped.push(label);
+                        }
+                    }
+                }
+            }
+            if let Err(error) = super::SemanticLock::atomic_commit(dir, &graph.semantic_lock()) {
+                theme.error(
+                    "couldn't commit foreign graph",
+                    &format!(
+                        "couldn't update `{}`: {}",
+                        super::SemanticLock::live_path(dir).display(),
+                        error.message()
+                    ),
+                    "fix the lock or project permissions, then run `jet bridge flake` again.",
+                );
+                return 1;
+            }
+        }
+        Err(error) => facts
+            .unmapped
+            .push(format!("flake graph: {error}")),
+    }
+    facts.unmapped.sort();
+    facts.unmapped.dedup();
+    facts.packages.sort();
+    facts.packages.dedup();
     for field in &facts.unmapped {
         eprint!(
             "{}",
             crate::Diagnostics::render_all(
-                Syntax::FOREIGN_FLAKE_FILE,
+                flake_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(Syntax::FOREIGN_FLAKE_FILE),
                 "",
-                std::slice::from_ref(&l0204_unmappable(field, Syntax::FOREIGN_FLAKE_FILE))
+                std::slice::from_ref(&l0204_unmappable(
+                    field,
+                    flake_path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(Syntax::FOREIGN_FLAKE_FILE),
+                ))
             )
         );
     }
@@ -284,6 +369,32 @@ mod tests {
         let facts_a = read_devshell_facts(&dir, Some(&fixtures)).unwrap();
         let facts_b = read_devshell_facts(&dir, Some(&fixtures)).unwrap();
         assert_eq!(render_shim(&facts_a), render_shim(&facts_b));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_commits_and_reloads_unsupported_graph_facts() {
+        let dir = scratch("commit");
+        std::fs::write(
+            dir.join("flake.nix"),
+            "{ outputs = { devShells.x86_64-linux.default = { shellHook = \"export FOO=1\"; }; }; }",
+        )
+        .unwrap();
+        let fixtures = scratch("commit_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": ["ripgrep"], "shellHook": "export FOO=1"}"#,
+        )
+        .unwrap();
+
+        let code = cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures));
+        assert_eq!(code, 0);
+        let raw = std::fs::read_to_string(crate::SemanticLock::live_path(&dir)).unwrap();
+        assert!(raw.contains("flake-unsupported:shellHook"), "{raw}");
+        let graph = FlakeGraph::load(&dir.join("flake.nix")).unwrap();
+        assert_eq!(graph.unsupported, vec!["shellHook".to_string()]);
+
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fixtures).ok();
     }

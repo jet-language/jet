@@ -10,8 +10,8 @@ related framework transplant cards (#505/#506/#1157–#1161).
 | D-LIVEQUERY1=A | Live queries + `#Transact` write-set invalidation + Signal push | `Prelude/CoreLib/Top/LiveQuery.rs`; `examples/features/tooling/app_live.jet` |
 | D-SCHEDULE1=A | `#Every` on `#Job`/`#Task` only; one schedule fact | Syntax + `CheckerSchedule.rs`; `examples/features/devloop/schedule_every.jet`; UI E0925/E0926 |
 | D-AUTH1=A | sessions, password, OAuth, magic link | `AuthSession.rs` / `Auth.rs`; `examples/features/crypto/auth_sessions.jet` |
-| D-SYNC1 | CRDT sync values | SyncLite + sync examples (card #1159 done) |
-| D-DBPOLICY1 | row policy | card #1160 done |
+| D-SYNC1 | CRDT sync values | SyncLite + sync examples; live-session receipt path landed; Tower closure remains coupled to row-policy binding |
+| D-DBPOLICY1 | row policy | Pure policy compiler/evaluator landed; connection/live-query enforcement binding remains owner-gated on #1160 |
 | D-LINTPOLICY1 | warnings non-blocking by default | pkg lint policy tests; dossier bypass facts |
 
 ## Non-goals / honesty

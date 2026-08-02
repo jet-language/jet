@@ -975,6 +975,67 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn remote_execution_grant_carries_blobs_without_cache_authority() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_execute_only_{}_{}",
+        std::process::id(),
+        "roundtrip"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let transport = RemoteCacheTransport::new(&root);
+    let key = ActionKey::new("execute-only");
+    let sandbox = RemoteSandboxProof::new(
+        "sandbox-execute-only",
+        key.as_str(),
+        ContentDigest::from_bytes(b"toolchain"),
+    );
+    let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
+    let input_digest = transport
+        .upload_execution_blob(b"source", &policy)
+        .unwrap();
+    assert_eq!(
+        transport.download_execution_blob(&input_digest, &policy).unwrap(),
+        b"source"
+    );
+    assert!(transport.upload_blob(b"cache-forbidden", &policy).is_err());
+
+    let input = ActionInputSnapshot {
+        path: BuildPath::new("src/main.jet").unwrap(),
+        digest: input_digest,
+        byte_len: 6,
+    };
+    let output_path = BuildPath::new("build/app").unwrap();
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+        inputs: vec![input],
+        outputs: vec![output_path.clone()],
+        toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+        sandbox: sandbox.clone(),
+    };
+    transport.submit_execution(&request, &policy).unwrap();
+    assert_eq!(transport.read_execution_request(&key).unwrap(), request);
+
+    let output_digest = transport
+        .upload_execution_blob(b"compiled", &policy)
+        .unwrap();
+    let result = RemoteExecutionResult {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: vec![ActionOutputRecord {
+            path: output_path,
+            digest: output_digest,
+            byte_len: 8,
+        }],
+        toolchain_digest: request.toolchain_digest.clone(),
+        sandbox,
+    };
+    transport.publish_execution_result(&result, &policy).unwrap();
+    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[cfg(unix)]
 #[test]
 fn remote_transport_rejects_a_symlinked_store_root() {

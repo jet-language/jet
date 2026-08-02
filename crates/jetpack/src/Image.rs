@@ -57,7 +57,7 @@ pub struct LayerFile {
 /// no filesystem/network access happens until `build` runs. `files` need not
 /// be pre-sorted; `build` sorts by path so declaration order never affects
 /// the output.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BuildSpec {
     pub files: Vec<LayerFile>,
     /// The container's `Entrypoint` (D-JPK-IMAGE1: the package binary's path
@@ -67,6 +67,25 @@ pub struct BuildSpec {
     pub env: Vec<(String, String)>,
     /// `expose:` — TCP ports, rendered as `ExposedPorts` keys (`"<port>/tcp"`).
     pub expose: Vec<i64>,
+    /// D-ENV-IMAGE1: non-root container user. The default is a stable
+    /// unprivileged UID; callers may choose a different explicit UID.
+    pub user: u32,
+    /// D-ENV-IMAGE1: optional health command rendered as an OCI
+    /// `Healthcheck` record.
+    pub healthcheck: Option<String>,
+}
+
+impl Default for BuildSpec {
+    fn default() -> Self {
+        Self {
+            files: Vec::new(),
+            entrypoint: Vec::new(),
+            env: Vec::new(),
+            expose: Vec::new(),
+            user: 10_001,
+            healthcheck: None,
+        }
+    }
 }
 
 /// The result of a successful build: where the OCI layout landed and the
@@ -162,10 +181,18 @@ fn build_config_json(spec: &BuildSpec, layer_digest: &str) -> String {
         .map(|p| format!("{}:{{}}", JSON::quote(&format!("{p}/tcp"))))
         .collect::<Vec<_>>()
         .join(",");
+    let health = spec.healthcheck.as_ref().map_or_else(String::new, |command| {
+        format!(
+            ",\"Healthcheck\":{{\"Test\":[\"CMD-SHELL\",{}]}}",
+            JSON::quote(command)
+        )
+    });
     format!(
-        "{{\"architecture\":\"{arch}\",\"os\":\"{os}\",\"config\":{{\"Env\":[{env_arr}],\"ExposedPorts\":{{{exposed}}},\"Entrypoint\":[{entrypoint_arr}]}},\"rootfs\":{{\"type\":\"layers\",\"diff_ids\":[\"sha256:{layer_digest}\"]}}}}",
+        "{{\"architecture\":\"{arch}\",\"os\":\"{os}\",\"config\":{{\"Env\":[{env_arr}],\"ExposedPorts\":{{{exposed}}},\"Entrypoint\":[{entrypoint_arr}],\"User\":\"{user}\"{health}}},\"rootfs\":{{\"type\":\"layers\",\"diff_ids\":[\"sha256:{layer_digest}\"]}}}}",
         arch = ARCHITECTURE,
         os = OS,
+        user = spec.user,
+        health = health,
     )
 }
 
@@ -307,6 +334,8 @@ mod tests {
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![("RUST_LOG".to_string(), "info".to_string())],
             expose: vec![8080],
+            user: 10_001,
+            healthcheck: None,
         };
         let dir_a = std::env::temp_dir().join(format!("jet-oci-test-a-{}", std::process::id()));
         let dir_b = std::env::temp_dir().join(format!("jet-oci-test-b-{}", std::process::id()));
@@ -348,6 +377,8 @@ mod tests {
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
+            user: 10_001,
+            healthcheck: None,
         };
         let spec_b = BuildSpec {
             files: vec![f2, f1],
@@ -377,6 +408,8 @@ mod tests {
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
+            user: 10_001,
+            healthcheck: None,
         };
         let spec_b = BuildSpec {
             files: vec![bin("usr/local/bin/app", "version two")],
@@ -421,6 +454,8 @@ mod tests {
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
+            user: 10_001,
+            healthcheck: None,
         };
         let dir = std::env::temp_dir().join(format!("jet-oci-test-layout-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);

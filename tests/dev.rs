@@ -1140,12 +1140,6 @@ fn data_schema_empty_and_generic_rows_report_jit_gap_on_default_dev() {
 }
 
 #[test]
-fn sh_typed_text_default_reports_jit_gap() {
-    let file = example_path("safety/sh_typed_text");
-    assert_default_dev_jit_gap("safety/sh_typed_text", &file);
-}
-
-#[test]
 fn hidden_generic_constructor_default_dev_matches_aot() {
     if !have_rustc() {
         return;

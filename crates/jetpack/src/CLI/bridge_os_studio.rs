@@ -10,7 +10,8 @@ use std::path::PathBuf;
 pub(super) fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
-            if !Provider::nix_on_path() {
+            let fixtures = fixtures_for(&parsed.flags);
+            if fixtures.is_none() && !Provider::nix_on_path() {
                 theme.error_coded(
                     "E1256",
                     "`jet bridge flake` needs `nix`, which isn't on PATH",
@@ -21,7 +22,7 @@ pub(super) fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
             let dir = std::env::current_dir().unwrap_or_default();
-            Bridge::cmd_flake(theme, &dir, fixtures_for(&parsed.flags).as_deref())
+            Bridge::cmd_flake(theme, &dir, fixtures.as_deref())
         }
         Some(other) => {
             theme.error(

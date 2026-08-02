@@ -11,6 +11,8 @@ fn run() {
     tb :: compute.ones([3]) ?? panic("tb")
     j :: compute.jvp_mul(a, b, ta, tb) ?? panic("jvp")
     print("jvp:{compute.to_list(j)}")
+    va :: compute.vjp_add(a, b, ta) ?? panic("vjp")
+    print("vjp:{compute.to_list(compute.grad_a(va))}")
 
     m := compute.matrix(2, 2, 0.0) ?? panic("m")
     compute.set(&m, [0, 0], 1.0) ?? panic("set")

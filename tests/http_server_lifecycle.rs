@@ -82,6 +82,10 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     }))
 }
 
+fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    panic!("{msg} (at {file}:{line})");
+}
+
 #[derive(Clone)]
 struct JetObserveTask {
     parent: usize,

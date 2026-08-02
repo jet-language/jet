@@ -10,6 +10,7 @@ use crate::RefSpec::{self, RefError};
 use crate::Services;
 use crate::Store::{self, Roots};
 use crate::Syntax;
+use crate::Trust;
 use std::path::Path;
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
@@ -330,12 +331,23 @@ pub(super) fn realize_adapter(
 )> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
+    let project_dir = std::env::current_dir().ok();
     let ctx = Provider::Ctx {
         fixtures: None,
         store_dir: &store_dir,
         offline: flags.offline,
-        project_dir: None,
+        project_dir: project_dir.as_deref(),
     };
+    let identity = match Provider::adapter_cache_expectation(plan, &ctx) {
+        Ok(expectation) => expectation.identity.recipe_fingerprint,
+        Err(error) => {
+            report_provider_error(theme, &error);
+            return None;
+        }
+    };
+    if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust).is_err() {
+        return None;
+    }
     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
         Ok(realized) => {
             let (mut entry, source_state, lease) = realized.into_parts();
@@ -510,11 +522,21 @@ pub(super) struct RunPlan {
     /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
     /// exist before entering the environment.
     pub(super) secrets: Vec<String>,
+    /// Typed lifecycle, profile, and language-pack facts shared by activation,
+    /// lifecycle hooks, and service commands.
+    pub(super) environment: ModuleEval::EnvironmentFacts,
 }
 
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
 pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
+    load_project_plan_with_profile(theme, None)
+}
+
+pub(super) fn load_project_plan_with_profile(
+    theme: &Theme,
+    requested_profile: Option<&str>,
+) -> Result<RunPlan, i32> {
     let dir = std::env::current_dir().unwrap_or_default();
 
     // Load jetpack.toml [sources] first so they are available as defaults.
@@ -540,7 +562,7 @@ pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
     // surface stays the fallback until the typed example fully replaces it.
     if ModuleEval::is_module_surface(&src) {
-        return typed_plan_with_defaults(theme, &src, &dir, toml_table);
+        return typed_plan_with_defaults(theme, &src, &dir, toml_table, requested_profile);
     }
 
     let ef = EnvFile::parse(&src);
@@ -557,6 +579,7 @@ pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
         prompt_strip: ModuleEval::PromptStripMode::default(),
         dev_services: Vec::new(),
         secrets: Vec::new(),
+        environment: ModuleEval::EnvironmentFacts::default(),
     })
 }
 
@@ -569,8 +592,9 @@ fn typed_plan_with_defaults(
     src: &str,
     dir: &Path,
     toml_defaults: RefSpec::SourceTable,
+    requested_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let plan = ModuleEval::evaluate_env(src, dir).map_err(|d| {
+    let plan = ModuleEval::evaluate_env_with_profile(src, dir, requested_profile).map_err(|d| {
         eprint!(
             "{}",
             crate::Diagnostics::render_all(Syntax::ENV_FILE, src, std::slice::from_ref(&d))
@@ -579,13 +603,38 @@ fn typed_plan_with_defaults(
     })?;
     let mut table = plan.table;
     table.merge_defaults(toml_defaults);
-    // U12: a dev service with no explicit `init:` that matches the built-in
+    // U12: a dev service with no explicit `run:` that matches the built-in
     // catalog implicitly depends on that catalog's package (e.g. `redis: {
     // enable: true }` needs `redis-server` on PATH) — fold its ref in
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
+    let selected_profile = plan.selected_profile;
+    let catalog = ModuleEval::LanguagePackCatalog::builtin();
+    let language_expansion = match catalog.expand(&plan.languages) {
+        Ok(expansion) => expansion,
+        Err(error) => {
+            theme.error(
+                "environment language pack could not be expanded",
+                &error,
+                "choose a language pack from jet env info or register a typed contribution.",
+            );
+            return Err(2);
+        }
+    };
+    if let Some(profile) = &selected_profile {
+        for package in &profile.packages {
+            if !package_refs.iter().any(|existing| existing == package) {
+                package_refs.push(package.clone());
+            }
+        }
+    }
+    for package in &language_expansion.packages {
+        if !package_refs.iter().any(|existing| existing == package) {
+            package_refs.push(package.clone());
+        }
+    }
     for svc in &plan.dev_services {
-        if svc.enable && svc.init.is_none() {
+        if svc.enable && svc.run.is_none() {
             if let Some(pkg_ref) = Services::catalog_pkg_ref(&svc.name) {
                 if !package_refs.iter().any(|r| r == pkg_ref) {
                     package_refs.push(pkg_ref.to_string());
@@ -605,6 +654,18 @@ fn typed_plan_with_defaults(
         prompt_strip: plan.prompt_strip,
         dev_services: plan.dev_services,
         secrets: plan.secrets,
+        environment: ModuleEval::EnvironmentFacts {
+            lifecycle: plan.lifecycle,
+            profiles: plan.profiles,
+            languages: language_expansion.selections,
+            selected_profile,
+            language_packs: language_expansion
+                .applied
+                .iter()
+                .filter_map(|name| catalog.get(name).cloned())
+                .collect(),
+            files: plan.files,
+        },
     })
 }
 
