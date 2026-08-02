@@ -1213,8 +1213,14 @@ pub(crate) fn lower_method_call(
             if let Some(alloc_type) = alloc_new_type(receiver, method, cx, &locals) {
                 let rust_type = alloc_handle_rust_type(alloc_type).unwrap_or("jet_mem::JetArena");
                 let ctor = if alloc_type == "Fixed" && method == "new" {
-                    let Expr::Int(size, _, _, _) = &args[0].expr else {
-                        unreachable!("sema rewrites Fixed.new's comptime size to a literal")
+                    let Some(Expr::Int(size, _, _, _)) = args.first().map(|arg| &arg.expr) else {
+                        // Invalid source can still reach the lowering seam while the
+                        // front end is assembling all diagnostics. Keep codegen total;
+                        // the sema E0103 remains the user-facing result.
+                        return TExpr {
+                            ty: Type::Named(alloc_type.to_string()),
+                            kind: TExprKind::Uninit,
+                        };
                     };
                     format!("__JET_FIXED_INLINE:{size}")
                 } else if alloc_type == "Fixed" && method == "over" {

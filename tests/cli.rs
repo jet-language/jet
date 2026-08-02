@@ -2598,7 +2598,7 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
         .expect("run jet ? List.filter");
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("List.filter(f: fn(T) => Bool) -> List<T>"), "signature missing: {stdout}");
+    assert!(stdout.contains("List.filter(f: fn(T) => Bool) => List<T>"), "signature missing: {stdout}");
     assert!(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}");
     assert!(stdout.contains("Example:"), "example missing: {stdout}");
     assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");

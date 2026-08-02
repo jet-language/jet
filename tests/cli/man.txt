@@ -185,6 +185,9 @@ Debug a program from Jet source
 .B repl
 Try Jet code interactively
 .TP
+.B notebook
+Open a Jet notebook (.jetnb) or Jupyter adapter
+.TP
 .B import
 Convert supported source code into editable Jet
 .TP
@@ -205,6 +208,9 @@ Explain a diagnostic code
 .TP
 .B env
 Open the project development shell
+.TP
+.B remote
+Manage host-owned remote builders
 .TP
 .B trust
 Review or change trusted capabilities
@@ -405,8 +411,17 @@ with doctor: apply auto-fixable problems
 .B --dry-run
 with fix: show changes without writing
 .TP
+.B --edition
+with fix: apply edition migration rewrites --edition=<year>
+.TP
 .B --try-anyway
 with dev: interpret past unsupported features (no guarantees)
+.TP
+.B --interpret
+with dev: force the tier-0 TIR interpreter
+.TP
+.B --trace-tiers
+with run/dev: print per-function Cranelift vs interpreter tier selection
 .TP
 .B --restart
 with dev: always rerun from scratch after a save
@@ -415,7 +430,7 @@ with dev: always rerun from scratch after a save
 with dev: hot-swap compatible edits and restart after type changes
 .TP
 .B --watch
-with dev: use --watch=off to run once and exit
+with run/dev: re-run on dependency changes; --watch=off runs once
 .TP
 .B --project
 with repl: load package settings and imports from this directory
@@ -488,6 +503,9 @@ with build/run: optimize for release
 .TP
 .B --profile
 with build/run: use --profile=<name>
+.TP
+.B --builder
+with build: select a previously bound remote builder
 .TP
 .B --a11y
 with lint: check roles, labels, and other accessibility basics
