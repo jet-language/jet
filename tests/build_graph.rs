@@ -292,7 +292,7 @@ fn typed_probes_record_reproducibility_and_provenance() {
 fn declared_target_toolchain_wins_over_ambient_host_tool() {
     let false_path = std::env::var_os("PATH")
         .into_iter()
-        .flat_map(|paths| std::env::split_paths(&paths))
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
         .map(|directory| directory.join("false"))
         .find(|path| path.is_file())
         .expect("the test host needs a `false` executable");
