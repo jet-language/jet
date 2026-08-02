@@ -225,8 +225,19 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                 matches!(
                     &output.kind,
                     super::SemanticLock::FlakeOutputKind::Package
-                ) && output.system == system
+                )
             }) {
+                if output.system.is_empty() {
+                    theme.error(
+                        "couldn't identify a package system",
+                        &format!("{} has no supported system-qualified package output", output.name),
+                        "write the package under `packages.<system>.<name>`, then run `jet bridge flake` again.",
+                    );
+                    return 1;
+                }
+                if output.system != system {
+                    continue;
+                }
                 match crate::NixEval::evaluate_derivation_output(
                     &source,
                     &system,
@@ -550,6 +561,29 @@ mod tests {
         )
         .unwrap();
         let fixtures = scratch("derivation_error_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        let code = cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures));
+        assert_eq!(code, 1);
+        assert!(!crate::SemanticLock::live_path(&dir).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_rejects_systemless_package_output() {
+        let dir = scratch("systemless_derivation");
+        std::fs::write(
+            dir.join("flake.nix"),
+            "{ packages.default = builtins.derivation { name = \"bad\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; }; }",
+        )
+        .unwrap();
+        let fixtures = scratch("systemless_derivation_fx");
         std::fs::write(
             fixtures.join(FIXTURE_FILE),
             r#"{"buildInputs": [], "shellHook": ""}"#,
