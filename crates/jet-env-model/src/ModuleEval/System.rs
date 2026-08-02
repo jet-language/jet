@@ -721,6 +721,7 @@ fn evaluate_host_option(
             host_field_source(source, value_span, prefix_len),
         ),
         Expr::Field(..) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
+        Expr::Str(_, _) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
         _ => evaluate_expression(
             expr,
             resolved,

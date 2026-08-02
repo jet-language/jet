@@ -69,7 +69,7 @@ pub(crate) fn evaluate_named_fields<'a>(
     let provenance = names
         .into_iter()
         .map(|field| {
-            let (_, expr) = fields.get(&field).expect("computed field name came from map");
+            let (field_span, expr) = fields.get(&field).expect("computed field name came from map");
             let mut dependencies = Vec::new();
             Comptime::walk_identifiers(expr, &mut |name, _| {
                 if fields.contains_key(name) && !dependencies.iter().any(|seen| seen == name) {
@@ -82,7 +82,7 @@ pub(crate) fn evaluate_named_fields<'a>(
                 dependencies,
                 pure: true,
                 source: source
-                    .and_then(|text| text.get(expr.span().start..expr.span().end))
+                    .and_then(|text| text.get(field_span.start..field_span.end))
                     .unwrap_or_default()
                     .trim()
                     .to_string(),
