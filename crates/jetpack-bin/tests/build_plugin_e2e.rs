@@ -93,8 +93,8 @@ fn component_for(response: &str) -> Vec<u8> {
         "(component
           (core module $m
             (memory (export \"memory\") 1)
-            (global $heap (mut i32) (i32.const 80))
-            (data (i32.const 16) \"{wat_response}\")
+            (global $heap (mut i32) (i32.const 4096))
+            (data (i32.const 1024) \"{wat_response}\")
             (func $realloc (export \"cabi_realloc\")
               (param $ptr i32) (param $old i32) (param $align i32) (param $new i32)
               (result i32)
@@ -107,9 +107,9 @@ fn component_for(response: &str) -> Vec<u8> {
             (func $build (export \"build\") (param i32 i32) (result i32)
               (local $ret i32)
               (local.set $ret (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
-              (i32.store (local.get $ret) (i32.const 16))
+              (i32.store (local.get $ret) (i32.const 1024))
               (i32.store offset=4 (local.get $ret) (i32.const {len}))
-              (local.get $ret))))
+              (local.get $ret)))
           (core instance $i (instantiate $m))
           (type $t (func (param \"request\" (list u8)) (result (list u8))))
           (func $build (type $t)
@@ -198,11 +198,12 @@ fn sibling_host_instantiates_component_and_applies_guest_graph() {
     assert_eq!(contribution.targets.len(), 1);
 
     let mut context = BuildContext::new();
+    let policy = BuildPolicy::allow_all().with_plugin_grant("e2e", BuildCapability::FS);
     let applied = with_packaged_plugin_runner(production_runner, || {
         context.apply_packaged_wasm_component_plugin_from_host(
             &manifest_path,
             &component_path,
-            &BuildPolicy::allow_all(),
+            &policy,
         )
     })
     .unwrap();
@@ -236,11 +237,12 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     let manifest_path = root.join("plugin.manifest");
     std::fs::write(&manifest_path, &manifest).unwrap();
     let mut context = BuildContext::new();
+    let policy = BuildPolicy::allow_all().with_plugin_grant("hostile", BuildCapability::FS);
     let error = with_packaged_plugin_runner(production_runner, || {
         context.apply_packaged_wasm_component_plugin_from_host(
             &manifest_path,
             &component_path,
-            &BuildPolicy::allow_all(),
+            &policy,
         )
     })
     .unwrap_err();
