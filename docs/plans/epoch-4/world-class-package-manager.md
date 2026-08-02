@@ -382,6 +382,12 @@ live acceptance, and documentation. Work order is binding.
   identity in `.jet/lock`, and grants no process, network, or derivation
   authority. Other evaluator stages remain private until their own differential
   proof lands.
+- Stage A flake projection consumes the locked input graph through the same
+  semantic-lock path. It preserves every `flake.lock` node, including
+  transitive input edges and array-shaped follows references, and records
+  indirect registry resolutions from each node's `original` and `locked`
+  objects. Ambient user/system registries are not consulted; a missing node or
+  source-vs-lock revision drift fails closed.
 - `tests/fixtures/nix-compat/stage-a.json` records the pinned literal,
   lazy-binding, function, and attrset projections, native rejection,
   normalized lock, and four output identities. Real nixpkgs derivation

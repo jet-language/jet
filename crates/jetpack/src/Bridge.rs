@@ -545,6 +545,45 @@ mod tests {
     }
 
     #[test]
+    fn cmd_flake_commits_locked_transitive_nodes_and_indirect_registry() {
+        let dir = scratch("locked_graph");
+        std::fs::write(
+            dir.join("flake.nix"),
+            r#"{
+  inputs = {
+    nixpkgs.url = "nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+  outputs = { ... }: { devShells.x86_64-linux.default = {}; };
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("flake.lock"),
+            include_str!("../../../tests/fixtures/nix-compat/stage-a-flake.lock"),
+        )
+        .unwrap();
+        let fixtures = scratch("locked_graph_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        assert_eq!(cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures)), 0);
+        let graph = FlakeGraph::load(&dir.join("flake.nix")).unwrap();
+        assert_eq!(graph.lock_nodes.len(), 4);
+        assert_eq!(graph.registries.len(), 1);
+        assert_eq!(graph.registries[0].alias, "nixpkgs");
+        let raw = std::fs::read_to_string(crate::SemanticLock::live_path(&dir)).unwrap();
+        assert!(raw.contains("flake-lock-node:flake-utils"), "{raw}");
+        assert!(raw.contains("flake-registry:nixpkgs"), "{raw}");
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
     fn cmd_flake_rejects_a_stale_semantic_lock() {
         let dir = scratch("stale_graph");
         let system = host_system();

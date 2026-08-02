@@ -163,6 +163,35 @@ pub struct FlakeInput {
     pub provenance: String,
 }
 
+/// One node and its input edges from the native `flake.lock` graph.
+///
+/// The original and locked objects stay canonical JSON rather than being
+/// reinterpreted as a second resolver model. This keeps every Nix field
+/// lossless while Jet still validates the direct input projection above.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FlakeLockEdge {
+    pub name: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FlakeLockNode {
+    pub name: String,
+    pub original: String,
+    pub locked: String,
+    pub inputs: Vec<FlakeLockEdge>,
+}
+
+/// An indirect flake reference resolved by the locked node. Ambient user or
+/// system registries are never consulted; the lock is the authority.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FlakeRegistryEntry {
+    pub alias: String,
+    pub node: String,
+    pub original: String,
+    pub locked: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FlakeOutputKind {
     Package,
@@ -249,6 +278,8 @@ pub struct FlakeGraph {
     pub source: String,
     pub source_fingerprint: String,
     pub inputs: Vec<FlakeInput>,
+    pub lock_nodes: Vec<FlakeLockNode>,
+    pub registries: Vec<FlakeRegistryEntry>,
     pub outputs: Vec<FlakeOutput>,
     pub composition: Option<FlakeComposition>,
     pub unsupported: Vec<String>,
@@ -354,6 +385,8 @@ impl FlakeGraph {
             source,
             source_fingerprint,
             inputs: inputs.into_values().collect(),
+            lock_nodes: Vec::new(),
+            registries: Vec::new(),
             outputs: outputs.into_iter().collect(),
             composition,
             unsupported,
@@ -518,6 +551,54 @@ impl FlakeGraph {
                 )));
             }
         }
+        let mut lock_nodes = Vec::new();
+        let mut lock_node_keys = BTreeSet::new();
+        for record in &lock.records {
+            if record.identity.kind != LockRecordKind::FlakeEvaluator {
+                continue;
+            }
+            let Some(name) = record.identity.key.strip_prefix("flake-lock-node:") else {
+                continue;
+            };
+            if !lock_node_keys.insert(name.to_string()) {
+                return Err(FlakeGraphError::StaleSemanticLock(format!(
+                    "lock has duplicate node record `{name}`"
+                )));
+            }
+            let node = parse_flake_lock_node(&record.identity.exact)?;
+            if node.name != name {
+                return Err(FlakeGraphError::StaleSemanticLock(format!(
+                    "lock node record `{name}` names `{}`",
+                    node.name
+                )));
+            }
+            lock_nodes.push(node);
+        }
+        lock_nodes.sort();
+        let mut registries = Vec::new();
+        let mut registry_keys = BTreeSet::new();
+        for record in &lock.records {
+            if record.identity.kind != LockRecordKind::FlakeEvaluator {
+                continue;
+            }
+            let Some(alias) = record.identity.key.strip_prefix("flake-registry:") else {
+                continue;
+            };
+            if !registry_keys.insert(alias.to_string()) {
+                return Err(FlakeGraphError::StaleSemanticLock(format!(
+                    "lock has duplicate registry record `{alias}`"
+                )));
+            }
+            let entry = parse_flake_registry(&record.identity.exact)?;
+            if entry.alias != alias {
+                return Err(FlakeGraphError::StaleSemanticLock(format!(
+                    "registry record `{alias}` names `{}`",
+                    entry.alias
+                )));
+            }
+            registries.push(entry);
+        }
+        registries.sort();
         let mut outputs = Vec::new();
         for record in &lock.records {
             if record.identity.kind != LockRecordKind::AdapterOutput {
@@ -584,6 +665,8 @@ impl FlakeGraph {
             source,
             source_fingerprint,
             inputs,
+            lock_nodes,
+            registries,
             outputs,
             composition,
             unsupported,
@@ -691,6 +774,72 @@ impl FlakeGraph {
                 return Err(FlakeGraphError::DuplicateInput(input.name.clone()));
             }
         }
+        let lock_names = self
+            .lock_nodes
+            .iter()
+            .map(|node| node.name.as_str())
+            .collect::<BTreeSet<_>>();
+        if lock_names.len() != self.lock_nodes.len() {
+            let mut seen = BTreeSet::new();
+            if let Some(node) = self
+                .lock_nodes
+                .iter()
+                .find(|node| !seen.insert(node.name.as_str()))
+            {
+                return Err(FlakeGraphError::Io(format!(
+                    "flake.lock has duplicate node `{}`",
+                    node.name
+                )));
+            }
+        }
+        for node in &self.lock_nodes {
+            for edge in &node.inputs {
+                let target = crate::JSON::parse(&edge.target)
+                    .map_err(|error| FlakeGraphError::Io(format!("flake.lock edge is invalid: {error}")))?;
+                let targets = match target {
+                    crate::JSON::JSONValue::Str(value) => vec![value],
+                    crate::JSON::JSONValue::Array(values) => values
+                        .into_iter()
+                        .map(|value| {
+                            value.as_str().map(str::to_string).map_err(|error| {
+                                FlakeGraphError::Io(format!("flake.lock edge target is invalid: {error}"))
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => {
+                        return Err(FlakeGraphError::Io(
+                            "flake.lock edge target must be a node name or node list".to_string(),
+                        ))
+                    }
+                };
+                if let Some(target) = targets.iter().find(|target| !lock_names.contains(target.as_str())) {
+                    return Err(FlakeGraphError::Io(format!(
+                        "flake.lock node `{}` input `{}` points to missing node `{target}`",
+                        node.name, edge.name
+                    )));
+                }
+            }
+        }
+        let registry_names = self
+            .registries
+            .iter()
+            .map(|entry| entry.alias.as_str())
+            .collect::<BTreeSet<_>>();
+        if registry_names.len() != self.registries.len() {
+            return Err(FlakeGraphError::Io(
+                "flake.lock has duplicate indirect registry aliases".to_string(),
+            ));
+        }
+        if let Some(entry) = self
+            .registries
+            .iter()
+            .find(|entry| !lock_names.contains(entry.node.as_str()))
+        {
+            return Err(FlakeGraphError::Io(format!(
+                "flake registry alias `{}` points to missing node `{}`",
+                entry.alias, entry.node
+            )));
+        }
         for input in &self.inputs {
             if !input.url.is_empty() && input.revision.is_empty() {
                 return Err(FlakeGraphError::MissingRevision {
@@ -766,6 +915,42 @@ impl FlakeGraph {
                     channel_input: input.follows.clone(),
                     exact_output: input.revision.clone(),
                     reason: input.provenance.clone(),
+                    ..LockRationale::default()
+                },
+            ));
+        }
+        for node in &self.lock_nodes {
+            let exact = flake_lock_node_json(node);
+            records.push(SemanticRecord::new(
+                LockIdentity {
+                    kind: LockRecordKind::FlakeEvaluator,
+                    key: format!("flake-lock-node:{}", node.name),
+                    hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+                    exact,
+                    platform: String::new(),
+                },
+                LockRationale {
+                    source_ref: self.source.clone(),
+                    provider: "flake-lock".to_string(),
+                    reason: "exact locked node and transitive input edges".to_string(),
+                    ..LockRationale::default()
+                },
+            ));
+        }
+        for registry in &self.registries {
+            let exact = flake_registry_json(registry);
+            records.push(SemanticRecord::new(
+                LockIdentity {
+                    kind: LockRecordKind::FlakeEvaluator,
+                    key: format!("flake-registry:{}", registry.alias),
+                    hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+                    exact,
+                    platform: String::new(),
+                },
+                LockRationale {
+                    source_ref: self.source.clone(),
+                    provider: "flake-registry".to_string(),
+                    reason: "indirect flake reference resolved by locked registry metadata".to_string(),
                     ..LockRationale::default()
                 },
             ));
@@ -889,9 +1074,27 @@ impl FlakeGraph {
             .as_ref()
             .map(composition_json)
             .unwrap_or_else(|| "null".to_string());
+        let lock_nodes = self
+            .lock_nodes
+            .iter()
+            .map(flake_lock_node_json)
+            .collect::<Vec<_>>()
+            .join(",");
+        let registries = self
+            .registries
+            .iter()
+            .map(flake_registry_json)
+            .collect::<Vec<_>>()
+            .join(",");
         format!(
-            "{{\"source\":{},\"inputs\":[{}],\"outputs\":[{}],\"composition\":{},\"unsupported\":[{}]}}",
-            crate::JSON::quote(&self.source), inputs, outputs, composition, unsupported
+            "{{\"source\":{},\"inputs\":[{}],\"lockNodes\":[{}],\"registries\":[{}],\"outputs\":[{}],\"composition\":{},\"unsupported\":[{}]}}",
+            crate::JSON::quote(&self.source),
+            inputs,
+            lock_nodes,
+            registries,
+            outputs,
+            composition,
+            unsupported
         )
     }
 }
@@ -1022,6 +1225,133 @@ fn composition_json(composition: &FlakeComposition) -> String {
         composition.per_system,
         systems
     )
+}
+
+fn flake_lock_node_json(node: &FlakeLockNode) -> String {
+    let inputs = node
+        .inputs
+        .iter()
+        .map(|input| {
+            format!(
+                "{{\"name\":{},\"target\":{}}}",
+                crate::JSON::quote(&input.name),
+                input.target
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"inputs\":[{}],\"locked\":{},\"name\":{},\"original\":{}}}",
+        inputs,
+        node.locked,
+        crate::JSON::quote(&node.name),
+        node.original
+    )
+}
+
+fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
+    let parsed = crate::JSON::parse_lenient(raw)
+        .map_err(|error| FlakeGraphError::InvalidAssignment(error))?;
+    let object = parsed
+        .value
+        .as_object()
+        .map_err(FlakeGraphError::InvalidAssignment)?;
+    let string_field = |key: &str| {
+        object
+            .get(key)
+            .ok_or_else(|| FlakeGraphError::InvalidAssignment(format!("missing lock node field `{key}`")))?
+            .as_str()
+            .map(str::to_string)
+            .map_err(FlakeGraphError::InvalidAssignment)
+    };
+    let inputs = object
+        .get("inputs")
+        .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock node inputs".to_string()))?
+        .as_array()
+        .map_err(FlakeGraphError::InvalidAssignment)?
+        .iter()
+        .map(|value| {
+            let object = value
+                .as_object()
+                .map_err(FlakeGraphError::InvalidAssignment)?;
+            let name = object
+                .get("name")
+                .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock edge name".to_string()))?
+                .as_str()
+                .map(str::to_string)
+                .map_err(FlakeGraphError::InvalidAssignment)?;
+            let target = object
+                .get("target")
+                .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock edge target".to_string()))?;
+            Ok(FlakeLockEdge {
+                name,
+                target: canonical_json(target),
+            })
+        })
+        .collect::<Result<Vec<_>, FlakeGraphError>>()?;
+    let original = object
+        .get("original")
+        .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock node original".to_string()))?;
+    let locked = object
+        .get("locked")
+        .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock node locked".to_string()))?;
+    if original.as_object().is_err() || locked.as_object().is_err() {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "lock node original/locked must be objects".to_string(),
+        ));
+    }
+    let mut node = FlakeLockNode {
+        name: string_field("name")?,
+        original: canonical_json(original),
+        locked: canonical_json(locked),
+        inputs,
+    };
+    node.inputs.sort();
+    Ok(node)
+}
+
+fn flake_registry_json(entry: &FlakeRegistryEntry) -> String {
+    format!(
+        "{{\"alias\":{},\"locked\":{},\"node\":{},\"original\":{}}}",
+        crate::JSON::quote(&entry.alias),
+        entry.locked,
+        crate::JSON::quote(&entry.node),
+        entry.original
+    )
+}
+
+fn parse_flake_registry(raw: &str) -> Result<FlakeRegistryEntry, FlakeGraphError> {
+    let parsed = crate::JSON::parse_lenient(raw)
+        .map_err(|error| FlakeGraphError::InvalidAssignment(error))?;
+    let object = parsed
+        .value
+        .as_object()
+        .map_err(FlakeGraphError::InvalidAssignment)?;
+    let string_field = |key: &str| {
+        object
+            .get(key)
+            .ok_or_else(|| FlakeGraphError::InvalidAssignment(format!("missing registry field `{key}`")))?
+            .as_str()
+            .map(str::to_string)
+            .map_err(FlakeGraphError::InvalidAssignment)
+    };
+    let original = object
+        .get("original")
+        .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing registry original".to_string()))?;
+    let locked = object
+        .get("locked")
+        .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing registry locked".to_string()))?;
+    if original.as_object().is_err() || locked.as_object().is_err() {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "registry original/locked must be objects".to_string(),
+        ));
+    }
+    Ok(FlakeRegistryEntry {
+        alias: string_field("alias")?,
+        node: string_field("node")?,
+        original: canonical_json(original),
+        locked: canonical_json(locked),
+    })
 }
 
 fn parse_composition_record(raw: &str) -> Result<FlakeComposition, FlakeGraphError> {
@@ -1363,6 +1693,58 @@ fn flake_revision(url: &str) -> String {
     }
 }
 
+fn canonical_json(value: &crate::JSON::JSONValue) -> String {
+    match value {
+        crate::JSON::JSONValue::Null => "null".to_string(),
+        crate::JSON::JSONValue::Bool(value) => value.to_string(),
+        crate::JSON::JSONValue::Num(value) => {
+            if value.is_finite() && value.fract() == 0.0 {
+                format!("{value:.0}")
+            } else {
+                value.to_string()
+            }
+        }
+        crate::JSON::JSONValue::Str(value) => crate::JSON::quote(value),
+        crate::JSON::JSONValue::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(canonical_json)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        crate::JSON::JSONValue::Object(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(key, value)| {
+                    format!("{}:{}", crate::JSON::quote(key), canonical_json(value))
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
+}
+
+fn canonical_object(
+    object: &std::collections::BTreeMap<String, crate::JSON::JSONValue>,
+    key: &str,
+) -> String {
+    object
+        .get(key)
+        .map(canonical_json)
+        .unwrap_or_else(|| "{}".to_string())
+}
+
+fn indirect_registry_alias(raw: &str) -> Option<String> {
+    let value = crate::JSON::parse(raw).ok()?;
+    let object = value.as_object().ok()?;
+    if object.get("type")?.as_str().ok()? != "indirect" {
+        return None;
+    }
+    object.get("id")?.as_str().ok().map(str::to_string)
+}
+
 /// Fill floating input URLs from the sibling `flake.lock`. The source flake
 /// remains the authority for URI and follows spelling; the lock contributes
 /// only the exact node identity. Missing or malformed lock data stays a hard
@@ -1370,30 +1752,82 @@ fn flake_revision(url: &str) -> String {
 fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraphError> {
     let parsed = crate::JSON::parse_lenient(text)
         .map_err(|error| FlakeGraphError::Io(format!("flake.lock is invalid: {error}")))?;
-    let root = parsed
+    let root_inputs = parsed
         .value
         .get("nodes")
         .ok()
         .and_then(|value| value.as_object().ok())
         .and_then(|nodes| nodes.get("root"))
         .and_then(|value| value.get("inputs").ok())
-        .and_then(|value| value.as_object().ok());
-    let Some(root_inputs) = root else {
-        return Err(FlakeGraphError::Io(
-            "flake.lock has no nodes.root.inputs map".to_string(),
-        ));
-    };
+        .and_then(|value| value.as_object().ok())
+        .ok_or_else(|| {
+            FlakeGraphError::Io("flake.lock has no nodes.root.inputs map".to_string())
+        })?;
     let nodes = parsed
         .value
         .get("nodes")
         .ok()
         .and_then(|value| value.as_object().ok())
         .ok_or_else(|| FlakeGraphError::Io("flake.lock has no nodes map".to_string()))?;
+
+    graph.lock_nodes = nodes
+        .iter()
+        .map(|(name, value)| {
+            let object = value.as_object().map_err(|error| {
+                FlakeGraphError::Io(format!("flake.lock node `{name}` is invalid: {error}"))
+            })?;
+            let inputs = match object.get("inputs") {
+                None => Vec::new(),
+                Some(value) => value
+                    .as_object()
+                    .map_err(|error| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock node `{name}` inputs are invalid: {error}"
+                        ))
+                    })?
+                    .iter()
+                    .map(|(input, target)| FlakeLockEdge {
+                        name: input.clone(),
+                        target: canonical_json(target),
+                    })
+                    .collect(),
+            };
+            Ok(FlakeLockNode {
+                name: name.clone(),
+                original: canonical_object(object, "original"),
+                locked: canonical_object(object, "locked"),
+                inputs,
+            })
+        })
+        .collect::<Result<Vec<_>, FlakeGraphError>>()?;
+    graph.lock_nodes.sort();
+
+    graph.registries = root_inputs
+        .iter()
+        .filter_map(|(_input, reference)| {
+            let node = lock_node_name(Some(reference))?;
+            let lock_node = graph.lock_nodes.iter().find(|item| item.name == node)?;
+            let alias = indirect_registry_alias(&lock_node.original)?;
+            Some(FlakeRegistryEntry {
+                alias,
+                node,
+                original: lock_node.original.clone(),
+                locked: lock_node.locked.clone(),
+            })
+        })
+        .collect();
+    graph.registries.sort();
+
     for input in &mut graph.inputs {
-        if !input.revision.is_empty() {
+        let Some(reference) = root_inputs.get(&input.name) else {
+            if input.revision.is_empty() && input.follows.is_empty() {
+                return Err(FlakeGraphError::MissingRevision {
+                    input: input.name.clone(),
+                });
+            }
             continue;
-        }
-        let Some(node_name) = lock_node_name(root_inputs.get(&input.name)) else {
+        };
+        let Some(node_name) = lock_node_name(Some(reference)) else {
             if input.follows.is_empty() {
                 return Err(FlakeGraphError::MissingRevision {
                     input: input.name.clone(),
@@ -1401,22 +1835,33 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
             }
             continue;
         };
-        let Some(locked) = nodes
-            .get(&node_name)
-            .and_then(|value| value.get("locked").ok())
-            .and_then(|value| value.as_object().ok())
-        else {
+        let Some(node) = graph.lock_nodes.iter().find(|node| node.name == node_name) else {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` points to missing node `{node_name}`",
+                input.name
+            )));
+        };
+        let locked = crate::JSON::parse(&node.locked)
+            .map_err(|error| FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}")))?;
+        let locked = locked.as_object().map_err(|error| {
+            FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}"))
+        })?;
+        let Some(exact) = locked.get("rev").and_then(|value| value.as_str().ok()) else {
+            if !input.revision.is_empty() || !input.follows.is_empty() {
+                continue;
+            }
             return Err(FlakeGraphError::MissingRevision {
                 input: input.name.clone(),
             });
         };
-        let exact = locked.get("rev").and_then(|value| value.as_str().ok());
-        let Some(exact) = exact else {
-            return Err(FlakeGraphError::MissingRevision {
+        if input.revision.is_empty() {
+            input.revision = exact.to_string();
+        } else if input.revision != exact {
+            return Err(FlakeGraphError::ConflictingInput {
                 input: input.name.clone(),
+                field: "revision".to_string(),
             });
-        };
-        input.revision = exact.to_string();
+        }
     }
     Ok(())
 }
@@ -2519,6 +2964,107 @@ mod flake_tests {
         assert_eq!(restored.inputs, graph.inputs);
         assert_eq!(restored.outputs, graph.outputs);
         assert_eq!(restored.semantic_lock_text(), graph.semantic_lock_text());
+    }
+
+    #[test]
+    fn pinned_flake_lock_fixture_preserves_nodes_edges_and_registry_resolution() {
+        let source = include_str!("../../../tests/fixtures/nix-compat/stage-a-flake.nix");
+        let lock = include_str!("../../../tests/fixtures/nix-compat/stage-a-flake.lock");
+        let expected = crate::JSON::parse(include_str!(
+            "../../../tests/fixtures/nix-compat/stage-a-flake.expected.json"
+        ))
+        .unwrap();
+        let expected = expected.as_object().unwrap();
+        let graph = FlakeGraph::parse_with_lock(
+            "tests/fixtures/nix-compat/stage-a-flake.nix".to_string(),
+            source,
+            Some(lock),
+            true,
+        )
+        .unwrap();
+
+        let expected_revisions = expected.get("input_revisions").unwrap().as_object().unwrap();
+        for input in &graph.inputs {
+            assert_eq!(
+                input.revision,
+                expected_revisions
+                    .get(&input.name)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+            );
+        }
+        let expected_nodes = expected
+            .get("lock_nodes")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            graph
+                .lock_nodes
+                .iter()
+                .map(|node| node.name.as_str())
+                .collect::<Vec<_>>(),
+            expected_nodes
+        );
+        let systems = graph
+            .lock_nodes
+            .iter()
+            .find(|node| node.name == "flake-utils")
+            .unwrap()
+            .inputs
+            .first()
+            .unwrap();
+        assert_eq!(systems.name, "systems");
+        assert_eq!(systems.target, "[\"systems\"]");
+
+        let registry = graph.registries.first().unwrap();
+        let expected_registry = expected.get("registry").unwrap().as_object().unwrap();
+        assert_eq!(registry.alias, expected_registry.get("alias").unwrap().as_str().unwrap());
+        assert_eq!(registry.node, expected_registry.get("node").unwrap().as_str().unwrap());
+        let locked = crate::JSON::parse(&registry.locked).unwrap();
+        let locked = locked.as_object().unwrap();
+        for field in ["type", "owner", "repo"] {
+            assert_eq!(
+                locked.get(field).unwrap().as_str().unwrap(),
+                expected_registry
+                    .get(&format!("locked_{field}"))
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+            );
+        }
+
+        let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+        assert_eq!(restored, graph);
+        assert_eq!(restored.semantic_lock_text(), graph.semantic_lock_text());
+    }
+
+    #[test]
+    fn flake_lock_revision_drift_fails_closed() {
+        let source =
+            "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaaa\"; }";
+        let lock = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "bbbbbbbb" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(lock), true)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            FlakeGraphError::ConflictingInput { input, field }
+                if input == "nixpkgs" && field == "revision"
+        ));
     }
 
     #[test]
