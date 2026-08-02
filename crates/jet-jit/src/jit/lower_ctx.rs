@@ -6695,44 +6695,46 @@ impl LowerCtx<'_, '_> {
                 let val = self.lower_expr(arg)?;
                 match kind {
                     TTypedTextForm::SQLRaw => {
-                        let n = self.b.ins().iconst(types::I64, 2);
-                        let new_ref = self
+                        let host = self
                             .module
-                            .declare_func_in_func(self.host.struct_new, self.b.func);
-                        let call = self.b.ins().call(new_ref, &[n]);
-                        let rec = self.b.inst_results(call)[0];
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let one = self.b.ins().iconst(types::I64, 1);
-                        let set = self
-                            .module
-                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                        self.b.ins().call(set, &[rec, zero, val]);
-                        let list_new = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                        let call = self.b.ins().call(list_new, &[]);
-                        let empty = self.b.inst_results(call)[0];
-                        self.b.ins().call(set, &[rec, one, empty]);
-                        Ok(rec)
+                            .declare_func_in_func(self.host.math.typed_sql_raw, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
+                        Ok(self.b.inst_results(call)[0])
                     }
                     TTypedTextForm::SQLTemplate => {
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let get = self
+                        let host = self
                             .module
-                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                        let call = self.b.ins().call(get, &[val, zero]);
+                            .declare_func_in_func(self.host.math.typed_sql_template, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
                         Ok(self.b.inst_results(call)[0])
                     }
                     TTypedTextForm::SQLParams => {
-                        let one = self.b.ins().iconst(types::I64, 1);
-                        let get = self
+                        let host = self
                             .module
-                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                        let call = self.b.ins().call(get, &[val, one]);
+                            .declare_func_in_func(self.host.math.typed_sql_params, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    TTypedTextForm::HTMLRaw | TTypedTextForm::HTMLText | TTypedTextForm::ShRaw => {
-                        Ok(val)
+                    TTypedTextForm::HTMLRaw => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.math.typed_html_raw, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TTypedTextForm::HTMLText => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.math.typed_html_text, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TTypedTextForm::ShRaw => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.math.typed_sh_raw, self.b.func);
+                        let call = self.b.ins().call(host, &[val]);
+                        Ok(self.b.inst_results(call)[0])
                     }
                 }
             }
@@ -6741,35 +6743,30 @@ impl LowerCtx<'_, '_> {
                 literals,
                 holes,
             } => {
-                let template = literals.join("?");
-                let template_id = self.runtime.heap.alloc_string(template);
-                let template_v = self.b.ins().iconst(types::I64, template_id);
                 let list_new = self
                     .module
                     .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                let call = self.b.ins().call(list_new, &[]);
-                let params = self.b.inst_results(call)[0];
                 let push = self
                     .module
                     .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                let call = self.b.ins().call(list_new, &[]);
+                let literal_values = self.b.inst_results(call)[0];
+                for literal in literals {
+                    let id = self.runtime.heap.alloc_string(literal.clone());
+                    let value = self.b.ins().iconst(types::I64, id);
+                    self.b.ins().call(push, &[literal_values, value]);
+                }
+                let call = self.b.ins().call(list_new, &[]);
+                let hole_values = self.b.inst_results(call)[0];
                 for hole in holes {
                     let shown = self.lower_jet_show(hole)?;
-                    self.b.ins().call(push, &[params, shown]);
+                    self.b.ins().call(push, &[hole_values, shown]);
                 }
-                let n = self.b.ins().iconst(types::I64, 2);
-                let new_ref = self
+                let host = self
                     .module
-                    .declare_func_in_func(self.host.struct_new, self.b.func);
-                let call = self.b.ins().call(new_ref, &[n]);
-                let rec = self.b.inst_results(call)[0];
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let set = self
-                    .module
-                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                self.b.ins().call(set, &[rec, zero, template_v]);
-                self.b.ins().call(set, &[rec, one, params]);
-                Ok(rec)
+                    .declare_func_in_func(self.host.math.typed_sql_interp, self.b.func);
+                let call = self.b.ins().call(host, &[literal_values, hole_values]);
+                Ok(self.b.inst_results(call)[0])
             }
             THostCall::TypedTextInterp {
                 kind: TTypedTextInterpKind::Sh,
@@ -6779,58 +6776,57 @@ impl LowerCtx<'_, '_> {
                 let list_new = self
                     .module
                     .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                let call = self.b.ins().call(list_new, &[]);
-                let argv = self.b.inst_results(call)[0];
                 let push = self
                     .module
                     .declare_func_in_func(self.host.coll.list_push, self.b.func);
-                for (i, lit) in literals.iter().enumerate() {
-                    for word in lit.split_whitespace() {
-                        let id = self.runtime.heap.alloc_string(word.to_string());
-                        let v = self.b.ins().iconst(types::I64, id);
-                        self.b.ins().call(push, &[argv, v]);
-                    }
-                    if let Some(hole) = holes.get(i) {
-                        let shown = self.lower_jet_show(hole)?;
-                        self.b.ins().call(push, &[argv, shown]);
-                    }
+                let call = self.b.ins().call(list_new, &[]);
+                let literal_values = self.b.inst_results(call)[0];
+                for literal in literals {
+                    let id = self.runtime.heap.alloc_string(literal.clone());
+                    let value = self.b.ins().iconst(types::I64, id);
+                    self.b.ins().call(push, &[literal_values, value]);
                 }
-                Ok(argv)
+                let call = self.b.ins().call(list_new, &[]);
+                let hole_values = self.b.inst_results(call)[0];
+                for hole in holes {
+                    let shown = self.lower_jet_show(hole)?;
+                    self.b.ins().call(push, &[hole_values, shown]);
+                }
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.math.typed_sh_interp, self.b.func);
+                let call = self.b.ins().call(host, &[literal_values, hole_values]);
+                Ok(self.b.inst_results(call)[0])
             }
             THostCall::TypedTextInterp {
                 kind: TTypedTextInterpKind::HTML,
                 literals,
                 holes,
             } => {
-                let mut acc = {
-                    let id = self.runtime.heap.alloc_string(String::new());
-                    self.b.ins().iconst(types::I64, id)
-                };
-                let concat = self
+                let list_new = self
                     .module
-                    .declare_func_in_func(self.host.math.str_concat, self.b.func);
-                let escape = self
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let push = self
                     .module
-                    .declare_func_in_func(self.host.math.html_escape, self.b.func);
-                for (i, lit) in literals.iter().enumerate() {
-                    if !lit.is_empty() {
-                        let id = self.runtime.heap.alloc_string(lit.clone());
-                        let lit_v = self.b.ins().iconst(types::I64, id);
-                        let call = self.b.ins().call(concat, &[acc, lit_v]);
-                        acc = self.b.inst_results(call)[0];
-                    }
-                    if let Some(hole) = holes.get(i) {
-                        let raw = match &hole.ty {
-                            Type::String => self.lower_expr(hole)?,
-                            _ => self.lower_jet_show(hole)?,
-                        };
-                        let call = self.b.ins().call(escape, &[raw]);
-                        let esc = self.b.inst_results(call)[0];
-                        let call = self.b.ins().call(concat, &[acc, esc]);
-                        acc = self.b.inst_results(call)[0];
-                    }
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                let call = self.b.ins().call(list_new, &[]);
+                let literal_values = self.b.inst_results(call)[0];
+                for literal in literals {
+                    let id = self.runtime.heap.alloc_string(literal.clone());
+                    let value = self.b.ins().iconst(types::I64, id);
+                    self.b.ins().call(push, &[literal_values, value]);
                 }
-                Ok(acc)
+                let call = self.b.ins().call(list_new, &[]);
+                let hole_values = self.b.inst_results(call)[0];
+                for hole in holes {
+                    let shown = self.lower_jet_show(hole)?;
+                    self.b.ins().call(push, &[hole_values, shown]);
+                }
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.math.typed_html_interp, self.b.func);
+                let call = self.b.ins().call(host, &[literal_values, hole_values]);
+                Ok(self.b.inst_results(call)[0])
             }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
@@ -15579,6 +15575,9 @@ impl LowerCtx<'_, '_> {
                     (start, self.b.ins().isub(end_exclusive, one))
                 };
                 self.emit_view_mut_window(recv_val, start, end)
+            }
+            TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => {
+                Err("jit tensor view requires ambient Prelude evaluation".to_string())
             }
             TBuiltinOp::SplitWrite { .. } => {
                 let mid = self.lower_expr(&args[0])?;

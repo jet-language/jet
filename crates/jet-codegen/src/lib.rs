@@ -21,4 +21,7 @@ pub mod numeric_widen;
 /// compiles the same Prelude source that AOT embeds.
 #[path = "Prelude/TaskGroup.rs"]
 pub mod task_group;
+/// D-TYPEDTEXT1=D: typed SQL/HTML/Sh semantics shared by AOT and TIR.
+#[path = "Prelude/TypedText.rs"]
+pub mod typed_text;
 // Prelude/ contains include_str-embedded text files, not Rust modules.

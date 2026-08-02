@@ -209,14 +209,18 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
-                TTypedTextForm::SQLRaw => format!("(({a}).clone(), Vec::new())"),
-                TTypedTextForm::HTMLRaw => format!("({a}).clone()"),
-                TTypedTextForm::ShRaw => format!(
-                    "({a}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()"
+                TTypedTextForm::SQLRaw => format!("{}jet_typed_sql_raw(({a}).clone())", cx.root_prefix),
+                TTypedTextForm::HTMLRaw => format!("{}jet_typed_html_raw(({a}).clone())", cx.root_prefix),
+                TTypedTextForm::ShRaw => format!("{}jet_typed_sh_raw(({a}).clone())", cx.root_prefix),
+                TTypedTextForm::SQLTemplate => format!(
+                    "{{ let __jet_sql = ({a}); {}jet_typed_sql_template(&__jet_sql) }}",
+                    cx.root_prefix
                 ),
-                TTypedTextForm::SQLTemplate => format!("({a}).0.clone()"),
-                TTypedTextForm::SQLParams => format!("({a}).1.clone()"),
-                TTypedTextForm::HTMLText => format!("({a}).clone()"),
+                TTypedTextForm::SQLParams => format!(
+                    "{{ let __jet_sql = ({a}); {}jet_typed_sql_params(&__jet_sql) }}",
+                    cx.root_prefix
+                ),
+                TTypedTextForm::HTMLText => format!("{}jet_typed_html_text(({a}).clone())", cx.root_prefix),
             }
         }
         THostCall::FnName(name) => cx.mangle_name(name),
@@ -322,52 +326,52 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             use crate::Codegen::escape_rust_str;
             match kind {
                 TTypedTextInterpKind::SQL => {
-                    let template = literals.join("?");
                     let hole_s = holes
                         .iter()
                         .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!(
-                        "({}.to_string(), vec![{hole_s}])",
-                        escape_rust_str(&template)
+                        "{}jet_typed_sql_interpolate(&[{}], vec![{hole_s}])",
+                        cx.root_prefix,
+                        literals
+                            .iter()
+                            .map(|literal| escape_rust_str(literal))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )
                 }
                 TTypedTextInterpKind::Sh => {
-                    let mut argv = Vec::new();
-                    for (i, lit) in literals.iter().enumerate() {
-                        for word in lit.split_whitespace() {
-                            argv.push(format!("{}.to_string()", escape_rust_str(word)));
-                        }
-                        if let Some(hole) = holes.get(i) {
-                            argv.push(format!("({}).jet_show()", emit_tir_expr(hole, cx)));
-                        }
-                    }
-                    format!("vec![{}]", argv.join(", "))
+                    let hole_s = holes
+                        .iter()
+                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "{}jet_typed_sh_interpolate(&[{}], vec![{hole_s}])",
+                        cx.root_prefix,
+                        literals
+                            .iter()
+                            .map(|literal| escape_rust_str(literal))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 }
                 TTypedTextInterpKind::HTML => {
-                    let mut fmt_str = String::new();
-                    let mut fmt_args = Vec::new();
-                    for (i, lit) in literals.iter().enumerate() {
-                        fmt_str.push_str(&lit.replace('{', "{{").replace('}', "}}"));
-                        if let Some(h) = holes.get(i) {
-                            fmt_str.push_str("{}");
-                            fmt_args.push(format!(
-                                "{}jet_html_escape(&({}))",
-                                cx.root_prefix,
-                                emit_tir_expr(h, cx)
-                            ));
-                        }
-                    }
-                    if fmt_args.is_empty() {
-                        format!("{}.to_string()", escape_rust_str(&fmt_str))
-                    } else {
-                        format!(
-                            "format!({}, {})",
-                            escape_rust_str(&fmt_str),
-                            fmt_args.join(", ")
-                        )
-                    }
+                    let hole_s = holes
+                        .iter()
+                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "{}jet_typed_html_interpolate(&[{}], vec![{hole_s}])",
+                        cx.root_prefix,
+                        literals
+                            .iter()
+                            .map(|literal| escape_rust_str(literal))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 }
             }
         }

@@ -328,6 +328,25 @@ impl JetArena {
         }
     }
 
+    /// Clone one string handle from a homogeneous `[String]` list. JIT host
+    /// adapters use this to marshal lists into shared Prelude functions;
+    /// numeric list storage remains unchanged because string handles are the
+    /// established erased `Int` representation.
+    pub fn list_get_string(&self, list: i64, index: i64) -> Option<String> {
+        if index < 0 {
+            return None;
+        }
+        let handle = match self.values.get(list as usize)? {
+            JetVal::List(values) => match values.get(index as usize)? {
+                JetVal::Int(handle) => Some(*handle),
+                JetVal::String(value) => return Some(value.clone()),
+                _ => None,
+            },
+            _ => None,
+        }?;
+        self.clone_string(handle)
+    }
+
     pub fn list_get_float(&self, list: i64, index: i64) -> Option<f64> {
         if index < 0 {
             return None;

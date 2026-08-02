@@ -8,6 +8,10 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::cell::RefCell;
 
+mod typed_text_semantics {
+    include!("../../jet-codegen/src/Prelude/TypedText.rs");
+}
+
 #[derive(Clone, Copy)]
 struct F32x4([f32; 4]);
 #[derive(Clone, Copy)]
@@ -576,20 +580,139 @@ extern "C" fn jet_jit_math_result_handle(packed: i64) -> i64 {
     unpack_handle(packed)
 }
 
-extern "C" fn jet_jit_html_escape(s: i64) -> i64 {
-    let raw = clone_string(s);
-    let mut out = String::with_capacity(raw.len());
-    for c in raw.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
+fn clone_string_list(list: i64) -> Option<Vec<String>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list)?;
+        (0..len)
+            .map(|index| rt.heap.list_get_string(list, index))
+            .collect()
+    })
+}
+
+fn require_string_list(list: i64) -> Option<Vec<String>> {
+    let values = clone_string_list(list);
+    if values.is_none() {
+        Concurrency::with_runtime_mut(|rt| rt.set_trap("typed-text list contains a non-string value"));
     }
-    alloc_string(out)
+    values
+}
+
+fn alloc_string_list(values: Vec<String>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for value in values {
+            let string = rt.heap.alloc_string(value);
+            let _ = rt.heap.list_push_int(list, string);
+        }
+        list
+    })
+}
+
+fn alloc_sql_value(value: (String, Vec<String>)) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let template = rt.heap.alloc_string(value.0);
+        let params = rt.heap.alloc_empty_list();
+        for param in value.1 {
+            let value = rt.heap.alloc_string(param);
+            let _ = rt.heap.list_push_int(params, value);
+        }
+        let _ = rt.heap.record_set_string(record, 0, template);
+        let _ = rt.heap.record_set_int(record, 1, params);
+        record
+    })
+}
+
+fn clone_sql_value(value: i64) -> Option<(String, Vec<String>)> {
+    Concurrency::with_runtime_mut(|rt| {
+        let template_handle = rt.heap.record_get_string(value, 0)?;
+        let template = rt.heap.clone_string(template_handle)?;
+        let params_handle = rt.heap.record_get_int(value, 1)?;
+        let len = rt.heap.list_len(params_handle)?;
+        let mut params = Vec::with_capacity(len as usize);
+        for index in 0..len {
+            params.push(rt.heap.list_get_string(params_handle, index)?);
+        }
+        Some((template, params))
+    })
+}
+
+extern "C" fn jet_jit_typed_sql_raw(s: i64) -> i64 {
+    alloc_sql_value(typed_text_semantics::jet_typed_sql_raw(clone_string(s)))
+}
+
+extern "C" fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
+    let Some(literals) = require_string_list(literals) else {
+        return 0;
+    };
+    let Some(holes) = require_string_list(holes) else {
+        return 0;
+    };
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    alloc_sql_value(typed_text_semantics::jet_typed_sql_interpolate(
+        &literal_refs,
+        holes,
+    ))
+}
+
+extern "C" fn jet_jit_typed_sql_template(value: i64) -> i64 {
+    let Some(value) = clone_sql_value(value) else {
+        trap("typed-text SQL value is malformed");
+        return 0;
+    };
+    alloc_string(typed_text_semantics::jet_typed_sql_template(&value))
+}
+
+extern "C" fn jet_jit_typed_sql_params(value: i64) -> i64 {
+    let Some(value) = clone_sql_value(value) else {
+        trap("typed-text SQL value is malformed");
+        return 0;
+    };
+    alloc_string_list(typed_text_semantics::jet_typed_sql_params(&value))
+}
+
+extern "C" fn jet_jit_typed_sh_raw(s: i64) -> i64 {
+    alloc_string_list(typed_text_semantics::jet_typed_sh_raw(clone_string(s)))
+}
+
+extern "C" fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
+    let Some(literals) = require_string_list(literals) else {
+        return 0;
+    };
+    let Some(holes) = require_string_list(holes) else {
+        return 0;
+    };
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    alloc_string_list(typed_text_semantics::jet_typed_sh_interpolate(
+        &literal_refs,
+        holes,
+    ))
+}
+
+extern "C" fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
+    let Some(literals) = require_string_list(literals) else {
+        return 0;
+    };
+    let Some(holes) = require_string_list(holes) else {
+        return 0;
+    };
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    alloc_string(typed_text_semantics::jet_typed_html_interpolate(
+        &literal_refs,
+        holes,
+    ))
+}
+
+extern "C" fn jet_jit_typed_html_raw(value: i64) -> i64 {
+    alloc_string(typed_text_semantics::jet_typed_html_raw(clone_string(value)))
+}
+
+extern "C" fn jet_jit_typed_html_text(value: i64) -> i64 {
+    alloc_string(typed_text_semantics::jet_typed_html_text(clone_string(value)))
+}
+
+extern "C" fn jet_jit_html_escape(s: i64) -> i64 {
+    alloc_string(typed_text_semantics::jet_typed_html_escape(&clone_string(s)))
 }
 
 extern "C" fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
@@ -609,6 +732,15 @@ pub(crate) struct MathHostFns {
     pub result_handle: FuncId,
     pub html_escape: FuncId,
     pub str_concat: FuncId,
+    pub typed_sql_raw: FuncId,
+    pub typed_sql_interp: FuncId,
+    pub typed_sql_template: FuncId,
+    pub typed_sql_params: FuncId,
+    pub typed_sh_raw: FuncId,
+    pub typed_sh_interp: FuncId,
+    pub typed_html_raw: FuncId,
+    pub typed_html_text: FuncId,
+    pub typed_html_interp: FuncId,
 }
 
 pub(crate) fn register_math_host_symbols(builder: &mut JITBuilder) {
@@ -627,6 +759,36 @@ pub(crate) fn register_math_host_symbols(builder: &mut JITBuilder) {
     );
     builder.symbol("jet_jit_html_escape", jet_jit_html_escape as *const u8);
     builder.symbol("jet_jit_str_concat", jet_jit_str_concat as *const u8);
+    builder.symbol("jet_jit_typed_sql_raw", jet_jit_typed_sql_raw as *const u8);
+    builder.symbol(
+        "jet_jit_typed_sql_interpolate",
+        jet_jit_typed_sql_interpolate as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_typed_sql_template",
+        jet_jit_typed_sql_template as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_typed_sql_params",
+        jet_jit_typed_sql_params as *const u8,
+    );
+    builder.symbol("jet_jit_typed_sh_raw", jet_jit_typed_sh_raw as *const u8);
+    builder.symbol(
+        "jet_jit_typed_sh_interpolate",
+        jet_jit_typed_sh_interpolate as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_typed_html_raw",
+        jet_jit_typed_html_raw as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_typed_html_text",
+        jet_jit_typed_html_text as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_typed_html_interpolate",
+        jet_jit_typed_html_interpolate as *const u8,
+    );
 }
 
 pub(crate) fn declare_math_host_fns(module: &mut JITModule) -> Result<MathHostFns, String> {
@@ -661,5 +823,14 @@ pub(crate) fn declare_math_host_fns(module: &mut JITModule) -> Result<MathHostFn
         result_handle: import("jet_jit_math_result_handle", &sig_unary)?,
         html_escape: import("jet_jit_html_escape", &sig_unary)?,
         str_concat: import("jet_jit_str_concat", &sig_binary)?,
+        typed_sql_raw: import("jet_jit_typed_sql_raw", &sig_unary)?,
+        typed_sql_interp: import("jet_jit_typed_sql_interpolate", &sig_binary)?,
+        typed_sql_template: import("jet_jit_typed_sql_template", &sig_unary)?,
+        typed_sql_params: import("jet_jit_typed_sql_params", &sig_unary)?,
+        typed_sh_raw: import("jet_jit_typed_sh_raw", &sig_unary)?,
+        typed_sh_interp: import("jet_jit_typed_sh_interpolate", &sig_binary)?,
+        typed_html_raw: import("jet_jit_typed_html_raw", &sig_unary)?,
+        typed_html_text: import("jet_jit_typed_html_text", &sig_unary)?,
+        typed_html_interp: import("jet_jit_typed_html_interpolate", &sig_binary)?,
     })
 }

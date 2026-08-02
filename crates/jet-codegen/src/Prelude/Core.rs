@@ -1882,22 +1882,6 @@ fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
 fn jet_string_trim_view(s: &str) -> &str {
     jet_unicode_trim_view(s)
 }
-// D-TYPEDTEXT1=D: escape a hole's text before it joins an `HTML` template —
-// the audited insertion point for every non-`.raw()` interpolation.
-fn jet_html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
 fn jet_string_lines(s: &String) -> Vec<String> {
     s.lines().map(|x| x.to_string()).collect()
 }

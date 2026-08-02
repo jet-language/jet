@@ -82,21 +82,6 @@ fn typed_sql_parts(value: &CtValue, span: crate::Diagnostics::Span) -> Result<(S
     }
 }
 
-fn typed_html_escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
 fn local_cell_handle(type_name: &str, index: usize) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -3111,17 +3096,25 @@ impl<'a> EvalCtx<'a> {
                     let value = self.eval_expr(arg, scope)?;
                     match kind {
                         TTypedTextForm::SQLRaw => match value {
-                            CtValue::Str(template) => Ok(typed_sql_value(template, Vec::new())),
+                            CtValue::Str(template) => {
+                                let (template, params) = crate::typed_text::jet_typed_sql_raw(template);
+                                Ok(typed_sql_value(template, params.into_iter().map(CtValue::Str).collect()))
+                            }
                             _ => Err(unsupported("SQL.raw expects String", self.span())),
                         },
-                        TTypedTextForm::HTMLRaw | TTypedTextForm::HTMLText => match value {
-                            CtValue::Str(_) => Ok(value),
+                        TTypedTextForm::HTMLRaw => match value {
+                            CtValue::Str(value) => Ok(CtValue::Str(crate::typed_text::jet_typed_html_raw(value))),
+                            _ => Err(unsupported("HTML value expects String", self.span())),
+                        },
+                        TTypedTextForm::HTMLText => match value {
+                            CtValue::Str(value) => Ok(CtValue::Str(crate::typed_text::jet_typed_html_text(value))),
                             _ => Err(unsupported("HTML value expects String", self.span())),
                         },
                         TTypedTextForm::ShRaw => match value {
                             CtValue::Str(text) => Ok(CtValue::List(
-                                text.split_whitespace()
-                                    .map(|word| CtValue::Str(word.to_string()))
+                                crate::typed_text::jet_typed_sh_raw(text)
+                                    .into_iter()
+                                    .map(CtValue::Str)
                                     .collect(),
                             )),
                             _ => Err(unsupported("Sh.raw expects String", self.span())),
@@ -3145,36 +3138,31 @@ impl<'a> EvalCtx<'a> {
                         values.push(self.eval_expr(hole, scope)?);
                     }
                     match kind {
-                        TTypedTextInterpKind::SQL => Ok(typed_sql_value(
-                            literals.join("?"),
-                            values
-                                .into_iter()
-                                .map(|value| CtValue::Str(value.jet_show()))
-                                .collect(),
-                        )),
+                        TTypedTextInterpKind::SQL => {
+                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let (template, params) = crate::typed_text::jet_typed_sql_interpolate(
+                                &literal_refs,
+                                values.into_iter().map(|value| value.jet_show()).collect(),
+                            );
+                            Ok(typed_sql_value(
+                                template,
+                                params.into_iter().map(CtValue::Str).collect(),
+                            ))
+                        }
                         TTypedTextInterpKind::Sh => {
-                            let mut argv = Vec::new();
-                            for (index, literal) in literals.iter().enumerate() {
-                                argv.extend(
-                                    literal
-                                        .split_whitespace()
-                                        .map(|word| CtValue::Str(word.to_string())),
-                                );
-                                if let Some(value) = values.get(index) {
-                                    argv.push(CtValue::Str(value.jet_show()));
-                                }
-                            }
-                            Ok(CtValue::List(argv))
+                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let argv = crate::typed_text::jet_typed_sh_interpolate(
+                                &literal_refs,
+                                values.into_iter().map(|value| value.jet_show()).collect(),
+                            );
+                            Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
                         }
                         TTypedTextInterpKind::HTML => {
-                            let mut text = String::new();
-                            for (index, literal) in literals.iter().enumerate() {
-                                text.push_str(literal);
-                                if let Some(value) = values.get(index) {
-                                    text.push_str(&typed_html_escape(&value.jet_show()));
-                                }
-                            }
-                            Ok(CtValue::Str(text))
+                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            Ok(CtValue::Str(crate::typed_text::jet_typed_html_interpolate(
+                                &literal_refs,
+                                values.into_iter().map(|value| value.jet_show()).collect(),
+                            )))
                         }
                     }
                 }
