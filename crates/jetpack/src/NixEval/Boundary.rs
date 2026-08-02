@@ -1,8 +1,8 @@
 //! Jetpack-private integration for the pure native evaluator seam.
 //!
 //! The product entry is intentionally bounded: it evaluates only the
-//! non-executing, typed devShell projection. Full differential parity remains
-//! separately gated by the oracle manifest.
+//! non-executing, typed devShell projection. The pinned Stage A fixture keeps
+//! its values, rejection, lock, and output identities reproducible.
 
 #![allow(dead_code)] // B-F consume this seam as they land; product use stays forbidden.
 

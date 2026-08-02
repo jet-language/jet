@@ -64,6 +64,14 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert!(oracle.contains("b5aa0fbd538984f6e3d201be0005b4463d8b09f8"));
     assert!(oracle.contains("\"last_modified\": 1782723713"));
     assert!(oracle.contains("sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="));
-    assert_eq!(oracle.matches("\"build_nar_hash\": null").count(), 4);
-    assert_eq!(oracle.matches("\"executable_nar_hash\": null").count(), 4);
+    assert_eq!(oracle.matches("\"build_nar_hash\": \"").count(), 4);
+    assert_eq!(oracle.matches("\"executable_nar_hash\": \"").count(), 4);
+    assert_eq!(oracle.matches("\"status\": \"ready\"").count(), 4);
+    assert!(oracle.contains("\"corpus_status\": \"bit_exact\""));
+
+    let verifier = fs::read_to_string(root.join("scripts/agent/verify-nix-eval-fixture.js"))
+        .expect("pinned oracle verifier");
+    assert!(verifier.contains("packages.${system}.nix"));
+    assert!(verifier.contains("complete install and its evaluator executable"));
+    assert!(verifier.contains("path-info"));
 }

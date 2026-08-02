@@ -1,7 +1,12 @@
 use super::*;
 use alloc::string::String;
+use alloc::vec;
 
 const ZERO_SRI: &str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const X86_64_LINUX_BUILD: &str = "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=";
+const X86_64_LINUX_EXECUTABLE: &str = "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ=";
+const STAGE_A_FIXTURE: &str =
+    include_str!("../../../tests/fixtures/nix-compat/stage-a.json");
 
 #[test]
 fn partial_stage_authority_is_minted_inside_seam_tests() {
@@ -20,16 +25,8 @@ fn partial_stage_authority_is_minted_inside_seam_tests() {
 
 fn manifest_with_identities(status: &str, corpus_status: &str) -> String {
     ORACLE_JSON
-        .replace(
-            "\"build_nar_hash\": null",
-            &format!("\"build_nar_hash\": \"{NIXPKGS_NAR_HASH}\""),
-        )
-        .replace(
-            "\"executable_nar_hash\": null",
-            &format!("\"executable_nar_hash\": \"{ZERO_SRI}\""),
-        )
-        .replace("\"status\": \"blocked\"", &format!("\"status\": \"{status}\""))
-        .replace("blocked_on_oracle_build_hashes", corpus_status)
+        .replace("\"status\": \"ready\"", &format!("\"status\": \"{status}\""))
+        .replace("bit_exact", corpus_status)
 }
 
 fn ready_manifest() -> ValidatedOracleManifest {
@@ -52,13 +49,13 @@ fn embedded_pin_is_exact_and_missing_build_identity_blocks() {
     assert_eq!(manifest.nixpkgs_last_modified(), NIXPKGS_LAST_MODIFIED);
     assert_eq!(manifest.nixpkgs_nar_hash(), NIXPKGS_NAR_HASH);
     assert_eq!(manifest.systems(), REQUIRED_SYSTEMS);
-    assert!(!manifest.product_ready());
+    assert!(manifest.product_ready());
 
     for system in REQUIRED_SYSTEMS {
         let observed = OracleBuildIdentity::new(system, NIXPKGS_NAR_HASH, ZERO_SRI).unwrap();
         assert!(matches!(
             manifest.verify_oracle(&observed),
-            Err(BoundaryError::MissingOracleIdentity { .. })
+            Err(BoundaryError::OracleIdentityMismatch { .. })
         ));
     }
 }
@@ -67,7 +64,7 @@ fn embedded_pin_is_exact_and_missing_build_identity_blocks() {
 fn exact_ready_identity_verifies() {
     let manifest = ready_manifest();
     let verified = manifest
-        .verify_oracle(&identity(NIXPKGS_NAR_HASH, ZERO_SRI))
+        .verify_oracle(&identity(X86_64_LINUX_BUILD, X86_64_LINUX_EXECUTABLE))
         .expect("exact ready identity must verify");
     assert_eq!(verified.system(), "x86_64-linux");
     assert!(manifest.product_ready());
@@ -84,7 +81,7 @@ fn build_and_executable_mismatches_fail_closed() {
         })
     ));
     assert!(matches!(
-        manifest.verify_oracle(&identity(NIXPKGS_NAR_HASH, NIXPKGS_NAR_HASH)),
+        manifest.verify_oracle(&identity(X86_64_LINUX_BUILD, NIXPKGS_NAR_HASH)),
         Err(BoundaryError::OracleIdentityMismatch {
             field: "executable_nar_hash",
             ..
@@ -96,11 +93,11 @@ fn build_and_executable_mismatches_fail_closed() {
 fn matching_identity_remains_blocked_when_build_status_is_blocked() {
     let manifest = ValidatedOracleManifest::parse_and_validate(&manifest_with_identities(
         "blocked",
-        "blocked_on_oracle_build_hashes",
+        "bit_exact",
     ))
     .expect("blocked manifest with identities must validate");
     assert!(matches!(
-        manifest.verify_oracle(&identity(NIXPKGS_NAR_HASH, ZERO_SRI)),
+        manifest.verify_oracle(&identity(X86_64_LINUX_BUILD, X86_64_LINUX_EXECUTABLE)),
         Err(BoundaryError::OracleBuildBlocked { .. })
     ));
 }
@@ -144,8 +141,8 @@ fn duplicate_keys_are_rejected_at_every_depth() {
     ));
 
     let build_duplicate = ORACLE_JSON.replacen(
-        "\"status\": \"blocked\"",
-        "\"status\": \"blocked\", \"status\": \"ready\"",
+        "\"status\": \"ready\"",
+        "\"status\": \"ready\", \"status\": \"blocked\"",
         1,
     );
     assert!(matches!(
@@ -170,7 +167,7 @@ fn malformed_or_noncanonical_sha256_sri_is_rejected() {
             })
         ));
         let changed = ORACLE_JSON.replacen(
-            "\"build_nar_hash\": null",
+            "\"build_nar_hash\": \"sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=\"",
             &format!("\"build_nar_hash\": \"{malformed}\""),
             1,
         );
@@ -219,6 +216,145 @@ fn native_devshell_rejects_dynamic_package_expressions() {
     )
     .expect_err("dynamic package expressions must not be guessed");
     assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("literal package list")));
+}
+
+#[test]
+fn stage_a_differential_fixture_matches_native_projection() {
+    let fixture = JSON::parse(STAGE_A_FIXTURE).expect("Stage A fixture must parse");
+    let root = fixture.as_object().expect("Stage A fixture root object");
+    let values = root
+        .get("values")
+        .expect("Stage A value cases")
+        .as_array()
+        .expect("Stage A values array");
+    let value_case = values[0].as_object().expect("Stage A value case object");
+    let value_source = value_case
+        .get("source")
+        .expect("Stage A value source")
+        .as_str()
+        .expect("Stage A value source string");
+    let evaluated = evaluate_devshell(value_source, "x86_64-linux")
+        .expect("pinned literal devShell fixture must evaluate");
+    let fixture_packages = fixture_strings(value_case.get("jet_packages").unwrap());
+    let fixture_unsupported = fixture_strings(value_case.get("jet_unsupported").unwrap());
+    assert_eq!(evaluated.packages(), fixture_packages.as_slice());
+    assert_eq!(evaluated.unsupported(), fixture_unsupported.as_slice());
+    let nix_value = value_case
+        .get("nix_value")
+        .expect("Stage A reference value")
+        .as_object()
+        .expect("Stage A reference value object");
+    assert_eq!(
+        fixture_strings(nix_value.get("packages").unwrap()),
+        vec!["ripgrep".to_string(), "fd".to_string()]
+    );
+    assert_eq!(
+        fixture_strings(nix_value.get("buildInputs").unwrap()),
+        vec!["nodejs".to_string()]
+    );
+
+    let errors = root
+        .get("errors")
+        .expect("Stage A error cases")
+        .as_array()
+        .expect("Stage A errors array");
+    let error_case = errors[0].as_object().expect("Stage A error case object");
+    let error_source = error_case
+        .get("source")
+        .expect("Stage A error source")
+        .as_str()
+        .expect("Stage A error source string");
+    let error = evaluate_devshell(error_source, "x86_64-linux")
+        .expect_err("dynamic package fixture must fail closed");
+    assert_eq!(
+        error.to_string(),
+        error_case
+            .get("jet_error")
+            .expect("Stage A error projection")
+            .as_str()
+            .expect("Stage A error projection string")
+    );
+    let error_value = error_case
+        .get("nix_value")
+        .expect("Stage A reference error value")
+        .as_object()
+        .expect("Stage A reference error value object");
+    assert_eq!(
+        fixture_strings(error_value.get("packages").unwrap()),
+        vec!["fd".to_string()]
+    );
+
+    let locks = root
+        .get("locks")
+        .expect("Stage A lock cases")
+        .as_array()
+        .expect("Stage A locks array");
+    let lock_case = locks[0].as_object().expect("Stage A lock case object");
+    let lock = lock_case
+        .get("nix_value")
+        .expect("Stage A lock value")
+        .as_object()
+        .expect("Stage A lock value object");
+    assert!(matches!(lock.get("version"), Some(JSONValue::Num(value)) if *value == 7.0));
+    let lock_nodes = lock
+        .get("nodes")
+        .expect("Stage A lock nodes")
+        .as_object()
+        .expect("Stage A lock nodes object");
+    let nixpkgs = lock_nodes
+        .get("nixpkgs")
+        .expect("Stage A nixpkgs node")
+        .as_object()
+        .expect("Stage A nixpkgs node object");
+    let locked = nixpkgs
+        .get("locked")
+        .expect("Stage A locked nixpkgs")
+        .as_object()
+        .expect("Stage A locked nixpkgs object");
+    assert_eq!(
+        locked.get("rev").unwrap().as_str().unwrap(),
+        NIXPKGS_REVISION
+    );
+    assert_eq!(
+        locked.get("narHash").unwrap().as_str().unwrap(),
+        NIXPKGS_NAR_HASH
+    );
+
+    let identities = root
+        .get("output_identities")
+        .expect("Stage A output identities")
+        .as_object()
+        .expect("Stage A output identities object");
+    let manifest = ValidatedOracleManifest::embedded().expect("embedded manifest");
+    for system in REQUIRED_SYSTEMS {
+        let fixture_identity = identities
+            .get(system)
+            .expect("required fixture system")
+            .as_object()
+            .expect("fixture system object");
+        let manifest_identity = manifest.builds.get(system).expect("required manifest system");
+        assert_eq!(
+            fixture_identity.get("build_nar_hash").unwrap().as_str().unwrap(),
+            manifest_identity.build_nar_hash.as_deref().unwrap()
+        );
+        assert_eq!(
+            fixture_identity
+                .get("executable_nar_hash")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            manifest_identity.executable_nar_hash.as_deref().unwrap()
+        );
+    }
+}
+
+fn fixture_strings(value: &JSONValue) -> Vec<String> {
+    value
+        .as_array()
+        .expect("fixture string array")
+        .iter()
+        .map(|item| item.as_str().expect("fixture string").to_string())
+        .collect()
 }
 
 #[test]

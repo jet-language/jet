@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "values": [
+    {
+      "name": "literal_devshell_projection",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.ripgrep pkgs.fd ]; buildInputs = with pkgs; [ nodejs ]; nativeBuildInputs = [ pkgs.fd ]; shellHook = \"export FOO=1\"; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; nodejs = \"nodejs\"; }; in { packages = [ pkgs.ripgrep pkgs.fd ]; buildInputs = with pkgs; [ nodejs ]; nativeBuildInputs = [ pkgs.fd ]; shellHook = \"export FOO=1\"; }",
+      "nix_value": {
+        "buildInputs": ["nodejs"],
+        "nativeBuildInputs": ["fd"],
+        "packages": ["ripgrep", "fd"],
+        "shellHook": "export FOO=1"
+      },
+      "jet_packages": ["fd", "nodejs", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
+    }
+  ],
+  "errors": [
+    {
+      "name": "dynamic_package_list_is_rejected",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; lib = { optionals = condition: values: if condition then values else []; }; }; in { packages = pkgs.lib.optionals true [ pkgs.fd ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    }
+  ],
+  "locks": [
+    {
+      "name": "pinned_nixpkgs",
+      "nix_expression": "builtins.fromJSON \"{\\\"nodes\\\":{\\\"root\\\":{\\\"inputs\\\":{\\\"nixpkgs\\\":\\\"nixpkgs\\\"}},\\\"nixpkgs\\\":{\\\"locked\\\":{\\\"lastModified\\\":1782723713,\\\"narHash\\\":\\\"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\\\",\\\"owner\\\":\\\"NixOS\\\",\\\"repo\\\":\\\"nixpkgs\\\",\\\"rev\\\":\\\"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\\\"},\\\"original\\\":{\\\"id\\\":\\\"nixpkgs\\\"}}},\\\"root\\\":\\\"root\\\",\\\"version\\\":7}\"",
+      "nix_value": {
+        "nodes": {
+          "nixpkgs": {
+            "locked": {
+              "lastModified": 1782723713,
+              "narHash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=",
+              "owner": "NixOS",
+              "repo": "nixpkgs",
+              "rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
+            },
+            "original": {"id": "nixpkgs"}
+          },
+          "root": {"inputs": {"nixpkgs": "nixpkgs"}}
+        },
+        "root": "root",
+        "version": 7
+      }
+    }
+  ],
+  "output_identities": {
+    "aarch64-darwin": {
+      "build_nar_hash": "sha256-rMlwlpqvtf4dmQwKPvcwMuJ0Gq8v8FrvNqcPv4cyKLQ=",
+      "executable_nar_hash": "sha256-OCO79DjPxsXvNMPRj2wAY+KOMT4pJdICbavTQl8Q2rE="
+    },
+    "aarch64-linux": {
+      "build_nar_hash": "sha256-iaMQdHZmdYtYvkkBeu2BuCEcXJHW+VLjLYdmfS/F7Og=",
+      "executable_nar_hash": "sha256-04ryjRswBDp+ymbJOeb4m9zcYHcE/6j1LR/WfOi4/Ms="
+    },
+    "x86_64-darwin": {
+      "build_nar_hash": "sha256-DUQnYzmxZIMU37Aa4Zy+0XNKWpcLP5zg5YsrwsrA1Sk=",
+      "executable_nar_hash": "sha256-K67J6pH92UHhlrFQUm+RofuRvo8y1KrOa/4zhkGImQU="
+    },
+    "x86_64-linux": {
+      "build_nar_hash": "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=",
+      "executable_nar_hash": "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
+    }
+  }
+}

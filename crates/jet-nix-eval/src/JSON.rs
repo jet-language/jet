@@ -6,10 +6,10 @@ use alloc::vec::Vec;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum JSON {
     Null,
-    Bool,
+    Bool(bool),
     Num(f64),
     Str(String),
-    Array,
+    Array(Vec<JSON>),
     Object(BTreeMap<String, JSON>),
 }
 
@@ -25,6 +25,14 @@ impl JSON {
         match self {
             Self::Str(value) => Ok(value),
             _ => Err("expected a JSON string".into()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn as_array(&self) -> Result<&[JSON], String> {
+        match self {
+            Self::Array(value) => Ok(value),
+            _ => Err("expected a JSON array".into()),
         }
     }
 }
@@ -115,21 +123,21 @@ impl Parser {
 
     fn array(&mut self) -> Result<JSON, String> {
         self.bump();
+        let mut values = Vec::new();
         self.skip_ws();
         if self.peek() == Some(']') {
             self.bump();
-            return Ok(JSON::Array);
+            return Ok(JSON::Array(values));
         }
         loop {
-            self.value()?;
+            values.push(self.value()?);
             self.skip_ws();
             match self.bump() {
                 Some(',') => {}
-                Some(']') => break,
+                Some(']') => return Ok(JSON::Array(values)),
                 _ => return Err("expected `,` or `]` in array".into()),
             }
         }
-        Ok(JSON::Array)
     }
 
     fn string(&mut self) -> Result<String, String> {
@@ -201,8 +209,10 @@ impl Parser {
     }
 
     fn boolean(&mut self) -> Result<JSON, String> {
-        if self.literal("true") || self.literal("false") {
-            Ok(JSON::Bool)
+        if self.literal("true") {
+            Ok(JSON::Bool(true))
+        } else if self.literal("false") {
+            Ok(JSON::Bool(false))
         } else {
             Err("invalid literal".into())
         }

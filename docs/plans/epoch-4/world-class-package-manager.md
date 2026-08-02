@@ -342,8 +342,10 @@ live acceptance, and documentation. Work order is binding.
 
 - The first ordered slice is landed as a private `NixEval` boundary. Its strict,
   independently committed oracle manifest pins the ratified Nix and nixpkgs
-  identities and remains fail-closed until every supported system records both
-  required NAR hashes. Partial-stage permits can be minted only by unit tests.
+  identities and fails closed unless every supported system records both
+  required NAR hashes. The committed Stage A manifest now has those four
+  identities and is `bit_exact`; partial-stage permits can be minted only by
+  unit tests.
   Evaluator code lives in a dependency-free `no_std` crate where the compiler
   forbids unsafe code and Cargo disables build scripts. Full verification also
   applies resolved-symbol Clippy denials for host processes, TCP/UDP, Unix and
@@ -360,12 +362,17 @@ live acceptance, and documentation. Work order is binding.
   native-code/plugin rejection, evaluator resource limits, and ballot-selected
   IFD behavior.
 - No raw evaluator trace reaches users.
-- Representative nixpkgs derivations bit-match reference Nix.
 - The bounded literal devShell projection is now a product path under
   D-JPK-NIXPRODUCT1=A. It returns typed package facts, preserves unsupported
   hooks as explicit loss records, records the native evaluator identity in
   `.jet/lock`, and never executes Nix code. Other evaluator stages remain
   private until their own differential proof lands.
+- `tests/fixtures/nix-compat/stage-a.json` records the pinned literal devShell
+  value, native rejection, normalized lock, and four output identities. Real
+  nixpkgs derivation bit-match remains the later differential-proof slice.
+  Regenerate and verify it with the exact oracle executable:
+  `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
+  scripts/agent/verify-nix-eval-fixture.js`.
 
 ### E4-JP10 — Nix evaluator breadth and performance
 
