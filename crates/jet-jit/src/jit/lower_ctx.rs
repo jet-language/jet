@@ -11648,6 +11648,10 @@ impl LowerCtx<'_, '_> {
                         "open" if args.len() == 1 => {
                             (self.host.db.open, vec![self.lower_expr(&args[0])?])
                         }
+                        "policy" if args.len() == 2 => (
+                            self.host.db.policy,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         "migrate" if args.len() == 3 => (
                             self.host.db.migrate,
                             vec![
@@ -18612,6 +18616,15 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val, method_v, a0, a1]);
                 Ok(self.b.inst_results(call)[0])
             },
+            THandleOp::DBWithPolicy => {
+                let policy = self.lower_expr(&args[0])?;
+                let user = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.with_policy, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, policy, user]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::DBQuery => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
@@ -18639,6 +18652,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
                 Ok(self.b.inst_results(call)[0])
             }
+            THandleOp::DBLive => Err("DBLive is ambient-backed".to_string()),
             THandleOp::DBBegin => {
                 let host_ref = self
                     .module

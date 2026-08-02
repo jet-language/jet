@@ -159,9 +159,31 @@ fn db_conn_value(handle: u64) -> CtValue {
     }
 }
 
+fn db_policy_value(table: String, expression: String) -> CtValue {
+    CtValue::Struct {
+        type_name: "RowPolicy".to_string(),
+        fields: vec![
+            ("table".to_string(), CtValue::Str(table)),
+            ("expression".to_string(), CtValue::Str(expression)),
+        ],
+    }
+}
+
+fn db_scope_value(handle: u64, table: String, expression: String, user: String) -> CtValue {
+    CtValue::Struct {
+        type_name: "DBScope".to_string(),
+        fields: vec![
+            ("handle".to_string(), CtValue::Int(handle as i64)),
+            ("policy".to_string(), db_policy_value(table, expression)),
+            ("user".to_string(), CtValue::Str(user)),
+        ],
+    }
+}
+
 fn db_handle(recv: &CtValue) -> Option<u64> {
     match recv {
-        CtValue::Struct { type_name, fields } if type_name == "DBConnection" => fields
+        CtValue::Struct { type_name, fields }
+            if matches!(type_name.as_str(), "DBConnection" | "DBScope") => fields
             .iter()
             .find_map(|(n, v)| match (n.as_str(), v) {
                 ("handle", CtValue::Int(h)) if *h > 0 => Some(*h as u64),
@@ -169,6 +191,32 @@ fn db_handle(recv: &CtValue) -> Option<u64> {
             }),
         _ => None,
     }
+}
+
+fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, String, String)> {
+    let handle = db_handle(recv)?;
+    let CtValue::Struct { fields, .. } = recv else {
+        return None;
+    };
+    let policy = fields.iter().find_map(|(name, value)| {
+        (name == "policy").then_some(value)
+    })?;
+    let CtValue::Struct { fields: policy_fields, .. } = policy else {
+        return None;
+    };
+    let table = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("table", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    let expression = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("expression", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    let user = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("user", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    Some((handle, table, expression, user))
 }
 
 fn ct_db_value(v: &CtValue) -> Option<wire::DBValue> {
@@ -227,7 +275,7 @@ fn row_map(row: BTreeMap<String, wire::DBValue>) -> CtValue {
     CtValue::Map(m)
 }
 
-fn encode_params(list: &CtValue, span: Span) -> Result<String, Diagnostic> {
+fn db_params(list: &CtValue, span: Span) -> Result<Vec<wire::DBValue>, Diagnostic> {
     let CtValue::List(items) = list else {
         return Err(unsupported("db params list", span));
     };
@@ -235,7 +283,7 @@ fn encode_params(list: &CtValue, span: Span) -> Result<String, Diagnostic> {
     for item in items {
         vals.push(ct_db_value(item).ok_or_else(|| unsupported("DBValue param", span))?);
     }
-    Ok(wire::jet_db_encode_params(&vals))
+    Ok(vals)
 }
 
 fn to_secret(v: &CtValue, span: Span) -> Result<Crypto::runtime::Secret, Diagnostic> {
@@ -283,6 +331,20 @@ pub fn ambient_core_call(
         return Some(result);
     }
     match (module, method) {
+        ("jet.db" | "core.db", "policy") => {
+            let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("jet.db.policy arguments", span)));
+            };
+            Some(Ok(match wire::jet_db_policy_validate(table, expression) {
+                Ok(()) => CtValue::ResOk(Box::new(db_policy_value(
+                    table.clone(),
+                    expression.clone(),
+                ))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+            }))
+        }
         ("core.io", "confirm") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
                 return Some(Err(unsupported("core.io.confirm prompt", span)));
@@ -916,6 +978,29 @@ pub fn ambient_handle(
     if let Some(result) = ambient_http_handle(op, recv, args, span) {
         return Some(result);
     }
+    if op == "DBWithPolicy" {
+        let handle = db_handle(recv)?;
+        let (CtValue::Struct { fields, .. }, CtValue::Str(user)) =
+            (args.first()?, args.get(1)?)
+        else {
+            return Some(Err(unsupported("DBConnection.with_policy arguments", span)));
+        };
+        let table = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("table", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        });
+        let expression = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("expression", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        });
+        let (Some(table), Some(expression)) = (table, expression) else {
+            return Some(Err(unsupported("DBConnection.with_policy policy", span)));
+        };
+        return Some(match wire::jet_db_policy_validate(&table, &expression) {
+            Ok(()) => Ok(db_scope_value(handle, table, expression, user.clone())),
+            Err(error) => Err(unsupported(&format!("row policy: {error}"), span)),
+        });
+    }
     let handle = db_handle(recv)?;
     match op {
         "DBBegin" => Some(Ok(CtValue::Bool(DB::runtime_begin(handle)))),
@@ -927,10 +1012,22 @@ pub fn ambient_handle(
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("DBConnection.execute sql", span))),
             };
-            let params = match encode_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
+            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),
             };
+            let (handle, sql, values) = match db_scope_parts(recv) {
+                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
+                    &sql, &values, &table, &expression, &user,
+                ) {
+                    Ok((sql, values)) => (handle, sql, values),
+                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                },
+                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                    "database row operations require a policy scope",
+                ))))),
+            };
+            let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_execute(handle, &sql, &params);
             Some(Ok(match wire::jet_db_decode_execute_result(&out) {
                 Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
@@ -942,10 +1039,22 @@ pub fn ambient_handle(
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("DBConnection.query sql", span))),
             };
-            let params = match encode_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
+            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),
             };
+            let (handle, sql, values) = match db_scope_parts(recv) {
+                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
+                    &sql, &values, &table, &expression, &user,
+                ) {
+                    Ok((sql, values)) => (handle, sql, values),
+                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                },
+                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                    "database row operations require a policy scope",
+                ))))),
+            };
+            let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_query(handle, &sql, &params);
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
                 Ok(rows) => CtValue::ResOk(Box::new(CtValue::List(
@@ -959,10 +1068,22 @@ pub fn ambient_handle(
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("DBConnection.query_one sql", span))),
             };
-            let params = match encode_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
+            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),
             };
+            let (handle, sql, values) = match db_scope_parts(recv) {
+                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
+                    &sql, &values, &table, &expression, &user,
+                ) {
+                    Ok((sql, values)) => (handle, sql, values),
+                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                },
+                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                    "database row operations require a policy scope",
+                ))))),
+            };
+            let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_query(handle, &sql, &params);
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
                 Ok(rows) => {
@@ -977,6 +1098,46 @@ pub fn ambient_handle(
                     CtValue::ResOk(Box::new(opt))
                 }
                 Err(e) => CtValue::ResErr(Box::new(db_err(e.message))),
+            }))
+        }
+        "DBLive" => {
+            let sql = match args.first() {
+                Some(CtValue::Str(s)) => s.clone(),
+                _ => return Some(Err(unsupported("DBScope.live sql", span))),
+            };
+            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
+                Ok(values) => values,
+                Err(error) => return Some(Err(error)),
+            };
+            let (handle, table, expression, user) = match db_scope_parts(recv) {
+                Some(parts) => parts,
+                None => {
+                    return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                        "database live queries require a policy scope",
+                    )))))
+                }
+            };
+            let (sql, values) = match wire::jet_db_apply_policy(
+                &sql, &values, &table, &expression, &user,
+            ) {
+                Ok(value) => value,
+                Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+            };
+            let out = DB::runtime_query(handle, &sql, &wire::jet_db_encode_params(&values));
+            Some(Ok(match wire::jet_db_decode_query_result(&out) {
+                Ok(rows) => {
+                    let footprint = format!("db:{table}:{sql}");
+                    let initial = format!("{rows:?}");
+                    match jet_codegen::Comptime::AppLite::apply(
+                        "live",
+                        &[CtValue::Str(footprint), CtValue::Str(initial)],
+                        span,
+                    ) {
+                        Ok(query) => CtValue::ResOk(Box::new(query)),
+                        Err(error) => return Some(Err(error)),
+                    }
+                }
+                Err(error) => CtValue::ResErr(Box::new(db_err(error.message))),
             }))
         }
         _ => None,

@@ -3461,7 +3461,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             true
         }
         THandleOp::StderrFlush | THandleOp::StderrIsTty if args.is_empty() => true,
-        THandleOp::DBQuery | THandleOp::DBQueryOne | THandleOp::DBExecute if args.len() == 2 => true,
+        THandleOp::DBWithPolicy
+        | THandleOp::DBQuery
+        | THandleOp::DBQueryOne
+        | THandleOp::DBExecute
+            if args.len() == 2 => true,
         THandleOp::DBBegin
         | THandleOp::DBCommit
         | THandleOp::DBRollback

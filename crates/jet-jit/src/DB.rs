@@ -5,6 +5,8 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -26,6 +28,67 @@ const DV_INT: i64 = 1;
 const DV_FLOAT: i64 = 2;
 const DV_TEXT: i64 = 3;
 const DV_BOOL: i64 = 4;
+
+thread_local! {
+    /// JIT-local policy capabilities. The token is passed through Cranelift
+    /// as the DBScope value; the policy and user never become mutable heap
+    /// fields visible to Jet code.
+    static DB_SCOPES: std::cell::RefCell<HashMap<u64, (u64, String, String, String)>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+static NEXT_DB_SCOPE: AtomicU64 = AtomicU64::new(1_000_000_000);
+
+fn scope_parts(handle: u64) -> Option<(u64, String, String, String)> {
+    DB_SCOPES.with(|scopes| scopes.borrow().get(&handle).cloned())
+}
+
+fn base_handle(handle: u64) -> u64 {
+    scope_parts(handle)
+        .map(|(base, _, _, _)| base)
+        .unwrap_or(handle)
+}
+
+fn alloc_policy_record(table: &str, expression: &str) -> i64 {
+    let table_id = table.to_string();
+    let expression_id = expression.to_string();
+    Concurrency::with_runtime_mut(|rt| {
+        let table_id = rt.heap.alloc_string(table_id);
+        let expression_id = rt.heap.alloc_string(expression_id);
+        let record = rt.heap.alloc_record(3);
+        let _ = rt.heap.record_set_int(record, 0, table_id);
+        let _ = rt.heap.record_set_int(record, 1, expression_id);
+        let _ = rt.heap.record_set_int(record, 2, 0);
+        record
+    })
+}
+
+fn policy_record_parts(policy: i64) -> Option<(String, String)> {
+    Concurrency::with_runtime_mut(|rt| {
+        let table = rt
+            .heap
+            .record_get_int(policy, 0)
+            .and_then(|id| rt.heap.clone_string(id))?;
+        let expression = rt
+            .heap
+            .record_get_int(policy, 1)
+            .and_then(|id| rt.heap.clone_string(id))?;
+        Some((table, expression))
+    })
+}
+
+fn new_scope(connection: u64, table: String, expression: String, user: String) -> i64 {
+    if connection == 0 || wire::jet_db_policy_validate(&table, &expression).is_err() {
+        return 0;
+    }
+    let id = NEXT_DB_SCOPE.fetch_add(1, Ordering::Relaxed);
+    DB_SCOPES.with(|scopes| {
+        scopes
+            .borrow_mut()
+            .insert(id, (base_handle(connection), table, expression, user));
+    });
+    id as i64
+}
 
 fn clone_heap_string(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
@@ -92,7 +155,7 @@ fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
     })
 }
 
-fn encode_params_list(list: i64) -> String {
+fn values_from_list(list: i64) -> Vec<wire::DBValue> {
     let handles: Vec<i64> = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
@@ -101,11 +164,31 @@ fn encode_params_list(list: i64) -> String {
         }
         out
     });
-    let vals: Vec<wire::DBValue> = handles
+    handles
         .into_iter()
         .map(|h| read_dbvalue(h).unwrap_or(wire::DBValue::Null))
-        .collect();
-    wire::jet_db_encode_params(&vals)
+        .collect()
+}
+
+extern "C" fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
+    let table = clone_heap_string(table);
+    let expression = clone_heap_string(expression);
+    match wire::jet_db_policy_validate(&table, &expression) {
+        Ok(()) => result_ok_bits(alloc_policy_record(&table, &expression) as u64),
+        Err(message) => result_err_msg(&message),
+    }
+}
+
+extern "C" fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) -> i64 {
+    let Some((table, expression)) = policy_record_parts(policy) else {
+        return 0;
+    };
+    new_scope(
+        connection as u64,
+        table,
+        expression,
+        clone_heap_string(user),
+    )
 }
 
 fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DBValue>>) -> i64 {
@@ -165,24 +248,42 @@ extern "C" fn jet_jit_db_open(path: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_close(handle: i64) -> i8 {
-    i8::from(runtime::jet_db_close(handle as u64))
+    let handle = handle as u64;
+    if scope_parts(handle).is_some() {
+        let base = base_handle(handle);
+        DB_SCOPES.with(|scopes| {
+            scopes.borrow_mut().remove(&handle);
+        });
+        i8::from(runtime::jet_db_close(base))
+    } else {
+        i8::from(runtime::jet_db_close(handle))
+    }
 }
 
 extern "C" fn jet_jit_db_begin(handle: i64) -> i8 {
-    i8::from(runtime::jet_db_begin(handle as u64))
+    i8::from(runtime::jet_db_begin(base_handle(handle as u64)))
 }
 
 extern "C" fn jet_jit_db_commit(handle: i64) -> i8 {
-    i8::from(runtime::jet_db_commit(handle as u64))
+    i8::from(runtime::jet_db_commit(base_handle(handle as u64)))
 }
 
 extern "C" fn jet_jit_db_rollback(handle: i64) -> i8 {
-    i8::from(runtime::jet_db_rollback(handle as u64))
+    i8::from(runtime::jet_db_rollback(base_handle(handle as u64)))
 }
 
 extern "C" fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
-    let wire_s = encode_params_list(params);
-    let out = runtime::jet_db_execute(handle as u64, &clone_heap_string(sql), &wire_s);
+    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
+        return result_err_msg("database row operations require a policy scope");
+    };
+    let values = values_from_list(params);
+    let sql = clone_heap_string(sql);
+    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
+        Ok(value) => value,
+        Err(error) => return result_err_msg(&error.message),
+    };
+    let wire_s = wire::jet_db_encode_params(&values);
+    let out = runtime::jet_db_execute(base, &sql, &wire_s);
     match wire::jet_db_decode_execute_result(&out) {
         Ok(n) => result_ok_bits(n as u64),
         Err(e) => result_err_msg(&e.message),
@@ -190,8 +291,17 @@ extern "C" fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
-    let wire_s = encode_params_list(params);
-    let out = runtime::jet_db_query(handle as u64, &clone_heap_string(sql), &wire_s);
+    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
+        return result_err_msg("database row operations require a policy scope");
+    };
+    let values = values_from_list(params);
+    let sql = clone_heap_string(sql);
+    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
+        Ok(value) => value,
+        Err(error) => return result_err_msg(&error.message),
+    };
+    let wire_s = wire::jet_db_encode_params(&values);
+    let out = runtime::jet_db_query(base, &sql, &wire_s);
     match wire::jet_db_decode_query_result(&out) {
         Ok(rows) => result_ok_bits(rows_to_list_of_maps(rows) as u64),
         Err(e) => result_err_msg(&e.message),
@@ -199,8 +309,17 @@ extern "C" fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
-    let wire_s = encode_params_list(params);
-    let out = runtime::jet_db_query(handle as u64, &clone_heap_string(sql), &wire_s);
+    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
+        return result_err_msg("database row operations require a policy scope");
+    };
+    let values = values_from_list(params);
+    let sql = clone_heap_string(sql);
+    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
+        Ok(value) => value,
+        Err(error) => return result_err_msg(&error.message),
+    };
+    let wire_s = wire::jet_db_encode_params(&values);
+    let out = runtime::jet_db_query(base, &sql, &wire_s);
     match wire::jet_db_decode_query_result(&out) {
         Ok(rows) => {
             let opt = match rows.into_iter().next() {
@@ -492,6 +611,8 @@ pub(crate) fn runtime_query(handle: u64, sql: &str, params_wire: &str) -> String
 pub(crate) struct DBHostFns {
     pub open_memory: FuncId,
     pub open: FuncId,
+    pub policy: FuncId,
+    pub with_policy: FuncId,
     pub close: FuncId,
     pub begin: FuncId,
     pub commit: FuncId,
@@ -515,6 +636,8 @@ pub(crate) struct DBHostFns {
 pub(crate) fn register_db_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_db_open_memory", jet_jit_db_open_memory as *const u8);
     builder.symbol("jet_jit_db_open", jet_jit_db_open as *const u8);
+    builder.symbol("jet_jit_db_policy", jet_jit_db_policy as *const u8);
+    builder.symbol("jet_jit_db_with_policy", jet_jit_db_with_policy as *const u8);
     builder.symbol("jet_jit_db_close", jet_jit_db_close as *const u8);
     builder.symbol("jet_jit_db_begin", jet_jit_db_begin as *const u8);
     builder.symbol("jet_jit_db_commit", jet_jit_db_commit as *const u8);
@@ -565,6 +688,8 @@ pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DBHostFns, S
     Ok(DBHostFns {
         open_memory: import("jet_jit_db_open_memory", &nullary)?,
         open: import("jet_jit_db_open", &unary)?,
+        policy: import("jet_jit_db_policy", &binary)?,
+        with_policy: import("jet_jit_db_with_policy", &ternary)?,
         close: import("jet_jit_db_close", &unary_i8)?,
         begin: import("jet_jit_db_begin", &unary_i8)?,
         commit: import("jet_jit_db_commit", &unary_i8)?,
