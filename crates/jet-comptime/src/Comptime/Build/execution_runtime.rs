@@ -675,18 +675,27 @@ fn wait_remote_execution_result(
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                let _ = transport.cancel_execution(key, policy);
-                return Err(remote_action(
-                    action,
-                    format!(
+                let cancellation = transport.cancel_execution(key, policy).err();
+                let detail = match cancellation {
+                    None => format!(
                         "remote worker did not publish a result within {}ms",
                         timeout.as_millis()
                     ),
-                ));
+                    Some(cancel_error) => format!(
+                        "remote worker did not publish a result within {}ms; cancellation failed: {cancel_error}",
+                        timeout.as_millis()
+                    ),
+                };
+                return Err(remote_action(action, detail));
             }
             Err(error) => {
-                let _ = transport.cancel_execution(key, policy);
-                return Err(remote_action(action, error.to_string()));
+                let detail = match transport.cancel_execution(key, policy) {
+                    Ok(()) => error.to_string(),
+                    Err(cancel_error) => {
+                        format!("{}; cancellation failed: {cancel_error}", error)
+                    }
+                };
+                return Err(remote_action(action, detail));
             }
         }
     }

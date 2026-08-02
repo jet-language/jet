@@ -13,6 +13,13 @@ const MAX_REMOTE_WIRE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REMOTE_BLOB_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REMOTE_ITEMS: usize = 100_000;
 const MAX_REMOTE_AUTH_KEY_BYTES: usize = 4096;
+const MAX_REMOTE_CANCELLED_ATTEMPTS: usize = 4096;
+
+#[derive(Debug, Default)]
+struct RemoteCancellationState {
+    attempts: Vec<String>,
+    retired: bool,
+}
 
 /// Cross-process serialization for the cancellation/result visibility
 /// boundary.  A process-local mutex cannot stop a worker in another Jet
@@ -1413,7 +1420,6 @@ impl RemoteCacheTransport {
         ensure_remote_root(&self.root)?;
         let _commit = remote_execution_commit_lock(&self.root)?;
         let result_path = self.execution_result_path(&request.key)?;
-        let cancelled_path = self.execution_cancel_path(&request.key)?;
         match secure_read_file_bounded(
             &self.root,
             &self.execution_request_path(&request.key)?,
@@ -1430,15 +1436,22 @@ impl RemoteCacheTransport {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(RemoteCacheError::Io(error)),
         }
-        if self
-            .execution_cancel_attempt(&request.key)?
-            .is_some_and(|attempt_id| attempt_id == request.attempt_id)
+        let cancellation = self.execution_cancel_state(&request.key)?;
+        if cancellation.retired || cancellation.attempts.len() >= MAX_REMOTE_CANCELLED_ATTEMPTS {
+            return Err(RemoteCacheError::InvalidRecord(
+                "remote action was retired after cancellation history reached its limit"
+                    .to_string(),
+            ));
+        }
+        if cancellation
+            .attempts
+            .iter()
+            .any(|attempt_id| attempt_id == &request.attempt_id)
         {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote execution attempt id was already cancelled".to_string(),
             ));
         }
-        remove_remote_execution_file(&cancelled_path)?;
         if let Ok(metadata) = fs::symlink_metadata(&result_path) {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err(RemoteCacheError::Io(io::Error::new(
@@ -1458,9 +1471,9 @@ impl RemoteCacheTransport {
     }
 
     /// Cancel a queued execution and invalidate any late worker result. The
-    /// authenticated cancellation marker remains until the next submission
-    /// for the action, so a worker that already read the request cannot publish
-    /// after the deadline.
+    /// authenticated cancellation history remains across later submissions
+    /// for the action, so an old worker attempt cannot be replayed after the
+    /// deadline.
     pub fn cancel_execution(
         &self,
         key: &ActionKey,
@@ -1492,11 +1505,38 @@ impl RemoteCacheTransport {
         }
         self.validate_sandbox_proof(policy, &request.sandbox, RemoteActionRequest::Execute)?;
         let marker = self.execution_cancel_path(key)?;
-        let payload = format!(
-            "key={}\nattempt={}\n",
-            hex_encode(key.as_str().as_bytes()),
-            hex_encode(attempt_id.as_bytes()),
-        );
+        let cancellation = self.execution_cancel_state(key)?;
+        if cancellation.retired {
+            return Err(RemoteCacheError::InvalidRecord(
+                "remote action was retired after cancellation history reached its limit"
+                    .to_string(),
+            ));
+        }
+        if cancellation
+            .attempts
+            .iter()
+            .any(|cancelled| cancelled == attempt_id)
+        {
+            return Err(RemoteCacheError::InvalidRecord(
+                "remote execution attempt id was already cancelled".to_string(),
+            ));
+        }
+        let mut payload = format!("key={}\n", hex_encode(key.as_str().as_bytes()));
+        if cancellation.attempts.len().saturating_add(1) >= MAX_REMOTE_CANCELLED_ATTEMPTS {
+            // Keep the tombstone small once the authenticated replay history
+            // would become unwieldy. A retired action rejects every future
+            // attempt, including workers holding any older request.
+            payload.push_str("retired=1\n");
+        } else {
+            for cancelled in &cancellation.attempts {
+                payload.push_str("attempt=");
+                payload.push_str(&hex_encode(cancelled.as_bytes()));
+                payload.push('\n');
+            }
+            payload.push_str("attempt=");
+            payload.push_str(&hex_encode(attempt_id.as_bytes()));
+            payload.push('\n');
+        }
         let bytes = self.seal("execution-cancel", payload.as_bytes())?;
         atomic_restore_file(&self.root, &marker, &bytes)?;
         remove_remote_execution_file(&self.execution_result_path(key)?)?;
@@ -1644,14 +1684,16 @@ impl RemoteCacheTransport {
         self.execution_path("cancelled", key)
     }
 
-    fn execution_cancel_attempt(
+    fn execution_cancel_state(
         &self,
         key: &ActionKey,
-    ) -> Result<Option<String>, RemoteCacheError> {
+    ) -> Result<RemoteCancellationState, RemoteCacheError> {
         let path = self.execution_cancel_path(key)?;
         let bytes = match secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256) {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(RemoteCancellationState::default())
+            }
             Err(error) => return Err(RemoteCacheError::Io(error)),
         };
         let payload = self.open("execution-cancel", &bytes)?;
@@ -1661,27 +1703,47 @@ impl RemoteCacheTransport {
             )
         })?;
         let mut marker_key = None;
-        let mut attempt_id = None;
-        let mut seen = BTreeSet::new();
+        let mut attempt_ids = Vec::new();
+        let mut seen_attempts = BTreeSet::new();
+        let mut seen_key = false;
+        let mut retired = false;
+        let mut seen_retired = false;
         for line in text.lines() {
             if let Some(value) = line.strip_prefix("key=") {
-                if !seen.insert("key") {
+                if seen_key {
                     return Err(duplicate_remote_field("cancellation key"));
                 }
+                seen_key = true;
                 marker_key = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                     RemoteCacheError::InvalidRecord(
                         "remote cancellation marker key is not UTF-8".to_string(),
                     )
                 })?);
             } else if let Some(value) = line.strip_prefix("attempt=") {
-                if !seen.insert("attempt") {
+                if value.is_empty() {
                     return Err(duplicate_remote_field("cancellation attempt"));
                 }
-                attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                let attempt_id = String::from_utf8(hex_decode(value)?).map_err(|_| {
                     RemoteCacheError::InvalidRecord(
                         "remote cancellation marker attempt is not UTF-8".to_string(),
                     )
-                })?);
+                })?;
+                validate_remote_attempt_id(&attempt_id)?;
+                if !seen_attempts.insert(attempt_id.clone()) {
+                    return Err(duplicate_remote_field("cancellation attempt"));
+                }
+                attempt_ids.push(attempt_id);
+            } else if let Some(value) = line.strip_prefix("retired=") {
+                if seen_retired {
+                    return Err(duplicate_remote_field("cancellation retired flag"));
+                }
+                seen_retired = true;
+                if value != "1" {
+                    return Err(RemoteCacheError::InvalidRecord(
+                        "remote cancellation retired flag is not 1".to_string(),
+                    ));
+                }
+                retired = true;
             } else if !line.trim().is_empty() {
                 return Err(RemoteCacheError::InvalidRecord(format!(
                     "unknown remote cancellation field `{line}`"
@@ -1693,13 +1755,20 @@ impl RemoteCacheTransport {
                 "remote cancellation marker does not match its action".to_string(),
             ));
         }
-        let attempt_id = attempt_id.ok_or_else(|| {
-            RemoteCacheError::InvalidRecord(
+        if attempt_ids.is_empty() && !retired {
+            return Err(RemoteCacheError::InvalidRecord(
                 "remote cancellation marker has no attempt id".to_string(),
-            )
-        })?;
-        validate_remote_attempt_id(&attempt_id)?;
-        Ok(Some(attempt_id))
+            ));
+        }
+        if retired && !attempt_ids.is_empty() {
+            return Err(RemoteCacheError::InvalidRecord(
+                "retired remote cancellation marker contains attempt history".to_string(),
+            ));
+        }
+        Ok(RemoteCancellationState {
+            attempts: attempt_ids,
+            retired,
+        })
     }
 
     fn execution_is_cancelled(
@@ -1707,9 +1776,8 @@ impl RemoteCacheTransport {
         key: &ActionKey,
         attempt_id: &str,
     ) -> Result<bool, RemoteCacheError> {
-        Ok(self
-            .execution_cancel_attempt(key)?
-            .is_some_and(|cancelled| cancelled == attempt_id))
+        let state = self.execution_cancel_state(key)?;
+        Ok(state.retired || state.attempts.iter().any(|cancelled| cancelled == attempt_id))
     }
 
     fn execution_path(

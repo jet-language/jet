@@ -1162,6 +1162,82 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
 }
 
 #[test]
+fn remote_cancelled_attempt_history_rejects_replay_after_later_submission() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_cancel_history_{}_{}",
+        std::process::id(),
+        "replay"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let binding = RemoteBuildBinding::new("builder-history", &root, b"history-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-history")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+    let key = ActionKey::new("history-action");
+    let proof_a = transport
+        .sandbox_proof(
+            "remote:builder-history:trusted:sandbox-a",
+            "attempt-history-a",
+            key.as_str(),
+            ContentDigest::from_bytes(b"history-provenance"),
+        )
+        .unwrap();
+    let policy_a = RemoteCachePolicy::with_grants(false, false, true, proof_a.clone());
+    let request_a = RemoteExecutionRequest {
+        key: key.clone(),
+        attempt_id: proof_a.attempt_id.clone(),
+        argv: vec!["remote-tool".to_string()],
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        toolchain_digest: ContentDigest::from_bytes(b"history-toolchain"),
+        sandbox: proof_a.clone(),
+    };
+    transport.submit_execution(&request_a, &policy_a).unwrap();
+    transport.cancel_execution(&key, &policy_a).unwrap();
+
+    let proof_b = transport
+        .sandbox_proof(
+            "remote:builder-history:trusted:sandbox-b",
+            "attempt-history-b",
+            key.as_str(),
+            ContentDigest::from_bytes(b"history-provenance"),
+        )
+        .unwrap();
+    let policy_b = RemoteCachePolicy::with_grants(false, false, true, proof_b.clone());
+    let request_b = RemoteExecutionRequest {
+        attempt_id: proof_b.attempt_id.clone(),
+        sandbox: proof_b.clone(),
+        ..request_a.clone()
+    };
+    transport.submit_execution(&request_b, &policy_b).unwrap();
+    assert!(matches!(
+        transport.submit_execution(&request_a, &policy_a),
+        Err(RemoteCacheError::InvalidRecord(message))
+            if message.contains("attempt id was already cancelled")
+    ));
+
+    let result_b = RemoteExecutionResult {
+        key: key.clone(),
+        attempt_id: request_b.attempt_id.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: Vec::new(),
+        toolchain_digest: request_b.toolchain_digest.clone(),
+        sandbox: proof_b,
+    };
+    transport
+        .publish_execution_result(&result_b, &policy_b)
+        .unwrap();
+    assert_eq!(
+        transport.download_execution_result(&key, &policy_b).unwrap(),
+        result_b
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn remote_cancel_and_publish_are_one_commit_race() {
     let root = std::env::temp_dir().join(format!(
         "jet_remote_cancel_race_{}_{}",
