@@ -25,8 +25,9 @@ No `plugins/tower/.tower/` yet → use the **tower-setup** skill.
 ## The one rule that governs everything
 
 **The owner's decisions are the only allowed bottleneck.** The owner must
-never wait on you for a plan or a decision writeup, and must never receive a
-plan or ballot no agent has reviewed. Do plans and decision development
+never wait on you for a plan or a decision writeup. Full ballots receive every
+required review pass; short ballots exist only on the owner's explicit request.
+Do plans and decision development
 eagerly; the owner only picks. There is no greenlight/activate gate — a
 fresh card lands straight in an agent lane; a ballot is the only way the
 owner confirms anything.
@@ -121,7 +122,10 @@ everything (bypass event-logged). Full table in the plugin's `AGENTS.md`; headli
 
 - `decision add` needs a plain-language ballot with
   gist/lesson/story/inWild/options[].code/rec plus structured recommendation
-  reasons for the winner and every loser
+  reasons for the winner and every loser. Full ballots also need ordered base,
+  boil-the-ocean, hybrid, cooperative, and adversarial summaries. Short ballots
+  need the owner's quoted request and must omit reviews. Use the `simple` skill
+  for every user-visible ballot field
   or `E_BALLOT` — save unfinished work with `--draft`, finish later with
   `decision update <id> --ready`.
 - `decision ratify` is owner-only (`E_OWNER_ONLY`) unless

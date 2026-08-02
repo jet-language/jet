@@ -302,7 +302,7 @@ function cmdDecision(store, { pos, flags }) {
     case 'add': {
       const p = readPayload(flags) || {};
       const payload = { ...p, by };
-      for (const f of ['id', 'cardId', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
+      for (const f of ['id', 'cardId', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
         if (flags[f] !== undefined) payload[f] = flags[f];
       if (flags.card !== undefined) payload.cardId = flags.card;
       if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
@@ -311,7 +311,7 @@ function cmdDecision(store, { pos, flags }) {
     }
     case 'update': {
       const p = readPayload(flags) || {};
-      for (const f of ['title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
+      for (const f of ['title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
         if (flags[f] !== undefined) p[f] = flags[f];
       if (flags.ready !== undefined) p.ready = flags.ready === true || flags.ready === 'true';
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
@@ -647,16 +647,24 @@ function renderBrief(p, t) {
       if (d.status === 'ratified') {
         L.push(`    ${t.success('→')} ${d.outcome}${d.comment ? `  ${t.border('—')} ${d.comment}` : ''}`);
       } else {
+        if (d.ballotMode) L.push(`    ${t.dim('profile:')} ${d.ballotMode} ballot`);
         if (d.lesson) L.push(`    ${t.dim('learn first:')} ${d.lesson}`);
         if (d.story) L.push(`    ${t.dim('story:')} ${d.story}`);
         if (d.inWild) L.push(`    ${t.dim('in the wild:')} ${d.inWild}`);
+        for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.technical ? `\n      technical: ${String(o.technical).split('\n').join('\n      ')}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
+        for (const [key, label] of [
+          ['base', '● base pass'],
+          ['boilOcean', '◎ boil-the-ocean pass'],
+          ['hybrid', '◇ hybrid pass'],
+          ['cooperative', '＋ cooperative pass'],
+          ['adversarial', '⚑ adversarial pass'],
+        ]) if (d.reviewPasses?.[key]) L.push(`    ${t.dim(`${label}:`)} ${d.reviewPasses[key]}`);
         if (d.rec) L.push(`    ${t.warn('rec:')} ${d.rec}`);
         if (d.recommendation?.why) L.push(`    ${t.dim('why:')} ${d.recommendation.why}`);
         for (const rejected of d.recommendation?.whyNot || []) L.push(`    ${t.dim(`why not ${rejected.key}:`)} ${rejected.reason}`);
         if (d.recommendation?.tradeoff) L.push(`    ${t.dim('accepted tradeoff:')} ${d.recommendation.tradeoff}`);
-        if (d.hybrid?.synthesis) L.push(`    ${t.dim(`hybrid result ${d.hybrid.result}:`)} ${d.hybrid.synthesis}`);
-        for (const item of d.hybrid?.harvest || []) L.push(`    ${t.dim(`harvest ${item.key}:`)} ${item.aspect} ${t.border('—')} ${item.use}`);
-        for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.technical ? `\n      technical: ${String(o.technical).split('\n').join('\n      ')}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
+        if (!d.reviewPasses && d.hybrid?.synthesis) L.push(`    ${t.dim(`◇ hybrid result ${d.hybrid.result}:`)} ${d.hybrid.synthesis}`);
+        if (!d.reviewPasses) for (const item of d.hybrid?.harvest || []) L.push(`    ${t.dim(`harvest ${item.key}:`)} ${item.aspect} ${t.border('—')} ${item.use}`);
       }
     }
   }
@@ -904,7 +912,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   Phases: ${PHASE_IDS.join(' ')}
 
   Guards (agent-hard, owner-soft — --by owner bypasses; see plugin AGENTS.md):
-    ballot validation (lesson included; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
+    ballot validation (full/short profile, simple prose, ordered reviews; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
     frozen write guard (E_OWNER_LANE), ratified-decision delete guard
     (E_HAS_RATIFIED), building-release handoff (E_HANDOFF).
 `;

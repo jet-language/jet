@@ -164,16 +164,21 @@ short-lived, single-use challenge for that exact ballot and outcome. CLI
 ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.
 
-Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a
-zero-context mini lesson defining the concept, mechanics, vocabulary, stakes,
-and one tiny example), `story` (a named person, why this exists), `inWild`
+Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a few
+plain sentences in one short paragraph that explain only the situation and
+stakes), `story` (a named person, why this exists), `inWild`
 (realistic code where the choice bites),
 `options[]` each with plain `{key,name,detail,code}` worked examples and optional
 hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
 `recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
-Plain prose uses one idea per sentence, defines jargon, expands acronyms, and
-leads with user impact. Write-time density limits are 32 words per sentence and
-90 per paragraph. The owner decides from the ballot
+The `simple` skill applies to every user-visible field. A full ballot is the
+default and records one- or two-sentence summaries for the complete base draft,
+then boil-the-ocean, hybrid, cooperative, and adversarial reviews in that exact
+order. A short ballot is the complete base draft with no reviews; use it only
+when the owner's current request explicitly asks for one, and preserve that
+request in `shortAuthorizedBy`. Plain prose uses one idea per sentence, defines
+jargon, expands acronyms, and leads with user impact. Write-time density limits
+are 32 words per sentence and 90 per paragraph. The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
 ### Archive (#461) — history is separate from live
@@ -232,7 +237,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
-| Ballot-ready | missing required fields, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
+| Ballot-ready | missing required fields, profile authority, ordered full-ballot reviews, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the verification UI (loopback or an `auth.token`-authenticated device) |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |

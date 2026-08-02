@@ -55,7 +55,9 @@ Load the smallest slice. Never hand-edit `plugins/tower/.tower/*.json`.
      need, or hides expert control.
    - For each surviving gate: author a ballot-ready decision via
      **tower-ballot** (`--draft` only while unfinished; `--ready` when the
-     owner can decide from the ballot alone).
+     owner can decide from the ballot alone). Use the full profile unless the
+     owner's current request explicitly asks for a short ballot. Full profile
+     reviews run base, boil the ocean, hybrid, cooperative, then adversarial.
    - Advance honestly: planning → ready when ungated; leave in decide while
      ballots are open. Log what changed with `--by <agent>`.
 4. Optionally run **tower-rank** if the user asked to reorder as part of prep.

@@ -112,12 +112,15 @@ test('served index.html stamps a live tower-version meta tag', async () => {
 
 test('server ratify flow advances the card', async () => {
   await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] });
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
+  assert.equal(state.decisions[0].ballotMode, 'full');
+  assert.equal(state.decisions[0].reviewPasses.cooperative, 'The cooperative pass strengthened each option.');
   const r = await post('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });
   assert.equal(r.status, 200);
   state = await (await fetch(url('/api/state'))).json();

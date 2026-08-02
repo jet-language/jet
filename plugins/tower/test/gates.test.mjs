@@ -17,8 +17,17 @@ const fresh = () => {
   return openStore(dir);
 };
 
+const reviewPasses = () => ({
+  base: 'The complete first draft compared all options.',
+  boilOcean: 'The breadth pass checked for missing choices.',
+  hybrid: 'The hybrid pass combined compatible strengths.',
+  cooperative: 'The cooperative pass strengthened every option.',
+  adversarial: 'The adversarial pass attacked the recommendation.',
+});
+
 const ballot = (extra = {}) => ({
-  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
+  ballotMode: 'full', reviewPasses: reviewPasses(),
+  gist: 'a plain sentence', lesson: 'This short paragraph explains the situation and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
   recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
@@ -34,7 +43,8 @@ test('addDecision refuses an incomplete ballot with E_BALLOT naming the gaps', (
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one' })),
     (e) => e instanceof TowerError && e.code === 'E_BALLOT'
       && /gist/.test(e.message) && /lesson/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
-      && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message) && !/hybrid/.test(e.message));
+      && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message)
+      && /reviewPasses/.test(e.message) && !/hybrid metadata/.test(e.message));
 });
 
 test('addDecision refuses options missing a code field', () => {
@@ -51,6 +61,74 @@ test('addDecision accepts a full ballot', () => {
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot() }));
   assert.equal(result.draft, false);
+  assert.equal(result.ballotMode, 'full');
+  assert.deepEqual(result.reviewPasses, reviewPasses());
+  assert.deepEqual(Object.keys(result.reviewPasses), ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial']);
+});
+
+test('full ballot requires every ordered review summary', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const passes = reviewPasses();
+  delete passes.cooperative;
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.cooperative/.test(e.message));
+});
+
+test('full ballot requires string review summaries', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const passes = reviewPasses();
+  passes.base = { text: 'Not a string.' };
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.base.*need text/.test(e.message));
+});
+
+test('ballot option keys are unique so every loser needs its own reason', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const duplicate = ballot();
+  duplicate.options[1].key = 'A';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...duplicate })),
+    (e) => e.code === 'E_BALLOT' && /options\[\]\.key.*duplicate: A/.test(e.message));
+});
+
+test('review summaries contain one or two sentences', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const passes = reviewPasses();
+  passes.adversarial = 'First finding. Second finding. Third finding.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.adversarial.*1-2 sentences/.test(e.message));
+});
+
+test('short ballot needs the owner request and rejects review records', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const short = ballot({ ballotMode: 'short', shortAuthorizedBy: 'Owner: make this a short ballot.', reviewPasses: undefined });
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short choice', ...short }));
+  assert.equal(result.ballotMode, 'short');
+  assert.equal(result.shortAuthorizedBy, 'Owner: make this a short ballot.');
+  assert.equal(result.reviewPasses, null);
+
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'No owner request', ...ballot({ ballotMode: 'short', reviewPasses: undefined }) })),
+    (e) => e.code === 'E_BALLOT' && /shortAuthorizedBy/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short with reviews', ...ballot({ ballotMode: 'short', shortAuthorizedBy: 'Owner said short.' }) })),
+    (e) => e.code === 'E_BALLOT' && /short.*reviewPasses/.test(e.message));
+});
+
+test('Learn this first is one paragraph at most', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ lesson: 'First paragraph.\n\nSecond paragraph.' }) })),
+    (e) => e.code === 'E_BALLOT' && /lesson.*one paragraph/.test(e.message));
 });
 
 test('addDecision rejects dense plain-language prose', () => {
@@ -60,6 +138,24 @@ test('addDecision rejects dense plain-language prose', () => {
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ lesson: dense }) })),
     (e) => e.code === 'E_BALLOT' && /plain language/.test(e.message) && /33 words/.test(e.message));
+});
+
+test('plain-language limits cover every user-visible prose field', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const dense = Array.from({ length: 33 }, (_, i) => `word${i}`).join(' ') + '.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ detail: dense }) })),
+    (e) => e.code === 'E_BALLOT' && /plain language.*detail/.test(e.message));
+});
+
+test('plain-language limits cover prose lines inside the in-the-wild example', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const dense = Array.from({ length: 33 }, (_, i) => `word${i}`).join(' ') + '.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ inWild: dense }) })),
+    (e) => e.code === 'E_BALLOT' && /plain language.*inWild line 1/.test(e.message));
 });
 
 test('recommendation must explain every losing option', () => {
@@ -104,6 +200,15 @@ test('decision update --ready validates then clears draft', () => {
   assert.equal(proj.cards[0].lane.lane, 'decide', 'now-ready decision blocks like any other');
 });
 
+test('editing an open ready ballot re-runs the profile gate', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-R2', title: 'Ready ballot', ...ballot() }));
+  assert.throws(
+    () => st.mutate((s) => db.updateDecision(s, 'D-R2', { reviewPasses: null }, 'agent-1')),
+    (e) => e.code === 'E_BALLOT' && /reviewPasses/.test(e.message));
+});
+
 test('acceptance ballots (mintAcceptance) are exempt from the narrative ballot standard', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
@@ -111,6 +216,22 @@ test('acceptance ballots (mintAcceptance) are exempt from the narrative ballot s
   const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
   assert.equal(result.phase, 'verify');
   assert.ok(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'));
+});
+
+test('only mintAcceptance can create or update an acceptance ballot', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-FAKE', group: 'acceptance', title: 'Fake' })),
+    (e) => e.code === 'E_INVALID' && /system-generated/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-ACCEPT-FAKE', group: 'other', title: 'Fake', draft: true })),
+    (e) => e.code === 'E_INVALID' && /system-generated/.test(e.message));
+
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-NORMAL', title: 'Normal', ...ballot() }));
+  assert.throws(
+    () => st.mutate((s) => db.updateDecision(s, 'D-NORMAL', { group: 'acceptance' }, 'agent-1')),
+    (e) => e.code === 'E_INVALID' && /system-generated/.test(e.message));
 });
 
 // ---- 2. owner-only ratify ----------------------------------------------------

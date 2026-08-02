@@ -14,7 +14,7 @@
   --red-line: rgba(255, 46, 77, .45);
   --red-glow: 0 0 18px -4px rgba(255, 46, 77, .7);
   --ok: #43c78c; --ok-soft: rgba(67, 199, 140, .12); --ok-line: rgba(67, 199, 140, .4);
-  --amber: #dfa14f; --frost: #8d92c9; --cyan: #45b8ca; --blue: #6a8ef2;
+  --amber: #dfa14f; --frost: #8d92c9; --cyan: #45b8ca; --blue: #6a8ef2; --slate: #7b8190;
 
   --s-triage: #dfa14f; --s-deciding: #ff2e4d; --s-planning: #6a8ef2; --s-ready: #43c78c;
   --s-building: #45b8ca; --s-verify: #d4a24a; --s-done: #525f58; --s-frozen: #8d92c9;
@@ -373,7 +373,7 @@ a { color: inherit; text-decoration: none; }
 .fdeck__head { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 14px; }
 .fdeck__id { font: 600 12px/1 var(--mono); color: var(--cyan); }
 .fdeck__for { font: 500 11.5px/1.4 var(--mono); color: var(--faint); }
-.fdeck__rec { margin-left: auto; font: 600 11px/1 var(--mono); color: var(--ok); }
+.fdeck__rec { margin-left: auto; font: 600 11px/1 var(--mono); color: var(--blue); }
 .fdeck__gist { font: 600 21px/1.35 var(--body); margin-bottom: 6px; }
 .fdeck__title { color: var(--dim); font-size: 14px; margin-bottom: 14px; }
 .facets { display: flex; gap: 5px; margin: 18px 0 0; flex-wrap: wrap; }
@@ -403,7 +403,7 @@ a { color: inherit; text-decoration: none; }
 }
 .opt.sel .opt__num { color: var(--void); background: var(--ok); border-color: var(--ok); }
 .opt__name { font: 600 13.5px/1.3 var(--body); }
-.opt__rec { font: 600 10px/1 var(--mono); color: var(--ok); margin-left: auto; }
+.opt__rec { font: 600 10px/1 var(--mono); color: var(--blue); margin-left: auto; }
 .opt__check { display: none; font: 600 11px/1 var(--mono); color: var(--ok); margin-left: auto; }
 .opt.sel .opt__check { display: inline; } .opt.sel .opt__rec { display: none; }
 .opt__detail { padding: 0 14px 10px 46px; color: var(--dim); font-size: 13px; max-width: 76ch; }
@@ -413,8 +413,21 @@ a { color: inherit; text-decoration: none; }
 .opt__code { padding: 0 14px 13px 46px; }
 .hybrid { margin: 14px 0; font-size: 13px; color: var(--dim); border-left: 2px solid var(--cyan); padding-left: 12px; }
 .hybrid p { margin: 7px 0 0; max-width: 76ch; }
-.recline { margin: 14px 0; font-size: 13px; color: var(--dim); border-left: 2px solid var(--ok-line); padding-left: 12px; }
+.reviewpasses { display: grid; gap: 8px; margin: 16px 0; }
+.reviewpass { --pass-color: var(--slate); border-left: 3px solid var(--pass-color); background: color-mix(in srgb, var(--pass-color) 8%, var(--panel)); padding: 10px 12px; border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.reviewpass--base { --pass-color: var(--slate); }
+.reviewpass--boilOcean { --pass-color: var(--frost); }
+.reviewpass--hybrid { --pass-color: var(--cyan); }
+.reviewpass--cooperative { --pass-color: var(--ok); }
+.reviewpass--adversarial { --pass-color: var(--amber); }
+.reviewpass__label { color: var(--pass-color); font: 700 10.5px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; }
+.reviewpass > p { margin: 7px 0 0; color: var(--dim); font-size: 13px; max-width: 76ch; }
+.reviewpass__detail { margin-top: 8px; color: var(--dim); font-size: 12.5px; }
+.reviewpass__detail p { margin: 6px 0 0; max-width: 76ch; }
+.recline { margin: 14px 0; font-size: 13px; color: var(--dim); border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 8%, var(--panel)); padding: 10px 12px; border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.recline > b { color: var(--blue); }
 .recline p { margin: 7px 0 0; max-width: 76ch; }
+.recline__why-not { color: color-mix(in srgb, var(--red) 68%, var(--dim)); }
 .fcomment { width: 100%; min-height: 54px; resize: vertical; margin-top: 14px; font-size: 13px; }
 .deck-actions { display: flex; gap: 8px; margin-top: 10px; }
 .askbox { margin-top: 12px; border: 1px solid rgba(223, 161, 79, .35); border-radius: var(--r-sm); padding: 12px; }
@@ -516,6 +529,7 @@ a { color: inherit; text-decoration: none; }
 }
 @keyframes queue-signal { 50% { transform: rotate(45deg); box-shadow: 0 0 0 5px rgba(69, 184, 202, .05), 0 0 16px rgba(69, 184, 202, .5); } }
 .queue__count { color: var(--faint); font: 500 11px/1 var(--mono); margin-right: auto; }
+.queue__done-count { color: var(--blue); font-weight: 700; }
 .queue__section { display: flex; flex-direction: column; gap: 6px; }
 .queue__label { color: var(--faint); font: 600 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
 .queue__row {

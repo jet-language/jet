@@ -22,6 +22,8 @@ const fresh = () => {
 };
 
 const ballot = (extra = {}) => ({
+  ballotMode: 'full',
+  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
   rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' }],
   recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
@@ -134,6 +136,8 @@ test('an open decision carries its full options text verbatim (owner decides fro
   assert.equal(d.story, 'Priya wants a terse literal.');
   assert.equal(d.inWild, 'x := [1,2,3] in examples/features/lists.jet');
   assert.equal(d.rec, 'A');
+  assert.equal(d.ballotMode, 'full');
+  assert.equal(d.reviewPasses.boilOcean, 'The boil-the-ocean pass tested the broad solution space.');
   assert.equal(d.recommendation.whyNot[0].key, 'B');
   assert.equal(d.hybrid.result, 'A');
   assert.deepEqual(d.options, [

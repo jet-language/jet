@@ -54,10 +54,14 @@ export function renderDoneMessageQueue({ done = [], messages = [], since = null 
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     })}`
     : '';
+  const countText = [
+    done.length ? `<span class="queue__done-count">${done.length} done</span>${sinceText}` : '',
+    `${messages.length} message${messages.length === 1 ? '' : 's'}`,
+  ].filter(Boolean).join(' · ');
   return `<div class="queue">
       <div class="queue__head">
         <div class="queue__h"><span class="queue__signal" aria-hidden="true">✦</span>Done &amp; messages</div>
-        <span class="queue__count">${done.length} done${sinceText} · ${messages.length} message${messages.length === 1 ? '' : 's'}</span>
+        <span class="queue__count">${countText}</span>
         ${done.length ? '<button class="btn btn--sm" data-clear-done>Clear done cards</button>' : ''}
       </div>
       ${done.length ? `<div class="queue__section"><div class="queue__label">Completed</div>${doneRows}</div>` : ''}

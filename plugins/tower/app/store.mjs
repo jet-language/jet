@@ -727,6 +727,7 @@ function mintAcceptance(s, c) {
     delete existing.outcome; delete existing.comment; delete existing.ratifiedAt;
   } else {
     addDecision(s, {
+      [SYSTEM_ACCEPTANCE]: true,
       id, cardId: c.id, group: 'acceptance',
       title: `Accept #${c.num} — ${c.title}`,
       gist: `Close #${c.num}, or bounce it back to building.`,
@@ -936,14 +937,17 @@ export function releaseCard(s, ref, by, handoff) {
 
 // ---- mutations: decisions --------------------------------------------------
 
-// D-TWRGUARD1=C (#458): the ballot-ready standard (tower-ballot skill) —
-// gist/lesson/story/inWild/options[].code/rec/recommendation — enforced at write
-// time. Acceptance
+// D-TWRGUARD1=C (#458), D-TWR-BALLOT-PROFILES1=A (#1375): the ballot-ready
+// standard is enforced at write time. Acceptance
 // ballots (`mintAcceptance` above) are a fixed system-generated evidence
 // format, not a narrative ballot, and are exempt.
 const PLAIN_SENTENCE_WORDS = 32;
 const PLAIN_PARAGRAPH_WORDS = 90;
+const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial'];
+const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
+const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+const orderedReviewPasses = (passes) => Object.fromEntries(REVIEW_PASS_KEYS.map(key => [key, passes[key]]));
 
 function proseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
@@ -963,14 +967,34 @@ function proseDensityGaps(label, text) {
   return gaps;
 }
 
+function exampleProseDensityGaps(label, text) {
+  if (!text || !String(text).trim()) return [];
+  const gaps = [];
+  String(text).split('\n').forEach((line, li) => {
+    line.split(/(?<=[.!?])\s+/).filter(Boolean).forEach((sentence, si) => {
+      const sentenceWords = words(sentence).length;
+      if (sentenceWords > PLAIN_SENTENCE_WORDS)
+        gaps.push(`${label} line ${li + 1} sentence ${si + 1} has ${sentenceWords} words (max ${PLAIN_SENTENCE_WORDS})`);
+    });
+  });
+  return gaps;
+}
+
 export function plainLanguageGaps(p) {
   const gaps = [
+    ...proseDensityGaps('title', p.title),
     ...proseDensityGaps('gist', p.gist),
     ...proseDensityGaps('lesson', p.lesson),
+    ...proseDensityGaps('explainer', p.explainer),
     ...proseDensityGaps('story', p.story),
+    ...exampleProseDensityGaps('inWild', p.inWild),
+    ...proseDensityGaps('detail', p.detail),
   ];
-  for (const option of p.options || [])
+  for (const option of p.options || []) {
+    gaps.push(...proseDensityGaps(`option ${option?.key || '?'} name`, option?.name));
     gaps.push(...proseDensityGaps(`option ${option?.key || '?'}`, option?.detail));
+    gaps.push(...proseDensityGaps(`option ${option?.key || '?'} technical`, option?.technical));
+  }
   for (const comparison of p.comparisons || [])
     gaps.push(...proseDensityGaps(`comparison ${comparison?.lang || '?'}`, comparison?.note));
   const recommendation = p.recommendation || {};
@@ -978,16 +1002,29 @@ export function plainLanguageGaps(p) {
   gaps.push(...proseDensityGaps('recommendation tradeoff', recommendation.tradeoff));
   for (const rejected of recommendation.whyNot || [])
     gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
+  gaps.push(...proseDensityGaps('hybrid synthesis', p.hybrid?.synthesis));
+  for (const item of p.hybrid?.harvest || []) {
+    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} aspect`, item?.aspect));
+    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} use`, item?.use));
+  }
+  for (const key of REVIEW_PASS_KEYS)
+    gaps.push(...proseDensityGaps(`reviewPasses.${key}`, p.reviewPasses?.[key]));
+  if (typeof p.checkInstructions === 'string')
+    gaps.push(...proseDensityGaps('checkInstructions', p.checkInstructions));
   return gaps;
 }
 
 export function ballotGaps(p) {
   const missing = [];
+  const ballotMode = p.ballotMode || 'full';
+  if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
   if (!p.lesson || !String(p.lesson).trim()) missing.push('lesson');
+  else if (String(p.lesson).trim().split(/\n\s*\n/).length > 1) missing.push('lesson (one paragraph maximum)');
   if (!p.story || !String(p.story).trim()) missing.push('story');
   if (!p.inWild || !String(p.inWild).trim()) missing.push('inWild');
   const opts = Array.isArray(p.options) ? p.options : [];
+  const optionKeys = opts.map(o => o?.key).filter(Boolean);
   if (opts.length < 2) missing.push('options (need at least 2)');
   else {
     const noKey = opts.filter(o => !o || !o.key || !String(o.key).trim());
@@ -998,9 +1035,10 @@ export function ballotGaps(p) {
     if (noDetail.length) missing.push(`options[].detail (missing on ${noDetail.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
     const noCode = opts.filter(o => !o || !o.code || !String(o.code).trim());
     if (noCode.length) missing.push(`options[].code (missing on ${noCode.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
+    const duplicateKeys = [...new Set(optionKeys.filter((key, i) => optionKeys.indexOf(key) !== i))];
+    if (duplicateKeys.length) missing.push(`options[].key (duplicate: ${duplicateKeys.join(', ')})`);
   }
   if (!p.rec || !String(p.rec).trim()) missing.push('rec');
-  const optionKeys = opts.map(o => o?.key).filter(Boolean);
   if (p.rec && !optionKeys.includes(p.rec)) missing.push('rec (must match an option key)');
   const recommendation = p.recommendation;
   if (!recommendation || typeof recommendation !== 'object') {
@@ -1014,6 +1052,23 @@ export function ballotGaps(p) {
       if (!item || !item.reason || !String(item.reason).trim()) missing.push(`recommendation.whyNot[${key}]`);
     }
   }
+  if (ballotMode === 'full') {
+    const passes = p.reviewPasses;
+    if (!passes || typeof passes !== 'object' || Array.isArray(passes)) {
+      missing.push('reviewPasses');
+    } else {
+      for (const key of REVIEW_PASS_KEYS) {
+        const summary = passes[key];
+        if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
+        else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
+      }
+      for (const key of Object.keys(passes).filter(key => !REVIEW_PASS_KEYS.includes(key)))
+        missing.push(`reviewPasses.${key} (unexpected)`);
+    }
+  } else if (ballotMode === 'short') {
+    if (!p.shortAuthorizedBy || !String(p.shortAuthorizedBy).trim()) missing.push('shortAuthorizedBy');
+    if (p.reviewPasses != null) missing.push('short ballots must omit reviewPasses');
+  }
   const dense = plainLanguageGaps(p);
   if (dense.length) missing.push(`plain language: ${dense.join('; ')}`);
   return missing;
@@ -1023,15 +1078,21 @@ export function addDecision(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'decision needs a title');
   if (p.id && s.decisions.find(d => d.id === p.id)) fail('E_INVALID', `decision id ${p.id} already exists`);
+  const systemAcceptance = p[SYSTEM_ACCEPTANCE] === true;
+  if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
+    fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   const draft = !!p.draft;
   if (!draft && p.group !== 'acceptance') {
     const gaps = ballotGaps(p);
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
   }
+  const ballotMode = p.group === 'acceptance' ? null : (p.ballotMode || 'full');
   const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
     title: String(p.title).trim(), gist: p.gist || '', lesson: p.lesson || '', explainer: p.explainer || '', story: p.story || '',
     inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
     rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
+    ballotMode, shortAuthorizedBy: ballotMode === 'short' ? p.shortAuthorizedBy : null,
+    reviewPasses: ballotMode === 'full' && p.reviewPasses ? orderedReviewPasses(p.reviewPasses) : null,
     checkInstructions: p.checkInstructions || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
   touchCard(card, p.by);
@@ -1122,16 +1183,24 @@ export function reopenDecision(s, decisionId, by) {
 
 export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group'])
+  if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-') || patch.group === 'acceptance')
+    fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses'])
     if (k in patch) d[k] = patch[k];
-  // --ready clears draft, but only once the ballot standard is actually met.
-  if (patch.ready) {
-    if (d.group !== 'acceptance') {
-      const gaps = ballotGaps(d);
-      if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
+  // Every edit to an open ready ballot re-runs the gate. --ready does the
+  // same while promoting a draft. Ratified records remain historical law.
+  if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
+    d.ballotMode ||= 'full';
+    const gaps = ballotGaps(d);
+    if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
+    if (d.ballotMode === 'full') {
+      d.reviewPasses = orderedReviewPasses(d.reviewPasses);
+      d.shortAuthorizedBy = null;
+    } else {
+      d.reviewPasses = null;
     }
-    d.draft = false;
   }
+  if (patch.ready) d.draft = false;
   const card = s.cards.find(c => c.id === d.cardId);
   if (card) touchCard(card, by);
   logEvent(s, { by, action: 'decision.update', ref: d.id, note: patch.ready ? 'marked ready' : '' });
@@ -1151,7 +1220,8 @@ export function mintVerdict(s, ref, outcome, title, by) {
   const d = { id, cardId: c.id, group: 'verdict',
     title: title || `Verdict on #${c.num} — ${c.title}`,
     gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
-    rec: null, recommendation: null, hybrid: null, draft: false, status: 'ratified', outcome, comment: outcome,
+    rec: null, recommendation: null, hybrid: null, ballotMode: null, shortAuthorizedBy: null, reviewPasses: null,
+    draft: false, status: 'ratified', outcome, comment: outcome,
     created: now(), ratifiedAt: today() };
   s.decisions.push(d);
   c.log.unshift({ at: today(), by, text: `Verdict recorded (${id}): ${outcome}` });
@@ -1428,10 +1498,11 @@ const BRIEF_RULES = [
 // included — since that's what the owner would need to decide from.
 function decisionForBrief(d) {
   const base = { id: d.id, cardId: d.cardId, group: d.group, status: d.status, draft: !!d.draft,
-    title: d.title, gist: d.gist, outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
+    title: d.title, gist: d.gist, ballotMode: d.ballotMode ?? null, shortAuthorizedBy: d.shortAuthorizedBy ?? null,
+    outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
   return { ...base, lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
-    recommendation: d.recommendation, hybrid: d.hybrid,
+    recommendation: d.recommendation, hybrid: d.hybrid, reviewPasses: d.reviewPasses,
     options: d.options || [], comparisons: d.comparisons || [] };
 }
 

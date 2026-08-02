@@ -30,6 +30,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
 
   // decision via stdin-less file
   const ballot = JSON.stringify({ cardId: '#1', id: 'D-CLI1', title: 'Choose',
+    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The boil-the-ocean pass tested the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened each option.', adversarial: 'The adversarial pass attacked the recommendation.' },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'B',
     recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' },
     hybrid: { result: 'B', synthesis: 'B combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
@@ -37,6 +38,13 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   const bp = join(cwd, 'ballot.json');
   writeFileSync(bp, ballot);
   run(cwd, ['decision', 'add', '--file', bp, '--by', 'tester']);
+  const saved = JSON.parse(run(cwd, ['decision', 'show', 'D-CLI1', '--json']).out);
+  assert.equal(saved.ballotMode, 'full');
+  assert.equal(saved.reviewPasses.adversarial, 'The adversarial pass attacked the recommendation.');
+  const brief = run(cwd, ['brief', '#1', '--color=never']).out;
+  const ordered = ['base pass:', 'boil-the-ocean pass:', 'hybrid pass:', 'cooperative pass:', 'adversarial pass:', 'rec:'];
+  for (let i = 1; i < ordered.length; i++)
+    assert.ok(brief.indexOf(ordered[i - 1]) < brief.indexOf(ordered[i]), `${ordered[i - 1]} must precede ${ordered[i]}`);
 
   const list = JSON.parse(run(cwd, ['card', 'list', '--lane', 'decide', '--json']).out);
   assert.equal(list.length, 1);

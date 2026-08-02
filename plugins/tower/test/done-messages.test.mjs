@@ -63,6 +63,7 @@ test('done-only queue renders the flared heading and clear control', () => {
     messages: [],
   });
   assert.match(html, /Done &amp; messages/);
+  assert.match(html, /queue__done-count">1 done</);
   assert.match(html, /queue__signal[^>]*aria-hidden="true">✦</);
   assert.match(html, />DONE</);
   assert.match(html, /data-clear-done>Clear done cards</);
@@ -86,6 +87,7 @@ test('message-only queue renders a per-message Done control without clear', () =
   assert.match(html, />MESSAGE</);
   assert.match(html, /data-message-done="q1">Done</);
   assert.doesNotMatch(html, /data-clear-done/);
+  assert.doesNotMatch(html, /queue__done-count/);
   assert.match(html, /Read &lt;this&gt; note/);
   assert.match(html, /Ship &amp; docs/);
 });

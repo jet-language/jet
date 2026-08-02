@@ -1,4 +1,6 @@
-import { boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot } from './board-state.js';
+import {
+  boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot,
+} from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
 
@@ -198,8 +200,9 @@ const ticket = (c) => '#' + (c.num ?? '');
 const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
-const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified');
+const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified' && !d.draft);
 const openGenericDecisions = () => openDecisions().filter(d => d.group !== 'acceptance');
+const ballotCount = () => openDecisions().length;
 
 // waiting-time chip: shown once something has sat for 6+ hours
 function ageChip(iso) {
@@ -266,7 +269,7 @@ function jumpTo(it) {
 
 // ---- chrome ------------------------------------------------------------------
 const VIEWS = [
-  { id: 'now', name: 'Now', count: () => duties().length, alert: true },
+  { id: 'now', name: 'Now', count: () => ballotCount(), alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
 ];
@@ -290,7 +293,7 @@ function renderChrome() {
   updatePill();
 }
 function updatePill() {
-  const fy = duties().length;
+  const fy = ballotCount();
   const pill = $('#pill');
   pill.className = 'top__pill' + (fy ? '' : ' clear');
   pill.innerHTML = fy ? `<span class="beat"></span> ${fy} for you` : '✓ tower clear';
@@ -312,8 +315,9 @@ function undoToast(label, rev) {
 function viewNow() {
   const v = $('#view');
   const items = duties();
+  const ballots = ballotCount();
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Now</h1>
-    <span class="viewhead__sub">${items.length ? `<b>${items.length}</b> waiting on you — clear the beacon` : 'nothing needs you'}</span>
+    <span class="viewhead__sub">${ballots ? `<b>${ballots}</b> ballot${ballots === 1 ? '' : 's'} waiting on you` : 'no ballots waiting on you'}</span>
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
@@ -982,6 +986,27 @@ function focusAll(startId) {
 function exitFocus() { focusIds = null; $('#focus').hidden = true; render(); }
 function focusGo(delta) { focusIdx = Math.max(0, Math.min(focusIds.length - 1, focusIdx + delta)); focusFacet = null; askOpen = false; renderFocus(); }
 const optName = (d, key) => ((d.options || []).find(x => x.key === key) || {}).name || '';
+const REVIEW_STAGES = [
+  ['base', '●', 'Base'],
+  ['boilOcean', '◎', 'Boil the ocean'],
+  ['hybrid', '◇', 'Hybrid'],
+  ['cooperative', '＋', 'Cooperative'],
+  ['adversarial', '⚑', 'Adversarial'],
+];
+function reviewPassesBody(d) {
+  if (!d.reviewPasses) {
+    return d.hybrid?.synthesis ? `<div class="hybrid"><b>◇ Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
+      ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : '';
+  }
+  return `<section class="reviewpasses" aria-label="Ballot review passes">
+    ${REVIEW_STAGES.map(([key, icon, label]) => `<div class="reviewpass reviewpass--${key}">
+      <div class="reviewpass__label"><span aria-hidden="true">${icon}</span> ${label} pass</div>
+      <p>${esc(d.reviewPasses[key] || '')}</p>
+      ${key === 'hybrid' && d.hybrid?.synthesis ? `<div class="reviewpass__detail"><b>Result ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
+        ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : ''}
+    </div>`).join('')}
+  </section>`;
+}
 function availFacets(d) {
   const f = [];
   if (d.lesson) f.push(['lesson', 'Learn this first']);
@@ -1051,11 +1076,10 @@ function renderFocus() {
       <div class="optslabel">Choose one
         ${(d.options || []).length >= 2 ? `<button class="btn btn--ghost btn--sm" id="f-compare" style="margin-left:10px;text-transform:none;letter-spacing:0">${focusCompare ? '☰ Stack' : '⇆ Compare'}</button>` : ''}</div>
       <div class="opts ${focusCompare ? 'opts--compare' : ''}" id="f-opts"></div>
-      ${d.hybrid?.synthesis ? `<div class="hybrid"><b>Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
-        ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : ''}
+      ${reviewPassesBody(d)}
       ${d.rec ? `<div class="recline"><b>Recommendation:</b> ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}
         ${d.recommendation?.why ? `<p><b>Why this wins:</b> ${esc(d.recommendation.why)}</p>` : ''}
-        ${(d.recommendation?.whyNot || []).map(x => `<p><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
+        ${(d.recommendation?.whyNot || []).map(x => `<p class="recline__why-not"><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
         ${d.recommendation?.tradeoff ? `<p><b>Accepted tradeoff:</b> ${esc(d.recommendation.tradeoff)}</p>` : ''}</div>` : ''}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
