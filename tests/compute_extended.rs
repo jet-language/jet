@@ -91,6 +91,26 @@ fn raw_kernel_contract_cannot_escape_the_unsafe_gate() {
 }
 
 #[test]
+fn safe_kernel_proof_reaches_tir_without_rederivation() {
+    let compiled = jet::compile(
+        "#Kernel(.parallel) fn add(left: Int, right: Int) => Int = left + right;\nfn run() { print(add(1, 2)) }\n",
+    )
+    .expect("the checked kernel should compile");
+    assert!(
+        compiled.rust.contains(
+            "jet-kernel-proof: mode=parallel bounds=true alias_free=true captures=true race_free=true barriers_uniform=true control_flow=true"
+        ),
+        "missing sema kernel proof in TIR output"
+    );
+    assert!(
+        compiled
+            .rust
+            .contains("const _: () = assert!(true, \"Jet kernel proof must be complete\")"),
+        "AOT backend did not consume the complete kernel proof"
+    );
+}
+
+#[test]
 fn data_series_feeds_the_same_compute_tensor_path() {
     assert_aot_and_default_parity(
         "compute_data_integration",

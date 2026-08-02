@@ -1349,6 +1349,10 @@ impl JetShow for JetRawKernelContract {
     }
 }
 
+fn jet_compute_raw_kernel_contract_show(contract: &JetRawKernelContract) -> String {
+    contract.jet_show()
+}
+
 /// Construct the typed audited boundary for raw device code. The raw body is
 /// outside this safe Prelude; this value is the required contract that a
 /// `#Unsafe` caller must carry to the eventual provider bridge. Keeping the

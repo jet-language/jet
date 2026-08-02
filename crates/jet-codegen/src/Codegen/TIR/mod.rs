@@ -4375,6 +4375,12 @@ pub enum THandleOp {
     },
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
+    /// D-SERVICE-AUTHORITY1: durable authority methods share the Prelude log.
+    ServiceRuntimeSend,
+    ServiceRuntimeRetry,
+    ServiceRuntimeDeadLetter,
+    ServiceRuntimeRetain,
+    ServiceRuntimeCommit,
     /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DBError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.

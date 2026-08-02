@@ -1862,6 +1862,12 @@ impl<'a> Checker<'a> {
                         return ret;
                     }
                 }
+                if handle_ty == "ServiceRuntime" {
+                    if let Some(ret) = self.check_service_runtime_method(method, args, span) {
+                        *recv_type_out = Some(handle_ty.clone());
+                        return ret;
+                    }
+                }
             }
             // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
             // — same bespoke-block shape as `DBConnection` above (`.call`/

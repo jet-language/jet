@@ -112,7 +112,9 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         .kernel_proof
         .map(|proof| {
             format!(
-                "/* jet-kernel-proof: mode={} bounds={} alias_free={} captures={} race_free={} barriers_uniform={} control_flow={} */\n",
+                "const _: () = assert!({}, \"Jet kernel proof must be complete\");\n\
+/* jet-kernel-proof: mode={} bounds={} alias_free={} captures={} race_free={} barriers_uniform={} control_flow={} */\n",
+                proof.is_complete(),
                 proof.mode.as_str(),
                 proof.bounds,
                 proof.alias_free,

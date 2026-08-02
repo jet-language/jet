@@ -1,0 +1,64 @@
+// D-SERVICE-AUTHORITY1=A: durable receipts survive runtime reopen.
+use core.path as path
+use core.services as services
+use core.testing as testing
+use core.time as time
+
+fn receipt_id(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Accepted(id) -> { return id }
+        .Duplicate(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
+    }
+    return ""
+}
+
+fn receipt_kind(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Accepted(_) -> { return "accepted" }
+        .Duplicate(_) -> { return "duplicate" }
+        .Retained(_, _) -> { return "retained" }
+        .DeadLettered(_) -> { return "dead" }
+        .Rejected(_) -> { return "rejected" }
+        .Unavailable(_) -> { return "unavailable" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("service-authority")
+    store :: path.join(temp, "authority.log")
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := services.runtime(store, retention: retention)
+    tree := services.tree("orders")
+    endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+
+    first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
+    id :: receipt_id(first)
+    if id == "" { panic("missing receipt id") }
+    print("first:accepted")
+    recovered := services.runtime(store, retention: retention)
+    recovered_duplicate :: recovered.retry(id) ?? panic("recover")
+    print("recovered:{receipt_kind(recovered_duplicate)}")
+    delivered :: services.receive(&tree, endpoint) ?? panic("deliver")
+    print("delivered:{delivered}")
+    runtime.commit(id) ?? panic("commit")
+    print("committed:ok")
+
+    duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
+    print("duplicate:{receipt_kind(duplicate)}")
+
+    retained :: runtime.retain(id) ?? panic("retain")
+    print("retain:{receipt_kind(retained)}")
+    retry :: recovered.retry(id) ?? panic("retry")
+    print("retry:{receipt_kind(retry)}")
+    redelivered :: services.receive(&tree, endpoint) ?? panic("redeliver")
+    print("redelivered:{redelivered}")
+    runtime.commit(id) ?? panic("redelivery commit")
+    dead :: runtime.dead_letter(id) ?? panic("dead")
+    print("dead:{receipt_kind(dead)}")
+    replay :: recovered.send(endpoint, "order", key: "order-1") ?? panic("replay")
+    print("replay:{receipt_kind(replay)}")
+}

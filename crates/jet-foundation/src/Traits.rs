@@ -1574,7 +1574,7 @@ impl TraitRegistry {
         );
         for ty in [
             "FileReader", "FileWriter", "FileLock", "TcpStream", "UnixStream",
-            "TLSStream", "DBConnection", "Arena", "Bump", "Pool", "Fixed",
+            "TLSStream", "DBConnection", "DBScope", "Arena", "Bump", "Pool", "Fixed",
         ] {
             self.trait_impls
                 .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
@@ -1604,9 +1604,9 @@ impl TraitRegistry {
     }
 
     /// D-DBDRIVER1=A: one nominal parameterized SQL driver contract. SQLite's
-    /// `DBConnection` is the first compiler-owned implementation. Methods take
-    /// SQL text plus a separate `[DBValue]` bind list — there is no raw-execute
-    /// escape. Cleanup stays on `Close` (not duplicated here).
+    /// `DBScope` is the first compiler-owned implementation. Methods take SQL
+    /// text plus a separate `[DBValue]` bind list — there is no raw-execute
+    /// escape, and a raw `DBConnection` cannot bypass its row policy.
     pub fn register_synthetic_driver(&mut self) {
         let dummy = Span { start: 0, end: 0 };
         let db_error = Type::Named("DBError".to_string());
@@ -1720,7 +1720,7 @@ impl TraitRegistry {
             );
         }
         self.trait_impls.insert((
-            "DBConnection".to_string(),
+            "DBScope".to_string(),
             Syntax::TRAIT_DRIVER.to_string(),
         ));
     }

@@ -49,7 +49,10 @@ mod UrlLite;
 mod Value;
 pub mod TirBridge;
 
-pub use AmbientRuntime::{try_core_call as try_ambient_core_call, try_handle as try_ambient_handle, with_ambient};
+pub use AmbientRuntime::{
+    ambient_hooks, try_core_call as try_ambient_core_call, try_handle as try_ambient_handle,
+    with_ambient,
+};
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
     core_event_async_result, core_event_decision_hook, core_event_hook, core_event_new,

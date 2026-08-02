@@ -40,6 +40,11 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsSubcommand => "ParsedArgsSubcommand",
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
         THandleOp::DBWithPolicy => "DBWithPolicy",
+        THandleOp::ServiceRuntimeSend => "ServiceRuntimeSend",
+        THandleOp::ServiceRuntimeRetry => "ServiceRuntimeRetry",
+        THandleOp::ServiceRuntimeDeadLetter => "ServiceRuntimeDeadLetter",
+        THandleOp::ServiceRuntimeRetain => "ServiceRuntimeRetain",
+        THandleOp::ServiceRuntimeCommit => "ServiceRuntimeCommit",
         THandleOp::DBQuery => "DBQuery",
         THandleOp::DBQueryOne => "DBQueryOne",
         THandleOp::DBExecute => "DBExecute",
@@ -434,6 +439,13 @@ pub(super) fn eval_handle(
         THandleOp::DBValueIsNull => db_value_result(recv, "is_null", span),
         // Runtime-tier only (jet-jit ambient); comptime has no SQLite host.
         THandleOp::DBWithPolicy => Err(unsupported("handle `DBWithPolicy`", span)),
+        THandleOp::ServiceRuntimeSend => Err(unsupported("handle `ServiceRuntimeSend`", span)),
+        THandleOp::ServiceRuntimeRetry => Err(unsupported("handle `ServiceRuntimeRetry`", span)),
+        THandleOp::ServiceRuntimeDeadLetter => {
+            Err(unsupported("handle `ServiceRuntimeDeadLetter`", span))
+        }
+        THandleOp::ServiceRuntimeRetain => Err(unsupported("handle `ServiceRuntimeRetain`", span)),
+        THandleOp::ServiceRuntimeCommit => Err(unsupported("handle `ServiceRuntimeCommit`", span)),
         THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
         THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
         THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),

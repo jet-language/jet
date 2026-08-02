@@ -990,6 +990,9 @@ impl<'a> Checker<'a> {
         if enum_name == "AuthError" {
             return true;
         }
+        if enum_name == "ServiceReceipt" {
+            return true;
+        }
         false
     }
 
@@ -1026,6 +1029,9 @@ impl<'a> Checker<'a> {
         }
         if enum_name == "EnvError" {
             return Some(core_env_error_variants());
+        }
+        if let Some(v) = core_service_receipt_variants(enum_name) {
+            return Some(v);
         }
         // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
         // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals

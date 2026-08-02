@@ -5108,6 +5108,29 @@ impl LowerCtx<'_, '_> {
             Type::String => "String".into(),
             other => other.name(),
         };
+        if let Type::Named(n) = &arg.ty {
+            if let Some((_names, tys)) = self.meta.struct_layout(n) {
+                // Reject before emitting any resident instructions. The
+                // ambient path owns nested/collection reflection semantics;
+                // the resident path only has exact scalar field encoders.
+                if tys.iter().any(|ty| {
+                    !matches!(
+                        ty,
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::Float32
+                            | Type::Bool
+                            | Type::Char
+                            | Type::String
+                    )
+                }) {
+                    return Err(format!(
+                        "resident reflection for `{n}` has non-scalar fields; use ambient parity path"
+                    ));
+                }
+            }
+        }
         let type_h = self.runtime.heap.alloc_string(type_name.clone());
         let type_v = self.b.ins().iconst(types::I64, type_h);
 
@@ -7874,8 +7897,6 @@ impl LowerCtx<'_, '_> {
         ret_ty: &Type,
     ) -> Result<Value, String> {
         let object = self.lower_expr(recv)?;
-        let type_id = self.record_slot(object, 0, &Type::Int)?;
-        let concrete = self.record_slot(object, 1, &Type::Int)?;
         let arg_values: Result<Vec<_>, _> =
             args.iter().map(|arg| self.lower_call_arg(arg)).collect();
         let arg_values = arg_values?;
@@ -7883,6 +7904,34 @@ impl LowerCtx<'_, '_> {
             .trait_owner
             .as_deref()
             .ok_or_else(|| format!("jit dynamic method `{}` has no trait owner", method.name))?;
+        // D-DBDRIVER1: `DBScope` is a compiler-owned implementation of the
+        // synthetic Driver trait. It has no user function body for the JIT to
+        // index; route the trait call to the same DB host functions used by
+        // concrete scope methods. The AOT path consumes the matching emitted
+        // Rust trait implementation.
+        if trait_name == jet_foundation::Syntax::TRAIT_DRIVER {
+            let concrete = self.record_slot(object, 1, &Type::Int)?;
+            let host_id = match method.name.as_str() {
+                "query" => self.host.db.query,
+                "query_one" => self.host.db.query_one,
+                "execute" => self.host.db.execute,
+                "begin" => self.host.db.begin,
+                "commit" => self.host.db.commit,
+                "rollback" => self.host.db.rollback,
+                other => return Err(format!("jit Driver method `{other}` unsupported")),
+            };
+            let mut values = Vec::with_capacity(arg_values.len() + 1);
+            values.push(concrete);
+            values.extend_from_slice(&arg_values);
+            let host = self.module.declare_func_in_func(host_id, self.b.func);
+            let call = self.b.ins().call(host, &values);
+            let ret_clif = self.meta.clif_ty(ret_ty).or_else(|| clif_ty(ret_ty));
+            let result = ret_clif.map(|_| self.b.inst_results(call)[0]);
+            self.emit_trap_check()?;
+            return Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        }
+        let type_id = self.record_slot(object, 0, &Type::Int)?;
+        let concrete = self.record_slot(object, 1, &Type::Int)?;
         let mut candidates: Vec<(i64, FuncId)> = self
             .meta
             .trait_method_owners(trait_name, &method.name)
@@ -18624,6 +18673,15 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.db.with_policy, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val, policy, user]);
                 Ok(self.b.inst_results(call)[0])
+            }
+            // D-SERVICE-AUTHORITY1: durable receipts are ambient-backed so the
+            // interpreter and the JIT deopt path call the same shared authority.
+            THandleOp::ServiceRuntimeSend
+            | THandleOp::ServiceRuntimeRetry
+            | THandleOp::ServiceRuntimeDeadLetter
+            | THandleOp::ServiceRuntimeRetain
+            | THandleOp::ServiceRuntimeCommit => {
+                Err("ServiceRuntime authority is ambient-backed".to_string())
             }
             THandleOp::DBQuery => {
                 let sql = self.lower_expr(&args[0])?;

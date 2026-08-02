@@ -126,6 +126,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.time" => &[
             "now",
             "sleep",
+            "milliseconds",
+            "seconds",
+            "minutes",
+            "hours",
             "start",
             "instant",
             "now_utc",
@@ -327,6 +331,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "transfer_show",
             "kernel_bounds_ok",
             "raw_kernel_contract",
+            "raw_kernel_contract_show",
             "jvp_add",
             "jvp_mul",
             "jvp_matmul",
@@ -399,6 +404,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "observe",
             "endpoint_show",
             "tree_show",
+            "runtime",
+            "ServiceRuntime",
+            "ServiceReceipt",
             "ServiceTree",
             "ServiceEndpoint",
             "ServiceError",
@@ -884,6 +892,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "cors",
             "cors_policy",
         ],
+        // D-WS1=B: standalone RFC6455 client/server entry points.
+        "core.ws" => &["connect", "upgrade"],
         // D-BROWSER-AUTO1=A: native BiDi profile/session entry points.
         "core.browser" => &[
             "Browser", "BrowserContext", "BrowserPage", "BrowserFrame", "BrowserLocator",

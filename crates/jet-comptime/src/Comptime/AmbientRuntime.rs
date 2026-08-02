@@ -34,6 +34,16 @@ pub fn with_ambient<R>(
     out
 }
 
+/// Copy the current callbacks into a worker thread before evaluating a
+/// runtime fragment. The callbacks are function pointers, so this preserves
+/// the ambient authority without sharing mutable host state.
+pub fn ambient_hooks() -> (Option<AmbientCoreCall>, Option<AmbientHandle>) {
+    (
+        CORE_CALL.with(|slot| slot.get()),
+        HANDLE.with(|slot| slot.get()),
+    )
+}
+
 pub fn try_core_call(
     module: &str,
     method: &str,

@@ -7,6 +7,8 @@ mod a11y;
 mod core_literals;
 mod arg_expect;
 mod db_methods;
+mod services_methods;
+pub use services_methods::*;
 mod db_returns;
 pub use db_returns::*;
 mod plugin_checks;

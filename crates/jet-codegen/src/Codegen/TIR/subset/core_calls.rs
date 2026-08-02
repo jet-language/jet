@@ -320,6 +320,20 @@ pub(super) fn core_call_args_in_subset(
                 label_ok && expr_in_subset(&arg.expr, cx, locals)
             });
     }
+    // D-SERVICE-AUTHORITY1=A: `services.runtime(store, retention: duration)`
+    // carries one documentation-only label. Sema validates the label and the
+    // emitter erases it; keep the same positional fact in the TIR gate.
+    if module == "core.services" && method == "runtime" {
+        return args.len() == 2
+            && args.iter().enumerate().all(|(idx, arg)| {
+                let label_ok = if idx == 1 {
+                    arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("retention")
+                } else {
+                    arg.label.is_none()
+                };
+                label_ok && expr_in_subset(&arg.expr, cx, locals)
+            });
+    }
     args.iter()
         .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
 }

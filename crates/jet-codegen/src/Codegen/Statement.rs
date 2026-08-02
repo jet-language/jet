@@ -28,6 +28,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         .unwrap_or(false);
     let is_email = etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
+    let is_service_receipt = etype == Some("ServiceReceipt");
     let is_hook_outcome = etype == Some("HookOutcome");
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
@@ -62,6 +63,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}jet_email::{rust}", cx.root_prefix)
             } else if t == "AuthError" {
                 format!("{}JetAuthError", cx.root_prefix)
+            } else if t == "ServiceReceipt" {
+                format!("{}JetServiceReceipt", cx.root_prefix)
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
@@ -82,7 +85,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_http || is_email || is_auth || is_hook_outcome || is_anon_union {
+        if is_json || is_key || is_io || is_http || is_email || is_auth || is_service_receipt || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -131,7 +134,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
                 let real_names = variant_field_names(cx, variant).map(|names| {
-                    if is_email || is_auth {
+                    if is_email || is_auth || is_service_receipt {
                         names.into_iter().map(|name| name.strip_prefix("user_").unwrap_or(&name).to_string()).collect()
                     } else {
                         names
@@ -280,7 +283,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .collect();
                 if let Some(names) = variant_field_names(cx, variant) {
                     let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
-                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError")
+                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError" | "ServiceReceipt")
                     });
                     let fields = names
                         .iter()

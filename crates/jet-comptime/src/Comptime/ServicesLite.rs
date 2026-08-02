@@ -11,6 +11,7 @@ trait JetShow {
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
 include!("../../../jet-codegen/src/Prelude/TaskGroup.rs");
+include!("../../../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Services.rs");
 
 fn restart_to_ct(r: JetServiceRestart) -> CtValue {
@@ -74,6 +75,7 @@ fn endpoint_to_ct(e: &JetServiceEndpoint) -> CtValue {
             ("tree".to_string(), CtValue::Str(e.tree.clone())),
             ("worker".to_string(), CtValue::Str(e.worker.clone())),
             ("generation".to_string(), CtValue::Int(e.generation)),
+            ("authority".to_string(), CtValue::Str(e.authority.clone())),
         ],
     }
 }
@@ -144,6 +146,10 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
         CtValue::Int(n) => *n,
         _ => return Err(unsupported("endpoint generation", span)),
     };
+    let authority = match field("authority")? {
+        CtValue::Str(s) => s.clone(),
+        _ => return Err(unsupported("endpoint authority", span)),
+    };
     if tree.trim().is_empty()
         || worker.trim().is_empty()
         || tree.chars().any(char::is_control)
@@ -151,6 +157,9 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
         || tree.len() > MAX_SERVICE_NAME
         || worker.len() > MAX_SERVICE_NAME
         || generation < 1
+        || authority.trim().is_empty()
+        || authority.chars().any(char::is_control)
+        || authority.len() > MAX_SERVICE_NAME
     {
         return Err(unsupported("ServiceEndpoint value", span));
     }
@@ -158,6 +167,7 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
         tree,
         worker,
         generation,
+        authority,
     })
 }
 
@@ -357,6 +367,7 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
         type_name: "ServiceTree".to_string(),
         fields: vec![
             ("name".to_string(), CtValue::Str(tree.name.clone())),
+            ("authority".to_string(), CtValue::Str(tree.authority.clone())),
             ("generation".to_string(), CtValue::Int(tree.generation)),
             ("delivery".to_string(), delivery_to_ct(tree.delivery.clone())),
             ("restart".to_string(), restart_to_ct(tree.restart.clone())),
@@ -654,6 +665,12 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
     };
     let tree = JetServiceTree {
         name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "tree name", span)?,
+        authority: ct_to_service_string(
+            field("authority")?,
+            MAX_SERVICE_NAME,
+            "tree authority",
+            span,
+        )?,
         generation: match field("generation")? {
             CtValue::Int(n) => *n,
             _ => return Err(unsupported("tree generation", span)),
@@ -697,6 +714,7 @@ fn map_err(err: JetServiceError) -> CtValue {
         JetServiceError::Unknown(m) => ("Unknown", m),
         JetServiceError::NotStarted(m) => ("NotStarted", m),
         JetServiceError::Policy(m) => ("Policy", m),
+        JetServiceError::Unavailable(m) => ("Unavailable", m),
     };
     CtValue::Enum {
         type_name: "ServiceError".to_string(),
@@ -713,6 +731,16 @@ fn mutate_ok(tree: JetServiceTree, value: CtValue) -> CtValue {
             ("value".to_string(), value),
         ],
     }
+}
+
+fn mutate_err(tree: JetServiceTree, error: CtValue) -> CtValue {
+    CtValue::ResErr(Box::new(CtValue::Struct {
+        type_name: "__JetServiceMutErr".to_string(),
+        fields: vec![
+            ("tree".to_string(), tree_to_ct(&tree)),
+            ("error".to_string(), error),
+        ],
+    }))
 }
 
 pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
@@ -741,6 +769,30 @@ pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
             }
             other => Ok((CtValue::Unit, CtValue::ResOk(Box::new(other)))),
         },
+        CtValue::ResErr(inner) => match *inner {
+            CtValue::Struct { type_name, fields } if type_name == "__JetServiceMutErr" => {
+                let tree = fields
+                    .iter()
+                    .find(|(n, _)| n == "tree")
+                    .map(|(_, v)| v.clone())
+                    .ok_or_else(|| {
+                        CtValue::ResErr(Box::new(CtValue::Str(
+                            "core.services: missing tree write-back".to_string(),
+                        )))
+                    })?;
+                let error = fields
+                    .iter()
+                    .find(|(n, _)| n == "error")
+                    .map(|(_, v)| v.clone())
+                    .ok_or_else(|| {
+                        CtValue::ResErr(Box::new(CtValue::Str(
+                            "core.services: missing error write-back".to_string(),
+                        )))
+                    })?;
+                Ok((tree, CtValue::ResErr(Box::new(error))))
+            }
+            other => Err(CtValue::ResErr(Box::new(other))),
+        },
         other => Err(other),
     }
 }
@@ -767,7 +819,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let restart = ct_to_restart(one(1)?, span)?;
             Ok(match jet_services_set_restart(&mut tree, restart) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "set_delivery" => {
@@ -775,7 +827,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let delivery = ct_to_delivery(one(1)?, span)?;
             Ok(match jet_services_set_delivery(&mut tree, delivery) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "worker" => {
@@ -789,7 +841,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_worker(&mut tree, name, capacity) {
                 Ok(ep) => CtValue::ResOk(Box::new(mutate_ok(tree, endpoint_to_ct(&ep)))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "group" => {
@@ -817,7 +869,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_group(&mut tree, name, workers) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "start" | "stop" => {
@@ -829,7 +881,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match result {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "send" => {
@@ -840,7 +892,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_send(&mut tree, &endpoint, message) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "receive" => {
@@ -848,7 +900,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let endpoint = ct_to_endpoint(one(1)?, span)?;
             Ok(match jet_services_receive(&mut tree, &endpoint) {
                 Ok(msg) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Str(msg)))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "mailbox_depth" => {
@@ -872,7 +924,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let endpoint = ct_to_endpoint(one(1)?, span)?;
             Ok(match jet_services_fail_worker(&mut tree, &endpoint) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "endpoint_show" => Ok(CtValue::Str(jet_services_endpoint_show(&ct_to_endpoint(
@@ -896,7 +948,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_send_durable(&mut tree, &endpoint, message, key) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "dead_letter_count" => Ok(CtValue::Int(jet_services_dead_letter_count(&ct_to_tree(
@@ -907,7 +959,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let mut tree = ct_to_tree(one(0)?, span)?;
             Ok(match jet_services_drain_dead_letters(&mut tree) {
                 Ok(n) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(n)))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "set_state_empty" | "set_state_snapshot" | "set_state_event_log" => {
@@ -919,7 +971,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match result {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "commit_snapshot" => {
@@ -930,7 +982,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_commit_snapshot(&mut tree, payload) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "restore_snapshot" => {
@@ -948,7 +1000,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_append_event(&mut tree, event) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "event_count" => Ok(CtValue::Int(jet_services_event_count(&ct_to_tree(
@@ -971,7 +1023,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_workflow_start(&mut tree, id, version) {
                 Ok(run_id) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(run_id)))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "workflow_step" => {
@@ -986,7 +1038,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_workflow_step(&mut tree, run_id, step) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "workflow_history" => {
@@ -1009,7 +1061,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let endpoint = ct_to_endpoint(one(2)?, span)?;
             Ok(match jet_services_directory_register(&mut tree, name, endpoint) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "directory_resolve" => {
@@ -1031,7 +1083,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let endpoint = ct_to_endpoint(one(1)?, span)?;
             Ok(match jet_services_drain_worker(&mut tree, &endpoint) {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "handoff_generation" | "rollback_generation" | "chaos_fail" => {
@@ -1043,7 +1095,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match result {
                 Ok(n) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Int(n)))),
-                Err(e) => CtValue::ResErr(Box::new(map_err(e))),
+                Err(e) => mutate_err(tree, map_err(e)),
             })
         }
         "observe" => Ok(CtValue::Str(jet_services_observe(&ct_to_tree(

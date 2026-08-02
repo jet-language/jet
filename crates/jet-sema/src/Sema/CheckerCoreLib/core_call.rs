@@ -523,6 +523,11 @@ impl<'a> Checker<'a> {
                     "app.sync", args, &[(1, "over")], span, &mut self.diags,
                 );
             }
+            if module == "core.services" && name == "runtime" && args.len() == 2 {
+                super::net_text_time::require_exact_labels(
+                    "services.runtime", args, &[(1, "retention")], span, &mut self.diags,
+                );
+            }
             let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len()) {
                 let mut params = vec![
                     (AccessConvention::Read, Type::String),

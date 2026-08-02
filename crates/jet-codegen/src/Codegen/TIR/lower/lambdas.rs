@@ -292,7 +292,15 @@ fn lower_lambda_expecting_with_host_borrow(
             .then_some(body_ty),
         is_move,
         boxed: lam.meta.escapes,
-        rc: lam.meta.escapes && !lam.meta.needs_fn_mut && !http_handler,
+        // Native callback helpers consume the closure as an ordinary `Fn` value.
+        // Keep the `Box` escape wrapper for those call sites; `Rc<closure>` is a
+        // cloneable Jet fn value, but it does not satisfy a generic `F: Fn(...)`
+        // parameter because the generic bound sees the wrapper type itself.
+        rc: lam.meta.escapes
+            && !lam.meta.needs_fn_mut
+            && !http_handler
+            && !by_value
+            && host_borrow.is_none(),
         arc: http_handler,
         captures,
     }

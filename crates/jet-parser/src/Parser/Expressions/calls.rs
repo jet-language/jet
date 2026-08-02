@@ -1,4 +1,4 @@
-use super::super::{Call, CallArg, Diagnostic, Parser, Span, TokKind};
+use super::super::{Call, CallArg, Diagnostic, Expr, Parser, Span, TokKind};
 
 impl<'a> Parser<'a> {
         pub(super) fn call_after_name(&mut self, name: String, name_span: Span) -> Result<Call, Diagnostic> {
@@ -22,10 +22,24 @@ impl<'a> Parser<'a> {
             })
         }
     
-        pub(in crate::Parser) fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
-            // D-MEM1/S2: an unmarked argument is a plain read at the call site —
-            // `parse_access_prefix` already resolves unmarked to `Read` directly.
-            let convention = self.parse_access_prefix();
+    pub(in crate::Parser) fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
+        self.call_arg_with_leading_dot(false)
+    }
+
+    /// Marker arguments also accept a leading-dot enum literal for a lowercase
+    /// variant, such as `#Kernel(.parallel)`. Ordinary expression parsing keeps
+    /// the existing uppercase-only leading-dot value grammar.
+    pub(in crate::Parser) fn marker_call_arg(&mut self) -> Result<CallArg, Diagnostic> {
+        self.call_arg_with_leading_dot(true)
+    }
+
+    fn call_arg_with_leading_dot(
+        &mut self,
+        allow_lowercase_leading_dot: bool,
+    ) -> Result<CallArg, Diagnostic> {
+        // D-MEM1/S2: an unmarked argument is a plain read at the call site —
+        // `parse_access_prefix` already resolves unmarked to `Read` directly.
+        let convention = self.parse_access_prefix();
             let span = self.peek().span;
             // D-VARIADIC1: `f(...xs)` call spread.
             let spread = if matches!(self.peek().kind, TokKind::DotDotDot) {
@@ -54,6 +68,23 @@ impl<'a> Parser<'a> {
                 && self.looks_like_provider_ref_value()
             {
                 self.provider_ref_placeholder()
+            } else if allow_lowercase_leading_dot
+                && matches!(self.peek().kind, TokKind::Dot)
+                && matches!(
+                    &self.peek2().kind,
+                    TokKind::Ident(name)
+                        if name.chars().next().is_some_and(char::is_lowercase)
+                )
+            {
+                let start = self.bump().span.start;
+                let (variant, variant_span) =
+                    self.expect_ident("after `.` in a marker enum argument")?;
+                Expr::EnumLit {
+                    type_name: String::new(),
+                    variant,
+                    args: Vec::new(),
+                    span: Span::new(start, variant_span.end),
+                }
             } else {
                 self.expr()?
             };
@@ -63,8 +94,7 @@ impl<'a> Parser<'a> {
                 span,
                 flags: Default::default(),
                 label,
-                spread,
-            })
-        }
-    
+            spread,
+        })
+    }
 }

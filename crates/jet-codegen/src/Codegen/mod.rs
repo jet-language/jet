@@ -420,6 +420,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     for part in CORELIB_KERNEL_PARTS {
         out.push_str(part);
     }
+    out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
 
     let needs_email = core_usage_matches(used_core, &["core.email"]);
     let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
@@ -595,6 +596,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
     }
     if needs_crypto {
@@ -653,6 +655,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
     }
     if needs_services {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
     }
 }
@@ -1352,9 +1355,9 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         }
     }
     if uses("jet.db") {
-        // D-DBDRIVER1=A: nominal Driver contract for `T: Driver` generics.
-        // Concrete `DBConnection` calls still go through THandleOp; this trait
-        // is the Rust half of the same parameterized surface.
+        // D-DBPOLICY-BIND1: `Driver` is a policy-bearing scope, never the raw
+        // connection. Generic calls use the same policy-enforcing helpers as
+        // concrete `DBScope` calls.
         out.push_str(&format!(
             "trait JetDBDriver {{\n\
              \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError>;\n\
@@ -1367,15 +1370,15 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         ));
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
-                "impl JetDBDriver for {root}JetDbConnection {{\n\
+                "impl JetDBDriver for {root}JetDbScope {{\n\
                  \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
-                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t\tjet_db_scope_query(self, &sql, &params)\n\
                  \t}}\n\
                  \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Option<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
-                 \t\t{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params))).map(|__rows| __rows.into_iter().next())\n\
+                 \t\tjet_db_scope_query(self, &sql, &params).map(|__rows| __rows.into_iter().next())\n\
                  \t}}\n\
                  \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-                 \t\t{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.handle, &sql, &{root}jet_std::jet_db_encode_params(&params)))\n\
+                 \t\tjet_db_scope_execute(self, &sql, &params)\n\
                  \t}}\n\
                  \tfn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.handle) }}\n\
                  \tfn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.handle) }}\n\
@@ -1383,11 +1386,60 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
                  }}\n"
             ));
             out.push_str(&format!(
+                "fn jet_db_scope_execute(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
+{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n\
+fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
+{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n"
+            ));
+            out.push_str(&format!(
+                "fn jet_db_scope_execute_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
+{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n\
+fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, &scope.policy.expression, &scope.user)?;\n\
+{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n"
+            ));
+            out.push_str(&format!(
+                "struct JetDbScopeBackend<'a> {{ scope: &'a {root}JetDbScope }}\n\
+impl {root}jet_std::JetDBBackend for JetDbScopeBackend<'_> {{\n\
+fn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.scope.handle) }}\n\
+fn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.scope.handle) }}\n\
+fn rollback(&mut self) {{ let _ = {ffi}::jet_db_rollback(self.scope.handle); }}\n\
+fn execute(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<i64, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
+{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n\
+fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<std::collections::BTreeMap<String, {root}jet_std::DBValue>>, {root}jet_std::DBError> {{\n\
+let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, &self.scope.policy.expression, &self.scope.user)? }};\n\
+{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+}}\n\
+}}\n\
+fn jet_db_scope_transaction(scope: &{root}JetDbScope, label: &String, steps: &Vec<String>) -> Result<i64, {root}jet_std::DBError> {{\n\
+let mut backend = JetDbScopeBackend {{ scope }};\n\
+{root}jet_std::jet_db_transaction(&mut backend, label, steps)\n\
+}}\n"
+            ));
+            out.push_str(&format!(
+                "fn jet_db_scope_migrate(scope: &{root}JetDbScope, name: &String, steps: &Vec<String>) -> Result<i64, {root}jet_std::DBError> {{\n\
+let mut backend = JetDbScopeBackend {{ scope }};\n\
+{root}jet_std::jet_db_migrate(&mut backend, name, steps)\n\
+}}\n"
+            ));
+            out.push_str(&format!(
                 "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+            ));
+            out.push_str(&format!(
+                "impl user_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
             ));
         } else {
             out.push_str(&format!(
-                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\n"
+                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl user_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
     }

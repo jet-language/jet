@@ -7280,6 +7280,8 @@ fn must_stay_deferred(ticket: Ticket) => Bool {
     return false
 }
 
+fn missing_minutes() => Float? = None
+
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
@@ -7299,8 +7301,7 @@ fn run() {
     loop ticket, data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
-    none :: Float? = None
-    maybe_minutes :: [ Val(2.0), none, Val(6.0), none ]
+    maybe_minutes :: [ Val(2.0), missing_minutes(), Val(6.0), missing_minutes() ]
     series :: data.series(maybe_minutes)
     print(data.count(series))
     print(data.missing_count(series))
@@ -7322,7 +7323,7 @@ fn run() {
             None -> print("{pair.left.team}:none")
         }
     }
-    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes) ?? panic("pivot")
+    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 -> "long" else -> "short", (t) => t.minutes) ?? panic("pivot")
     loop cell, pivot {
         print("{cell.row_key}|{cell.column_key}:{cell.count}")
     }
@@ -8706,23 +8707,25 @@ use core.db as db
 
 fn run() {
     conn := db.open_memory()
-    created :: db.migrate(conn, "person-v1", [
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    created :: db.migrate(scoped, "person-v1", [
         "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
     ]) ?? panic("migrate")
-    skipped :: db.migrate(conn, "person-v1", [
+    skipped :: db.migrate(scoped, "person-v1", [
         "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
     ]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
     insert :: SQL.{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
-    _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
-    failed :: db.transaction(conn, "bad batch", [
+    _inserted :: scoped.execute(insert.template(), db.params(insert)) ?? panic("insert")
+    failed :: db.transaction(scoped, "bad batch", [
         "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
         "INSERT INTO missing_table VALUES (1)"
     ]) ?? 0
-    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
+    row :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
-    count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
+    count :: scoped.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
     counted :: count ?? panic("missing count")
     print(created)
     print(skipped)
@@ -8731,7 +8734,7 @@ fn run() {
     print(db.row_text(found, "name") ?? "bad")
     print(db.row_int(found, "active") ?? 0)
     print(db.row_int(counted, "n") ?? 0)
-    _closed :: conn.close()
+    _closed :: scoped.close()
 }
 "#,
         &[],
@@ -8763,17 +8766,18 @@ fn count_people<T: Driver>(&conn: T) => Int ? DBError {
 
 fn run() {
     conn := db.open_memory()
-    _ :: conn.execute(
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)",
-        []
-    ) ?? panic("create")
-    _ :: conn.execute(
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"
+    ]) ?? panic("create")
+    _ :: scoped.execute(
         "INSERT INTO person (id, name) VALUES (?, ?)",
         [DBValue.Int(1), DBValue.Text("Ada")]
     ) ?? panic("insert")
-    n :: count_people(&conn) ?? panic("count")
+    n :: count_people(&scoped) ?? panic("count")
     print(n)
-    _closed :: conn.close()
+    _closed :: scoped.close()
 }
 "#;
     let (code, stdout, stderr) = build_and_run(
@@ -9505,12 +9509,17 @@ fn core_module_items_covers_known_core_modules() {
 
     // Extract the `core_module_items` function body.
     let fn_start = src
-        .find("pub(crate) fn core_module_items(")
+        .find("fn core_module_items(")
         .expect("core_module_items function not found in CheckerCoreLib/module_items.rs");
     // Find the closing `}` at top-level indent (just after the last arm).
     let fn_body = &src[fn_start..];
     // Collect ALL string literals from match arm heads (handles `"a" | "b" => &[` form too).
     let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // `core.lang` is generated from the marker registry and returns before the
+    // static match table, so it has no ordinary arm to extract.
+    if fn_body.contains("if module == \"core.lang\"") {
+        items_keys.insert("core.lang".to_string());
+    }
     for line in fn_body.lines() {
         let trimmed = line.trim();
         // A match arm head: `"core.files" => &[` or `"core.log" | "jet.log" => &[`

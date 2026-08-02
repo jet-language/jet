@@ -131,7 +131,7 @@ impl<'a> Parser<'a> {
                 self.bump(); // `(`
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
-                        let arg = self.call_arg()?;
+                        let arg = self.marker_call_arg()?;
                         arg_labels.push(arg.label);
                         args.push(arg.expr);
                         if matches!(self.peek().kind, TokKind::RParen) {

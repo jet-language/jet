@@ -2630,6 +2630,11 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {
         return Some("func attrs unsupported".into());
     }
+    if let Some(proof) = tir.kernel_proof {
+        if !proof.is_complete() {
+            return Some("kernel proof incomplete".into());
+        }
+    }
     if !tir.params.iter().all(|(_, ty, _)| jit_value_type(ty)) {
         return Some("param type unsupported".into());
     }

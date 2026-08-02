@@ -560,6 +560,22 @@ pub fn core_fixed_sig(
         )),
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
         ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
+        ("core.time", "milliseconds") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
+        ("core.time", "seconds") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
+        ("core.time", "minutes") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
+        ("core.time", "hours") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
         ("core.tasks", "interval") => Some((
             vec![(read, Type::Int)],
             Some(Type::Apply {
@@ -913,6 +929,10 @@ pub fn core_fixed_sig(
                 Type::Named("ComputeError".to_string()),
             )),
         )),
+        ("core.compute", "raw_kernel_contract_show") => Some((
+            vec![(read, Type::Named("RawKernelContract".to_string()))],
+            Some(Type::String),
+        )),
         ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => Some((
             vec![
                 (read, Type::Named("Tensor".to_string())),
@@ -1022,6 +1042,10 @@ pub fn core_fixed_sig(
             Some((vec![], Some(Type::String)))
         },
         // D-SERVICE1=D (#444): service tree topology + mailboxes.
+        ("core.services", "runtime") => Some((
+            vec![(read, Type::String), (read, Type::Named("Duration".to_string()))],
+            Some(Type::Named("ServiceRuntime".to_string())),
+        )),
         ("core.services", "tree") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("ServiceTree".to_string())),

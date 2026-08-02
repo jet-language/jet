@@ -11,7 +11,7 @@ related framework transplant cards (#505/#506/#1157–#1161).
 | D-SCHEDULE1=A | `#Every` on `#Job`/`#Task` only; one schedule fact | Syntax + `CheckerSchedule.rs`; `examples/features/devloop/schedule_every.jet`; UI E0925/E0926 |
 | D-AUTH1=A | sessions, password, OAuth, magic link | `AuthSession.rs` / `Auth.rs`; `examples/features/crypto/auth_sessions.jet` |
 | D-SYNC1 | CRDT sync values | SyncLite + sync examples; live-session receipt path landed; Tower closure remains coupled to row-policy binding |
-| D-DBPOLICY1 | row policy | Pure policy compiler/evaluator landed; connection/live-query enforcement binding remains owner-gated on #1160 |
+| D-DBPOLICY1 | row policy | `DBScope` carries the compiled policy and user through query, mutation, transaction, and live-query paths; AOT and ambient adapters share the Prelude rewriter |
 | D-LINTPOLICY1 | warnings non-blocking by default | pkg lint policy tests; dossier bypass facts |
 
 ## Non-goals / honesty

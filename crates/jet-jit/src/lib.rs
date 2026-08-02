@@ -43,6 +43,9 @@ mod Reactive;
 mod Sketch;
 mod Solver;
 mod Text;
+mod testing_shared {
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");
+}
 mod Time;
 mod Ui;
 mod Watcher;

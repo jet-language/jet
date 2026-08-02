@@ -213,11 +213,11 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 TTypedTextForm::HTMLRaw => format!("{}jet_typed_html_raw(({a}).clone())", cx.root_prefix),
                 TTypedTextForm::ShRaw => format!("{}jet_typed_sh_raw(({a}).clone())", cx.root_prefix),
                 TTypedTextForm::SQLTemplate => format!(
-                    "{{ let __jet_sql = ({a}); {}jet_typed_sql_template(&__jet_sql) }}",
+                    "{{ let __jet_sql = ({a}).clone(); {}jet_typed_sql_template(&__jet_sql) }}",
                     cx.root_prefix
                 ),
                 TTypedTextForm::SQLParams => format!(
-                    "{{ let __jet_sql = ({a}); {}jet_typed_sql_params(&__jet_sql) }}",
+                    "{{ let __jet_sql = ({a}).clone(); {}jet_typed_sql_params(&__jet_sql) }}",
                     cx.root_prefix
                 ),
                 TTypedTextForm::HTMLText => format!("{}jet_typed_html_text(({a}).clone())", cx.root_prefix),
@@ -4273,18 +4273,40 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     policy = a(0),
                     user = a(1),
                 ),
+                THandleOp::ServiceRuntimeSend => format!(
+                    "jet_services_runtime_send(&({recv}), &({}), &({}), &({}))",
+                    a(0),
+                    a(1),
+                    a(2)
+                ),
+                THandleOp::ServiceRuntimeRetry => format!(
+                    "jet_services_runtime_retry(&({recv}), &({}))",
+                    a(0)
+                ),
+                THandleOp::ServiceRuntimeDeadLetter => format!(
+                    "jet_services_runtime_dead_letter(&({recv}), &({}))",
+                    a(0)
+                ),
+                THandleOp::ServiceRuntimeRetain => format!(
+                    "jet_services_runtime_retain(&({recv}), &({}))",
+                    a(0)
+                ),
+                THandleOp::ServiceRuntimeCommit => format!(
+                    "jet_services_runtime_commit(&({recv}), &({}))",
+                    a(0)
+                ),
                 THandleOp::DBQuery => format!(
-                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))), Err(e) => Err(e) }} }}",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); jet_db_scope_query(__jet_scope, &__jet_sql, &__jet_params) }}",
                     a(0),
                     a(1)
                 ),
                 THandleOp::DBQueryOne => format!(
-                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))).map(|__rows| __rows.into_iter().next()), Err(e) => Err(e) }} }}",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); jet_db_scope_query(__jet_scope, &__jet_sql, &__jet_params).map(|__rows| __rows.into_iter().next()) }}",
                     a(0),
                     a(1)
                 ),
                 THandleOp::DBExecute => format!(
-                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); match {root}jet_std::jet_db_apply_policy(&__jet_sql, &__jet_params, &__jet_scope.policy.table, &__jet_scope.policy.expression, &__jet_scope.user) {{ Ok((__sql, __params)) => {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(__jet_scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params))), Err(e) => Err(e) }} }}",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); jet_db_scope_execute(__jet_scope, &__jet_sql, &__jet_params) }}",
                     a(0),
                     a(1)
                 ),

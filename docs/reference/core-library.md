@@ -791,8 +791,7 @@ Merges are deterministic and retain independent replica contributions. Beginner
 row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
 over: session)` publishes the typed CRDT representation through a bounded
 session registry and returns a monotonic delivery receipt. Database row-policy
-attachment to a connection is still owner-gated; `policy_allows` is the pure
-policy evaluator until that binding decision is ratified.
+enforcement uses the explicit `DBScope` selected by `D-DBPOLICY-BIND1`.
 
 Example: `examples/features/tooling/sync_crdt.jet`.
 
@@ -3065,20 +3064,25 @@ inserting it, and `Sh.{"…"}` makes each hole one argv item without shell word
 splitting. A runtime `String` cannot become one of these types; the explicit
 `.raw(...)` constructors are the audited escape for already-reviewed text.
 
-D-DBDRIVER1=A: `Driver` is the backend-neutral trait for that parameterized
-surface (`query` / `query_one` / `execute` / `begin` / `commit` / `rollback`).
-`DBConnection` is the first implementation. Call sites can take `T: Driver`
-without naming SQLite. Cleanup stays on `Close` via `close(...)`.
+D-DBDRIVER1=A / D-DBPOLICY-BIND1=A: `Driver` is the backend-neutral trait for
+that parameterized surface (`query` / `query_one` / `execute` / `begin` /
+`commit` / `rollback`). `DBConnection` opens the connection and establishes a
+typed `DBScope`; only the scope implements row operations. Call sites can take
+`T: Driver` without naming SQLite, while the policy and user stay attached to
+the capability. Cleanup stays on `Close` via `close(...)`.
 
 | API | Returns | Notes |
 |-----|---------|-------|
-| `conn.execute(sql, params)` | `Int ? DBError` | Affected row count |
-| `conn.query(sql, params)` | `[Row] ? DBError` | `Row` is `Map<String, DBValue>` |
-| `conn.query_one(sql, params)` | `Row? ? DBError` | First row, if any |
-| `conn.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control |
+| `db.policy(table, expression)` | `RowPolicy ? String` | Closed policies: `true` or `owner == user` |
+| `conn.with_policy(policy, user)` | `DBScope` | Binds the policy and identity; the raw connection has no row operations |
+| `scoped.execute(sql, params)` | `Int ? DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
+| `scoped.query(sql, params)` | `[Row] ? DBError` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
+| `scoped.query_one(sql, params)` | `Row? ? DBError` | First allowed row, if any |
+| `scoped.live(sql, params)` | `LiveQuery ? DBError` | The same policy is applied to the live-query read |
+| `scoped.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control through the same scope |
 | `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T ? String` | Typed column read with missing/type errors |
-| `db.transaction(conn, label, statements)` | `Int ? DBError` | Runs statements in one transaction, rollback on first error |
-| `db.migrate(conn, name, statements)` | `Int ? DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
+| `db.transaction(scoped, label, statements)` | `Int ? DBError` | Runs scoped statements in one transaction, rollback on first error |
+| `db.migrate(scoped, name, statements)` | `Int ? DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
 
 `DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
 
@@ -3116,7 +3120,7 @@ fn run() {
 | `value_and_grad_mul` / `jvp_*` / `vjp_*` / `grad_*` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
-| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, bounds check, and typed audited raw-kernel obligation descriptor |
+| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` / `raw_kernel_contract_show` | stream, transfer, bounds check, and typed audited raw-kernel obligation descriptor |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
@@ -3154,11 +3158,35 @@ policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
 Empty / Snapshot / EventLog; workflows, directory identity, and generation
 handoff/rollback are first-class.
 
-The current `send_durable` result is `Unit ? ServiceError`. It records
-idempotency and bounded dead letters, but it does not claim a typed durable
-receipt, retention deadline, or transaction commit. That public authority is
-owner-gated by `D-SERVICE-AUTHORITY1`; callers must not infer durable commit
-from `Ok` until that decision is ratified and implemented.
+`send_durable` remains the bounded in-memory tree path and returns
+`Unit ? ServiceError`. Durable delivery uses the explicit `ServiceRuntime`
+authority selected by `D-SERVICE-AUTHORITY1`. Its append-only store commits
+before returning a typed receipt, and reopening the same store reconstructs
+idempotency, retention, retry, and dead-letter state.
+
+```jet
+use core.services as services
+use core.time as time
+
+fn run() {
+    runtime := services.runtime("orders.log", retention: time.hours(24))
+    receipt := runtime.send(order_endpoint, order, key: order.id)?
+    if receipt == {
+        .Accepted(id) -> audit(id)
+        .Duplicate(_) -> continue
+        .Retained(_, until) -> schedule_retry(until)
+        .DeadLettered(_) -> report("dead letter")
+        .Rejected(reason) | .Unavailable(reason) -> report(reason)
+    }
+}
+```
+
+`ServiceRuntime` is the only durable authority. `send`, `retry`,
+`dead_letter`, `retain`, and `commit` use the same Prelude implementation in
+AOT and ambient execution; `commit(id)` durably acknowledges a delivered
+receipt and removes its pending copy. An uncommitted receipt can be recovered
+by `retry(id)` after a process restart. The ordinary tree remains the bounded
+local delivery path.
 
 ```jet
 use core.services as services
@@ -3199,7 +3227,7 @@ collector is compiler-private: user code keeps ordinary bare values and opts in
 at package, module, function, or block scope. `jet gc report` identifies the
 exact automatic promotion sites to migrate back to ownership.
 
-`core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
+`core.compiler`, `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
 `core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
 `core.solve`, `core.data`, `core.compute`, `core.files`, `core.path`, `core.url`, `core.mime`,
 `core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
@@ -3213,7 +3241,7 @@ exact automatic promotion sites to migrate back to ownership.
 `core.compress.gzip`, `core.compress.zstd`, `core.db`, `core.plugin`,
 `core.reactive`, `core.event`, `core.science.measurement`,
 `core.reactive.loadable`, `core.perf`, `core.ui`, `core.web`,
-`core.web.storage`, `core.web.storage.local`, `core.web.storage.session`,
+`core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `app`,
 `core.sketch.hll`, `core.sketch.tdigest`, `core.sketch.reservoir`,
 `core.sketch.cms`, `core.time.date`, `core.time.datetime`,
 `core.time.expiring`, `core.http.client`,

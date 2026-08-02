@@ -211,7 +211,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GradTriple" | "SparseTensor" | "RawKernelContract"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
-        | "ServiceDelivery"
+        | "ServiceDelivery" | "ServiceRuntime" | "ServiceReceipt"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
@@ -1430,6 +1430,49 @@ pub(crate) fn core_key_variants(
         (zero, VariantPayload::Single(Type::Int, zero)),
     );
     m
+}
+
+/// D-SERVICE-AUTHORITY1: durable delivery receipts are a closed sum. The
+/// receipt, not a Boolean, tells callers whether the message was accepted,
+/// replayed, retained, dead-lettered, rejected, or unavailable.
+pub(crate) fn core_service_receipt_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::{VariantField, VariantPayload};
+    use crate::Diagnostics::Span;
+    if enum_name != "ServiceReceipt" {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        [
+            ("Accepted", VariantPayload::Single(Type::String, zero)),
+            ("Duplicate", VariantPayload::Single(Type::String, zero)),
+            (
+                "Retained",
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "id".to_string(),
+                        name_span: zero,
+                        ty: Type::String,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "until".to_string(),
+                        name_span: zero,
+                        ty: Type::Int,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+            ("DeadLettered", VariantPayload::Single(Type::String, zero)),
+            ("Rejected", VariantPayload::Single(Type::String, zero)),
+            ("Unavailable", VariantPayload::Single(Type::String, zero)),
+        ]
+        .into_iter()
+        .map(|(name, payload)| (name.to_string(), (zero, payload)))
+        .collect(),
+    )
 }
 
 /// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).

@@ -676,6 +676,26 @@ pub(crate) fn emit_tir_core_call(
         ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
         ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
         ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        ("core.time", "milliseconds") => format!(
+            "{}({}, jet_std::DurationUnit::Milliseconds)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
+        ("core.time", "seconds") => format!(
+            "{}({}, jet_std::DurationUnit::Seconds)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
+        ("core.time", "minutes") => format!(
+            "{}({}, jet_std::DurationUnit::Minutes)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
+        ("core.time", "hours") => format!(
+            "{}({}, jet_std::DurationUnit::Hours)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
         ("core.time", "instant") => format!("{}()", helper("jet_time_instant_now")),
         ("core.time", "now_utc") => format!("{}()", helper("jet_time_now_utc")),
         ("core.time", "from_unix_ms") => format!("JetDateTime::from_unix_ms({})", arg(0)),
@@ -1000,6 +1020,11 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.compute", "raw_kernel_contract_show") => format!(
+            "{}(&({}))",
+            helper("jet_compute_raw_kernel_contract_show"),
+            arg(0)
+        ),
         ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => format!(
             "{}(&({}), &({}), &({}), &({}))",
             helper(&format!("jet_compute_{method}")),
@@ -1073,6 +1098,12 @@ pub(crate) fn emit_tir_core_call(
             format!("{}()", helper("jet_compute_profile_f32_strict"))
         }
         ("core.compute", "profile_show") => format!("{}()", helper("jet_compute_profile_show")),
+        ("core.services", "runtime") => format!(
+            "{}(({}).clone(), ({}).ms)",
+            helper("jet_services_runtime"),
+            arg(0),
+            arg(1)
+        ),
         ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
         ("core.services", "restart_one_for_one") => {
             format!("{}()", helper("jet_services_restart_one_for_one"))
@@ -1223,7 +1254,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("core.services", "directory_register") => format!(
-            "{}(&mut ({}), ({}).clone(), {})",
+            "{}(&mut ({}), ({}).clone(), ({}).clone())",
             helper("jet_services_directory_register"),
             arg(0),
             arg(1),
@@ -3112,61 +3143,19 @@ pub(crate) fn emit_tir_core_call(
             format!("{}jet_std::jet_db_row_bool(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
         }
         ("jet.db", "transaction") => {
-            let root = &cx.root_prefix;
             format!(
-                "{{ let __jet_conn = &({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DBValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DBError {{ message: format!(\"could not begin transaction: {{}}\", {}) }}) }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DBError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DBError {{ message: \"could not commit transaction\".to_string() }}) }} }} }}",
+                "jet_db_scope_transaction(&({}), &({}), &({}))",
                 arg(0),
-                arg(2),
-                root,
-                regex_fn("jet_db_begin"),
-                root,
                 arg(1),
-                root,
-                root,
-                regex_fn("jet_db_execute"),
-                root,
-                regex_fn("jet_db_rollback"),
-                regex_fn("jet_db_commit"),
-                root,
+                arg(2),
             )
         }
         ("jet.db", "migrate") => {
-            let root = &cx.root_prefix;
             format!(
-                "{{ let __jet_conn = &({}); let __jet_name = ({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DBValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DBError {{ message: format!(\"could not begin migration `{{}}`\", __jet_name) }}) }} else {{ let __jet_create_sql = \"CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)\".to_string(); let __jet_create = {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_create_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))); match __jet_create {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ let __jet_checksum = {}jet_std::jet_db_migration_checksum(&__jet_steps); let __jet_check_sql = \"SELECT checksum FROM __jet_migrations WHERE name = ?\".to_string(); let __jet_check_params = vec![{}jet_std::DBValue::Text(__jet_name.clone())]; let __jet_existing = {}jet_std::jet_db_decode_query_result(&{}(__jet_conn.handle, &__jet_check_sql, &{}jet_std::jet_db_encode_params(&__jet_check_params))); match __jet_existing {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(rows) => {{ if let Some(row) = rows.into_iter().next() {{ let old = row.get(\"checksum\").and_then(|v| v.text().ok()).unwrap_or_default(); if old == __jet_checksum {{ if {}(__jet_conn.handle) {{ Ok(0) }} else {{ Err({}jet_std::DBError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} else {{ let _ = {}(__jet_conn.handle); Err({}jet_std::DBError {{ message: format!(\"migration `{{}}` checksum changed\", __jet_name) }}) }} }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DBError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else {{ let __jet_insert_sql = \"INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)\".to_string(); let __jet_insert_params = vec![{}jet_std::DBValue::Text(__jet_name.clone()), {}jet_std::DBValue::Text(__jet_checksum)]; match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_insert_sql, &{}jet_std::jet_db_encode_params(&__jet_insert_params))) {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DBError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} }} }} }} }} }} }} }} }} }}",
+                "jet_db_scope_migrate(&({}), &({}), &({}))",
                 arg(0),
                 arg(1),
                 arg(2),
-                root,
-                regex_fn("jet_db_begin"),
-                root,
-                root,
-                regex_fn("jet_db_execute"),
-                root,
-                regex_fn("jet_db_rollback"),
-                root,
-                root,
-                root,
-                regex_fn("jet_db_query"),
-                root,
-                regex_fn("jet_db_rollback"),
-                regex_fn("jet_db_commit"),
-                root,
-                regex_fn("jet_db_rollback"),
-                root,
-                root,
-                root,
-                regex_fn("jet_db_execute"),
-                root,
-                regex_fn("jet_db_rollback"),
-                root,
-                root,
-                root,
-                regex_fn("jet_db_execute"),
-                root,
-                regex_fn("jet_db_rollback"),
-                regex_fn("jet_db_commit"),
-                root,
             )
         }
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin — sandboxed WASM

@@ -161,7 +161,7 @@ impl<'a> super::Checker<'a> {
     ) -> Result<(), KernelFailure> {
         match expression {
             Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => Ok(()),
-            Expr::Ident(name, span) if names.contains(name) => Ok(()),
+            Expr::Ident(name, _) if names.contains(name) => Ok(()),
             Expr::Ident(_, span) => Err(KernelFailure {
                 obligation: "closed captures",
                 span: *span,

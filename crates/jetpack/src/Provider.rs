@@ -1664,7 +1664,9 @@ mod tests {
         .unwrap();
         let production_root = root.split("#[cfg(test)]\nmod tests").next().unwrap();
 
-        assert!(root.lines().count() < MAX_MODULE_LINES);
+        // Keep the production module bounded; provider tests are intentionally
+        // colocated because they exercise private dispatch helpers.
+        assert!(production_root.lines().count() < MAX_MODULE_LINES);
         assert!(remote.lines().count() < MAX_MODULE_LINES);
         assert!(production_root.contains("\nmod remote;\n"));
         assert!(!production_root.contains("include!("));

@@ -837,6 +837,16 @@ impl KernelProof {
             control_flow: true,
         }
     }
+
+    pub const fn is_complete(self) -> bool {
+        matches!(self.mode, KernelMode::Parallel)
+            && self.bounds
+            && self.alias_free
+            && self.captures
+            && self.race_free
+            && self.barriers_uniform
+            && self.control_flow
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -683,6 +683,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "AuthError" {
         return format!("{}JetAuthError::{}", cx.root_prefix, variant);
     }
+    if type_name == "ServiceReceipt" {
+        return format!("{}JetServiceReceipt::{}", cx.root_prefix, variant);
+    }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),

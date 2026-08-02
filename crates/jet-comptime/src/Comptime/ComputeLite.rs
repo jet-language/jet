@@ -167,6 +167,46 @@ fn raw_kernel_to_ct(contract: &JetRawKernelContract) -> CtValue {
     }
 }
 
+fn ct_to_raw_kernel_contract(
+    value: &CtValue,
+    span: Span,
+) -> Result<JetRawKernelContract, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("RawKernelContract", span));
+    };
+    if type_name != "RawKernelContract" && type_name != "JetRawKernelContract" {
+        return Err(unsupported("RawKernelContract", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+            .ok_or_else(|| unsupported("RawKernelContract field", span))
+    };
+    let text = |name: &str| match field(name)? {
+        CtValue::Str(value) => Ok(value.clone()),
+        _ => Err(unsupported("RawKernelContract text field", span)),
+    };
+    let boolean = |name: &str| match field(name)? {
+        CtValue::Bool(value) => Ok(*value),
+        _ => Err(unsupported("RawKernelContract bool field", span)),
+    };
+    let arity = match field("arity")? {
+        CtValue::Int(value) => *value,
+        _ => return Err(unsupported("RawKernelContract arity", span)),
+    };
+    Ok(JetRawKernelContract {
+        reason: text("reason")?,
+        arity,
+        bounds: boolean("bounds")?,
+        alias_free: boolean("alias_free")?,
+        race_free: boolean("race_free")?,
+        barrier_uniform: boolean("barrier_uniform")?,
+        differential: text("differential")?,
+    })
+}
+
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
     CtValue::Struct {
         type_name: "Tensor".to_string(),
@@ -774,6 +814,9 @@ pub fn apply(
                 },
             )
         }
+        "raw_kernel_contract_show" => Ok(CtValue::Str(
+            jet_compute_raw_kernel_contract_show(&ct_to_raw_kernel_contract(one(0)?, span)?),
+        )),
         "jvp_add" | "jvp_mul" | "jvp_matmul" => Ok(match if method == "jvp_add" {
             jet_compute_jvp_add(
                 &ct_to_tensor(one(0)?, span)?,

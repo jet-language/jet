@@ -1865,6 +1865,24 @@ pub fn run_program(
     )
 }
 
+fn validate_kernel_proofs(program: &JitProgram) -> Result<(), Diagnostic> {
+    if let Some(func) = program
+        .funcs
+        .iter()
+        .find(|func| func.kernel_proof.is_some_and(|proof| !proof.is_complete()))
+    {
+        return Err(Diagnostic::error(
+            "E0956",
+            format!("kernel proof for `{}` is incomplete", func.name),
+            "the interpreter consumes sema's complete kernel proof before execution"
+                .to_string(),
+            "report this as a compiler bug".to_string(),
+            Some(func.source_span),
+        ));
+    }
+    Ok(())
+}
+
 pub fn run_program_with_structs(
     program: &JitProgram,
     base_dir: &Path,
@@ -1879,21 +1897,24 @@ pub fn run_program_with_structs(
     // semantic spine, but its large Rust frame makes ordinary test/CLI stacks
     // too small for nested aggregate literals. Keep the public runtime seam
     // on a bounded worker stack; this changes no language semantics.
+    let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-tir-eval".to_string())
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, move || {
-                run_program_with_structs_on_stack(
-                    program,
-                    base_dir,
-                    sink,
-                    globals,
-                    core_imports,
-                    allow_impure,
-                    struct_fields,
-                    struct_field_types,
-                )
+                crate::Comptime::with_ambient(ambient_core, ambient_handle, || {
+                    run_program_with_structs_on_stack(
+                        program,
+                        base_dir,
+                        sink,
+                        globals,
+                        core_imports,
+                        allow_impure,
+                        struct_fields,
+                        struct_field_types,
+                    )
+                })
             })
             .expect("evaluator worker");
         worker.join().expect("evaluator worker panicked")
@@ -1910,6 +1931,7 @@ fn run_program_with_structs_on_stack(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
+    validate_kernel_proofs(program)?;
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
@@ -1986,6 +2008,7 @@ pub fn run_named_func(
     args: Vec<CtValue>,
     sink: &mut DevSink,
 ) -> Result<CtValue, Diagnostic> {
+    validate_kernel_proofs(program)?;
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let func = funcs.get(name).copied().ok_or_else(|| {

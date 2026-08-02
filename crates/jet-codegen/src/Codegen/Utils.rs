@@ -14,6 +14,8 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
                 format!("{}JetHTTPOperation", cx.root_prefix)
             } else if t == "AuthError" {
                 format!("{}JetAuthError", cx.root_prefix)
+            } else if t == "ServiceReceipt" {
+                format!("{}JetServiceReceipt", cx.root_prefix)
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
@@ -73,6 +75,7 @@ pub(crate) fn variant_rust_name(cx: &Cx, variant: &str) -> String {
             .is_some_and(|owner| matches!(owner.as_str(), "HTTPError" | "HTTPOperation"))
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "HookOutcome")
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "AuthError")
+        || cx.variant_owner.get(variant).is_some_and(|owner| owner == "ServiceReceipt")
     {
         variant.to_string()
     } else {

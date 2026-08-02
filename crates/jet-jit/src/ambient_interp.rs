@@ -13,6 +13,7 @@ use jet_codegen::Diagnostics::{Diagnostic, Span};
 use crate::Crypto;
 use crate::DB;
 use crate::IO;
+use jet_codegen::Comptime::ServicesLite as service_prelude;
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -219,6 +220,126 @@ fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, String, String)> {
     Some((handle, table, expression, user))
 }
 
+fn service_runtime_value(store: String, retention_ms: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceRuntime".to_string(),
+        fields: vec![
+            ("store".to_string(), CtValue::Str(store)),
+            ("retention_ms".to_string(), CtValue::Int(retention_ms)),
+        ],
+    }
+}
+
+fn service_runtime_parts(recv: &CtValue) -> Option<service_prelude::JetServiceRuntime> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != "ServiceRuntime" {
+        return None;
+    }
+    let store = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("store", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    let retention_ms = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("retention_ms", CtValue::Int(value)) => Some(*value),
+        _ => None,
+    })?;
+    Some(service_prelude::JetServiceRuntime { store, retention_ms })
+}
+
+fn service_endpoint_value(value: &CtValue) -> Option<service_prelude::JetServiceEndpoint> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "ServiceEndpoint" {
+        return None;
+    }
+    let tree = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("tree", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    let worker = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("worker", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    let generation = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("generation", CtValue::Int(value)) => Some(*value),
+        _ => None,
+    })?;
+    let authority = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("authority", CtValue::Str(value)) => Some(value.clone()),
+        _ => None,
+    })?;
+    Some(service_prelude::JetServiceEndpoint { tree, worker, generation, authority })
+}
+
+fn service_receipt_value(receipt: service_prelude::JetServiceReceipt) -> CtValue {
+    match receipt {
+        service_prelude::JetServiceReceipt::Accepted(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Accepted".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        service_prelude::JetServiceReceipt::Duplicate(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Duplicate".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        service_prelude::JetServiceReceipt::Retained { id, until } => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Retained".to_string(),
+            args: vec![
+                (Some("id".to_string()), CtValue::Str(id)),
+                (Some("until".to_string()), CtValue::Int(until)),
+            ],
+        },
+        service_prelude::JetServiceReceipt::DeadLettered(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "DeadLettered".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        service_prelude::JetServiceReceipt::Rejected(reason) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Rejected".to_string(),
+            args: vec![(None, CtValue::Str(reason))],
+        },
+        service_prelude::JetServiceReceipt::Unavailable(reason) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Unavailable".to_string(),
+            args: vec![(None, CtValue::Str(reason))],
+        },
+    }
+}
+
+fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
+    let message = match error {
+        service_prelude::JetServiceError::Full(message)
+        | service_prelude::JetServiceError::Ambiguous(message)
+        | service_prelude::JetServiceError::Unknown(message)
+        | service_prelude::JetServiceError::NotStarted(message)
+        | service_prelude::JetServiceError::Policy(message)
+        | service_prelude::JetServiceError::Unavailable(message) => message,
+    };
+    CtValue::Struct {
+        type_name: "ServiceError".to_string(),
+        fields: vec![("message".to_string(), CtValue::Str(message))],
+    }
+}
+
+fn service_duration_ms(value: &CtValue) -> Option<i64> {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "ms").then_some(value))
+            .and_then(|value| match value {
+                CtValue::Int(ms) => Some(*ms),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
 fn ct_db_value(v: &CtValue) -> Option<wire::DBValue> {
     match v {
         CtValue::Enum {
@@ -286,6 +407,78 @@ fn db_params(list: &CtValue, span: Span) -> Result<Vec<wire::DBValue>, Diagnosti
     Ok(vals)
 }
 
+fn ambient_db_scope_execute(
+    scope: &(u64, String, String, String),
+    sql: &str,
+    params: &Vec<wire::DBValue>,
+    allow_schema: bool,
+) -> Result<i64, wire::DBError> {
+    let (handle, table, expression, user) = scope;
+    let (sql, values) = if allow_schema {
+        wire::jet_db_apply_migration_policy(sql, params, table, expression, user)?
+    } else {
+        wire::jet_db_apply_policy(sql, params, table, expression, user)?
+    };
+    let result = DB::runtime_execute(*handle, &sql, &wire::jet_db_encode_params(&values));
+    wire::jet_db_decode_execute_result(&result)
+}
+
+fn ambient_db_scope_query(
+    scope: &(u64, String, String, String),
+    sql: &str,
+    params: &Vec<wire::DBValue>,
+    allow_schema: bool,
+) -> Result<Vec<BTreeMap<String, wire::DBValue>>, wire::DBError> {
+    let (handle, table, expression, user) = scope;
+    let (sql, values) = if allow_schema {
+        wire::jet_db_apply_migration_policy(sql, params, table, expression, user)?
+    } else {
+        wire::jet_db_apply_policy(sql, params, table, expression, user)?
+    };
+    let result = DB::runtime_query(*handle, &sql, &wire::jet_db_encode_params(&values));
+    wire::jet_db_decode_query_result(&result)
+}
+
+struct AmbientDbBackend {
+    scope: (u64, String, String, String),
+}
+
+impl wire::JetDBBackend for AmbientDbBackend {
+    fn begin(&mut self) -> bool {
+        DB::runtime_begin(self.scope.0)
+    }
+
+    fn commit(&mut self) -> bool {
+        DB::runtime_commit(self.scope.0)
+    }
+
+    fn rollback(&mut self) {
+        let _ = DB::runtime_rollback(self.scope.0);
+    }
+
+    fn execute(
+        &mut self,
+        sql: &String,
+        params: &Vec<wire::DBValue>,
+        allow_schema: bool,
+    ) -> Result<i64, wire::DBError> {
+        ambient_db_scope_execute(&self.scope, sql, params, allow_schema)
+    }
+
+    fn query(
+        &mut self,
+        sql: &String,
+        params: &Vec<wire::DBValue>,
+        allow_schema: bool,
+    ) -> Result<Vec<BTreeMap<String, wire::DBValue>>, wire::DBError> {
+        ambient_db_scope_query(&self.scope, sql, params, allow_schema)
+    }
+}
+
+fn ambient_db_steps(value: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
+    ct_string_list(value).ok_or_else(|| unsupported("database steps list", span))
+}
+
 fn to_secret(v: &CtValue, span: Span) -> Result<Crypto::runtime::Secret, Diagnostic> {
     let bytes = secret_bytes(v, span)?;
     Ok(Crypto::runtime::jet_crypto_secret_from_bytes_impl(bytes))
@@ -331,6 +524,23 @@ pub fn ambient_core_call(
         return Some(result);
     }
     match (module, method) {
+        ("core.testing", "temp_dir") => {
+            let Some(CtValue::Str(prefix)) = args.first() else {
+                return Some(Err(unsupported("core.testing.temp_dir arguments", span)));
+            };
+            Some(Ok(CtValue::Str(
+                crate::testing_shared::jet_testing_temp_dir_path(prefix),
+            )))
+        }
+        ("core.services", "runtime") => {
+            let (Some(CtValue::Str(store)), Some(retention)) = (args.first(), args.get(1)) else {
+                return Some(Err(unsupported("core.services.runtime arguments", span)));
+            };
+            let Some(retention_ms) = service_duration_ms(retention) else {
+                return Some(Err(unsupported("core.services.runtime duration", span)));
+            };
+            Some(Ok(service_runtime_value(store.clone(), retention_ms)))
+        }
         ("jet.db" | "core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
@@ -343,6 +553,33 @@ pub fn ambient_core_call(
                     expression.clone(),
                 ))),
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+            }))
+        }
+        ("jet.db" | "core.db", "transaction" | "migrate") => {
+            let Some(scope_value) = args.first() else {
+                return Some(Err(unsupported("database scope", span)));
+            };
+            let Some(scope) = db_scope_parts(scope_value) else {
+                return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                    "database transaction requires a policy scope",
+                )))));
+            };
+            let Some(CtValue::Str(label)) = args.get(1) else {
+                return Some(Err(unsupported("database transaction label", span)));
+            };
+            let steps = match ambient_db_steps(args.get(2)?, span) {
+                Ok(steps) => steps,
+                Err(error) => return Some(Err(error)),
+            };
+            let mut backend = AmbientDbBackend { scope };
+            let result = if method == "migrate" {
+                wire::jet_db_migrate(&mut backend, label, &steps)
+            } else {
+                wire::jet_db_transaction(&mut backend, label, &steps)
+            };
+            Some(Ok(match result {
+                Ok(done) => CtValue::ResOk(Box::new(CtValue::Int(done))),
+                Err(error) => CtValue::ResErr(Box::new(db_err(error.message))),
             }))
         }
         ("core.io", "confirm") => {
@@ -1001,6 +1238,64 @@ pub fn ambient_handle(
             Err(error) => Err(unsupported(&format!("row policy: {error}"), span)),
         });
     }
+    if matches!(
+        op,
+        "ServiceRuntimeSend"
+            | "ServiceRuntimeRetry"
+            | "ServiceRuntimeDeadLetter"
+            | "ServiceRuntimeRetain"
+            | "ServiceRuntimeCommit"
+    ) {
+        let Some(runtime) = service_runtime_parts(recv) else {
+            return Some(Err(unsupported("ServiceRuntime receiver", span)));
+        };
+        if op == "ServiceRuntimeCommit" {
+            let Some(CtValue::Str(id)) = args.first() else {
+                return Some(Err(unsupported("ServiceRuntime.commit id", span)));
+            };
+            return Some(Ok(match service_prelude::jet_services_runtime_commit(&runtime, id) {
+                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::ResErr(Box::new(service_error_value(error))),
+            }));
+        }
+        let result = match op {
+            "ServiceRuntimeSend" => {
+                let Some(endpoint) = args.first().and_then(service_endpoint_value) else {
+                    return Some(Err(unsupported("ServiceRuntime.send endpoint", span)));
+                };
+                let Some(CtValue::Str(message)) = args.get(1) else {
+                    return Some(Err(unsupported("ServiceRuntime.send message", span)));
+                };
+                let Some(CtValue::Str(key)) = args.get(2) else {
+                    return Some(Err(unsupported("ServiceRuntime.send key", span)));
+                };
+                service_prelude::jet_services_runtime_send(&runtime, &endpoint, message, key)
+            }
+            "ServiceRuntimeRetry" => {
+                let Some(CtValue::Str(id)) = args.first() else {
+                    return Some(Err(unsupported("ServiceRuntime.retry id", span)));
+                };
+                service_prelude::jet_services_runtime_retry(&runtime, id)
+            }
+            "ServiceRuntimeDeadLetter" => {
+                let Some(CtValue::Str(id)) = args.first() else {
+                    return Some(Err(unsupported("ServiceRuntime.dead_letter id", span)));
+                };
+                service_prelude::jet_services_runtime_dead_letter(&runtime, id)
+            }
+            "ServiceRuntimeRetain" => {
+                let Some(CtValue::Str(id)) = args.first() else {
+                    return Some(Err(unsupported("ServiceRuntime.retain id", span)));
+                };
+                service_prelude::jet_services_runtime_retain(&runtime, id)
+            }
+            _ => unreachable!(),
+        };
+        return Some(Ok(match result {
+            Ok(receipt) => CtValue::ResOk(Box::new(service_receipt_value(receipt))),
+            Err(error) => CtValue::ResErr(Box::new(service_error_value(error))),
+        }));
+    }
     let handle = db_handle(recv)?;
     match op {
         "DBBegin" => Some(Ok(CtValue::Bool(DB::runtime_begin(handle)))),
@@ -1010,7 +1305,7 @@ pub fn ambient_handle(
         "DBExecute" => {
             let sql = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBConnection.execute sql", span))),
+                _ => return Some(Err(unsupported("DBScope.execute sql", span))),
             };
             let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,
@@ -1037,7 +1332,7 @@ pub fn ambient_handle(
         "DBQuery" => {
             let sql = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBConnection.query sql", span))),
+                _ => return Some(Err(unsupported("DBScope.query sql", span))),
             };
             let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,
@@ -1066,7 +1361,7 @@ pub fn ambient_handle(
         "DBQueryOne" => {
             let sql = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBConnection.query_one sql", span))),
+                _ => return Some(Err(unsupported("DBScope.query_one sql", span))),
             };
             let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(p) => p,

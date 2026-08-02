@@ -437,6 +437,13 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "walk", 0) => THandleOp::PathWalk,
         // D-DBPOLICY-BIND1: only a DBScope can perform row reads/writes.
         ("DBConnection", "with_policy", 2) => THandleOp::DBWithPolicy,
+        // D-SERVICE-AUTHORITY1: durable send/retry lifecycle is a handle
+        // operation so AOT, JIT deopt, and the ambient interpreter share it.
+        ("ServiceRuntime", "send", 3) => THandleOp::ServiceRuntimeSend,
+        ("ServiceRuntime", "retry", 1) => THandleOp::ServiceRuntimeRetry,
+        ("ServiceRuntime", "dead_letter", 1) => THandleOp::ServiceRuntimeDeadLetter,
+        ("ServiceRuntime", "retain", 1) => THandleOp::ServiceRuntimeRetain,
+        ("ServiceRuntime", "commit", 1) => THandleOp::ServiceRuntimeCommit,
         ("DBScope", "query", 2) => THandleOp::DBQuery,
         ("DBScope", "query_one", 2) => THandleOp::DBQueryOne,
         ("DBScope", "execute", 2) => THandleOp::DBExecute,
@@ -534,6 +541,9 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
                 Some(crate::Sema::db_connection_method_return_ty(method))
             } else if handle == "DBScope" {
                 Some(crate::Sema::db_scope_method_return_ty(method))
+            } else if handle == "ServiceRuntime" {
+                crate::Sema::service_runtime_method_return_ty(method)
+                    .map(Some)
             } else {
                 None
             }

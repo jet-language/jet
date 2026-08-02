@@ -602,6 +602,8 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "ServiceError" => Some("JetServiceError"),
         "ServiceRestart" => Some("JetServiceRestart"),
         "ServiceDelivery" => Some("JetServiceDelivery"),
+        "ServiceRuntime" => Some("JetServiceRuntime"),
+        "ServiceReceipt" => Some("JetServiceReceipt"),
         _ => None,
     }
 }
@@ -2518,6 +2520,40 @@ fn register_core_close_types(cx: &mut Cx) {
 
 /// Populate value-shape tables that depend on bundle-resolved Core imports.
 pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
+    if cx.core_imports.values().any(|module| module == "core.services") {
+        let zero = Span::new(0, 0);
+        let variants = vec![
+            ("Accepted".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Duplicate".to_string(), VariantPayload::Single(Type::String, zero)),
+            (
+                "Retained".to_string(),
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "id".to_string(),
+                        name_span: zero,
+                        ty: Type::String,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "until".to_string(),
+                        name_span: zero,
+                        ty: Type::Int,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+            ("DeadLettered".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Rejected".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Unavailable".to_string(), VariantPayload::Single(Type::String, zero)),
+        ];
+        for (variant, _) in &variants {
+            cx.variant_owner
+                .insert(variant.clone(), "ServiceReceipt".to_string());
+        }
+        cx.enum_variants
+            .insert("ServiceReceipt".to_string(), variants);
+        cx.cloneable.insert("ServiceReceipt".to_string());
+    }
     if cx.core_imports.values().any(|module| module == "core.auth") {
         let zero = Span::new(0, 0);
         let field = |name: &str, ty: Type| VariantField {
