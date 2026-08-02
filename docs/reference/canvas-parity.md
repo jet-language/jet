@@ -89,6 +89,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::Bool] status=graph literal node.
 - [Expr::Char] status=graph literal node.
 - [Expr::ListLit] status=graph collection node.
+- [Expr::MemberSpread] status=readonly member spread detail, source edits.
 - [Expr::Spread] status=readonly spread detail, source edits.
 - [Expr::MapLit] status=graph collection node.
 - [Expr::Index] status=graph index node.

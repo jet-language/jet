@@ -188,7 +188,7 @@ pub(super) fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
 pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
     let func_span = func_source_span(f);
     for hint in canvas_comment_hints(src) {
-        if !span_overlaps(hint.anchor, func_span) {
+        if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) {
             continue;
         }
         g.regions.push(format!(
@@ -206,7 +206,7 @@ pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AS
         ));
     }
     for hint in canvas_collapse_hints(src) {
-        if !span_overlaps(hint.anchor, func_span) {
+        if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) {
             continue;
         }
         g.regions.push(format!(
@@ -217,6 +217,31 @@ pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AS
             span_json(hint.hint_span)
         ));
     }
+}
+
+fn hint_belongs_to_function(src: &str, anchor: SourceSpan, hint_span: SourceSpan, func_span: SourceSpan) -> bool {
+    if span_overlaps(anchor, func_span) || span_overlaps(hint_span, func_span) {
+        return true;
+    }
+    if hint_span.start < func_span.end {
+        return false;
+    }
+    hint_span.start < next_function_start(src, func_span.end)
+}
+
+fn next_function_start(src: &str, offset: usize) -> usize {
+    let mut cursor = offset.min(src.len());
+    for line in src[cursor..].split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub(package) fn ")
+        {
+            return cursor + line.len() - trimmed.len();
+        }
+        cursor += line.len();
+    }
+    src.len()
 }
 
 pub(super) fn add_execution_overlay(g: &mut GraphBuilder) {

@@ -214,6 +214,9 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         let SymbolKind::Function { params, ret } = &def.kind else {
             continue;
         };
+        if def.module_path.starts_with("core.") {
+            continue;
+        }
         project_functions.push(project_function_catalog_json(
             def,
             params,
@@ -1352,6 +1355,17 @@ pub(super) struct CanvasAuthority {
 
 pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    if let Some(root) = find_canonical_package_root(dir) {
+        if let Some(Ok(package)) = jet_driver::Package::PackageFacts::load(&root) {
+            return CanvasAuthority {
+                grant: "canvas.source_edit:package".to_string(),
+                package_id: package.name,
+                version: package.version.unwrap_or_else(|| "unversioned".to_string()),
+                touched_file: rel_path(&root, path),
+                project_root: root,
+            };
+        }
+    }
     if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
         let manifest_path = root.join(jet_driver::Syntax::PAYLOAD_FILE);
         if let Ok(raw) = fs::read_to_string(&manifest_path) {
@@ -1376,5 +1390,15 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
             .unwrap_or("current.jet")
             .to_string(),
         project_root: dir.to_path_buf(),
+    }
+}
+
+fn find_canonical_package_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join("package.jet").is_file() {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
     }
 }

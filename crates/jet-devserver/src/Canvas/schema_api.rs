@@ -20,7 +20,7 @@ use super::edit_actions::{
     apply_remove_multi_input_element, apply_remove_pattern_arm, apply_rename,
     apply_reorder_statements, apply_update_comment_region, apply_visible_conversion,
     canvas_action_candidate, extract_inline_candidate, inline_helper_candidate,
-    write_checked_formatted,
+    write_checked_formatted, write_checked_source,
 };
 use super::graph_helpers::{
     canvas_action_preview_ok, diagnostics_json, edit_error, preview_ok, project_edit_error,
@@ -293,6 +293,9 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
     if let Some(root) = &ctx.manifest_root {
         return vec![root.clone()];
     }
+    if let Some(root) = &ctx.ecosystem_root {
+        return vec![root.clone()];
+    }
     vec![ctx.entry_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()]
 }
 
@@ -310,11 +313,13 @@ fn project_json_for_entry_inner(path: &Path) -> String {
     let packages_json = packages_project_json(
         &ctx.project_root,
         ctx.manifest_root.as_deref(),
+        ctx.ecosystem_root.as_deref(),
         ctx.workspace_root.as_deref(),
     );
     let targets_json = targets_project_json(
         &ctx.project_root,
         ctx.manifest_root.as_deref(),
+        ctx.ecosystem_root.as_deref(),
         ctx.workspace_root.as_deref(),
     );
     let files_json = ctx
@@ -373,7 +378,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         json_str(&entry_rel),
         json_str(if ctx.workspace_root.is_some() {
             "workspace"
-        } else if ctx.manifest_root.is_some() {
+        } else if ctx.manifest_root.is_some() || ctx.ecosystem_root.is_some() {
             "package"
         } else {
             "single_file"
@@ -798,6 +803,10 @@ fn run_jet_command(entry: &Path, args: &[&str]) -> Result<std::process::Output, 
 
 /// Apply one versioned Canvas edit transaction and write ordinary Jet source.
 pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| apply_transaction_json_on_compiler_stack(path, request))
+}
+
+fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {
     let src = fs::read_to_string(path).map_err(|e| edit_error("io", &e.to_string()))?;
     let revision = required_string(request, "revision")?;
     if revision != source_revision(&src) {
@@ -951,7 +960,11 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
         }
         "replace_source" => {
             let source = required_string(request, "source")?;
-            write_checked_formatted(path, &src, &source)
+            if json_string_field(request, "undo_restore").is_some() {
+                write_checked_source(path, &src, &source)
+            } else {
+                write_checked_formatted(path, &src, &source)
+            }
         }
         "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" => {
             let graph_id = required_string(request, "graph_id")?;

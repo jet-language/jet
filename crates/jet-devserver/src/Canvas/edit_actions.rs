@@ -21,14 +21,8 @@ use super::validation_json::{
     wire_span_from_json_chunk,
 };
 
-pub(super) fn apply_noop(path: &Path, src: &str) -> Result<String, String> {
-    let formatted =
-        jet_driver::Formatter::format_source(src).map_err(|diags| diagnostics_error(path, src, &diags))?;
-    let changed = formatted != src;
-    if changed {
-        fs::write(path, formatted).map_err(|e| edit_error("io", &e.to_string()))?;
-    }
-    Ok(edit_ok(changed, path))
+pub(super) fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
+    Ok(edit_ok(false, path))
 }
 
 pub(super) fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
@@ -868,10 +862,33 @@ fn validated_collapse_selection(
     let mut locs = Vec::new();
     collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
     let first = locs.iter().find(|loc| {
-        requested.start == loc.anchor.start || requested.start == loc.source.start
+        requested.start == loc.anchor.start
+            || requested.start == loc.source.start
+            || requested.start == loc.full.start
+    }).or_else(|| {
+        // Subjectless guards render the condition span, not the `if` token.
+        // Accept that graph boundary and let the block comparison below make
+        // the final safety decision.
+        locs.iter().find(|loc| {
+            loc.is_guard
+                && loc.guard_span.is_some_and(|span| {
+                    requested.start >= span.start && requested.start < span.end
+                })
+        })
     });
     let last = locs.iter().find(|loc| {
-        requested.end == loc.anchor.end || requested.end == loc.source.end
+        requested.end == loc.anchor.end
+            || requested.end == loc.source.end
+            || requested.end == loc.full.end
+    }).or_else(|| {
+        // Call nodes may expose the callee span while the checked statement
+        // owns the complete call expression. Treat an endpoint inside that
+        // expression as the graph's statement boundary.
+        locs.iter().find(|loc| {
+            loc.is_expr
+                && requested.end > loc.source.start
+                && requested.end <= loc.source.end
+        })
     });
     let (Some(first), Some(last)) = (first, last) else {
         return Err(edit_error(
@@ -991,6 +1008,9 @@ struct StatementLoc {
     full: SourceSpan,
     block: Vec<usize>,
     index: usize,
+    is_guard: bool,
+    is_expr: bool,
+    guard_span: Option<SourceSpan>,
 }
 
 pub(super) fn apply_reorder_statements(
@@ -2244,6 +2264,14 @@ fn collect_statement_locs(
             full: stmt_text_span(src, stmt),
             block: block.clone(),
             index,
+            is_guard: matches!(stmt, Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. }),
+            is_expr: matches!(stmt, Stmt::Expr(_)),
+            guard_span: match stmt {
+                Stmt::Switch { arms, .. } | Stmt::ComptimeSwitch { arms, .. } => {
+                    arms.first().map(|arm| arm.cond.span().into())
+                }
+                _ => None,
+            },
         });
         block.push(index);
         collect_child_statement_locs(src, stmt, block, out);
@@ -2372,21 +2400,29 @@ fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
 pub(super) fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
     let formatted = jet_driver::Formatter::format_source(candidate)
         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;
+    write_checked_candidate(path, before, &formatted)
+}
+
+pub(super) fn write_checked_source(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
+    write_checked_candidate(path, before, candidate)
+}
+
+fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
     let path_str = path.to_string_lossy();
     let abs = canonical_path(path);
     let (diags, _, _) =
-        jet_driver::Driver::check_file_with_effect_facts(&path_str, Some((&abs, &formatted)), true);
+        jet_driver::Driver::check_file_with_effect_facts(&path_str, Some((&abs, candidate)), true);
     let errors: Vec<Diagnostic> = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
         .cloned()
         .collect();
     if !errors.is_empty() {
-        return Err(diagnostics_error(path, &formatted, &errors));
+        return Err(diagnostics_error(path, candidate, &errors));
     }
-    let changed = formatted != before;
+    let changed = candidate != before;
     if changed {
-        fs::write(path, formatted).map_err(|e| edit_error("io", &e.to_string()))?;
+        fs::write(path, candidate).map_err(|e| edit_error("io", &e.to_string()))?;
     }
     Ok(edit_ok(changed, path))
 }

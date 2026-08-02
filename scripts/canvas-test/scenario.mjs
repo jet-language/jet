@@ -516,6 +516,11 @@ function projectionSnapshot(doc) {
 }
 
 async function assertSourceSync(ctx, opLog) {
+  await ctx.waitFor(async () => {
+    const ui = await ctx.uiDoc();
+    const fresh = await ctx.graph();
+    return !!(ui && fresh && ui.revision === fresh.revision && ui.source_text === fresh.source_text);
+  }, "Canvas projection sync");
   await ctx.waitForCanvas();
   const ui = await ctx.uiDoc();
   const fresh = await ctx.graph();
@@ -635,11 +640,8 @@ async function expectConsumedDescriptor(ctx, id, expected = {}) {
 async function expectPaletteDescriptor(ctx, title, id, transaction) {
   const state = await ctx.state();
   const actions = await ctx.driver.evaluate("window.__jetCanvasTest.actionEntries()");
-  const action = (actions || []).find((entry) => String(entry.title || "").includes(title));
+  const action = (actions || []).find((entry) => String(entry.title || "").includes(title) && entry.node_descriptor_id === id);
   if (!action) throw new Error(`palette action missing: ${title}\n${JSON.stringify(actions || [])}`);
-  if (action.node_descriptor_id !== id) {
-    throw new Error(`palette action ${title} descriptor ${JSON.stringify(action.node_descriptor_id)} != ${JSON.stringify(id)}`);
-  }
   const descriptor = (state.nodeDescriptors || []).find((candidate) => candidate.id === id);
   if (!descriptor || !descriptor.palette || !descriptor.palette.insertable || descriptor.transaction !== transaction) {
     throw new Error(`palette action ${title} did not consume insertable served facts: ${JSON.stringify({ action, descriptor })}`);
@@ -1219,7 +1221,7 @@ fn run() {
 
 fn choose(x: Choice) => Int {
     if x == {
-        A(n) -> { return n }
+        .A(n) -> { return n }
         else -> { return 0 }
     }
 }
@@ -1231,21 +1233,21 @@ fn run() {
     await ctx.openCanvas();
     await expectConsumedDescriptor(ctx, "dispatch", { transaction: "insert_switch", glyph: "◇", defaultEditor: "pattern_arm" });
     let before = await ctx.source();
-    await ctx.driver.evaluate(`window.prompt = () => "== B(n)"`);
+    await ctx.driver.evaluate(`window.prompt = () => "== .B(n)"`);
     let pos = await ctx.node("if ==");
     await ctx.driver.rightClick(pos.x, pos.y);
     await ctx.expectMenu("Add pattern arm");
     await ctx.pickEntry("Add pattern arm");
-    await ctx.waitFor(async () => (await ctx.source()).includes("B(n) ->"), "pattern arm add");
+    await ctx.waitFor(async () => (await ctx.source()).includes(".B(n) ->"), "pattern arm add");
     await assertSourceSync(ctx, ["pattern add"]);
-    await ctx.expectSourceContains("B(n) ->");
+    await ctx.expectSourceContains(".B(n) ->");
 
-    await ctx.driver.evaluate(`window.prompt = () => "== C(n)"`);
+    await ctx.driver.evaluate(`window.prompt = () => "== .C(n)"`);
     const pin = await ctx.pin("if ==", "arm2");
     await ctx.driver.rightClick(pin.x, pin.y);
     await ctx.expectMenu("Edit pattern");
     await ctx.pickEntry("Edit pattern");
-    await ctx.waitFor(async () => (await ctx.source()).includes("C(n) ->") && !(await ctx.source()).includes("B(n) ->"), "pattern arm edit");
+    await ctx.waitFor(async () => (await ctx.source()).includes(".C(n) ->") && !(await ctx.source()).includes(".B(n) ->"), "pattern arm edit");
     await assertSourceSync(ctx, ["pattern edit"]);
 
     const edited = await ctx.source();
@@ -1253,7 +1255,7 @@ fn run() {
     await ctx.driver.rightClick(removePin.x, removePin.y);
     await ctx.expectMenu("Remove arm");
     await ctx.pickEntry("Remove arm");
-    await ctx.waitFor(async () => !(await ctx.source()).includes("C(n) ->"), "pattern arm remove");
+    await ctx.waitFor(async () => !(await ctx.source()).includes(".C(n) ->"), "pattern arm remove");
     await assertSourceSync(ctx, ["pattern remove"]);
 
     const restored = await ctx.undo();
@@ -1270,7 +1272,7 @@ fn run() {
 
 fn choose(x: Choice) => Int {
     if x == {
-        A(n) -> { return n }
+        .A(n) -> { return n }
         else -> { return 0 }
     }
 }
@@ -1281,7 +1283,7 @@ fn run() {
 `);
     await ctx.openCanvas();
     const before = await ctx.source();
-    await ctx.driver.evaluate(`window.prompt = () => "== Missing(n)"`);
+    await ctx.driver.evaluate(`window.prompt = () => "== .Missing(n)"`);
     const pos = await ctx.node("if ==");
     await ctx.driver.rightClick(pos.x, pos.y);
     await ctx.expectMenu("Add pattern arm");
@@ -1299,7 +1301,7 @@ fn run() {
 
 fn demo() => Int {
     xs :: [1, 2, 3]
-    ys :: to_int.[1, 2]
+    ys :: [1, 2]
     return xs[0] + ys[0]
 }
 
@@ -1323,19 +1325,6 @@ fn run() {
     await ctx.waitFor(async () => (await ctx.source()).includes("[1, 2, 3]") && !(await ctx.source()).includes("[1, 2, 3, 4]"), "list remove");
 
     await ctx.driver.evaluate(`window.prompt = () => "3"`);
-    let fanout = await ctx.node("fanout");
-    await ctx.driver.rightClick(fanout.x, fanout.y);
-    await ctx.expectMenu("Append input");
-    await ctx.pickEntry("Append input");
-    await ctx.waitFor(async () => (await ctx.source()).includes("to_int.[1, 2, 3]"), "fanout append");
-    await assertSourceSync(ctx, ["fanout append"]);
-
-    item = await ctx.pin("fanout", "item3");
-    await ctx.driver.rightClick(item.x, item.y);
-    await ctx.expectMenu("Remove element");
-    await ctx.pickEntry("Remove element");
-    await ctx.waitFor(async () => (await ctx.source()).includes("to_int.[1, 2]") && !(await ctx.source()).includes("to_int.[1, 2, 3]"), "fanout remove");
-    await assertSourceSync(ctx, ["fanout remove"]);
   },
 
   "inline-edit-values": async (ctx) => {

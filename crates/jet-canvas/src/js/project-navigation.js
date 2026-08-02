@@ -117,7 +117,8 @@
     }
     for (const svc of project.services || []) {
       const ports = (svc.ports || []).join(", ") || "no ports";
-      devRows.push(projectMiniCard(svc.name || "service", svc.enable === false ? "disabled" : "enabled", `${ports} · ${svc.ready || svc.init || "no command"}`));
+      const run = (svc.run || []).join(" ") || "catalog/default";
+      devRows.push(projectMiniCard(svc.name || "service", svc.enable === false ? "disabled" : "enabled", `${ports} · ${run}`));
     }
     const diagRows = collectProjectDiagnostics(project);
     const lockRows = (project.locks || []).map((lock) => projectMiniCard(lock.path || ".jet/lock", lock.kind || "lock", lock.revision || ""));
@@ -490,7 +491,13 @@
   }
 
   function openGraphActionPalette(x, y, query, graphPoint) {
-    openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
+    if (latestDoc && actionEntries.length && actionEntriesRevision === latestDoc.revision) {
+      openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
+      return;
+    }
+    loadCanvasActions().then(() => {
+      openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
+    });
   }
 
   function renderCoreCatalogPalette(query = "") {

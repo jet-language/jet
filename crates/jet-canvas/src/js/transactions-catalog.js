@@ -1,5 +1,8 @@
 
 // Function-pin editing, transactions, graph loading, and action catalog loading.
+  let canvasActionsLoading = null;
+  let canvasActionsLoadingRevision = null;
+  let actionEntriesRevision = null;
   function handleFunctionPinButton(ev) {
     const button = ev.target && ev.target.closest && ev.target.closest("#apply-function-pins, #set-function-output, #remove-function-output, #add-function-output");
     if (!button || !latestDoc) return;
@@ -174,12 +177,13 @@
     return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
-        window.__jetCanvasLastTxResult = result.json;
         if (!result.ok) {
+          window.__jetCanvasLastTxResult = result.json;
           if (!acceptDiagnosticsPayload(result.json, "Transaction")) showToast(result.json.message || "Edit rejected");
           return;
         }
         if (result.json.protocol === "jet.canvas.action") {
+          window.__jetCanvasLastTxResult = result.json;
           searchState.results = [];
           searchState.spans = [];
           searchState.active = -1;
@@ -194,12 +198,18 @@
           searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
           renderSearchResults();
         }
+        if (latestDoc && result.json.revision) {
+          latestDoc = Object.assign({}, latestDoc, {
+            revision: result.json.revision,
+            source_text: result.json.source_text || latestDoc.source_text
+          });
+        }
         if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
         clearDiagnosticsForRevision(result.json.revision);
         showToast(result.json.changed ? "Source updated" : "No change");
-        loadSourceControl();
-        loadProject();
-        loadGraph();
+        return loadGraph().then(() => {
+          window.__jetCanvasLastTxResult = result.json;
+        });
       })
       .catch((e) => showToast(String(e)));
   }
@@ -209,7 +219,7 @@
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     window.__jetCanvasLastTx = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
     window.__jetCanvasLastTxResult = null;
-    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source }) })
+    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" }) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         window.__jetCanvasLastTxResult = result.json;
@@ -217,12 +227,20 @@
           if (!acceptDiagnosticsPayload(result.json, "Undo")) showToast(result.json.message || "Undo rejected");
           return;
         }
+        if (latestDoc && result.json.revision) {
+          latestDoc = Object.assign({}, latestDoc, {
+            revision: result.json.revision,
+            source_text: result.json.source_text || latestDoc.source_text
+          });
+        }
         if (redoEntry) pushHistory(redoStack, redoEntry);
         if (undoEntry) pushHistory(undoStack, undoEntry);
         clearDiagnosticsForRevision(result.json.revision);
         showToast((action || "Restore") + ": " + ((redoEntry || undoEntry || {}).label || "source"));
         loadSourceControl();
-        return loadGraph();
+        return loadGraph().then(() => {
+          window.__jetCanvasLastTxResult = result.json;
+        });
       })
       .catch((e) => showToast(String(e)));
   }
@@ -245,6 +263,8 @@
   }
 
   function loadGraph(sourceId) {
+    const loadToken = (window.__jetCanvasGraphLoadGeneration || 0) + 1;
+    window.__jetCanvasGraphLoadGeneration = loadToken;
     if (typeof sourceId === "string") {
       selectedSourceId = sourceId || null;
       selectedVariableName = null;
@@ -252,6 +272,7 @@
     return fetch(graphRequestUrl(selectedSourceId), { cache: "no-store" })
       .then((r) => r.json().then((doc) => ({ ok: r.ok, doc })))
       .then((result) => {
+        if (loadToken !== window.__jetCanvasGraphLoadGeneration) return;
         if (!result.ok) {
           acceptDiagnosticsPayload(result.doc, "Graph");
           jump.textContent = "Canvas graph has problems";
@@ -287,14 +308,21 @@
   }
 
   function loadCanvasActions() {
-    if (!latestDoc) return;
-    fetch(queryUrl, {
+    if (!latestDoc) return Promise.resolve(actionEntries);
+    const loadRevision = latestDoc.revision;
+    if (canvasActionsLoading) {
+      if (canvasActionsLoadingRevision === loadRevision) return canvasActionsLoading;
+      return canvasActionsLoading.then(() => loadCanvasActions());
+    }
+    canvasActionsLoadingRevision = loadRevision;
+    canvasActionsLoading = fetch(queryUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ schema_version: 1, revision: latestDoc.revision, op: "actions" })
+      body: JSON.stringify({ schema_version: 1, revision: loadRevision, op: "actions" })
     })
       .then((r) => r.json())
       .then((doc) => {
+        if (!latestDoc || latestDoc.revision !== loadRevision) return actionEntries;
         if (!doc || !doc.actions) return;
         const projectFunctions = (doc.project_functions || []).map((fn) => withNodeDescriptor({
           title: fn.name || fn.callee,
@@ -342,9 +370,17 @@
           args: action.default_args || ["\"canvas\""]
         }));
         actionEntries = projectFunctions.concat(canvasActions);
+        actionEntriesRevision = loadRevision;
         if (canvasActions.some((action) => action.kind === "canvas.core_catalog")) coreCatalogLoaded = true;
+        if (latestDoc && latestDoc.revision === loadRevision) drawGraph(latestDoc);
+        return actionEntries;
       })
-      .catch(() => {});
+      .catch(() => actionEntries)
+      .finally(() => {
+        canvasActionsLoading = null;
+        canvasActionsLoadingRevision = null;
+      });
+    return canvasActionsLoading;
   }
 
   function mergeActionEntries(entries) {

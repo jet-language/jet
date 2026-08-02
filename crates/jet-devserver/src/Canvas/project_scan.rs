@@ -17,6 +17,16 @@ pub(super) fn project_file_with_runtime(
     path: &Path,
     runtime_events: Option<&str>,
 ) -> Result<Projection, Vec<Diagnostic>> {
+    // Canvas is callable from test/UI threads with small default stacks, while
+    // the authoritative loader and sema path can recurse through a whole
+    // project. Reuse the compiler worker when already inside it.
+    jet_driver::run_compiler_work(|| project_file_with_runtime_on_compiler_stack(path, runtime_events))
+}
+
+fn project_file_with_runtime_on_compiler_stack(
+    path: &Path,
+    runtime_events: Option<&str>,
+) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
     let src = fs::read_to_string(path).unwrap_or_default();
     let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(&path_str, None, true);
@@ -45,6 +55,10 @@ pub(super) struct ProjectContext {
     pub(super) entry_path: PathBuf,
     pub(super) project_root: PathBuf,
     pub(super) manifest_root: Option<PathBuf>,
+    /// Canonical E5 Package root. This is separate from `manifest_root` so
+    /// legacy `pkg.jet` compiler support cannot become a second authority for
+    /// a project that already has `package.jet`.
+    pub(super) ecosystem_root: Option<PathBuf>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) files: Vec<ProjectFileRec>,
     pub(super) parts: jet_driver::ProjectParts::ProjectPartsReport,
@@ -90,15 +104,22 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
             }
         }
     });
+    let ecosystem_root = workspace_root
+        .as_deref()
+        .filter(|root| root.join("package.jet").is_file())
+        .map(Path::to_path_buf)
+        .or_else(|| find_package_root(entry_dir));
     let project_root = workspace_root
         .as_deref()
         .or(manifest_root.as_deref())
+        .or(ecosystem_root.as_deref())
         .unwrap_or(entry_dir)
         .to_path_buf();
     let files = collect_project_files(
         &project_root,
         path,
         manifest_root.as_deref(),
+        ecosystem_root.as_deref(),
         workspace_root.as_deref(),
     );
     let parts = jet_driver::ProjectParts::scan(&project_root);
@@ -107,10 +128,21 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         entry_path: path.to_path_buf(),
         project_root,
         manifest_root,
+        ecosystem_root,
         workspace_root,
         files,
         parts,
         project_revision,
+    }
+}
+
+fn find_package_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join("package.jet").is_file() {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
     }
 }
 
@@ -176,6 +208,7 @@ fn collect_project_files(
     project_root: &Path,
     entry_path: &Path,
     manifest_root: Option<&Path>,
+    ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> Vec<ProjectFileRec> {
     let mut paths = Vec::new();
@@ -184,6 +217,9 @@ fn collect_project_files(
     if let Some(root) = manifest_root {
         push_existing(&mut paths, &root.join(jet_driver::Syntax::PAYLOAD_FILE));
     }
+    if let Some(root) = ecosystem_root {
+        push_existing(&mut paths, &root.join("package.jet"));
+    }
     if let Some(root) = workspace_root {
         push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
         push_existing(&mut paths, &root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE));
@@ -191,6 +227,7 @@ fn collect_project_files(
             for member in plan.members {
                 let member_dir = root.join(member.path);
                 push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PAYLOAD_FILE));
+                push_existing(&mut paths, &member_dir.join("package.jet"));
                 collect_jet_files(&member_dir, &mut paths);
             }
         }
@@ -208,6 +245,8 @@ fn collect_project_files(
                 == Some(jet_driver::Syntax::PAYLOAD_FILE)
             {
                 "manifest"
+            } else if path.file_name().and_then(|n| n.to_str()) == Some("package.jet") {
+                "package"
             } else if path.file_name().and_then(|n| n.to_str())
                 == Some(jet_driver::Syntax::WORKSPACE_FILE)
             {
@@ -310,18 +349,26 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
 pub(super) fn packages_project_json(
     project_root: &Path,
     manifest_root: Option<&Path>,
+    ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    package_dirs(manifest_root, workspace_root)
+    package_dirs(manifest_root, ecosystem_root, workspace_root)
         .iter()
         .filter_map(|dir| package_project_json(project_root, dir))
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> Vec<PathBuf> {
+fn package_dirs(
+    manifest_root: Option<&Path>,
+    ecosystem_root: Option<&Path>,
+    workspace_root: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(root) = manifest_root {
+        dirs.push(root.to_path_buf());
+    }
+    if let Some(root) = ecosystem_root {
         dirs.push(root.to_path_buf());
     }
     if let Some(root) = workspace_root {
@@ -339,9 +386,10 @@ fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> 
 pub(super) fn targets_project_json(
     project_root: &Path,
     manifest_root: Option<&Path>,
+    ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    package_dirs(manifest_root, workspace_root)
+    package_dirs(manifest_root, ecosystem_root, workspace_root)
         .iter()
         .filter_map(|dir| package_targets_project_json(project_root, dir))
         .flatten()
@@ -350,6 +398,9 @@ pub(super) fn targets_project_json(
 }
 
 fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
+    if dir.join("package.jet").is_file() {
+        return canonical_package_targets_project_json(project_root, dir);
+    }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
     let manifest = jet_driver::PackageManifest::parse(&raw).ok()?;
@@ -377,6 +428,9 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
 }
 
 fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
+    if dir.join("package.jet").is_file() {
+        return canonical_package_project_json(project_root, dir);
+    }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
     match jet_driver::PackageManifest::parse(&raw) {
@@ -431,6 +485,178 @@ fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
             json_str(&format!("{:?}", err))
         )),
     }
+}
+
+fn canonical_package_facts(
+    dir: &Path,
+) -> Result<jet_driver::Package::PackageFacts, String> {
+    jet_driver::Package::PackageFacts::load(dir)
+        .ok_or_else(|| format!("canonical Package `{}` is missing", dir.join("package.jet").display()))?
+        .map_err(|error| error.to_string())
+}
+
+fn canonical_package_error(project_root: &Path, dir: &Path, error: &str) -> String {
+    format!(
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{{\"code\":\"package\",\"what\":{},\"why\":\"package.jet did not produce one valid typed Package fact graph\",\"fix\":\"fix package.jet or its declared Config files before Canvas uses package facts\"}}]}}",
+        json_str(&rel_path(project_root, dir)),
+        json_str(&rel_path(project_root, &dir.join("package.jet"))),
+        json_str(dir.file_name().and_then(|name| name.to_str()).unwrap_or("package")),
+        json_str(error),
+    )
+}
+
+fn output_kind_label(kind: &jet_driver::Package::PackageOutputKind) -> &'static str {
+    use jet_driver::Package::PackageOutputKind;
+    match kind {
+        PackageOutputKind::Library => "library",
+        PackageOutputKind::Executable => "executable",
+        PackageOutputKind::Service => "service",
+        PackageOutputKind::Check => "check",
+        PackageOutputKind::Environment => "environment",
+        PackageOutputKind::Image => "image",
+        PackageOutputKind::Bundle => "bundle",
+        PackageOutputKind::System => "system",
+        PackageOutputKind::Fleet => "fleet",
+    }
+}
+
+fn canonical_outputs_json(facts: &jet_driver::Package::PackageFacts) -> String {
+    facts
+        .outputs
+        .values()
+        .map(|output| {
+            format!(
+                "{{\"name\":{},\"kind\":{},\"entry\":{},\"fields\":{{{}}}}}",
+                json_str(&output.name),
+                json_str(output_kind_label(&output.kind)),
+                json_optional_str(output.entry.as_deref()),
+                output
+                    .fields
+                    .iter()
+                    .map(|(name, value)| format!("{}:{}", json_str(name), json_str(value)))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn canonical_environments_json(facts: &jet_driver::Package::PackageFacts) -> String {
+    facts
+        .environments
+        .values()
+        .map(|environment| {
+            let services = environment
+                .services
+                .iter()
+                .map(|(name, service)| {
+                    format!(
+                        "{{\"name\":{},\"enable\":{},\"ports\":[{}],\"ready\":{}}}",
+                        json_str(name),
+                        if service.enable { "true" } else { "false" },
+                        service
+                            .ports
+                            .iter()
+                            .map(i64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        json_optional_str(service.ready.as_deref()),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"name\":{},\"tools\":[{}],\"services\":[{}],\"secrets\":[{}]}}",
+                json_str(&environment.name),
+                environment
+                    .tools
+                    .iter()
+                    .map(|tool| json_str(tool))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                services,
+                environment
+                    .secrets
+                    .keys()
+                    .map(|name| json_str(name))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn canonical_package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
+    let facts = canonical_package_facts(dir).ok()?;
+    let package_path = rel_path(project_root, dir);
+    let manifest_rel = rel_path(project_root, &dir.join("package.jet"));
+    Some(
+        facts
+            .outputs
+            .values()
+            .map(|output| {
+                format!(
+                    "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":{}}}",
+                    json_str(&facts.name),
+                    json_str(&package_path),
+                    json_str(&manifest_rel),
+                    json_str(&output.name),
+                    json_str(output_kind_label(&output.kind)),
+                    json_optional_str(output.entry.as_deref()),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
+    let facts = match canonical_package_facts(dir) {
+        Ok(facts) => facts,
+        Err(error) => return Some(canonical_package_error(project_root, dir, &error)),
+    };
+    let deps = facts
+        .deps
+        .iter()
+        .map(|(name, source)| {
+            format!(
+                "{{\"name\":{},\"source\":{}}}",
+                json_str(name),
+                json_str(source)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!(
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"effects_enabled\":false,\"diagnostics\":[]}}",
+        json_str(&rel_path(project_root, dir)),
+        json_str(&rel_path(project_root, &dir.join("package.jet"))),
+        json_str(&facts.name),
+        json_optional_str(facts.version.as_deref()),
+        deps,
+        facts
+            .outputs
+            .values()
+            .map(|output| json_str(&output.name))
+            .collect::<Vec<_>>()
+            .join(","),
+        canonical_outputs_json(&facts),
+        canonical_environments_json(&facts),
+        facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(","),
+        facts
+            .members
+            .iter()
+            .map(|member| {
+                let value = match member {
+                    jet_driver::Package::MemberRef::Path(path) => path,
+                    jet_driver::Package::MemberRef::Find(path) => path,
+                };
+                json_str(value)
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+    ))
 }
 
 pub(super) struct EnvProjectJson {
@@ -507,15 +733,53 @@ fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan)
         })
         .collect::<Vec<_>>()
         .join(",");
+    let run = service
+        .run
+        .as_ref()
+        .map(|args| {
+            format!(
+                "[{}]",
+                args.iter()
+                    .map(|arg| json_str(arg))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
+    let shutdown = service.shutdown.as_ref().map(|policy| match policy {
+        jet_env_model::ModuleEval::ShutdownPolicy::Kill => "Kill",
+        jet_env_model::ModuleEval::ShutdownPolicy::Term { .. } => "Term",
+    });
+    let after = format!(
+        "[{}]",
+        service
+            .after
+            .iter()
+            .chain(service.depends_on.iter())
+            .map(|name| json_str(name))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let before_start = format!(
+        "[{}]",
+        service
+            .before_start
+            .iter()
+            .map(|name| json_str(name))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     format!(
-        "{{\"name\":{},\"enable\":{},\"ports\":[{}],\"init\":{},\"shutdown\":{},\"data_dir\":{},\"ready\":{},\"extra\":[{}],\"source\":{}}}",
+        "{{\"name\":{},\"enable\":{},\"ports\":[{}],\"run\":{},\"shutdown\":{},\"data_dir\":{},\"ready\":{},\"after\":{},\"before_start\":{},\"extra\":[{}],\"source\":{}}}",
         json_str(&service.name),
         if service.enable { "true" } else { "false" },
         ports,
-        json_optional_str(service.init.as_deref()),
-        json_optional_str(service.shutdown.as_deref()),
+        run,
+        shutdown.map(json_str).unwrap_or_else(|| "null".to_string()),
         json_optional_str(service.data_dir.as_deref()),
         json_optional_str(service.ready.as_deref()),
+        after,
+        before_start,
         extra,
         json_str(jet_driver::Syntax::ENV_FILE)
     )

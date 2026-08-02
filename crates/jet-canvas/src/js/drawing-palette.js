@@ -303,7 +303,13 @@
     if (action && action.available === false) {
       return { available: false, code: action.unavailable_reason_code || "unavailable", reason: action.denied_reason || "This action is unavailable here." };
     }
-    if (action && (action.op || action.insert_op) === "insert_fallible_rail" && !graphIsFallible(graph)) {
+    const isFallibleRail = action && (
+      (action.op || action.insert_op) === "insert_fallible_rail"
+      || action.node_descriptor_id === "fallible"
+      || action.action_id === "canvas.structural:fallible"
+      || (action.kind === "canvas.structural" && action.title === "Fallible")
+    );
+    if (isFallibleRail && !graphIsFallible(graph)) {
       return { available: false, code: "needs_fallible_function", reason: "Needs a fallible function." };
     }
     return { available: true, code: "", reason: "" };

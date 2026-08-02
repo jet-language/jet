@@ -627,6 +627,7 @@ fn project_stmt(
             connect_expr_to_input_with_span(g, index, src, &init.init, initializer_span, ordinal * 10, "initializer", &node_id, &init_pin, x - 220, y);
             let cond_pin = add_pin(g, &node_id, "condition", "input", "Bool", "", false);
             connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", &node_id, &cond_pin, x - 220, y + 30);
+            add_inline(g, &node_id, ordinal, "cond", src, cond.span());
             if let Some(step) = step {
                 let afterthought = match step.as_ref() {
                     Stmt::Assign { target, value, .. } => {

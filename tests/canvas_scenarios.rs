@@ -5,11 +5,13 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, Once, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 static BUILD_JET: Once = Once::new();
+static NEXT_CANVAS_CASE: AtomicU64 = AtomicU64::new(0);
 const MAX_CANVAS_BROWSERS: usize = 4;
 static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
 
@@ -691,7 +693,13 @@ impl CanvasCase {
         let root = std::env::var("JET_VERIFY_TMPDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| repo.join("target/test-tmp"));
-        let dir = root.join(format!("canvas_scenario_{}_{}", name.replace('-', "_"), std::process::id()));
+        let serial = NEXT_CANVAS_CASE.fetch_add(1, Ordering::Relaxed);
+        let dir = root.join(format!(
+            "canvas_scenario_{}_{}_{}",
+            name.replace('-', "_"),
+            std::process::id(),
+            serial
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create Canvas scenario dir");
         let entry = dir.join("main.jet");
@@ -717,6 +725,14 @@ impl Drop for CanvasCase {
             }
         }
     }
+}
+
+#[test]
+fn canvas_cases_same_name_get_distinct_directories() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let first = CanvasCase::new(&repo, "undo-restores-source");
+    let second = CanvasCase::new(&repo, "undo-restores-source");
+    assert_ne!(first.dir, second.dir);
 }
 
 struct DevServer {

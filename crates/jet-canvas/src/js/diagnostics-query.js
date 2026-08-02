@@ -118,7 +118,44 @@
 
   function nodeDiagnostics(node) {
     if (!node || !node.source_span) return [];
-    return activeDiagnostics().filter((diag) => diag.source_span && spansOverlap(node.source_span, diag.source_span));
+    const graph = latestDoc && currentGraph(latestDoc);
+    const relatedSpans = [node.source_span].concat(
+      (graph && graph.inline_exprs || [])
+        .filter((expr) => expr.node_id === node.node_id && expr.source_span)
+        .map((expr) => expr.source_span)
+    );
+    const diagnostics = activeDiagnostics();
+    const direct = diagnostics.filter((diag) =>
+      diag.source_span && relatedSpans.some((span) => spansOverlap(span, diag.source_span))
+    );
+    if (!graph || !graph.function || !graph.function.source_span) return direct;
+
+    // A failed source edit is checked against the candidate text, while the
+    // visible graph still describes the last valid revision. Formatting can
+    // move an error span away from the stale node/inline spans. Keep the
+    // diagnostic on the nearest node in this function so the canvas still
+    // exposes the error without pretending that the invalid candidate became
+    // the source of truth.
+    const fallback = diagnostics.filter((diag) => {
+      if (!diag.source_span || direct.includes(diag) || !spansOverlap(graph.function.source_span, diag.source_span)) return false;
+      let nearest = null;
+      for (const candidate of graph.nodes || []) {
+        const spans = [candidate.source_span].concat(
+          (graph.inline_exprs || [])
+            .filter((expr) => expr.node_id === candidate.node_id && expr.source_span)
+            .map((expr) => expr.source_span)
+        ).filter(Boolean);
+        for (const span of spans) {
+          const offset = diag.source_span.start;
+          const distance = offset < span.start ? span.start - offset : offset > span.end ? offset - span.end : 0;
+          if (!nearest || distance < nearest.distance || (distance === nearest.distance && span.start < nearest.start)) {
+            nearest = { node_id: candidate.node_id, distance, start: span.start };
+          }
+        }
+      }
+      return nearest && nearest.node_id === node.node_id;
+    });
+    return direct.concat(fallback);
   }
 
   function worstDiagnosticSeverity(entries) {

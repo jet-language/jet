@@ -77,7 +77,7 @@ Current transactions:
 | `add_target` | `manifest`, `name`, `target` | Inserts or updates one `packages:` target entry and validates the manifest parser before write. |
 | `create_package` | `package_path`, `name`, `target`, optional `entry` | Creates a package directory with `pkg.jet` and an entry `.jet` file, then validates the manifest parser and generated entry syntax before write. New files must appear in `files` with revision `missing`. |
 | `add_workspace_member` | `workspace`, `member_path` | Creates or edits `workspace.jet` to include a package directory, then validates the workspace evaluator before write. Existing explicit member lists are edited in source; `find("./dir")` workspaces no-op when the member path is already covered. |
-| `add_env_service` | `env`, `name`, optional `enable`, `port`, `init`, `ready`, `shutdown`, `data_dir` | Creates or edits `env.jet` to include a dev service, then validates Jetpack module evaluation before write. |
+| `add_env_service` | `env`, `name`, optional `enable`, `port`, `run` (string array), `ready`, typed `shutdown`, `data_dir` | Creates or edits `env.jet` to include a dev service, then validates Jetpack module evaluation before write. |
 
 Successful response:
 

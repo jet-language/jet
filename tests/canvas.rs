@@ -1471,7 +1471,8 @@ fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source()
         revision, escaped_original
     );
     jet::Canvas::apply_transaction_json(&path, &undo).expect("undo source replace");
-    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    let expected = jet::Formatter::format_source(&original).expect("format original");
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
 }
 
 #[test]
@@ -2546,7 +2547,7 @@ fn canvas_project_json_projects_env_services_and_diagnostics() {
     .unwrap();
     fs::write(
         dir.join("env.jet"),
-        "module env.dev {\n    prompt: \"svcapp\",\n    services: { redis: { enable: true, ports: [6380], init: \"redis-server --port 6380\", ready: \"redis-cli -p 6380 ping\" } },\n}\n",
+        "module env.dev {\n    prompt: \"svcapp\",\n    services: { redis: { ports: [6380], run: [\"redis-server\", \"--port\", \"6380\"], ready: \"redis-cli -p 6380 ping\" } },\n}\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -2796,7 +2797,7 @@ fn canvas_project_transactions_add_env_service() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"add_env_service\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"env.jet\",\"revision\":\"missing\"}}],\"env\":\"env.jet\",\"name\":\"redis\",\"port\":6380,\"init\":\"redis-server --port 6380\",\"ready\":\"redis-cli -p 6380 ping\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_env_service\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"env.jet\",\"revision\":\"missing\"}}],\"env\":\"env.jet\",\"name\":\"redis\",\"port\":6380,\"run\":[\"redis-server\",\"--port\",\"6380\"],\"ready\":\"redis-cli -p 6380 ping\"}}",
         project_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
@@ -2814,6 +2815,7 @@ fn canvas_project_transactions_add_env_service() {
     assert!(env.contains("module env.dev"), "{env}");
     assert!(env.contains("redis:"), "{env}");
     assert!(env.contains("ports: [6380]"), "{env}");
+    assert!(env.contains("run: [\"redis-server\", \"--port\", \"6380\"]"), "{env}");
     let project = jet::Canvas::project_json_for_entry(&entry);
     assert!(project.contains("\"services\":[{\"name\":\"redis\""), "{project}");
     assert!(project.contains("\"ports\":[6380]"), "{project}");
@@ -3332,7 +3334,7 @@ fn canvas_projects_nested_control_and_assignment_forms() {
         "\"kind\":\"function\"",
         "\"title\":\"if ==\"",
         "\"title\":\"next\"",
-        "\"source\":\"i < limit\"",
+        "\"source\":\"limit\"",
         "\"source\":\"i == 2\"",
         "\"source\":\"total\"",
     ] {

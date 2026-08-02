@@ -68,7 +68,12 @@ pub(super) fn function_signature_span(src: &str, name_span: SourceSpan) -> Resul
 
 pub(super) fn insert_offset(src: &str, f: &AST::Func) -> usize {
     if let Some(first) = f.body.first() {
-        return line_start(src, first.span().start);
+        let first_start = first.span().start;
+        let line = line_start(src, first_start);
+        if src[line..first_start].contains('{') {
+            return first_start;
+        }
+        return line;
     }
     line_after(src, f.name_span.end)
 }
