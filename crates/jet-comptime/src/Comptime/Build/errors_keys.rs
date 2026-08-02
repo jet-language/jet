@@ -70,6 +70,8 @@ pub enum BuildError {
         wrapper: LegacyWrapperKind,
         actual: String,
     },
+    LegacyProjectFileMissing(LegacyWrapperKind),
+    LegacyProjectFileInvalid(String),
     PolicyDenied(PolicyExplanation),
     EmptyPluginField(String),
     InvalidPluginDigest(String),

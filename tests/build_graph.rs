@@ -5,10 +5,11 @@ use jet::Comptime::Build::{
     BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest,
     GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord,
     PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest,
-    RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
-    RemoteExecutionResult, RemoteSandboxProof, ReproducibilityClass, SdkIdentity,
+    RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
+    RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof,
+    ReproducibilityClass, SdkIdentity,
     SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
-    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, read_packaged_file_bounded,
 };
 use std::fs;
 
@@ -916,7 +917,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         "roundtrip"
     ));
     let _ = fs::remove_dir_all(&root);
-    let transport = RemoteCacheTransport::new(&root);
+    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
     let key = ActionKey::new("compile:app");
     let provenance_digest = ContentDigest::from_bytes(b"provenance");
     let sandbox = RemoteSandboxProof::new("sandbox-1", key.as_str(), provenance_digest.clone());
@@ -943,7 +944,9 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
         inputs: vec![ActionInputSnapshot {
             path: BuildPath::new("src/main.jet").unwrap(),
-            digest: ContentDigest::from_bytes(b"source"),
+            digest: transport
+                .upload_execution_blob(b"source", &policy)
+                .unwrap(),
             byte_len: 6,
         }],
         outputs: vec![output.path.clone()],
@@ -983,7 +986,7 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
         "roundtrip"
     ));
     let _ = fs::remove_dir_all(&root);
-    let transport = RemoteCacheTransport::new(&root);
+    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
     let key = ActionKey::new("execute-only");
     let sandbox = RemoteSandboxProof::new(
         "sandbox-execute-only",
@@ -1058,11 +1061,137 @@ fn remote_transport_rejects_a_symlinked_store_root() {
         key.as_str(),
         ContentDigest::from_bytes(b"provenance"),
     ));
-    let transport = RemoteCacheTransport::new(&root);
+    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
     assert!(transport.upload_blob(b"must not follow", &policy).is_err());
     assert!(!outside.join("cas").exists());
     let _ = fs::remove_file(&root);
     let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
+fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_hostile_{}_{}",
+        std::process::id(),
+        "exchange"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let key = ActionKey::new("hostile-worker");
+    let sandbox = RemoteSandboxProof::new(
+        "remote:builder-a:trusted:job-1",
+        key.as_str(),
+        ContentDigest::from_bytes(b"provenance"),
+    );
+    let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
+    let unauthenticated = RemoteCacheTransport::new(&root);
+    let auth_error = unauthenticated
+        .upload_execution_blob(b"must-not-write", &policy)
+        .unwrap_err();
+    assert!(matches!(
+        auth_error,
+        RemoteCacheError::Denied(denied)
+            if denied.reason == RemoteDeniedReason::MissingAuthentication
+    ));
+
+    let client = RemoteCacheTransport::authenticated(&root, b"worker-key").unwrap();
+    let worker = RemoteCacheTransport::authenticated(&root, b"worker-key").unwrap();
+    let input_digest = client.upload_execution_blob(b"source", &policy).unwrap();
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+        inputs: vec![ActionInputSnapshot {
+            path: BuildPath::new("src/main.jet").unwrap(),
+            digest: input_digest,
+            byte_len: 6,
+        }],
+        outputs: vec![BuildPath::new("build/app").unwrap()],
+        toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+        sandbox: sandbox.clone(),
+    };
+    client.submit_execution(&request, &policy).unwrap();
+    let wrong_key = RemoteCacheTransport::authenticated(&root, b"wrong-worker-key").unwrap();
+    assert!(matches!(
+        wrong_key.read_execution_request(&key),
+        Err(RemoteCacheError::InvalidRecord(_))
+    ));
+    assert_eq!(worker.read_execution_request(&key).unwrap(), request);
+
+    let output_digest = worker.upload_execution_blob(b"compiled", &policy).unwrap();
+    let result = RemoteExecutionResult {
+        key: key.clone(),
+        outcome: ActionOutcome::Succeeded { exit_code: 0 },
+        outputs: vec![ActionOutputRecord {
+            path: request.outputs[0].clone(),
+            digest: output_digest.clone(),
+            byte_len: 8,
+        }],
+        toolchain_digest: request.toolchain_digest.clone(),
+        sandbox: sandbox.clone(),
+    };
+    worker.publish_execution_result(&result, &policy).unwrap();
+    assert_eq!(client.download_execution_result(&key, &policy).unwrap(), result);
+
+    // A second submission for the same action is a new remote attempt. The
+    // old result is removed before the new request is visible, so a delayed
+    // worker cannot replay a successful result into a changed sandbox.
+    let new_sandbox = RemoteSandboxProof::new(
+        "remote:builder-a:trusted:job-2",
+        key.as_str(),
+        ContentDigest::from_bytes(b"provenance"),
+    );
+    let new_policy = RemoteCachePolicy::with_grants(false, false, true, new_sandbox.clone());
+    let mut new_request = request.clone();
+    new_request.sandbox = new_sandbox.clone();
+    client.submit_execution(&new_request, &new_policy).unwrap();
+    let stale_error = client
+        .download_execution_result(&key, &new_policy)
+        .unwrap_err();
+    assert!(matches!(
+        stale_error,
+        RemoteCacheError::Io(error) if error.kind() == std::io::ErrorKind::NotFound
+    ));
+    let replay_error = worker
+        .publish_execution_result(&result, &policy)
+        .unwrap_err();
+    assert!(matches!(replay_error, RemoteCacheError::InvalidRecord(_)));
+
+    let output_path = root
+        .join("cas")
+        .join("blobs")
+        .join("sha256")
+        .join(&output_digest.as_str()[7..9])
+        .join(&output_digest.as_str()[9..]);
+    let mut tampered = fs::read(&output_path).unwrap();
+    let last = tampered.len() - 1;
+    tampered[last] ^= 0x01;
+    fs::write(&output_path, tampered).unwrap();
+    let tampered_error = client
+        .download_execution_blob(&output_digest, &policy)
+        .unwrap_err();
+    assert!(matches!(tampered_error, RemoteCacheError::InvalidRecord(_)));
+
+    let binding = RemoteBuildBinding::new("builder-a", root.clone(), b"worker-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_execute(true);
+    assert!(binding.is_enabled());
+    assert!(format!("{binding:?}").contains("configured: true"));
+    let bound = RemoteCacheTransport::for_binding(&binding).unwrap();
+    let foreign_policy = RemoteCachePolicy::with_grants(
+        false,
+        false,
+        true,
+        RemoteSandboxProof::new(
+            "remote:builder-a:other-trust:job-1",
+            key.as_str(),
+            ContentDigest::from_bytes(b"provenance"),
+        ),
+    );
+    assert!(matches!(
+        bound.upload_execution_blob(b"foreign", &foreign_policy),
+        Err(RemoteCacheError::InvalidRecord(_))
+    ));
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1308,6 +1437,74 @@ fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authorit
 }
 
 #[test]
+fn legacy_project_import_reads_one_canonical_file_and_ci_denies_the_wrapper() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_legacy_import_{}_{}",
+        std::process::id(),
+        "cargo"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("Cargo.toml"), b"[package]\nname = \"imported\"\n").unwrap();
+
+    let imported = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap();
+    assert_eq!(
+        imported.labels.get("legacy.project-file").map(String::as_str),
+        Some("Cargo.toml")
+    );
+    assert_eq!(imported.inputs[0].as_str(), "Cargo.toml");
+    assert_eq!(imported.argv[0], "cargo");
+    let action = imported
+        .clone()
+        .with_outputs(["target/debug/imported"])
+        .with_cap(BuildCapability::Exec)
+        .into_action_spec(&BuildPolicy::allow_all())
+        .unwrap();
+    assert_eq!(action.legacy_wrapper, Some(LegacyWrapperKind::Cargo));
+
+    let ci = imported
+        .with_outputs(["target/debug/imported"])
+        .with_cap(BuildCapability::Exec)
+        .into_action_spec(&BuildPolicy::ci_default())
+        .unwrap_err();
+    assert!(matches!(ci, BuildError::PolicyDenied(_)));
+
+    fs::remove_file(root.join("Cargo.toml")).unwrap();
+    assert_eq!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap_err(),
+        BuildError::LegacyProjectFileMissing(LegacyWrapperKind::Cargo)
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn legacy_project_import_rejects_a_symlinked_canonical_file() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_legacy_import_symlink_{}_{}",
+        std::process::id(),
+        "cargo"
+    ));
+    let outside = root.with_extension("outside");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("Cargo.toml"), b"[package]\nname = \"outside\"\n").unwrap();
+    symlink(outside.join("Cargo.toml"), root.join("Cargo.toml")).unwrap();
+
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+        Err(BuildError::LegacyProjectFileInvalid(path)) if path == "Cargo.toml"
+    ));
+    let _ = fs::remove_file(root.join("Cargo.toml"));
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
 fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
     let mut b = BuildContext::new();
     let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -1478,6 +1675,32 @@ fn packaged_build_plugins_verify_bytes_and_roll_back_rejected_contributions() {
 
     fs::write(&component_path, b"tampered").unwrap();
     assert!(WasmComponentPluginSpec::load_packaged(&manifest, &component_path).is_err());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn packaged_plugin_host_reads_are_bounded_and_reject_links() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_plugin_bounds_{}_{}",
+        std::process::id(),
+        "hostile"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let oversized = root.join("oversized.manifest");
+    fs::write(&oversized, vec![b'x'; 65 * 1024]).unwrap();
+    let error = read_packaged_file_bounded(&oversized, "manifest", 64 * 1024).unwrap_err();
+    assert!(error.contains("exceeds 65536"), "{error}");
+
+    let target = root.join("real.manifest");
+    fs::write(&target, b"safe").unwrap();
+    let link = root.join("linked.manifest");
+    symlink(&target, &link).unwrap();
+    let error = read_packaged_file_bounded(&link, "manifest", 64 * 1024).unwrap_err();
+    assert!(error.contains("regular non-symlink"), "{error}");
     let _ = fs::remove_dir_all(root);
 }
 

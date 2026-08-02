@@ -776,6 +776,9 @@ pub struct BuildRunOptions {
     pub web_target: bool,
     pub plugin_target: bool,
     pub cross_target: Option<String>,
+    /// Optional host-owned remote builder binding. Source and CLI input cannot
+    /// construct an endpoint or credential; `None` is always local.
+    pub remote: Option<crate::Comptime::Build::RemoteBuildBinding>,
 }
 
 impl Default for BuildRunOptions {
@@ -792,6 +795,7 @@ impl Default for BuildRunOptions {
             web_target: false,
             plugin_target: false,
             cross_target: None,
+            remote: None,
         }
     }
 }
@@ -1020,6 +1024,7 @@ fn build_query_options() -> BuildRunOptions {
         web_target: false,
         plugin_target: false,
         cross_target: None,
+        remote: None,
     }
 }
 
@@ -1453,6 +1458,7 @@ fn compile_bundle_path_build_inner(
             &options,
             build.name_span,
         )?;
+        validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
 
         let selected_actions = evaluated
             .plan
@@ -1536,10 +1542,12 @@ fn compile_bundle_path_build_inner(
         };
         let executed = if options.execute {
             let execution_grants = effective_grants(&options, &evaluated.plan);
-            crate::Comptime::Build::execute_build_plan(
+            crate::Comptime::Build::execute_build_plan_with_front_end_and_remote(
                 &evaluated.plan,
                 &bundle.project_root,
                 &execution_grants,
+                crate::Comptime::Build::FrontEndCompletion::all_complete(),
+                options.remote.as_ref(),
             )
             .map_err(|error| vec![build_execution_diagnostic(error)])?
         } else {
@@ -2280,6 +2288,95 @@ fn validate_build_authority(
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),
                 "a source declaration and `#Impure` gate do not widen CLI, package, or workspace policy".to_string(),
                 format!("pass `--allow-{}` or grant it in package/workspace build policy", effect.flag()),
+                Some(span),
+            )]);
+        }
+    }
+    Ok(())
+}
+
+fn validate_legacy_project_imports(
+    plan: &crate::Comptime::Build::BuildPlan,
+    project_root: &std::path::Path,
+    span: crate::Diagnostics::Span,
+) -> Result<(), Vec<Diagnostic>> {
+    let selected = plan
+        .selected_action_ids()
+        .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+    for action in plan
+        .actions()
+        .iter()
+        .filter(|action| selected.contains(&action.id))
+    {
+        let import_marker = action.labels.get("legacy.import");
+        let Some(project_file) = action.labels.get("legacy.project-file") else {
+            if import_marker.is_some() {
+                return Err(vec![Diagnostic::error(
+                    "E3502",
+                    "legacy project-file import is missing its canonical path".to_string(),
+                    "a project-file import has one reserved marker and one canonical path"
+                        .to_string(),
+                    "pass the wrapper's canonical project file as the final import argument"
+                        .to_string(),
+                    Some(span),
+                )]);
+            }
+            continue;
+        };
+        if import_marker.map(String::as_str) != Some("project-file") {
+            return Err(vec![Diagnostic::error(
+                "E3502",
+                format!("legacy project file `{project_file}` has no canonical import marker"),
+                "only the typed legacy project-file importer may attach this path to an action"
+                    .to_string(),
+                "declare the project file through the legacy wrapper import".to_string(),
+                Some(span),
+            )]);
+        }
+        let Some(kind) = action.legacy_wrapper else {
+            return Err(vec![Diagnostic::error(
+                "E3502",
+                format!("legacy import `{}` is not attached to a legacy wrapper", project_file),
+                "a project-file import must be owned by the typed legacy wrapper that reads it".to_string(),
+                "declare the project file through the legacy wrapper import".to_string(),
+                Some(span),
+            )]);
+        };
+        if project_file != kind.project_file()
+            || crate::Comptime::Build::BuildPath::new(project_file.clone()).is_err()
+            || !action.inputs.iter().any(|input| input.as_str() == project_file)
+        {
+            return Err(vec![Diagnostic::error(
+                "E3502",
+                format!("legacy import `{}` is not the canonical project file for {}", project_file, kind.as_str()),
+                "an imported legacy project file must be canonical, relative, and part of the typed action identity".to_string(),
+                format!("use `{}` through the legacy wrapper import", kind.project_file()),
+                Some(span),
+            )]);
+        }
+        if let Err(error) = crate::Comptime::Build::LegacyWrapperSpec::read_legacy_project_file(
+            project_root,
+            kind,
+        ) {
+            let (what, fix) = match error {
+                crate::Comptime::Build::BuildError::LegacyProjectFileMissing(_) => (
+                    format!("legacy project file `{project_file}` is missing"),
+                    "restore the declared project file or remove the import".to_string(),
+                ),
+                crate::Comptime::Build::BuildError::LegacyProjectFileInvalid(path) => (
+                    format!("legacy project file `{path}` is not a bounded UTF-8 regular file"),
+                    "declare a regular UTF-8 project file no larger than 1 MiB inside the project root".to_string(),
+                ),
+                other => (
+                    format!("legacy project file `{project_file}` could not be imported: {other:?}"),
+                    "restore the declared project file or remove the import".to_string(),
+                ),
+            };
+            return Err(vec![Diagnostic::error(
+                "E3502",
+                what,
+                "legacy graph import rejects links and directories before a wrapper can run".to_string(),
+                fix,
                 Some(span),
             )]);
         }

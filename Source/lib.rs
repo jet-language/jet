@@ -292,6 +292,7 @@ fn compile_programmable_build_opts_inner(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
+                remote: None,
             },
         )?;
         if emit_generated {
@@ -360,6 +361,7 @@ fn compile_workspace_build_opts(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
+                remote: None,
             },
         )?;
         if emit_generated {
@@ -386,6 +388,7 @@ fn compile_workspace_build_opts(
             web_target,
             plugin_target,
             cross_target: cross_target.map(str::to_string),
+            remote: None,
         },
     )?;
     if emit_generated {

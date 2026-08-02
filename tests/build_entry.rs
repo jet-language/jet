@@ -34,6 +34,16 @@ fn opts() -> BuildRunOptions {
         web_target: false,
         plugin_target: false,
         cross_target: None,
+        remote: None,
+    }
+}
+
+fn ci_opts() -> BuildRunOptions {
+    BuildRunOptions {
+        policy: BuildPolicy::ci_default(),
+        grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::FS]),
+        allow_impure: true,
+        ..opts()
     }
 }
 
@@ -191,6 +201,55 @@ fn package_and_file_build_entries_are_rejected_as_one_unit() {
 
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3520"));
+}
+
+#[test]
+fn production_build_bridge_imports_only_the_canonical_legacy_project_file() {
+    let root = project("legacy-import");
+    let entry = root.join("main.jet");
+    write(&root.join("Cargo.toml"), "[package]\nname = \"legacy-import\"\n");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
+    #Impure("invoke one explicitly imported legacy project file") {
+        tc :: b.toolchain("native", "x86_64-linux")?
+        identity :: b.signing("builder", "ci")?
+        imported :: b.legacy(
+            "cargo",
+            "cargo",
+            ["Cargo.toml"],
+            ["target/imported"],
+            ["cargo", "build"],
+            ["Exec"],
+            tc,
+            [],
+            identity,
+            "generic",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "cached",
+            "Cargo.toml"
+        )?
+        app :: b.add_executable("app", ["main.jet"], [imported])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), ci_opts()).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("legacy build wrappers are disabled in CI")),
+        "{errors:#?}"
+    );
 }
 
 #[test]

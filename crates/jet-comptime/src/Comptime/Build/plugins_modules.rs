@@ -6,6 +6,7 @@ use super::handles::{
 use super::targets::{BuildPath, TargetKind, TargetSpec};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 pub const BUILD_PLUGIN_API_VERSION: &str = "jet.build.plugin.v1";
@@ -14,6 +15,8 @@ pub const BUILD_PLUGIN_API_VERSION: &str = "jet.build.plugin.v1";
 pub const BUILD_PLUGIN_HOST_SUBCOMMAND: &str = "__build-plugin-v1";
 pub const BUILD_PLUGIN_MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub const BUILD_PLUGIN_MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+pub const BUILD_PLUGIN_MAX_MANIFEST_BYTES: usize = 64 * 1024;
+pub const BUILD_PLUGIN_MAX_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
 const BUILD_PLUGIN_MAX_WIRE_ITEMS: usize = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,10 +73,16 @@ impl WasmComponentPluginSpec {
         let component_path = component_path.as_ref();
         reject_plugin_link(manifest_path, "manifest")?;
         reject_plugin_link(component_path, "component")?;
-        let manifest = fs::read(manifest_path)
-            .map_err(|error| format!("could not read plugin manifest: {error}"))?;
-        let component = fs::read(component_path)
-            .map_err(|error| format!("could not read plugin component: {error}"))?;
+        let manifest = read_packaged_file_bounded(
+            manifest_path,
+            "manifest",
+            BUILD_PLUGIN_MAX_MANIFEST_BYTES,
+        )?;
+        let component = read_packaged_file_bounded(
+            component_path,
+            "component",
+            BUILD_PLUGIN_MAX_COMPONENT_BYTES,
+        )?;
         let spec = Self::load_packaged_bytes(&manifest, &component)?;
         let manifest_digest = ContentDigest::from_bytes(&manifest).as_str().to_string();
         Ok((spec, manifest_digest))
@@ -83,6 +92,18 @@ impl WasmComponentPluginSpec {
     /// The host uses this after reading the files so the bytes it verifies are
     /// the exact bytes it gives to Wasmtime.
     pub fn load_packaged_bytes(manifest: &[u8], component: &[u8]) -> Result<Self, String> {
+        if manifest.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
+            return Err(format!(
+                "plugin manifest exceeds {} bytes",
+                BUILD_PLUGIN_MAX_MANIFEST_BYTES
+            ));
+        }
+        if component.len() > BUILD_PLUGIN_MAX_COMPONENT_BYTES {
+            return Err(format!(
+                "plugin component exceeds {} bytes",
+                BUILD_PLUGIN_MAX_COMPONENT_BYTES
+            ));
+        }
         let manifest = std::str::from_utf8(manifest)
             .map_err(|_| "plugin manifest is not UTF-8".to_string())?;
         let spec = Self::from_manifest_text(manifest)?;
@@ -98,6 +119,12 @@ impl WasmComponentPluginSpec {
     }
 
     pub fn from_manifest_text(text: &str) -> Result<Self, String> {
+        if text.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
+            return Err(format!(
+                "plugin manifest exceeds {} bytes",
+                BUILD_PLUGIN_MAX_MANIFEST_BYTES
+            ));
+        }
         let mut name = None;
         let mut version = None;
         let mut api_version = None;
@@ -175,6 +202,34 @@ fn reject_plugin_link(path: &Path, label: &str) -> Result<(), String> {
         return Err(format!("plugin {label} must be a regular non-symlink file"));
     }
     Ok(())
+}
+
+/// Read a packaged plugin file only after checking its regular-file identity
+/// and declared byte bound. Both the compiler loader and the sibling host use
+/// this helper so a large or replaced package cannot become an unbounded read.
+pub fn read_packaged_file_bounded(
+    path: &Path,
+    label: &str,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    reject_plugin_link(path, label)?;
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not stat plugin {label}: {error}"))?;
+    if metadata.len() > limit as u64 {
+        return Err(format!(
+            "plugin {label} exceeds {limit} bytes"
+        ));
+    }
+    let file = fs::File::open(path)
+        .map_err(|error| format!("could not read plugin {label}: {error}"))?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read plugin {label}: {error}"))?;
+    if bytes.len() > limit {
+        return Err(format!("plugin {label} exceeds {limit} bytes"));
+    }
+    Ok(bytes)
 }
 
 /// Check the dependency-free part of the WebAssembly Component Model envelope.

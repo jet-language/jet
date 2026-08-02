@@ -2,8 +2,13 @@ use super::errors_keys::BuildError;
 use super::handles::{ActionId, PluginHandle, ProbeHandle, SigningIdentityHandle, ToolchainHandle};
 use super::targets::BuildPath;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::Read;
+use std::path::Path;
 
 pub type BuildCapability = crate::BuildEffect;
+
+const MAX_LEGACY_PROJECT_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildResourcePool {
@@ -57,6 +62,26 @@ impl LegacyWrapperKind {
             LegacyWrapperKind::Gradle => "gradle",
             LegacyWrapperKind::Npm => "npm",
             LegacyWrapperKind::Cargo => "cargo",
+        }
+    }
+
+    pub fn project_file(self) -> &'static str {
+        match self {
+            LegacyWrapperKind::CMake => "CMakeLists.txt",
+            LegacyWrapperKind::Make => "Makefile",
+            LegacyWrapperKind::Gradle => "build.gradle",
+            LegacyWrapperKind::Npm => "package.json",
+            LegacyWrapperKind::Cargo => "Cargo.toml",
+        }
+    }
+
+    fn default_argv(self) -> Vec<String> {
+        match self {
+            LegacyWrapperKind::CMake => vec!["cmake".to_string(), "--build".to_string(), "build".to_string()],
+            LegacyWrapperKind::Make => vec!["make".to_string()],
+            LegacyWrapperKind::Gradle => vec!["gradle".to_string(), "build".to_string()],
+            LegacyWrapperKind::Npm => vec!["npm".to_string(), "run".to_string(), "build".to_string()],
+            LegacyWrapperKind::Cargo => vec!["cargo".to_string(), "build".to_string()],
         }
     }
 }
@@ -402,6 +427,53 @@ pub struct LegacyWrapperSpec {
 }
 
 impl LegacyWrapperSpec {
+    /// Import only the canonical project file for a wrapper. Commands still
+    /// need explicit outputs and capabilities before they can enter the graph.
+    pub fn from_project_file(
+        root: impl AsRef<Path>,
+        kind: LegacyWrapperKind,
+    ) -> Result<Self, BuildError> {
+        Self::read_legacy_project_file(root, kind)?;
+        Ok(Self::new(kind, kind.default_argv()).with_project_file(kind.project_file()))
+    }
+
+    /// Read and validate the one project file owned by a legacy wrapper.
+    /// Keeping this check in the build seam lets both the Rust importer and
+    /// the production driver apply the same bounded, UTF-8, non-link rule.
+    pub fn read_legacy_project_file(
+        root: impl AsRef<Path>,
+        kind: LegacyWrapperKind,
+    ) -> Result<Vec<u8>, BuildError> {
+        let root = root.as_ref();
+        let root_meta = fs::symlink_metadata(root)
+            .map_err(|_| BuildError::LegacyProjectFileInvalid(root.display().to_string()))?;
+        if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+            return Err(BuildError::LegacyProjectFileInvalid(root.display().to_string()));
+        }
+        let relative = kind.project_file();
+        let path = root.join(relative);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|_| BuildError::LegacyProjectFileMissing(kind))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(BuildError::LegacyProjectFileInvalid(relative.to_string()));
+        }
+        if metadata.len() > MAX_LEGACY_PROJECT_FILE_BYTES {
+            return Err(BuildError::LegacyProjectFileInvalid(relative.to_string()));
+        }
+        let mut contents = Vec::with_capacity(metadata.len() as usize);
+        fs::File::open(&path)
+            .map_err(|_| BuildError::LegacyProjectFileInvalid(relative.to_string()))?
+            .take(MAX_LEGACY_PROJECT_FILE_BYTES + 1)
+            .read_to_end(&mut contents)
+            .map_err(|_| BuildError::LegacyProjectFileInvalid(relative.to_string()))?;
+        if contents.len() as u64 > MAX_LEGACY_PROJECT_FILE_BYTES
+            || std::str::from_utf8(&contents).is_err()
+        {
+            return Err(BuildError::LegacyProjectFileInvalid(relative.to_string()));
+        }
+        Ok(contents)
+    }
+
     pub fn cmake<I, S>(argv: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -474,6 +546,21 @@ impl LegacyWrapperSpec {
     {
         self.inputs
             .extend(paths.into_iter().map(|p| BuildPath(p.into())));
+        self
+    }
+
+    /// Mark the project file that an optional graph import inspected. The
+    /// path is also a declared input, so later execution cannot hide changes
+    /// to the imported project file from action identity.
+    pub fn with_project_file(mut self, path: impl Into<String>) -> Self {
+        let path = path.into();
+        if !self.inputs.iter().any(|input| input.as_str() == path) {
+            self.inputs.push(BuildPath(path.clone()));
+        }
+        self.labels
+            .insert("legacy.import".to_string(), "project-file".to_string());
+        self.labels
+            .insert("legacy.project-file".to_string(), path);
         self
     }
 

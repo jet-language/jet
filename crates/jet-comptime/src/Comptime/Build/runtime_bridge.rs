@@ -430,6 +430,12 @@ fn eval_session_method(
                     let (label, value) = entry.split_once('=').ok_or_else(|| {
                         build_diag("legacy wrapper label entries must use NAME=VALUE", span)
                     })?;
+                    if matches!(label, "legacy.import" | "legacy.project-file") {
+                        return Err(build_diag(
+                            "legacy import labels are reserved; pass the canonical project file as the final argument",
+                            span,
+                        ));
+                    }
                     wrapper = wrapper.with_label(label, value);
                 }
             }
@@ -440,6 +446,20 @@ fn eval_session_method(
                     "phony" | "uncached" => ActionCache::UncachedPhony,
                     _ => return Err(build_diag("legacy wrapper cache must be cached or phony", span)),
                 });
+            }
+            if args.len() >= 17 {
+                let project_file = string_arg(&args, 16, span)?;
+                if project_file != wrapper.kind.project_file() {
+                    return Err(build_diag(
+                        &format!(
+                            "legacy {} import must use `{}`",
+                            wrapper.kind.as_str(),
+                            wrapper.kind.project_file()
+                        ),
+                        span,
+                    ));
+                }
+                wrapper = wrapper.with_project_file(project_file);
             }
             let spec = wrapper
                 .into_action_spec(session.context.policy())
@@ -818,6 +838,14 @@ fn build_error_text(error: &BuildError) -> String {
         BuildError::InvalidPath(path) => {
             format!("build path `{path}` must be relative and stay inside the project")
         }
+        BuildError::LegacyProjectFileMissing(kind) => format!(
+            "legacy {} import requires `{}` in the project root",
+            kind.as_str(),
+            kind.project_file()
+        ),
+        BuildError::LegacyProjectFileInvalid(path) => format!(
+            "legacy project file `{path}` must be a readable regular file"
+        ),
         BuildError::UndeclaredEnvName { action, key } => {
             format!("action `{action}` allowlists undeclared environment variable `{key}`")
         }

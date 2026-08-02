@@ -54,10 +54,10 @@ fn main() {
 /// graph response and performs the transaction in the compiler process.
 fn run_build_plugin_host(args: &[String]) -> i32 {
     use jet_comptime::Comptime::Build::{
-        ContentDigest, WasmComponentPluginSpec, BUILD_PLUGIN_MAX_REQUEST_BYTES,
-        BUILD_PLUGIN_MAX_RESPONSE_BYTES,
+        read_packaged_file_bounded, ContentDigest, WasmComponentPluginSpec,
+        BUILD_PLUGIN_MAX_COMPONENT_BYTES, BUILD_PLUGIN_MAX_MANIFEST_BYTES,
+        BUILD_PLUGIN_MAX_REQUEST_BYTES, BUILD_PLUGIN_MAX_RESPONSE_BYTES,
     };
-    use std::fs;
     use std::io::{Read, Write};
 
     let [manifest_path, component_path, expected_manifest_digest, expected_component_digest] = args
@@ -65,27 +65,22 @@ fn run_build_plugin_host(args: &[String]) -> i32 {
         eprintln!("build-plugin host requires manifest, component, and expected digests");
         return 2;
     };
-    for (path, label) in [(manifest_path, "manifest"), (component_path, "component")] {
-        match fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => {
-                eprintln!("build-plugin {label} must be a regular non-symlink file");
-                return 2;
-            }
-            Err(error) => {
-                eprintln!("couldn't stat build-plugin {label}: {error}");
-                return 2;
-            }
-        }
-    }
-    let manifest = match fs::read(manifest_path) {
+    let manifest = match read_packaged_file_bounded(
+        std::path::Path::new(manifest_path),
+        "manifest",
+        BUILD_PLUGIN_MAX_MANIFEST_BYTES,
+    ) {
         Ok(bytes) => bytes,
         Err(error) => {
             eprintln!("couldn't read build-plugin manifest: {error}");
             return 2;
         }
     };
-    let component = match fs::read(component_path) {
+    let component = match read_packaged_file_bounded(
+        std::path::Path::new(component_path),
+        "component",
+        BUILD_PLUGIN_MAX_COMPONENT_BYTES,
+    ) {
         Ok(bytes) => bytes,
         Err(error) => {
             eprintln!("couldn't read build-plugin component: {error}");

@@ -3719,14 +3719,36 @@ The remote cache/execution seam is transport-only. Cache reads, writes, and
 remote execution require an explicit policy grant plus a complete sandbox
 proof whose action key, toolchain digest, output paths, and provenance are
 checked for parity. A missing worker or remote record is a miss/error; Jet
-never falls back to ambient local execution under the remote surface.
+never falls back to ambient local execution under the remote surface. The host
+must supply an explicit `RemoteBuildBinding` with a previously authorized
+builder, absolute transport root, credential, trust domain, grants, and
+timeout; source text, CLI flags, and environment variables cannot create an
+endpoint or trust root. Request, result, cache-record, and CAS-blob envelopes
+use authenticated HMAC-SHA256 transport records. Input/output blobs must exist
+before a request/result or cache record is published, and a new submission
+removes any older result for the same action key before a worker can answer.
 
 WASM build plugins enter through the packaged manifest/component loader or the
 typed in-memory test seam. The loader verifies a regular non-symlink file, the
 Component Model binary envelope, the fixed API version, and its SHA-256 digest
 before application. Capability grants are checked per plugin and the graph is
 rolled back on every rejected contribution, so a hostile plugin cannot leave
-partial actions, targets, or generated modules behind.
+partial actions, targets, or generated modules behind. Packaged manifests are
+bounded to 64 KiB and components to 64 MiB; request and response pipes are
+bounded too, and both the compiler loader and the production `jetpack` host
+reject symlinks and non-regular package files.
+
+Legacy CMake, Make, Gradle, npm, and Cargo support remains an explicit Tier-2
+wrapper. `LegacyWrapperSpec::from_project_file` imports only the wrapper's
+canonical root file, records it as a typed action input, rejects links and
+oversized/non-UTF-8 files, and still requires declared outputs and capabilities.
+The production build policy denies these wrappers in CI unless a stronger
+host policy explicitly replaces that default.
+
+Fleet host overrides are typed values, not deferred source snippets. Their
+fields use the same pure comptime evaluator and dependency-cycle checks as
+computed module fields; each result retains exact source, dependency, and
+purity provenance for inspection.
 
 `core.compiler` is the typed read-only compiler API. `lex`, `parse`, `check`,
 and `source_map` are compile-time-only and preserve source, spans, diagnostics,

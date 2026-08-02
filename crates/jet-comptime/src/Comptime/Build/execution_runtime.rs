@@ -2,9 +2,9 @@ use super::actions_policy::{ActionCache, BuildAction, BuildCapability};
 use super::cache_cas::{
     ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
     ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-    LocalCas, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason,
-    RemoteExecutionRequest, RemoteSandboxProof, atomic_restore_file, ensure_real_directory,
-    secure_read_file,
+    LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
+    RemoteDeniedReason, RemoteExecutionRequest, RemoteSandboxProof, atomic_restore_file,
+    ensure_real_directory, secure_read_file,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -17,7 +17,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, io, time::{Duration, Instant}};
+
+static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProbeFact {
@@ -53,11 +56,12 @@ pub fn execute_build_plan(
     project_root: &Path,
     grants: &BTreeSet<BuildCapability>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
-    execute_build_plan_with_front_end(
+    execute_build_plan_with_front_end_and_remote(
         plan,
         project_root,
         grants,
         FrontEndCompletion::all_complete(),
+        None,
     )
 }
 
@@ -68,6 +72,25 @@ pub fn execute_build_plan_with_front_end(
     project_root: &Path,
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    execute_build_plan_with_front_end_and_remote(
+        plan,
+        project_root,
+        grants,
+        front_end,
+        None,
+    )
+}
+
+/// Execute with an explicitly selected host-owned builder binding. No
+/// environment variable, repository field, or command-line endpoint can
+/// activate this path.
+pub fn execute_build_plan_with_front_end_and_remote(
+    plan: &BuildPlan,
+    project_root: &Path,
+    grants: &BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
+    remote_binding: Option<&RemoteBuildBinding>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
     let selected_actions = plan.selected_action_ids().map_err(BuildExecutionError::InvalidGraph)?;
     for action in plan.actions.iter().filter(|action| selected_actions.contains(&action.id)) {
@@ -127,6 +150,7 @@ pub fn execute_build_plan_with_front_end(
                                 grants,
                                 probe_facts,
                                 front_end,
+                                remote_binding,
                             )
                         }))
                     })
@@ -195,11 +219,10 @@ fn execute_one_action(
     grants: &BTreeSet<BuildCapability>,
     probe_facts: &[BuildProbeFact],
     front_end: FrontEndCompletion,
+    remote_binding: Option<&RemoteBuildBinding>,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
-    let remote_requested = std::env::var_os("JET_BUILD_REMOTE_ROOT").is_some()
-        && (remote_policy_env("JET_BUILD_REMOTE_CACHE")
-            || remote_policy_env("JET_BUILD_REMOTE_EXECUTE"));
+    let remote_requested = remote_binding.is_some_and(RemoteBuildBinding::is_enabled);
     let executable = resolve_program_path(plan, action.toolchain, &action.argv[0])
         .or_else(|| {
             // A remote cache hit also needs a stable command identity, but it
@@ -231,7 +254,7 @@ fn execute_one_action(
         &effective_probe_facts,
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
-    let remote = remote_for_action(plan, action, &key, project_root, grants)?;
+    let remote = remote_for_action(plan, action, &key, grants, remote_binding)?;
     let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
         .map(|record| record.key);
@@ -348,7 +371,10 @@ fn execute_one_action(
         transport
             .submit_execution(&request, policy)
             .map_err(|error| remote_action(action, error.to_string()))?;
-        let result = wait_remote_execution_result(transport, policy, &key, action)?;
+        let timeout_ms = remote_binding
+            .map(|binding| binding.timeout_ms)
+            .unwrap_or(30_000);
+        let result = wait_remote_execution_result(transport, policy, &key, action, timeout_ms)?;
         match result.outcome {
             ActionOutcome::Succeeded { exit_code } => {
                 restore_remote_outputs(
@@ -408,6 +434,15 @@ fn execute_one_action(
                 ));
             }
         }
+    }
+
+    if remote_binding.is_some_and(|binding| {
+        binding.cache_read && !binding.execute && !binding.fallback_local
+    }) {
+        return Err(remote_action(
+            action,
+            "remote cache miss cannot fall back to local execution".to_string(),
+        ));
     }
 
     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
@@ -501,19 +536,25 @@ fn remote_for_action(
     plan: &BuildPlan,
     action: &BuildAction,
     key: &ActionKey,
-    project_root: &Path,
     grants: &BTreeSet<BuildCapability>,
+    binding: Option<&RemoteBuildBinding>,
 ) -> Result<Option<(RemoteCacheTransport, RemoteCachePolicy, bool)>, BuildExecutionError> {
-    let Some(root) = std::env::var_os("JET_BUILD_REMOTE_ROOT") else {
+    let Some(binding) = binding.filter(|binding| binding.is_enabled()) else {
         return Ok(None);
     };
-    let cache_grant = remote_policy_env("JET_BUILD_REMOTE_CACHE");
-    let execute = remote_policy_env("JET_BUILD_REMOTE_EXECUTE");
-    if !cache_grant && !execute {
-        // Configuring a transport is not itself permission to use it. Local
-        // execution/cache remains the default until one remote grant is
-        // explicitly supplied.
-        return Ok(None);
+    if binding.trust_domain.trim().is_empty() {
+        return Err(remote_action(
+            action,
+            "remote builder binding has no trust domain".to_string(),
+        ));
+    }
+    if binding.trust_domain.len() > 256
+        || binding.trust_domain.chars().any(|character| character.is_control())
+    {
+        return Err(remote_action(
+            action,
+            "remote builder binding has an invalid trust domain".to_string(),
+        ));
     }
     if !grants.contains(&BuildCapability::Net) {
         return Err(BuildExecutionError::MissingGrant {
@@ -521,14 +562,15 @@ fn remote_for_action(
             capability: BuildCapability::Net,
         });
     }
-    let root = PathBuf::from(root);
-    let root = if root.is_absolute() {
-        root
-    } else {
-        project_root.join(root)
-    };
     let proof = RemoteSandboxProof::new(
-        format!("local-{}-{}", std::process::id(), action.id.0),
+        format!(
+            "remote:{}:{}:local-{}-{}-{}",
+            binding.builder,
+            binding.trust_domain,
+            std::process::id(),
+            action.id.0,
+            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+        ),
         key.as_str(),
         toolchain_provenance_digest(plan, action.toolchain),
     );
@@ -539,16 +581,16 @@ fn remote_for_action(
         });
     }
     Ok(Some((
-        RemoteCacheTransport::new(root),
-        RemoteCachePolicy::with_grants(cache_grant, cache_grant, execute, proof),
-        execute,
+        RemoteCacheTransport::for_binding(binding)
+            .map_err(|detail| remote_action(action, detail))?,
+        RemoteCachePolicy::with_grants(
+            binding.cache_read,
+            binding.cache_write,
+            binding.execute,
+            proof,
+        ),
+        binding.execute,
     )))
-}
-
-fn remote_policy_env(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"))
 }
 
 fn wait_remote_execution_result(
@@ -556,11 +598,8 @@ fn wait_remote_execution_result(
     policy: &RemoteCachePolicy,
     key: &ActionKey,
     action: &BuildAction,
+    timeout_ms: u64,
 ) -> Result<super::cache_cas::RemoteExecutionResult, BuildExecutionError> {
-    let timeout_ms = std::env::var("JET_BUILD_REMOTE_TIMEOUT_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(30_000);
     let timeout = Duration::from_millis(timeout_ms);
     let deadline = Instant::now() + timeout;
     loop {
@@ -961,8 +1000,37 @@ fn resolve_program_path(
     // make a cross build depend on whichever host tool happens to be installed.
     if matches!(toolchain.role, super::provenance_toolchains::ToolchainRole::Host) {
         find_program_path(program)
+    } else if target_matches_running_host(&toolchain.target_triple) {
+        // An explicit native target still runs on the host. Keep the target
+        // identity in the graph, but resolve its tools from the ambient host
+        // toolchain just as the documented `native` build example requires.
+        find_program_path(program)
     } else {
         None
+    }
+}
+
+fn target_matches_running_host(triple: &str) -> bool {
+    let arch = std::env::consts::ARCH;
+    let linux = [
+        format!("{arch}-linux"),
+        format!("{arch}-linux-gnu"),
+        format!("{arch}-unknown-linux-gnu"),
+    ];
+    let macos = [
+        format!("{arch}-macos"),
+        format!("{arch}-apple-darwin"),
+    ];
+    let windows = [
+        format!("{arch}-windows"),
+        format!("{arch}-pc-windows-msvc"),
+        format!("{arch}-pc-windows-gnu"),
+    ];
+    match std::env::consts::OS {
+        "linux" => linux.iter().any(|candidate| candidate == triple),
+        "macos" => macos.iter().any(|candidate| candidate == triple),
+        "windows" => windows.iter().any(|candidate| candidate == triple),
+        _ => false,
     }
 }
 

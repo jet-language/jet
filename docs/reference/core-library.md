@@ -3116,7 +3116,7 @@ fn run() {
 | `value_and_grad_mul` / `jvp_*` / `vjp_*` / `grad_*` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
-| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, safe-kernel proof, and typed audited raw-kernel contract |
+| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` | stream, transfer, bounds check, and typed audited raw-kernel obligation descriptor |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
@@ -3124,6 +3124,11 @@ fn run() {
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
 symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
+
+`raw_kernel_contract` is an audited `#Unsafe` boundary descriptor. Its fields
+state the obligations a raw provider must satisfy; they are not compiler proof
+that the raw body is bounds-safe, race-free, or barrier-uniform. The public
+ordinary-kernel surface is owner-gated by `D-COMPUTE-KERNEL-SURFACE1`.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).
@@ -3140,6 +3145,12 @@ mailboxes; delivery defaults to at-most-once with `Full` under capacity;
 policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
 Empty / Snapshot / EventLog; workflows, directory identity, and generation
 handoff/rollback are first-class.
+
+The current `send_durable` result is `Unit ? ServiceError`. It records
+idempotency and bounded dead letters, but it does not claim a typed durable
+receipt, retention deadline, or transaction commit. That public authority is
+owner-gated by `D-SERVICE-AUTHORITY1`; callers must not infer durable commit
+from `Ok` until that decision is ratified and implemented.
 
 ```jet
 use core.services as services

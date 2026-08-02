@@ -433,7 +433,7 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
-        ("legacy", 6..=16) => build_result(Syntax::TYPE_BUILD_ACTION),
+        ("legacy", 6..=17) => build_result(Syntax::TYPE_BUILD_ACTION),
         ("add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
         | "add_doc" | "add_install" | "add_package" | "add_publish", 3 | 4 | 5 | 6 | 7) => {
             build_result(Syntax::TYPE_BUILD_TARGET)
@@ -511,7 +511,7 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
             Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
             Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(), Type::String,
         ]),
-        ("legacy", 6..=16) => {
+        ("legacy", 6..=17) => {
             let mut args = vec![
                 Type::String,
                 Type::String,
@@ -548,6 +548,9 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
                 args.push(strings());
             }
             if arg_count >= 16 {
+                args.push(Type::String);
+            }
+            if arg_count >= 17 {
                 args.push(Type::String);
             }
             Some(args)
