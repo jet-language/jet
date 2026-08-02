@@ -98,6 +98,74 @@ pub struct DevShellEvaluation {
     unsupported: Vec<String>,
 }
 
+/// One output requested by the bounded native derivation primitive.
+///
+/// Store paths are deliberately not present here. The dependency-free
+/// evaluator records the pure request; Jetpack's private NixDrv seam assigns
+/// canonical paths after it has validated the request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivationOutputEvaluation {
+    name: String,
+    method_algo: String,
+    hash_hex: String,
+}
+
+impl DerivationOutputEvaluation {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn method_algo(&self) -> &str {
+        &self.method_algo
+    }
+
+    pub fn hash_hex(&self) -> &str {
+        &self.hash_hex
+    }
+}
+
+/// Pure, bounded input to the private Nix derivation materializer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivationEvaluation {
+    name: String,
+    system: String,
+    builder: String,
+    args: Vec<String>,
+    env: BTreeMap<String, String>,
+    input_sources: Vec<String>,
+    outputs: Vec<DerivationOutputEvaluation>,
+}
+
+impl DerivationEvaluation {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn system(&self) -> &str {
+        &self.system
+    }
+
+    pub fn builder(&self) -> &str {
+        &self.builder
+    }
+
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
+    pub fn env(&self) -> &BTreeMap<String, String> {
+        &self.env
+    }
+
+    pub fn input_sources(&self) -> &[String] {
+        &self.input_sources
+    }
+
+    pub fn outputs(&self) -> &[DerivationOutputEvaluation] {
+        &self.outputs
+    }
+}
+
 impl DevShellEvaluation {
     pub fn system(&self) -> &str {
         &self.system
@@ -162,6 +230,25 @@ pub fn evaluate_devshell_with_import_authority(
     }
 
     Evaluator::evaluate_devshell(source, system, import_authority)
+}
+
+/// Evaluate the bounded pure `builtins.derivation` surface.
+///
+/// This is an internal compatibility seam. It never executes a builder,
+/// reads the host store, or shells out to Nix. Dynamic derivations, multiple
+/// outputs, and inputs without canonical store identities fail closed.
+pub fn evaluate_derivation(
+    source: &str,
+    system: &str,
+) -> core::result::Result<DerivationEvaluation, EvaluationError> {
+    if source.len() > MAX_EVALUATOR_INPUT_BYTES {
+        return Err(EvaluationError::InputTooLarge);
+    }
+    if !REQUIRED_SYSTEMS.contains(&system) {
+        return Err(EvaluationError::UnsupportedSystem(system.to_string()));
+    }
+
+    Evaluator::evaluate_derivation(source, system)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

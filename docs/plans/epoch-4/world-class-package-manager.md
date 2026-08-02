@@ -362,8 +362,14 @@ live acceptance, and documentation. Work order is binding.
   absolute paths, URI paths, escapes, symlink escapes, missing files, cycles,
   and over-budget sources fail closed. Windows has no pathname-based import
   fallback; imports remain unsupported there until handle-relative authority
-  is available. Derivation primitives, broader required
-  builtins, and flake input/lock/registry evaluation remain on their own cards.
+  is available. The bounded derivation primitive now accepts one input-addressed
+  or fixed-output out result, records only canonical store-path inputs, and
+  materializes its drvPath/outPath through Jetpack's existing NixDrv seam.
+  Dynamic and multi-output derivations remain on their own cards.
+- Required pure helpers now include attribute inspection, type predicates,
+  bounded list/string operations, JSON conversion, currentSystem/storeDir, and
+  storePath. Unsupported authority, fetchers, dynamic derivations, and
+  non-canonical hashes fail closed; no helper shells out to Nix.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,
   native-code/plugin rejection, evaluator resource limits, and ballot-selected
   IFD behavior remain enforced. String contexts retain package/path provenance
@@ -385,6 +391,10 @@ live acceptance, and documentation. Work order is binding.
   scripts/agent/verify-nix-eval-fixture.js`. The authority corpus is checked
   with `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
   scripts/agent/verify-nix-eval-authority-fixture.js`.
+
+  The derivation corpus is checked with the exact oracle executable through
+  scripts/agent/verify-nix-eval-derivation-fixture.js; it records both the
+  pure request and exact Nix 2.34.8 drvPath/outPath values.
 
 ### E4-JP10 — Nix evaluator breadth and performance
 

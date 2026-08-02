@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"
+  },
+  "values": [
+    {
+      "name": "input_addressed",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_expression": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_value": {
+        "drvPath": "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv",
+        "out": "/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"
+      },
+      "jet_request": {
+        "name": "hello",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "",
+          "hash_hex": ""
+        }
+      }
+    },
+    {
+      "name": "fixed_output",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_expression": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_value": {
+        "drvPath": "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv",
+        "out": "/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"
+      },
+      "jet_request": {
+        "name": "fixed",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "sha256",
+          "hash_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  ],
+  "errors": [
+    {
+      "name": "multiple_outputs",
+      "system": "x86_64-linux",
+      "source": "builtins.derivation { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" ]; }",
+      "nix_expression": "builtins.attrNames (builtins.derivation { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" ]; })",
+      "nix_value": ["all", "builder", "dev", "drvAttrs", "drvPath", "name", "out", "outPath", "outputName", "outputs", "system", "type"],
+      "jet_error_contains": "multiple derivation outputs"
+    }
+  ]
+}

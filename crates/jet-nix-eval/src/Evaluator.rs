@@ -1,4 +1,7 @@
-use super::{DevShellEvaluation, EvaluationError};
+use super::{
+    DerivationEvaluation, DerivationOutputEvaluation, DevShellEvaluation, EvaluationError,
+};
+use super::JSON::{self, JSON as JSONValue};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -18,6 +21,9 @@ const MAX_IMPORTS: usize = 64;
 const MAX_PATH_BYTES: usize = 4_096;
 const MAX_STRING_PARTS: usize = 256;
 const MAX_STRING_BYTES: usize = 1 << 20;
+const MAX_DERIVATION_ARGS: usize = 256;
+const MAX_DERIVATION_ENV: usize = 256;
+const MAX_DERIVATION_INPUTS: usize = 256;
 
 #[derive(Debug, Clone)]
 enum Error {
@@ -1059,7 +1065,7 @@ impl EnvironmentFrame {
             );
             let _ = frame.bindings.insert(
                 "builtins".into(),
-                Thunk::value(Value::BuiltinsNamespace),
+                Thunk::value(Value::BuiltinsNamespace(arena.system.clone())),
             );
             let _ = frame.bindings.insert(
                 "mkShell".into(),
@@ -1104,12 +1110,18 @@ enum Value {
     Path(String),
     Package(String),
     PackageNamespace(String),
-    BuiltinsNamespace,
+    BuiltinsNamespace(String),
     LibraryNamespace,
     List(Vec<Thunk>),
     AttrSet(BTreeMap<String, Thunk>),
+    Derivation(Rc<DerivationValue>),
     Function(Rc<FunctionValue>),
     Native(NativeFunction),
+}
+
+#[derive(Clone)]
+struct DerivationValue {
+    evaluation: DerivationEvaluation,
 }
 
 #[derive(Clone)]
@@ -1125,6 +1137,57 @@ enum NativeFunction {
     Import,
     ToString,
     HasContext,
+    Builtin(Builtin),
+    Partial {
+        operation: NativeOperation,
+        arguments: Vec<Value>,
+    },
+    Derivation {
+        strict: bool,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum Builtin {
+    AttrNames,
+    AttrValues,
+    GetAttr,
+    HasAttr,
+    IsAttrs,
+    IsBool,
+    IsFunction,
+    IsInt,
+    IsList,
+    IsNull,
+    IsPath,
+    IsString,
+    Length,
+    Head,
+    Tail,
+    ConcatLists,
+    ConcatStringsSep,
+    Map,
+    Filter,
+    ReplaceStrings,
+    Substring,
+    BaseNameOf,
+    DirOf,
+    StringLength,
+    ToJSON,
+    FromJSON,
+    StorePath,
+    Throw,
+}
+
+#[derive(Clone, Copy)]
+enum NativeOperation {
+    GetAttr,
+    HasAttr,
+    Map,
+    Filter,
+    ConcatStringsSep,
+    ReplaceStrings,
+    Substring,
 }
 
 pub(super) fn evaluate_devshell(
@@ -1139,6 +1202,24 @@ pub(super) fn evaluate_devshell(
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
     let shell = resolve_shell(root.clone(), system, &arena).map_err(Error::public)?;
     project_shell(shell, system).map_err(Error::public)
+}
+
+pub(super) fn evaluate_derivation(
+    source: &str,
+    system: &str,
+) -> Result<DerivationEvaluation, EvaluationError> {
+    let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
+    let expression = Parser::new(tokens).parse().map_err(Error::public)?;
+    let arena = EvaluationArena::new(system, None);
+    let environment = EnvironmentFrame::root(&arena, "");
+    let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
+    match root {
+        Value::Derivation(derivation) => Ok(derivation.evaluation.clone()),
+        value => Err(EvaluationError::Unsupported(format!(
+            "derivation evaluation must return a derivation, got {}",
+            value_name(&value)
+        ))),
+    }
 }
 
 fn evaluate_expr(
@@ -1575,14 +1656,82 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
         Value::Package(prefix) => Ok(Some(Thunk::value(Value::Package(format!(
             "{prefix}.{field}"
         ))))),
+        Value::Derivation(derivation) => {
+            let value = match field {
+                "type" => Value::String("derivation".into()),
+                "name" => Value::String(derivation.evaluation.name.clone()),
+                "system" => Value::String(derivation.evaluation.system.clone()),
+                "builder" => Value::String(derivation.evaluation.builder.clone()),
+                "args" => Value::List(
+                    derivation
+                        .evaluation
+                        .args
+                        .iter()
+                        .cloned()
+                        .map(|value| Thunk::value(Value::String(value)))
+                        .collect(),
+                ),
+                "drvPath" | "outPath" | "out" => {
+                    return Err(Error::Unsupported(
+                        "derivation store paths are assigned by Jetpack's private materializer"
+                            .into(),
+                    ))
+                }
+                _ => {
+                    if let Some(value) = derivation.evaluation.env.get(field) {
+                        Value::String(value.clone())
+                    } else {
+                        return Ok(None);
+                    }
+                }
+            };
+            Ok(Some(Thunk::value(value)))
+        }
         Value::LibraryNamespace => Ok(None),
-        Value::BuiltinsNamespace => match field {
-            "toString" => Ok(Some(Thunk::value(Value::Native(NativeFunction::ToString)))),
-            "hasContext" => Ok(Some(Thunk::value(Value::Native(
-                NativeFunction::HasContext,
-            )))),
-            _ => Ok(None),
-        },
+        Value::BuiltinsNamespace(system) => {
+            let native = match field {
+                "toString" => Some(NativeFunction::ToString),
+                "hasContext" => Some(NativeFunction::HasContext),
+                "derivation" => Some(NativeFunction::Derivation { strict: false }),
+                "derivationStrict" => Some(NativeFunction::Derivation { strict: true }),
+                "attrNames" => Some(NativeFunction::Builtin(Builtin::AttrNames)),
+                "attrValues" => Some(NativeFunction::Builtin(Builtin::AttrValues)),
+                "getAttr" => Some(NativeFunction::Builtin(Builtin::GetAttr)),
+                "hasAttr" => Some(NativeFunction::Builtin(Builtin::HasAttr)),
+                "isAttrs" => Some(NativeFunction::Builtin(Builtin::IsAttrs)),
+                "isBool" => Some(NativeFunction::Builtin(Builtin::IsBool)),
+                "isFunction" => Some(NativeFunction::Builtin(Builtin::IsFunction)),
+                "isInt" => Some(NativeFunction::Builtin(Builtin::IsInt)),
+                "isList" => Some(NativeFunction::Builtin(Builtin::IsList)),
+                "isNull" => Some(NativeFunction::Builtin(Builtin::IsNull)),
+                "isPath" => Some(NativeFunction::Builtin(Builtin::IsPath)),
+                "isString" => Some(NativeFunction::Builtin(Builtin::IsString)),
+                "length" => Some(NativeFunction::Builtin(Builtin::Length)),
+                "head" => Some(NativeFunction::Builtin(Builtin::Head)),
+                "tail" => Some(NativeFunction::Builtin(Builtin::Tail)),
+                "concatLists" => Some(NativeFunction::Builtin(Builtin::ConcatLists)),
+                "concatStringsSep" => {
+                    Some(NativeFunction::Builtin(Builtin::ConcatStringsSep))
+                }
+                "map" => Some(NativeFunction::Builtin(Builtin::Map)),
+                "filter" => Some(NativeFunction::Builtin(Builtin::Filter)),
+                "replaceStrings" => Some(NativeFunction::Builtin(Builtin::ReplaceStrings)),
+                "substring" => Some(NativeFunction::Builtin(Builtin::Substring)),
+                "baseNameOf" => Some(NativeFunction::Builtin(Builtin::BaseNameOf)),
+                "dirOf" => Some(NativeFunction::Builtin(Builtin::DirOf)),
+                "stringLength" => Some(NativeFunction::Builtin(Builtin::StringLength)),
+                "toJSON" => Some(NativeFunction::Builtin(Builtin::ToJSON)),
+                "fromJSON" => Some(NativeFunction::Builtin(Builtin::FromJSON)),
+                "storePath" => Some(NativeFunction::Builtin(Builtin::StorePath)),
+                "throw" => Some(NativeFunction::Builtin(Builtin::Throw)),
+                "currentSystem" => return Ok(Some(Thunk::value(Value::String(
+                    system,
+                )))),
+                "storeDir" => return Ok(Some(Thunk::value(Value::String("/nix/store".into())))),
+                _ => None,
+            };
+            Ok(native.map(|function| Thunk::value(Value::Native(function))))
+        }
         value => Err(Error::Type {
             expected: "attribute set",
             actual: value_name(&value),
@@ -1677,11 +1826,742 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
             let (_, contexts) = stringify_value(&value)?;
             Ok(Value::Bool(!contexts.is_empty()))
         }
+        Value::Native(NativeFunction::Derivation { strict }) => {
+            derivation_from_value(argument.force()?, strict)
+        }
+        Value::Native(NativeFunction::Builtin(builtin)) => {
+            apply_builtin(builtin, argument.force()?, arena)
+        }
+        Value::Native(NativeFunction::Partial {
+            operation,
+            mut arguments,
+        }) => {
+            arguments.push(argument.force()?);
+            apply_partial(operation, arguments, arena)
+        }
         value => Err(Error::Type {
             expected: "function",
             actual: value_name(&value),
         }),
     }
+}
+
+fn derivation_from_value(value: Value, _strict: bool) -> Result<Value, Error> {
+    let Value::AttrSet(fields) = value else {
+        return Err(Error::Type {
+            expected: "derivation attribute set",
+            actual: value_name(&value),
+        });
+    };
+
+    let name = required_string_field(&fields, "name")?;
+    validate_derivation_name(&name)?;
+    let system = required_string_field(&fields, "system")?;
+    let builder = required_string_field(&fields, "builder")?;
+    let mut input_sources = Vec::new();
+    let args = match field_value(&fields, "args")? {
+        Some(Value::List(values)) => {
+            if values.len() > MAX_DERIVATION_ARGS {
+                return Err(Error::ResourceLimit(format!(
+                    "derivation has more than {MAX_DERIVATION_ARGS} arguments"
+                )));
+            }
+            values
+                .into_iter()
+                .map(|value| {
+                    let value = value.force()?;
+                    let (text, contexts) = stringify_value(&value)?;
+                    record_derivation_contexts(&contexts, &mut input_sources)?;
+                    Ok(text)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        Some(value) => {
+            return Err(Error::Type {
+                expected: "derivation argument list",
+                actual: value_name(&value),
+            })
+        }
+        None => Vec::new(),
+    };
+
+    let output_names = match field_value(&fields, "outputs")? {
+        Some(Value::List(values)) => values
+            .into_iter()
+            .map(|value| string_for_derivation(value.force()?))
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(value) => {
+            return Err(Error::Type {
+                expected: "derivation output list",
+                actual: value_name(&value),
+            })
+        }
+        None => vec!["out".into()],
+    };
+    if output_names != ["out"] {
+        return Err(Error::Unsupported(
+            "multiple derivation outputs are reserved for the multi-output evaluator stage".into(),
+        ));
+    }
+
+    let output_hash = optional_string_field(&fields, "outputHash")?;
+    let output_hash_algo = optional_string_field(&fields, "outputHashAlgo")?;
+    let output_hash_mode = optional_string_field(&fields, "outputHashMode")?;
+    let (method_algo, hash_hex) = match output_hash {
+        Some(hash) => {
+            let algo = output_hash_algo
+                .clone()
+                .unwrap_or_else(|| "sha256".into());
+            let mode = output_hash_mode
+                .clone()
+                .unwrap_or_else(|| "flat".into());
+            let method_algo = match mode.as_str() {
+                "flat" => algo,
+                "recursive" => format!("r:{algo}"),
+                _ => {
+                    return Err(Error::Unsupported(format!(
+                        "unsupported fixed-output hash mode `{mode}`"
+                    )))
+                }
+            };
+            let hash_hex = normalize_hash_hex(&hash)?;
+            (method_algo, hash_hex)
+        }
+        None if output_hash_algo.is_some() || output_hash_mode.is_some() => {
+            return Err(Error::Invalid(
+                "outputHashAlgo/outputHashMode require outputHash".into(),
+            ))
+        }
+        None => (String::new(), String::new()),
+    };
+
+    let mut env = BTreeMap::new();
+    let ignored = [
+        "name",
+        "system",
+        "builder",
+        "args",
+        "outputs",
+        "outputHash",
+        "outputHashAlgo",
+        "outputHashMode",
+        "__ignoreNulls",
+    ];
+    let ignore_nulls = matches!(field_value(&fields, "__ignoreNulls")?, Some(Value::Bool(true)));
+    for (field, thunk) in fields {
+        if ignored.contains(&field.as_str()) {
+            continue;
+        }
+        let value = thunk.force()?;
+        if matches!(value, Value::Null) {
+            if ignore_nulls {
+                continue;
+            }
+            return Err(Error::Invalid(format!(
+                "derivation environment field `{field}` is null"
+            )));
+        }
+        let (text, contexts) = stringify_value(&value)?;
+        record_derivation_contexts(&contexts, &mut input_sources)?;
+        if env.insert(field.clone(), text).is_some() {
+            return Err(Error::Invalid(format!("duplicate derivation field `{field}`")));
+        }
+        if env.len() > MAX_DERIVATION_ENV {
+            return Err(Error::ResourceLimit(format!(
+                "derivation has more than {MAX_DERIVATION_ENV} environment fields"
+            )));
+        }
+    }
+    env.insert("builder".into(), builder.clone());
+    env.insert("name".into(), name.clone());
+    env.insert("system".into(), system.clone());
+    if !method_algo.is_empty() {
+        env.insert("outputHash".into(), hash_hex.clone());
+        env.insert(
+            "outputHashAlgo".into(),
+            output_hash_algo.unwrap_or_else(|| "sha256".into()),
+        );
+        env.insert(
+            "outputHashMode".into(),
+            output_hash_mode.unwrap_or_else(|| "flat".into()),
+        );
+    }
+    env.insert("out".into(), String::new());
+
+    if input_sources.len() > MAX_DERIVATION_INPUTS {
+        return Err(Error::ResourceLimit(format!(
+            "derivation has more than {MAX_DERIVATION_INPUTS} source inputs"
+        )));
+    }
+    input_sources.sort();
+    input_sources.dedup();
+
+    Ok(Value::Derivation(Rc::new(DerivationValue {
+        evaluation: DerivationEvaluation {
+            name,
+            system,
+            builder,
+            args,
+            env,
+            input_sources,
+            outputs: vec![DerivationOutputEvaluation {
+                name: "out".into(),
+                method_algo,
+                hash_hex,
+            }],
+        },
+    })))
+}
+
+fn field_value(fields: &BTreeMap<String, Thunk>, name: &str) -> Result<Option<Value>, Error> {
+    attr_field(fields, name).map(|value| value.force()).transpose()
+}
+
+fn required_string_field(fields: &BTreeMap<String, Thunk>, name: &str) -> Result<String, Error> {
+    let value = field_value(fields, name)?.ok_or_else(|| Error::Missing(name.into()))?;
+    string_for_derivation(value)
+}
+
+fn optional_string_field(
+    fields: &BTreeMap<String, Thunk>,
+    name: &str,
+) -> Result<Option<String>, Error> {
+    field_value(fields, name)?
+        .map(string_for_derivation)
+        .transpose()
+}
+
+fn string_for_derivation(value: Value) -> Result<String, Error> {
+    let (text, contexts) = stringify_value(&value)?;
+    let mut inputs = Vec::new();
+    record_derivation_contexts(&contexts, &mut inputs)?;
+    Ok(text)
+}
+
+fn record_derivation_contexts(contexts: &[String], inputs: &mut Vec<String>) -> Result<(), Error> {
+    for context in contexts {
+        let Some(path) = context.strip_prefix("path:") else {
+            return Err(Error::Unsupported(
+                "derivation inputs must have canonical store-path context".into(),
+            ));
+        };
+        if !is_store_path(path) {
+            return Err(Error::Unsupported(
+                "project-relative paths do not have canonical derivation identities".into(),
+            ));
+        }
+        inputs.push(path.to_string());
+    }
+    Ok(())
+}
+
+fn is_store_path(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("/nix/store/") else {
+        return false;
+    };
+    let Some((hash, label)) = name.split_once('-') else {
+        return false;
+    };
+    hash.len() == 32 && !label.is_empty() && !label.contains('/')
+}
+
+fn validate_derivation_name(name: &str) -> Result<(), Error> {
+    if name.is_empty()
+        || name.len() > MAX_PATH_BYTES
+        || name.contains('/')
+        || name.contains('\0')
+        || name == "."
+        || name == ".."
+    {
+        return Err(Error::Invalid(format!("invalid derivation name `{name}`")));
+    }
+    Ok(())
+}
+
+fn normalize_hash_hex(hash: &str) -> Result<String, Error> {
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(Error::Unsupported(
+            "only canonical 256-bit hexadecimal output hashes are supported".into(),
+        ));
+    }
+    Ok(hash.to_ascii_lowercase())
+}
+
+fn apply_builtin(
+    builtin: Builtin,
+    argument: Value,
+    _arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    match builtin {
+        Builtin::AttrNames => {
+            let Value::AttrSet(fields) = argument else {
+                return Err(Error::Type {
+                    expected: "attribute set",
+                    actual: value_name(&argument),
+                });
+            };
+            Ok(Value::List(
+                fields
+                    .keys()
+                    .map(|name| Thunk::value(Value::String(name.clone())))
+                    .collect(),
+            ))
+        }
+        Builtin::AttrValues => {
+            let Value::AttrSet(fields) = argument else {
+                return Err(Error::Type {
+                    expected: "attribute set",
+                    actual: value_name(&argument),
+                });
+            };
+            Ok(Value::List(fields.into_values().collect()))
+        }
+        Builtin::GetAttr => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::GetAttr,
+            arguments: vec![argument],
+        })),
+        Builtin::HasAttr => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::HasAttr,
+            arguments: vec![argument],
+        })),
+        Builtin::IsAttrs => Ok(Value::Bool(matches!(argument, Value::AttrSet(_)))),
+        Builtin::IsBool => Ok(Value::Bool(matches!(argument, Value::Bool(_)))),
+        Builtin::IsFunction => Ok(Value::Bool(matches!(
+            argument,
+            Value::Function(_) | Value::Native(_)
+        ))),
+        Builtin::IsInt => Ok(Value::Bool(matches!(argument, Value::Integer(_)))),
+        Builtin::IsList => Ok(Value::Bool(matches!(argument, Value::List(_)))),
+        Builtin::IsNull => Ok(Value::Bool(matches!(argument, Value::Null))),
+        Builtin::IsPath => Ok(Value::Bool(matches!(argument, Value::Path(_)))),
+        Builtin::IsString => Ok(Value::Bool(matches!(
+            argument,
+            Value::String(_) | Value::StringContext { .. }
+        ))),
+        Builtin::Length => match argument {
+            Value::List(values) => Ok(Value::Integer(values.len() as i64)),
+            value => Err(Error::Type {
+                expected: "list",
+                actual: value_name(&value),
+            }),
+        },
+        Builtin::Head => match argument {
+            Value::List(values) => values
+                .into_iter()
+                .next()
+                .ok_or_else(|| Error::Invalid("head called on an empty list".into()))?
+                .force(),
+            value => Err(Error::Type {
+                expected: "list",
+                actual: value_name(&value),
+            }),
+        },
+        Builtin::Tail => match argument {
+            Value::List(values) => {
+                if values.is_empty() {
+                    return Err(Error::Invalid("tail called on an empty list".into()));
+                }
+                Ok(Value::List(values.into_iter().skip(1).collect()))
+            }
+            value => Err(Error::Type {
+                expected: "list",
+                actual: value_name(&value),
+            }),
+        },
+        Builtin::ConcatLists => {
+            let Value::List(values) = argument else {
+                return Err(Error::Type {
+                    expected: "list of lists",
+                    actual: value_name(&argument),
+                });
+            };
+            let mut flattened = Vec::new();
+            for value in values {
+                let Value::List(items) = value.force()? else {
+                    return Err(Error::Type {
+                        expected: "list of lists",
+                        actual: "non-list item",
+                    });
+                };
+                flattened.extend(items);
+            }
+            Ok(Value::List(flattened))
+        }
+        Builtin::ConcatStringsSep => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::ConcatStringsSep,
+            arguments: vec![argument],
+        })),
+        Builtin::Map => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::Map,
+            arguments: vec![argument],
+        })),
+        Builtin::Filter => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::Filter,
+            arguments: vec![argument],
+        })),
+        Builtin::ReplaceStrings => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::ReplaceStrings,
+            arguments: vec![argument],
+        })),
+        Builtin::Substring => Ok(Value::Native(NativeFunction::Partial {
+            operation: NativeOperation::Substring,
+            arguments: vec![argument],
+        })),
+        Builtin::BaseNameOf => {
+            let value = plain_string(argument)?;
+            Ok(Value::String(
+                value.rsplit('/').next().unwrap_or(value.as_str()).into(),
+            ))
+        }
+        Builtin::DirOf => {
+            let value = plain_string(argument)?;
+            let directory = value.rsplit_once('/').map_or(".", |(directory, _)| {
+                if directory.is_empty() {
+                    "/"
+                } else {
+                    directory
+                }
+            });
+            Ok(Value::String(directory.into()))
+        }
+        Builtin::StringLength => Ok(Value::Integer(plain_string(argument)?.chars().count() as i64)),
+        Builtin::ToJSON => Ok(Value::String(encode_json(&value_to_json(&argument, 0)?)?)),
+        Builtin::FromJSON => {
+            let text = plain_string(argument)?;
+            let json = JSON::parse(&text).map_err(Error::Invalid)?;
+            json_to_value(json, 0)
+        }
+        Builtin::StorePath => {
+            let path = plain_string(argument)?;
+            if !is_store_path(&path) {
+                return Err(Error::Unsupported(
+                    "builtins.storePath requires a canonical /nix/store path".into(),
+                ));
+            }
+            Ok(Value::StringContext {
+                value: path.clone(),
+                contexts: vec![format!("path:{path}")],
+            })
+        }
+        Builtin::Throw => Err(Error::Invalid(format!(
+            "foreign flake evaluation threw: {}",
+            plain_string(argument)?
+        ))),
+    }
+}
+
+fn apply_partial(
+    operation: NativeOperation,
+    arguments: Vec<Value>,
+    arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    let arity = match operation {
+        NativeOperation::GetAttr
+        | NativeOperation::HasAttr
+        | NativeOperation::Map
+        | NativeOperation::Filter
+        | NativeOperation::ConcatStringsSep => 2,
+        NativeOperation::ReplaceStrings | NativeOperation::Substring => 3,
+    };
+    if arguments.len() < arity {
+        return Ok(Value::Native(NativeFunction::Partial {
+            operation,
+            arguments,
+        }));
+    }
+    if arguments.len() > arity {
+        return Err(Error::Invalid("builtin received too many arguments".into()));
+    }
+    match operation {
+        NativeOperation::GetAttr => {
+            let name = plain_string(arguments[0].clone())?;
+            let Value::AttrSet(fields) = arguments[1].clone() else {
+                return Err(Error::Type {
+                    expected: "attribute set",
+                    actual: value_name(&arguments[1]),
+                });
+            };
+            attr_field(&fields, &name)
+                .ok_or_else(|| Error::Missing(name))?
+                .force()
+        }
+        NativeOperation::HasAttr => {
+            let name = plain_string(arguments[0].clone())?;
+            let Value::AttrSet(fields) = arguments[1].clone() else {
+                return Err(Error::Type {
+                    expected: "attribute set",
+                    actual: value_name(&arguments[1]),
+                });
+            };
+            Ok(Value::Bool(attr_field(&fields, &name).is_some()))
+        }
+        NativeOperation::Map | NativeOperation::Filter => {
+            let function = arguments[0].clone();
+            let Value::List(values) = arguments[1].clone() else {
+                return Err(Error::Type {
+                    expected: "list",
+                    actual: value_name(&arguments[1]),
+                });
+            };
+            let mut output = Vec::new();
+            for value in values {
+                let candidate = value.clone();
+                let result = apply(function.clone(), value, arena)?;
+                if matches!(operation, NativeOperation::Filter) {
+                    match result {
+                        Value::Bool(true) => {
+                            output.push(candidate);
+                            continue;
+                        }
+                        Value::Bool(false) => continue,
+                        value => {
+                            return Err(Error::Type {
+                                expected: "boolean predicate result",
+                                actual: value_name(&value),
+                            })
+                        }
+                    }
+                }
+                output.push(Thunk::value(result));
+            }
+            Ok(Value::List(output))
+        }
+        NativeOperation::ConcatStringsSep => {
+            let separator = plain_string(arguments[0].clone())?;
+            let Value::List(values) = arguments[1].clone() else {
+                return Err(Error::Type {
+                    expected: "list",
+                    actual: value_name(&arguments[1]),
+                });
+            };
+            let mut output = String::new();
+            let mut contexts = Vec::new();
+            for (index, value) in values.into_iter().enumerate() {
+                if index > 0 {
+                    output.push_str(&separator);
+                }
+                let (text, value_contexts) = stringify_value(&value.force()?)?;
+                output.push_str(&text);
+                for context in value_contexts {
+                    if !contexts.contains(&context) {
+                        contexts.push(context);
+                    }
+                }
+            }
+            if contexts.is_empty() {
+                Ok(Value::String(output))
+            } else {
+                Ok(Value::StringContext { value: output, contexts })
+            }
+        }
+        NativeOperation::ReplaceStrings => {
+            let from = string_list(arguments[0].clone())?;
+            let to = string_list(arguments[1].clone())?;
+            if from.len() != to.len() {
+                return Err(Error::Invalid(
+                    "replaceStrings requires equal search and replacement lists".into(),
+                ));
+            }
+            let (subject, contexts) = stringify_value(&arguments[2])?;
+            let mut output = String::new();
+            let mut position = 0;
+            while position < subject.len() {
+                let match_index = from
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, needle)| {
+                        !needle.is_empty() && subject[position..].starts_with(needle.as_str())
+                    })
+                    .max_by_key(|(_, needle)| needle.len())
+                    .map(|(index, _)| index);
+                if let Some(index) = match_index {
+                    output.push_str(&to[index]);
+                    position += from[index].len();
+                } else {
+                    let character = subject[position..]
+                        .chars()
+                        .next()
+                        .ok_or_else(|| Error::Invalid("invalid UTF-8 string boundary".into()))?;
+                    output.push(character);
+                    position += character.len_utf8();
+                }
+            }
+            if contexts.is_empty() {
+                Ok(Value::String(output))
+            } else {
+                Ok(Value::StringContext { value: output, contexts })
+            }
+        }
+        NativeOperation::Substring => {
+            let Value::Integer(start) = arguments[0] else {
+                return Err(Error::Type {
+                    expected: "integer substring start",
+                    actual: value_name(&arguments[0]),
+                });
+            };
+            let Value::Integer(length) = arguments[1] else {
+                return Err(Error::Type {
+                    expected: "integer substring length",
+                    actual: value_name(&arguments[1]),
+                });
+            };
+            let (text, contexts) = stringify_value(&arguments[2])?;
+            let start = start.max(0) as usize;
+            let length = length.max(0) as usize;
+            let value: String = text.chars().skip(start).take(length).collect();
+            if contexts.is_empty() {
+                Ok(Value::String(value))
+            } else {
+                Ok(Value::StringContext { value, contexts })
+            }
+        }
+    }
+}
+
+fn plain_string(value: Value) -> Result<String, Error> {
+    stringify_value(&value).map(|(text, _)| text)
+}
+
+fn string_list(value: Value) -> Result<Vec<String>, Error> {
+    let Value::List(values) = value else {
+        return Err(Error::Type {
+            expected: "string list",
+            actual: value_name(&value),
+        });
+    };
+    values
+        .into_iter()
+        .map(|value| plain_string(value.force()?))
+        .collect()
+}
+
+fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
+    if depth > MAX_EVAL_DEPTH {
+        return Err(Error::ResourceLimit("JSON value is too deeply nested".into()));
+    }
+    match value {
+        Value::Null => Ok(JSONValue::Null),
+        Value::Bool(value) => Ok(JSONValue::Bool(*value)),
+        Value::Integer(value) => Ok(JSONValue::Num(*value as f64)),
+        Value::String(value)
+        | Value::StringContext { value, .. }
+        | Value::Path(value)
+        | Value::Package(value) => Ok(JSONValue::Str(value.clone())),
+        Value::List(values) => values
+            .iter()
+            .map(|value| value.force().and_then(|value| value_to_json(&value, depth + 1)))
+            .collect::<Result<Vec<_>, _>>()
+            .map(JSONValue::Array),
+        Value::AttrSet(fields) => {
+            let mut output = BTreeMap::new();
+            for (name, value) in fields {
+                let value = value.force()?;
+                if output
+                    .insert(name.clone(), value_to_json(&value, depth + 1)?)
+                    .is_some()
+                {
+                    return Err(Error::Invalid(format!("duplicate JSON attribute {name}")));
+                }
+            }
+            Ok(JSONValue::Object(output))
+        }
+        Value::PackageNamespace(_)
+        | Value::BuiltinsNamespace(_)
+        | Value::LibraryNamespace
+        | Value::Derivation(_)
+        | Value::Function(_)
+        | Value::Native(_) => Err(Error::Unsupported(format!(
+            "value of type {} cannot be encoded as JSON",
+            value_name(value)
+        ))),
+    }
+}
+
+fn json_to_value(value: JSONValue, depth: usize) -> Result<Value, Error> {
+    if depth > MAX_EVAL_DEPTH {
+        return Err(Error::ResourceLimit("JSON value is too deeply nested".into()));
+    }
+    match value {
+        JSONValue::Null => Ok(Value::Null),
+        JSONValue::Bool(value) => Ok(Value::Bool(value)),
+        JSONValue::Num(value)
+            if value.is_finite()
+                && value >= i64::MIN as f64
+                && value <= i64::MAX as f64
+                && (value as i64) as f64 == value =>
+        {
+            Ok(Value::Integer(value as i64))
+        }
+        JSONValue::Num(_) => Err(Error::Unsupported(
+            "fromJSON only supports Nix integer JSON numbers".into(),
+        )),
+        JSONValue::Str(value) => Ok(Value::String(value)),
+        JSONValue::Array(values) => Ok(Value::List(
+            values
+                .into_iter()
+                .map(|value| json_to_value(value, depth + 1).map(Thunk::value))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        JSONValue::Object(values) => {
+            let mut fields = BTreeMap::new();
+            for (name, value) in values {
+                let _ = fields.insert(name, Thunk::value(json_to_value(value, depth + 1)?));
+            }
+            Ok(Value::AttrSet(fields))
+        }
+    }
+}
+
+fn encode_json(value: &JSONValue) -> Result<String, Error> {
+    match value {
+        JSONValue::Null => Ok("null".into()),
+        JSONValue::Bool(value) => Ok(if *value { "true" } else { "false" }.into()),
+        JSONValue::Num(value) => Ok(format!("{value}")),
+        JSONValue::Str(value) => Ok(encode_json_string(value)),
+        JSONValue::Array(values) => {
+            let values = values
+                .iter()
+                .map(encode_json)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
+            Ok(format!("[{values}]"))
+        }
+        JSONValue::Object(values) => {
+            let values = values
+                .iter()
+                .map(|(name, value)| {
+                    Ok(format!(
+                        "{}:{}",
+                        encode_json_string(name),
+                        encode_json(value)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, Error>>()?
+                .join(",");
+            Ok(format!("{{{values}}}"))
+        }
+    }
+}
+
+fn encode_json_string(value: &str) -> String {
+    let mut output = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if (character as u32) == 8 => output.push_str("\\b"),
+            character if (character as u32) == 12 => output.push_str("\\f"),
+            character if (character as u32) < 0x20 => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
 }
 
 fn merge(left: Value, right: Value) -> Result<Value, Error> {
@@ -1727,10 +2607,11 @@ fn value_name(value: &Value) -> &'static str {
         Value::Path(_) => "path",
         Value::Package(_) => "package",
         Value::PackageNamespace(_) => "package namespace",
-        Value::BuiltinsNamespace => "builtins namespace",
+        Value::BuiltinsNamespace(_) => "builtins namespace",
         Value::LibraryNamespace => "library namespace",
         Value::List(_) => "list",
         Value::AttrSet(_) => "attribute set",
+        Value::Derivation(_) => "derivation",
         Value::Function(_) | Value::Native(_) => "function",
     }
 }

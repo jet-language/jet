@@ -12,6 +12,8 @@ const STAGE_A_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a.json");
 const STAGE_A_AUTHORITY_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a-authority.json");
+const STAGE_A_DERIVATION_FIXTURE: &str =
+    include_str!("../../../tests/fixtures/nix-compat/stage-a-derivation.json");
 
 #[test]
 fn partial_stage_authority_is_minted_inside_seam_tests() {
@@ -584,6 +586,104 @@ fn native_devshell_rejects_unknown_systems_and_empty_flakes() {
         evaluate_devshell("{ }", "x86_64-linux"),
         Err(EvaluationError::Unsupported(reason)) if reason.contains("devShell")
     ));
+}
+
+#[test]
+fn native_derivation_builds_a_pure_request_with_required_builtins() {
+    let evaluated = evaluate_derivation(
+        r#"
+        builtins.derivationStrict {
+          name = builtins.concatStringsSep "-" [ "hello" "native" ];
+          system = builtins.currentSystem;
+          builder = "/bin/sh";
+          args = builtins.map (value: value) [ "-c" "echo hi > $out" ];
+          message = builtins.toJSON (builtins.fromJSON "{\"ok\":true,\"count\":2}");
+          source = builtins.storePath "/nix/store/0123456789abcdef0123456789abcdef-source";
+        }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("required derivation builtins must evaluate");
+    assert_eq!(evaluated.name(), "hello-native");
+    assert_eq!(evaluated.system(), "x86_64-linux");
+    assert_eq!(evaluated.builder(), "/bin/sh");
+    assert_eq!(
+        evaluated.args(),
+        &["-c".to_string(), "echo hi > $out".to_string()]
+    );
+    assert_eq!(
+        evaluated.env().get("message"),
+        Some(&"{\"count\":2,\"ok\":true}".to_string())
+    );
+    assert_eq!(
+        evaluated.input_sources(),
+        &["/nix/store/0123456789abcdef0123456789abcdef-source".to_string()]
+    );
+    assert_eq!(evaluated.outputs()[0].name(), "out");
+    assert_eq!(evaluated.outputs()[0].method_algo(), "");
+    assert_eq!(evaluated.outputs()[0].hash_hex(), "");
+}
+
+#[test]
+fn native_derivation_rejects_noncanonical_inputs_and_multiple_outputs() {
+    let path_error = evaluate_derivation(
+        r#"builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; src = "${pkgs.fd}"; }"#,
+        "x86_64-linux",
+    )
+    .expect_err("package placeholders must not become derivation inputs");
+    assert!(matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("canonical store-path context")));
+
+    let output_error = evaluate_derivation(
+        r#"builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }"#,
+        "x86_64-linux",
+    )
+    .expect_err("multi-output derivations belong to the later breadth stage");
+    assert!(matches!(output_error, EvaluationError::Unsupported(reason) if reason.contains("multiple derivation outputs")));
+}
+
+#[test]
+fn native_derivation_fixture_matches_pure_request() {
+    let fixture = JSON::parse(STAGE_A_DERIVATION_FIXTURE).expect("derivation fixture must parse");
+    let root = fixture.as_object().expect("derivation fixture root");
+    let values = root
+        .get("values")
+        .expect("derivation fixture values")
+        .as_array()
+        .expect("derivation fixture values array");
+    for value in values {
+        let value = value.as_object().expect("derivation value object");
+        let source = value.get("source").unwrap().as_str().unwrap();
+        let system = value.get("system").unwrap().as_str().unwrap();
+        let evaluated = evaluate_derivation(source, system)
+            .expect("fixture derivation must evaluate natively");
+        let expected = value.get("jet_request").unwrap().as_object().unwrap();
+        assert_eq!(evaluated.name(), expected.get("name").unwrap().as_str().unwrap());
+        assert_eq!(evaluated.system(), expected.get("system").unwrap().as_str().unwrap());
+        assert_eq!(
+            evaluated.builder(),
+            expected.get("builder").unwrap().as_str().unwrap()
+        );
+        assert_eq!(
+            evaluated.args(),
+            &fixture_strings(expected.get("args").unwrap())
+        );
+        assert_eq!(
+            evaluated.input_sources(),
+            &fixture_strings(expected.get("input_sources").unwrap())
+        );
+        assert_eq!(evaluated.outputs().len(), 1);
+        let output = evaluated.outputs().first().unwrap();
+        let expected_output = expected.get("output").unwrap().as_object().unwrap();
+        assert_eq!(output.name(), expected_output.get("name").unwrap().as_str().unwrap());
+        assert_eq!(
+            output.method_algo(),
+            expected_output.get("method_algo").unwrap().as_str().unwrap()
+        );
+        assert_eq!(
+            output.hash_hex(),
+            expected_output.get("hash_hex").unwrap().as_str().unwrap()
+        );
+    }
 }
 
 #[test]
