@@ -3737,6 +3737,11 @@ trust root. Request, result, cache-record, and CAS-blob envelopes use
 authenticated HMAC-SHA256 transport records. Input/output blobs must exist
 before a request/result or cache record is published, and a new submission
 removes any older result for the same action key before a worker can answer.
+Execution cancellation, result publication, and result reads share a
+cross-process kernel/file commit lock over their final visibility transition;
+an in-process mutex is not a correctness boundary. Authenticated cache-only
+transports may read, but cache writes and execution blob exchange require the
+host-bound worker identity.
 
 WASM build plugins enter through the packaged manifest/component loader or the
 typed in-memory test seam. The loader verifies a regular non-symlink file, the
@@ -3753,8 +3758,12 @@ wrapper. `LegacyWrapperSpec::from_project_file` parses the wrapper's canonical
 root file into the typed command, paths, capabilities, environment, cache,
 kind, pools, and provenance fields. It records the file as a typed action
 input, rejects links, oversized/non-UTF-8 files, and unsupported constructs,
-and the production `b.legacy` bridge fails if its declared graph does not
-match the import. The production build policy denies these wrappers in CI
+and records the bounded non-symlink project source closure as typed inputs;
+the action key therefore includes auxiliary scripts, headers, and lockfiles.
+Make recipes, Gradle task bodies, unpinned Cargo/npm dependencies, non-registry
+Cargo sources, and unmodeled package fields fail closed rather than being
+dropped. The production `b.legacy` bridge fails if its declared graph does
+not match the import. The production build policy denies these wrappers in CI
 unless a stronger host policy explicitly replaces that default.
 
 Fleet host overrides are typed values, not deferred source snippets. Their

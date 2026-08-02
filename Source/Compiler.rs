@@ -1058,9 +1058,10 @@ pub fn check_file_json(path: &std::path::Path) -> String {
             )
         }
     };
-    let (diagnostics, bundle, facts) =
-        crate::Driver::check_file_with_effect_facts(&file, None, true);
-    let value = checked_value_from_parts(&source, &diagnostics, bundle.as_ref(), &facts).to_json();
+    // Keep the JSON mirror byte-for-byte aligned with the typed, source-only
+    // operation. The file belongs in the outer envelope; it must not change
+    // the `CompilerChecked` value returned by `core.compiler.check`.
+    let value = checked_value(&source).to_json();
     format!(
         "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"check\",\"file\":{},\"value\":{}}}",
         JSON_SCHEMA_VERSION,

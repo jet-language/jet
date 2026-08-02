@@ -9,6 +9,8 @@ use std::path::Path;
 pub type BuildCapability = crate::BuildEffect;
 
 const MAX_LEGACY_PROJECT_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_LEGACY_PROJECT_INPUT_FILES: usize = 100_000;
+const MAX_LEGACY_PROJECT_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildResourcePool {
@@ -264,6 +266,116 @@ fn apply_import_directives(
     Ok(())
 }
 
+fn legacy_generated_directory(kind: LegacyWrapperKind, name: &str) -> bool {
+    name == ".git"
+        || name == ".jet"
+        || matches!(
+            (kind, name),
+            (LegacyWrapperKind::CMake | LegacyWrapperKind::Make, "build")
+                | (LegacyWrapperKind::Gradle, "build" | ".gradle")
+                | (LegacyWrapperKind::Npm, "build" | "dist" | "node_modules")
+                | (LegacyWrapperKind::Cargo, "target")
+        )
+}
+
+fn collect_legacy_project_inputs(
+    root: &Path,
+    kind: LegacyWrapperKind,
+    import: &mut LegacyProjectImport,
+) -> Result<(), BuildError> {
+    fn walk(
+        root: &Path,
+        relative: &Path,
+        kind: LegacyWrapperKind,
+        import: &mut LegacyProjectImport,
+        file_count: &mut usize,
+        byte_count: &mut u64,
+    ) -> Result<(), BuildError> {
+        let directory = root.join(relative);
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|_| legacy_import_error(kind, format!("cannot read `{}`", relative.display())))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| legacy_import_error(kind, format!("cannot read `{}`", relative.display())))?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let name = entry.file_name();
+            let child_relative = relative.join(&name);
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| {
+                legacy_import_error(kind, format!("cannot inspect `{}`", child_relative.display()))
+            })?;
+            if metadata.file_type().is_symlink() {
+                return Err(legacy_import_error(
+                    kind,
+                    format!("source closure cannot contain symlink `{}`", child_relative.display()),
+                ));
+            }
+            if metadata.is_dir() {
+                if legacy_generated_directory(kind, name.to_string_lossy().as_ref()) {
+                    continue;
+                }
+                walk(
+                    root,
+                    &child_relative,
+                    kind,
+                    import,
+                    file_count,
+                    byte_count,
+                )?;
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err(legacy_import_error(
+                    kind,
+                    format!("source closure contains non-file `{}`", child_relative.display()),
+                ));
+            }
+            let child_path = child_relative.to_string_lossy();
+            if import
+                .outputs
+                .iter()
+                .any(|output| output.as_str() == child_path.as_ref())
+            {
+                continue;
+            }
+            *file_count += 1;
+            *byte_count = (*byte_count).saturating_add(metadata.len());
+            if *file_count > MAX_LEGACY_PROJECT_INPUT_FILES {
+                return Err(legacy_import_error(
+                    kind,
+                    format!("source closure exceeds {MAX_LEGACY_PROJECT_INPUT_FILES} files"),
+                ));
+            }
+            if *byte_count > MAX_LEGACY_PROJECT_INPUT_BYTES {
+                return Err(legacy_import_error(
+                    kind,
+                    format!("source closure exceeds {MAX_LEGACY_PROJECT_INPUT_BYTES} bytes"),
+                ));
+            }
+            let path = child_relative.to_str().ok_or_else(|| {
+                legacy_import_error(kind, "source closure contains a non-UTF-8 path")
+            })?;
+            push_unique(&mut import.inputs, path);
+        }
+        Ok(())
+    }
+
+    let mut file_count = 0;
+    let mut byte_count = 0;
+    walk(
+        root,
+        Path::new(""),
+        kind,
+        import,
+        &mut file_count,
+        &mut byte_count,
+    )?;
+    import.labels.insert(
+        "legacy.source-closure".to_string(),
+        format!("project-files-v1:{file_count}:{byte_count}"),
+    );
+    Ok(())
+}
+
 fn cmake_command_calls(source: &str) -> Vec<(String, Vec<String>)> {
     let bytes = source.as_bytes();
     let mut calls = Vec::new();
@@ -476,7 +588,10 @@ fn parse_make_import(source: &str, import: &mut LegacyProjectImport) -> Result<(
             continue;
         }
         if line.starts_with('\t') {
-            continue;
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Make,
+                "recipe bodies are not representable in the typed import",
+            ));
         }
         if let Some((special, targets)) = trimmed.split_once(':') {
             if special == ".PHONY" {
@@ -556,51 +671,98 @@ fn parse_make_import(source: &str, import: &mut LegacyProjectImport) -> Result<(
     Ok(())
 }
 
-fn quoted_after(source: &str, marker: &str) -> Option<String> {
-    let start = source.find(marker)? + marker.len();
-    let rest = source[start..].trim_start_matches(|ch| matches!(ch, ' ' | '\t' | '='));
-    let quote = rest.chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return rest.split_whitespace().next().map(str::to_string);
-    }
-    let end = rest[1..].find(quote)? + 1;
-    Some(rest[1..end].to_string())
-}
-
 fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result<(), BuildError> {
-    for unsupported in [
-        "dependsOn",
-        "commandLine",
-        "doLast",
-        "doFirst",
-        "exec {",
-        "dependencies",
-        "implementation(",
-        "api(",
-        "runtimeOnly(",
-        "testImplementation(",
-        "sourceSets",
-        "publishing",
-    ] {
-        if source.contains(unsupported) {
-            return Err(legacy_import_error(
-                LegacyWrapperKind::Gradle,
-                format!("unsupported construct {unsupported}"),
-            ));
-        }
-    }
     let mut tasks = Vec::new();
-    for marker in ["tasks.register(", "tasks.create("] {
-        if let Some(task) = quoted_after(source, marker) {
-            tasks.push(task);
+    let mut project = None;
+    for raw_line in source.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+            continue;
         }
+        let declaration = ["tasks.register(", "tasks.create("]
+            .iter()
+            .find_map(|marker| line.strip_prefix(marker).map(|rest| (*marker, rest)));
+        if let Some((marker, rest)) = declaration {
+            let Some(argument) = rest.strip_suffix(')') else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    format!("unsupported task body after {marker}"),
+                ));
+            };
+            let argument = argument.trim();
+            let Some(quote) = argument.chars().next() else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "task declaration needs one quoted literal name",
+                ));
+            };
+            if !matches!(quote, '\'' | '"')
+                || argument.len() < 2
+                || !argument.ends_with(quote)
+                || argument[1..argument.len() - 1].contains(quote)
+            {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "task declaration needs one quoted literal name",
+                ));
+            }
+            tasks.push(argument[1..argument.len() - 1].to_string());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("task ") {
+            let mut words = rest.split_whitespace();
+            let Some(task) = words.next() else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "task declaration needs one literal name",
+                ));
+            };
+            if words.next().is_some() {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "task bodies and task options are not representable in the typed import",
+                ));
+            }
+            tasks.push(task.to_string());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("rootProject.name") {
+            let Some((_, value)) = rest.split_once('=') else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "rootProject.name must assign one quoted literal",
+                ));
+            };
+            let value = value.trim();
+            let Some(quote) = value.chars().next() else {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "rootProject.name must assign one quoted literal",
+                ));
+            };
+            if !matches!(quote, '\'' | '"')
+                || value.len() < 2
+                || !value.ends_with(quote)
+                || value[1..value.len() - 1].contains(quote)
+            {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "rootProject.name must assign one quoted literal",
+                ));
+            }
+            if project.replace(value[1..value.len() - 1].to_string()).is_some() {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Gradle,
+                    "rootProject.name must be declared once",
+                ));
+            }
+            continue;
+        }
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Gradle,
+            format!("unsupported construct `{line}`"),
+        ));
     }
-    tasks.extend(source.lines().filter_map(|line| {
-        let line = line.trim();
-        line.strip_prefix("task ")
-            .and_then(|rest| rest.split_whitespace().next())
-            .map(str::to_string)
-    }));
     if tasks.len() != 1 {
         return Err(legacy_import_error(
             LegacyWrapperKind::Gradle,
@@ -618,7 +780,7 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
             "task name must be one literal word",
         ));
     }
-    let project = quoted_after(source, "rootProject.name");
+    let project = project;
     if matches!(task.as_str(), "build" | "assemble") && project.is_none() {
         return Err(legacy_import_error(
             LegacyWrapperKind::Gradle,
@@ -694,8 +856,18 @@ fn parse_cargo_import(
                     "build scripts are not supported by the typed importer",
                 ));
             }
-            "package" if key == "name" => package = Some(value),
-            "package" if key == "version" => version = Some(value),
+            "package" if key == "name" => {
+                package = Some(value);
+                import
+                    .labels
+                    .insert("legacy.package.name".to_string(), raw.trim().to_string());
+            }
+            "package" if key == "version" => {
+                version = Some(value);
+                import
+                    .labels
+                    .insert("legacy.package.version".to_string(), raw.trim().to_string());
+            }
             "package"
                 if matches!(
                     key,
@@ -714,7 +886,11 @@ fn parse_cargo_import(
                         | "exclude"
                         | "include"
                         | "publish"
-                ) => {}
+                ) => {
+                    import
+                        .labels
+                        .insert(format!("legacy.package.{key}"), raw.trim().to_string());
+                }
             "package" => {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Cargo,
@@ -728,6 +904,9 @@ fn parse_cargo_import(
                         "binary target names must be declared once",
                     ));
                 }
+                import
+                    .labels
+                    .insert("legacy.bin.name".to_string(), raw.trim().to_string());
             }
             "bin" if key == "path" => {
                 if bin_path.replace(value).is_some() {
@@ -736,12 +915,21 @@ fn parse_cargo_import(
                         "binary target paths must be declared once",
                     ));
                 }
+                import
+                    .labels
+                    .insert("legacy.bin.path".to_string(), raw.trim().to_string());
             }
             "bin" if key == "required-features" && value != "[]" => {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Cargo,
                     "binary required-features are not supported",
                 ));
+            }
+            "bin" if key == "required-features" => {
+                import.labels.insert(
+                    "legacy.bin.required-features".to_string(),
+                    raw.trim().to_string(),
+                );
             }
             "bin" => {
                 return Err(legacy_import_error(
@@ -780,7 +968,20 @@ fn parse_cargo_import(
     if let Some(path) = bin_path {
         push_unique(&mut import.inputs, path);
     }
+    let has_dependencies = !dependencies.is_empty();
     for (dependency, requirement) in dependencies {
+        if requirement.contains("path =")
+            || requirement.contains("path=")
+            || requirement.contains("git =")
+            || requirement.contains("git=")
+            || requirement.contains("workspace =")
+            || requirement.contains("workspace=")
+        {
+            return Err(legacy_import_error(
+                LegacyWrapperKind::Cargo,
+                format!("dependency `{dependency}` uses an unsupported non-registry source"),
+            ));
+        }
         import.labels.insert(
             format!("legacy.dependency.{dependency}"),
             requirement,
@@ -789,10 +990,18 @@ fn parse_cargo_import(
     if let Some(version) = version {
         import.labels.insert("legacy.version".to_string(), version);
     }
+    let mut has_lock = false;
     if let Ok(metadata) = fs::symlink_metadata(root.join("Cargo.lock")) {
         if metadata.is_file() && !metadata.file_type().is_symlink() {
+            has_lock = true;
             push_unique(&mut import.inputs, "Cargo.lock");
         }
+    }
+    if has_dependencies && !has_lock {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Cargo,
+            "dependency closure requires a non-symlink Cargo.lock",
+        ));
     }
     Ok(())
 }
@@ -817,10 +1026,24 @@ fn parse_npm_import(
             "package.json root must be an object",
         ));
     };
-    if object.contains_key("workspaces") {
+    const SUPPORTED_NPM_FIELDS: &[&str] = &[
+        "name",
+        "version",
+        "scripts",
+        "main",
+        "module",
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ];
+    if let Some(field) = object
+        .keys()
+        .find(|field| !SUPPORTED_NPM_FIELDS.contains(&field.as_str()))
+    {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
-            "workspace packages are not supported by the typed importer",
+            format!("unsupported package.json field `{field}`"),
         ));
     }
     if object.contains_key("name") && json_string(object.get("name")).is_none() {
@@ -904,7 +1127,14 @@ fn parse_npm_import(
         "dist/index.js".to_string()
     };
     push_unique(&mut import.outputs, output);
-    for section in ["dependencies", "devDependencies", "peerDependencies"] {
+    let dependency_sections = [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ];
+    let mut has_dependencies = false;
+    for section in dependency_sections {
         if let Some(value) = object.get(section) {
             let jet_foundation::JSON::JSONValue::Object(values) = value else {
                 return Err(legacy_import_error(
@@ -912,20 +1142,54 @@ fn parse_npm_import(
                     format!("package {section} must be an object"),
                 ));
             };
-            for name in values.keys() {
+            has_dependencies |= !values.is_empty();
+            for (name, requirement) in values {
+                let Some(requirement) = json_string(Some(requirement)) else {
+                    return Err(legacy_import_error(
+                        LegacyWrapperKind::Npm,
+                        format!("package dependency `{name}` in {section} must be a string"),
+                    ));
+                };
                 import.labels.insert(
-                    format!("legacy.dependency.{name}"),
-                    section.to_string(),
+                    format!("legacy.dependency.{section}.{name}"),
+                    requirement,
                 );
             }
         }
     }
+    let mut has_lock = false;
     for lock in ["package-lock.json", "npm-shrinkwrap.json"] {
-        if let Ok(metadata) = fs::symlink_metadata(root.join(lock)) {
-            if metadata.is_file() && !metadata.file_type().is_symlink() {
+        match fs::symlink_metadata(root.join(lock)) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    format!("lockfile `{lock}` may not be a symlink"),
+                ));
+            }
+            Ok(metadata) if metadata.is_file() => {
+                has_lock = true;
                 push_unique(&mut import.inputs, lock);
             }
+            Ok(_) => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    format!("lockfile `{lock}` is not a regular file"),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(legacy_import_error(
+                    LegacyWrapperKind::Npm,
+                    format!("cannot inspect lockfile `{lock}`"),
+                ));
+            }
         }
+    }
+    if has_dependencies && !has_lock {
+        return Err(legacy_import_error(
+            LegacyWrapperKind::Npm,
+            "dependency closure requires package-lock.json or npm-shrinkwrap.json",
+        ));
     }
     Ok(())
 }
@@ -948,6 +1212,11 @@ fn parse_legacy_project(
         LegacyWrapperKind::Cargo => parse_cargo_import(root, source, &mut import)?,
     }
     apply_import_directives(kind, source, &mut import)?;
+    // The wrapper command may observe any project file, not only the
+    // canonical manifest.  Import the bounded, non-symlink source closure so
+    // cache identity and remote execution cannot silently ignore headers,
+    // scripts, lockfiles, or auxiliary build inputs.
+    collect_legacy_project_inputs(root, kind, &mut import)?;
     Ok(import)
 }
 

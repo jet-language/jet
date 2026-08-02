@@ -8,24 +8,93 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 const MAX_REMOTE_WIRE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REMOTE_BLOB_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REMOTE_ITEMS: usize = 100_000;
 const MAX_REMOTE_AUTH_KEY_BYTES: usize = 4096;
 
-static REMOTE_EXECUTION_COMMIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+/// Cross-process serialization for the cancellation/result visibility
+/// boundary.  A process-local mutex cannot stop a worker in another Jet
+/// process from publishing after a cancellation check; the kernel lock is
+/// held across the final check and the atomic file publication instead.
+struct RemoteExecutionCommitLock {
+    _file: fs::File,
+    #[cfg(not(unix))]
+    path: PathBuf,
+}
 
-fn remote_execution_commit_lock() -> Result<std::sync::MutexGuard<'static, ()>, RemoteCacheError> {
-    REMOTE_EXECUTION_COMMIT_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| {
-            RemoteCacheError::InvalidRecord(
-                "remote execution commit lock was poisoned".to_string(),
-            )
-        })
+fn remote_execution_commit_lock(
+    root: &Path,
+) -> Result<RemoteExecutionCommitLock, RemoteCacheError> {
+    ensure_remote_root(root)?;
+    let path = root.join("execution.commit.lock");
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
+        const O_NOFOLLOW: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+            0o400000
+        } else {
+            0x0000_0100
+        };
+        const LOCK_EX: i32 = 2;
+        unsafe extern "C" {
+            fn flock(fd: i32, operation: i32) -> i32;
+        }
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
+        options.custom_flags(O_NOFOLLOW);
+        let file = options.open(&path)?;
+        if !file.metadata()?.is_file() {
+            return Err(RemoteCacheError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "remote execution lock is not a regular file",
+            )));
+        }
+        // SAFETY: the descriptor belongs to the live lock file and remains
+        // open for the lifetime of the guard.
+        if unsafe { flock(file.as_raw_fd(), LOCK_EX) } != 0 {
+            return Err(RemoteCacheError::Io(io::Error::last_os_error()));
+        }
+        Ok(RemoteExecutionCommitLock { _file: file })
+    }
+    #[cfg(not(unix))]
+    {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(RemoteCacheError::Io)?;
+        Ok(RemoteExecutionCommitLock { _file: file, path })
+    }
+}
+
+#[cfg(not(unix))]
+impl Drop for RemoteExecutionCommitLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1132,6 +1201,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::CacheWrite)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::CacheWrite)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.put_remote_blob(bytes)
     }
@@ -1192,6 +1262,7 @@ impl RemoteCacheTransport {
             .check(RemoteActionRequest::CacheWrite)
             .map_err(RemoteCacheError::Denied)?;
         self.require_auth(RemoteActionRequest::CacheWrite)?;
+        self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, &record.key, RemoteActionRequest::CacheWrite)?;
         validate_action_key(&record.key)?;
@@ -1323,7 +1394,7 @@ impl RemoteCacheTransport {
             self.read_remote_blob_with_len(&input.digest, input.byte_len)?;
         }
         ensure_remote_root(&self.root)?;
-        let _commit = remote_execution_commit_lock()?;
+        let _commit = remote_execution_commit_lock(&self.root)?;
         let result_path = self.execution_result_path(&request.key)?;
         let cancelled_path = self.execution_cancel_path(&request.key)?;
         remove_remote_execution_file(&cancelled_path)?;
@@ -1362,7 +1433,7 @@ impl RemoteCacheTransport {
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
         ensure_remote_root(&self.root)?;
-        let _commit = remote_execution_commit_lock()?;
+        let _commit = remote_execution_commit_lock(&self.root)?;
         let marker = self.execution_cancel_path(key)?;
         let bytes = self.seal("execution-cancel", key.as_str().as_bytes())?;
         atomic_restore_file(&self.root, &marker, &bytes)?;
@@ -1395,7 +1466,7 @@ impl RemoteCacheTransport {
             self.validate_worker_identity(&result.sandbox, expected)?;
         }
         validate_remote_execution_result(result)?;
-        let _commit = remote_execution_commit_lock()?;
+        let _commit = remote_execution_commit_lock(&self.root)?;
         if self.execution_is_cancelled(&result.key)? {
             return Err(RemoteCacheError::InvalidRecord(
                 "remote execution was cancelled before this result was published".to_string(),
@@ -1436,7 +1507,7 @@ impl RemoteCacheTransport {
         self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
-        let _commit = remote_execution_commit_lock()?;
+        let _commit = remote_execution_commit_lock(&self.root)?;
         if self.execution_is_cancelled(key)? {
             remove_remote_execution_file(&self.execution_result_path(key)?)?;
             return Err(RemoteCacheError::Io(io::Error::new(

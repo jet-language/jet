@@ -1,9 +1,9 @@
 //! Real Component Model build-plugin host proof.
 
 use jet_comptime::Comptime::Build::{
-    with_packaged_plugin_runner, BuildCapability, BuildContext, BuildPolicy, ContentDigest,
-    PackagedPluginContribution, TargetKind, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
-    BUILD_PLUGIN_MAX_RESPONSE_BYTES,
+    with_packaged_plugin_runner, ActionSpec, BuildCapability, BuildContext, BuildPolicy,
+    ContentDigest, PackagedPluginContribution, TargetKind, WasmComponentPluginSpec,
+    BUILD_PLUGIN_API_VERSION, BUILD_PLUGIN_MAX_RESPONSE_BYTES,
 };
 use std::path::Path;
 
@@ -207,6 +207,10 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     let manifest_path = root.join("plugin.manifest");
     std::fs::write(&manifest_path, &manifest).unwrap();
     let mut context = BuildContext::new();
+    context
+        .action("baseline", ActionSpec::cached(["baseline"]))
+        .unwrap();
+    let baseline = context.plan().unwrap();
     let policy = BuildPolicy::allow_all().with_plugin_grant("hostile", BuildCapability::FS);
     let error = with_packaged_plugin_runner(production_runner, || {
         context.apply_packaged_wasm_component_plugin_from_host(
@@ -217,7 +221,7 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     })
     .unwrap_err();
     assert!(format!("{error:?}").contains("InvalidPath"));
-    assert!(context.plan().unwrap().actions().is_empty());
+    assert_eq!(context.plan().unwrap(), baseline);
 
     let trap_wat = include_str!("../fixtures/build_plugin/trap.wat");
     let trap = wat::parse_str(trap_wat).unwrap();
@@ -229,15 +233,16 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     );
     let trap_manifest_path = root.join("trap.manifest");
     std::fs::write(&trap_manifest_path, &trap_manifest).unwrap();
-    let trap_spec = WasmComponentPluginSpec::new("trap", "1.0.0", trap_digest);
-    let trap_error = production_runner(
-        &trap_manifest_path,
-        &trap_path,
-        &trap_spec,
-        ContentDigest::from_bytes(trap_manifest.as_bytes()).as_str(),
-    )
+    let trap_error = with_packaged_plugin_runner(production_runner, || {
+        context.apply_packaged_wasm_component_plugin_from_host(
+            &trap_manifest_path,
+            &trap_path,
+            &BuildPolicy::allow_all(),
+        )
+    })
     .unwrap_err();
     assert!(trap_error.contains("trapped") || trap_error.contains("timed out"));
+    assert_eq!(context.plan().unwrap(), baseline);
 
     let malformed_component = component_for("not-a-build-plugin-response");
     let malformed_path = root.join("malformed.wasm");
@@ -250,18 +255,19 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     );
     let malformed_manifest_path = root.join("malformed.manifest");
     std::fs::write(&malformed_manifest_path, &malformed_manifest).unwrap();
-    let malformed_spec = WasmComponentPluginSpec::new("malformed", "1.0.0", malformed_digest);
-    let malformed_error = production_runner(
-        &malformed_manifest_path,
-        &malformed_path,
-        &malformed_spec,
-        ContentDigest::from_bytes(malformed_manifest.as_bytes()).as_str(),
-    )
+    let malformed_error = with_packaged_plugin_runner(production_runner, || {
+        context.apply_packaged_wasm_component_plugin_from_host(
+            &malformed_manifest_path,
+            &malformed_path,
+            &BuildPolicy::allow_all(),
+        )
+    })
     .unwrap_err();
     assert!(
         malformed_error.contains("version") || malformed_error.contains("response"),
         "{malformed_error}"
     );
+    assert_eq!(context.plan().unwrap(), baseline);
 
     let oversized_response = "x".repeat(BUILD_PLUGIN_MAX_RESPONSE_BYTES + 1);
     let oversized_component = component_for(&oversized_response);
@@ -275,15 +281,16 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     );
     let oversized_manifest_path = root.join("oversized.manifest");
     std::fs::write(&oversized_manifest_path, &oversized_manifest).unwrap();
-    let oversized_spec = WasmComponentPluginSpec::new("oversized", "1.0.0", oversized_digest);
-    let oversized_error = production_runner(
-        &oversized_manifest_path,
-        &oversized_path,
-        &oversized_spec,
-        ContentDigest::from_bytes(oversized_manifest.as_bytes()).as_str(),
-    )
+    let oversized_error = with_packaged_plugin_runner(production_runner, || {
+        context.apply_packaged_wasm_component_plugin_from_host(
+            &oversized_manifest_path,
+            &oversized_path,
+            &BuildPolicy::allow_all(),
+        )
+    })
     .unwrap_err();
     assert!(oversized_error.contains("exceeds"), "{oversized_error}");
+    assert_eq!(context.plan().unwrap(), baseline);
 
     let timeout_wat = include_str!("../fixtures/build_plugin/timeout.wat");
     let timeout = wat::parse_str(timeout_wat).unwrap();
@@ -295,14 +302,15 @@ fn packaged_host_rejects_invalid_graph_and_traps_guest() {
     );
     let timeout_manifest_path = root.join("timeout.manifest");
     std::fs::write(&timeout_manifest_path, &timeout_manifest).unwrap();
-    let timeout_spec = WasmComponentPluginSpec::new("timeout", "1.0.0", timeout_digest);
-    let timeout_error = production_runner(
-        &timeout_manifest_path,
-        &timeout_path,
-        &timeout_spec,
-        ContentDigest::from_bytes(timeout_manifest.as_bytes()).as_str(),
-    )
+    let timeout_error = with_packaged_plugin_runner(production_runner, || {
+        context.apply_packaged_wasm_component_plugin_from_host(
+            &timeout_manifest_path,
+            &timeout_path,
+            &BuildPolicy::allow_all(),
+        )
+    })
     .unwrap_err();
     assert!(timeout_error.contains("timed out") || timeout_error.contains("trapped"));
+    assert_eq!(context.plan().unwrap(), baseline);
     let _ = std::fs::remove_dir_all(root);
 }

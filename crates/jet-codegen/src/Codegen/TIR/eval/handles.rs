@@ -126,9 +126,10 @@ fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, D
         "type_name" => reflect_inner(recv)
             .map(|value| CtValue::Str(reflect_type_name(value)))
             .ok_or_else(|| unsupported("reflect value", span)),
-        "display" => reflect_inner(recv)
-            .map(|value| CtValue::Str(value.jet_show()))
-            .ok_or_else(|| unsupported("reflect value", span)),
+        // `Value.display()` needs the evaluator's user-function table. The
+        // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
+        // context-free fallback would silently use JetShow instead.
+        "display" => Err(unsupported("reflect display evaluator", span)),
         "fields" => {
             let value = reflect_inner(recv).ok_or_else(|| unsupported("reflect value", span))?;
             let Some(field_names) = reflect_field_names(recv) else {
@@ -691,7 +692,9 @@ pub(super) fn eval_handle(
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
         THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
-        THandleOp::ReflectValueDisplay => reflect_handle(recv, "display", span),
+        // Handled before this context-free dispatch in `eval/exprs.rs`, where
+        // the Display-aware evaluator is available.
+        THandleOp::ReflectValueDisplay => Err(unsupported("reflect display evaluator", span)),
         THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
         THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
         THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),

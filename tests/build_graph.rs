@@ -1532,16 +1532,55 @@ fn remote_transport_rejects_a_symlinked_store_root() {
     fs::create_dir_all(&outside).unwrap();
     symlink(&outside, &root).unwrap();
     let key = ActionKey::new("remote-symlink-key");
-    let policy = RemoteCachePolicy::granted(RemoteSandboxProof::new(
-        "sandbox",
-        key.as_str(),
-        ContentDigest::from_bytes(b"provenance"),
+    let binding = RemoteBuildBinding::new("builder-symlink", &root, b"remote-test-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-symlink")
+        .with_platform("linux-x86_64")
+        .with_abi("native");
+    let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+    let policy = RemoteCachePolicy::granted(
+        transport
+            .sandbox_proof(
+                "remote:builder-symlink:trusted:symlink",
+                key.as_str(),
+                ContentDigest::from_bytes(b"provenance"),
+            )
+            .unwrap(),
+    );
+    assert!(matches!(
+        transport.upload_blob(b"must not follow", &policy),
+        Err(RemoteCacheError::Io(_))
     ));
-    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
-    assert!(transport.upload_blob(b"must not follow", &policy).is_err());
     assert!(!outside.join("cas").exists());
     let _ = fs::remove_file(&root);
     let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
+fn authenticated_cache_only_transport_cannot_publish_without_worker_identity() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_remote_cache_only_{}_{}",
+        std::process::id(),
+        "identity"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
+    let policy = RemoteCachePolicy::with_grants(
+        true,
+        true,
+        false,
+        RemoteSandboxProof::new(
+            "cache-only",
+            "cache-only-key",
+            ContentDigest::from_bytes(b"provenance"),
+        ),
+    );
+    assert!(matches!(
+        transport.upload_blob(b"must bind a worker", &policy),
+        Err(RemoteCacheError::InvalidRecord(message)) if message.contains("worker identity")
+    ));
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -2023,6 +2062,71 @@ fn legacy_project_import_rejects_ambiguous_targets_and_unmodeled_dependencies() 
     assert!(matches!(
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("multiple binary")
+    ));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_legacy_import_closure_{}_{}",
+        std::process::id(),
+        "all"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::create_dir_all(root.join("include")).unwrap();
+    fs::write(root.join("src/main.c"), "int main(void) { return 0; }\n").unwrap();
+    fs::write(root.join("include/app.h"), "#pragma once\n").unwrap();
+
+    fs::write(
+        root.join("CMakeLists.txt"),
+        "project(app)\nadd_executable(app src/main.c)\n",
+    )
+    .unwrap();
+    let cmake = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake).unwrap();
+    assert!(cmake.inputs.iter().any(|path| path.as_str() == "src/main.c"));
+    assert!(cmake.inputs.iter().any(|path| path.as_str() == "include/app.h"));
+    assert!(cmake
+        .labels
+        .get("legacy.source-closure")
+        .is_some_and(|value| value.starts_with("project-files-v1:")));
+
+    fs::write(root.join("Makefile"), "app: src/main.c\n\tcc -o app src/main.c\n").unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("recipe bodies")
+    ));
+
+    fs::write(root.join("build.gradle"), "tasks.register(\"build\") { dependsOn \"x\" }\n")
+        .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("task body")
+    ));
+
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"app\"\n[dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("Cargo.lock")
+    ));
+
+    fs::write(
+        root.join("package.json"),
+        r#"{"scripts":{"build":"tool"},"dependencies":{"vite":"5"}}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+        Err(BuildError::LegacyProjectFileInvalid(message))
+            if message.contains("package-lock") || message.contains("shrinkwrap")
     ));
     let _ = fs::remove_dir_all(root);
 }

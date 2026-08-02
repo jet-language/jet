@@ -5009,6 +5009,46 @@ impl<'a> EvalCtx<'a> {
         if let Some(text) = crate::Comptime::display_core_pure_value(v) {
             return Ok(text);
         }
+        // `JetDisplay` is recursive for containers.  Calling `jet_show()` on
+        // the outer value loses a user Display implementation held inside a
+        // list/map/option/result, which makes reflection and interpolation
+        // disagree with AOT.  Keep the evaluator on the same Display path at
+        // every nested value; structural user records still use their normal
+        // JetShow body when they do not declare Display.
+        match v {
+            CtValue::Bytes(bytes) => {
+                let parts = bytes.iter().map(u8::to_string).collect::<Vec<_>>();
+                return Ok(format!("[{}]", parts.join(", ")));
+            }
+            CtValue::List(values) => {
+                let parts = values
+                    .iter()
+                    .map(|value| self.show_value(value, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(format!("[{}]", parts.join(", ")));
+            }
+            CtValue::Map(entries) => {
+                let parts = entries
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((
+                            self.show_value(&key.to_value(), scope)?,
+                            self.show_value(value, scope)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                return Ok(jet_foundation::StructuralDebug::jet_debug_map(parts));
+            }
+            CtValue::Some(inner) => return self.show_value(inner, scope),
+            CtValue::None(_) => return Ok("null".to_string()),
+            CtValue::ResOk(inner) => {
+                return Ok(format!("Ok({})", self.show_value(inner, scope)?));
+            }
+            CtValue::ResErr(inner) => {
+                return Ok(format!("Err({})", self.show_value(inner, scope)?));
+            }
+            _ => {}
+        }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
             let key = format!("{type_name}::display");
             if let Some(func) = self.funcs.get(&key).copied() {
@@ -5023,7 +5063,27 @@ impl<'a> EvalCtx<'a> {
             // derive for the internal differential corpus.
             return Ok(self.debug_value(v));
         }
-        Ok(v.jet_show())
+        Ok(match v {
+            CtValue::Int(value) => value.to_string(),
+            CtValue::Float(value) => value.render(),
+            CtValue::Bool(value) => value.to_string(),
+            CtValue::Char(value) => value.to_string(),
+            CtValue::Str(value) => value.clone(),
+            CtValue::BigInt(value) => value.to_string_rep(),
+            CtValue::Unit => String::new(),
+            CtValue::Closure(_) => "<closure>".to_string(),
+            // All composite cases are returned above. Keep this arm explicit
+            // so this method cannot silently fall back to JetShow when a new
+            // CtValue variant is added.
+            CtValue::Struct { .. } | CtValue::Enum { .. } => self.debug_value(v),
+            CtValue::Bytes(_)
+            | CtValue::List(_)
+            | CtValue::Map(_)
+            | CtValue::Some(_)
+            | CtValue::None(_)
+            | CtValue::ResOk(_)
+            | CtValue::ResErr(_) => unreachable!("composite display case handled above"),
+        })
     }
 
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
