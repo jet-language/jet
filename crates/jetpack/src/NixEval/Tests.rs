@@ -1,7 +1,7 @@
 use super::Boundary::NativeBoundary;
 
 const STAGE_A_DERIVATION_FIXTURE: &str =
-    include_str!("../../../tests/fixtures/nix-compat/stage-a-derivation.json");
+    include_str!("../../../../tests/fixtures/nix-compat/stage-a-derivation.json");
 
 #[test]
 fn private_integration_has_pinned_product_ready_evaluator() {
