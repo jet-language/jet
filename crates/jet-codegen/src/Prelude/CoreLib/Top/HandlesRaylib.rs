@@ -34,16 +34,6 @@ struct JetDbConnection {
     handle: u64,
 }
 
-/// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping the
-/// policy and user on the scope prevents a caller from replacing either one
-/// between SQL operations while retaining the underlying connection handle.
-#[derive(Clone, Debug)]
-struct JetDbScope {
-    handle: u64,
-    policy: JetRowPolicy,
-    user: String,
-}
-
 // ── core.plugin sandboxed WASM handle (D-DEP-WASM1=A / D-PLUGIN1=B, c81) ─────
 // The real wasmtime `Store`/`Instance` live in the FFI bridge crate's
 // thread-local handle map (wasmtime types can't cross into this

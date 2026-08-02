@@ -34,6 +34,16 @@ pub struct JetRowPolicy {
     compiled: JetRowPolicyExpr,
 }
 
+/// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping the
+/// policy and user on the scope prevents a caller from replacing either one
+/// between SQL operations while retaining the underlying connection handle.
+#[derive(Clone, Debug)]
+struct JetDbScope {
+    handle: u64,
+    policy: JetRowPolicy,
+    user: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct JetSyncList {
     pub items: Vec<(String, String)>, // replica_id, serialized item
