@@ -461,6 +461,19 @@ fn eval_session_method(
                     _ => return Err(build_diag("legacy wrapper cache must be cached or phony", span)),
                 });
             }
+            // A denied wrapper cannot contribute a graph. Preserve the
+            // policy diagnostic before reading a canonical file that will
+            // never be admitted, while allowed builds still take the exact
+            // importer contract path below.
+            if matches!(
+                &session.context.policy().legacy_wrappers,
+                super::actions_policy::PolicySetting::Deny(_)
+            ) {
+                return Err(build_error_diag(
+                    &BuildError::PolicyDenied(wrapper.explain(session.context.policy())),
+                    span,
+                ));
+            }
             if args.len() >= 17 {
                 let project_file = string_arg(&args, 16, span)?;
                 if project_file != wrapper.kind.project_file() {

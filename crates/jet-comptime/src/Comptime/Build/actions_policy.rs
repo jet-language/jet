@@ -343,6 +343,11 @@ fn collect_legacy_project_inputs(
             {
                 continue;
             }
+            // Jet build sources belong to the host project, not to the
+            // imported legacy tool's source closure.
+            if child_relative.extension().is_some_and(|extension| extension == "jet") {
+                continue;
+            }
             *file_count += 1;
             *byte_count = (*byte_count).saturating_add(metadata.len());
             if *file_count > MAX_LEGACY_PROJECT_INPUT_FILES {
