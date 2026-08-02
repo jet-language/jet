@@ -450,6 +450,52 @@ payload: { name: "a", version: "0.1.0" }
 }
 
 #[test]
+fn workspace_cli_grant_does_not_authorize_member_builds() {
+    let root = project("workspace-grant-boundary");
+    let member = root.join("packages/member");
+    fs::create_dir_all(&member).unwrap();
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { members: [\"./packages/member\"] }\nfn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+    );
+    write(
+        &member.join("pkg.jet"),
+        "payload: { name: \"member\", version: \"0.1.0\" }\n",
+    );
+    write(
+        &member.join("run.jet"),
+        r#"
+fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    #Impure("member must use its own grant") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
+        app :: b.add_executable("app", ["run.jet"], [action])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = jet::compile_programmable_build_opts(
+        root.join("workspace.jet").to_str().unwrap(),
+        &["exec".to_string()],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3504"),
+        "member must not inherit the workspace CLI grant: {errors:#?}"
+    );
+    assert!(!member.join("stamp").exists());
+}
+
+#[test]
 fn failed_action_replaces_stale_rebuild_provenance() {
     let root = project("failed-provenance");
     let entry = root.join("main.jet");

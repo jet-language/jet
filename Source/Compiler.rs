@@ -709,9 +709,23 @@ fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -
 }
 
 fn checked_value(source: &str) -> CtValue {
-    let syntax = parse_source(source);
     let (checked_diagnostics, bundle, effect_facts) =
         crate::Driver::check_eval_with_effect_facts(source, "core.compiler.jet");
+    checked_value_from_parts(
+        source,
+        &checked_diagnostics,
+        bundle.as_ref(),
+        &effect_facts,
+    )
+}
+
+fn checked_value_from_parts(
+    source: &str,
+    checked_diagnostics: &[Diagnostic],
+    bundle: Option<&AST::ProgramBundle>,
+    effect_facts: &crate::Sema::SemIndexEffectFacts,
+) -> CtValue {
+    let syntax = parse_source(source);
     let diagnostics = checked_diagnostics
         .iter()
         .map(diagnostic_view)
@@ -720,12 +734,12 @@ fn checked_value(source: &str) -> CtValue {
         .iter()
         .any(|diagnostic| diagnostic.severity == Severity::Error);
     let syntax_value = syntax_tree_value(&syntax);
-    let (functions, effects, semantic_index) = if let Some(bundle) = bundle.as_ref() {
-        let semantic_facts = crate::Driver::program_semantic_facts(bundle, &effect_facts);
+    let (functions, effects, semantic_index) = if let Some(bundle) = bundle {
+        let semantic_facts = crate::Driver::program_semantic_facts(bundle, effect_facts);
         let program = crate::Comptime::build_program_info(bundle, &semantic_facts);
         let functions = field_value(&program, "functions")
             .unwrap_or_else(|| CtValue::List(Vec::new()));
-        let index = jet_semindex::from_checked(bundle, &effect_facts);
+        let index = jet_semindex::from_checked(bundle, effect_facts);
         let effects = CtValue::List(
             index
                 .effects()
@@ -749,7 +763,7 @@ fn checked_value(source: &str) -> CtValue {
         (
             CtValue::List(functions),
             CtValue::None(Type::Named("CompilerSemanticIndex".to_string())),
-            CtValue::List(Vec::new()),
+            CtValue::None(Type::Named("CompilerSemanticIndex".to_string())),
         )
     };
     ct_struct(
@@ -1046,34 +1060,7 @@ pub fn check_file_json(path: &std::path::Path) -> String {
     };
     let (diagnostics, bundle, facts) =
         crate::Driver::check_file_with_effect_facts(&file, None, true);
-    let diagnostic_views = diagnostics.iter().map(diagnostic_view).collect::<Vec<_>>();
-    let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
-    let syntax = bundle.as_ref().map(|bundle| bundle_syntax_tree(bundle, &source));
-    let semantic_index = if has_errors {
-        "null".to_string()
-    } else {
-        bundle
-            .as_ref()
-            .map(|bundle| {
-                compiler_semantic_index_value(
-                    &jet_semindex::from_checked(bundle, &facts),
-                    &source,
-                )
-                    .to_json()
-            })
-            .unwrap_or_else(|| "null".to_string())
-    };
-    let value = format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"diagnostics\":{},\"syntax\":{},\"semantic_index\":{}}}",
-        SCHEMA_VERSION,
-        API_VERSION,
-        json_diagnostics(&diagnostic_views),
-        syntax
-            .as_ref()
-            .map(json_syntax_tree)
-            .unwrap_or_else(|| "null".to_string()),
-        semantic_index,
-    );
+    let value = checked_value_from_parts(&source, &diagnostics, bundle.as_ref(), &facts).to_json();
     format!(
         "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"check\",\"file\":{},\"value\":{}}}",
         JSON_SCHEMA_VERSION,

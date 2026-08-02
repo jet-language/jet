@@ -3522,6 +3522,12 @@ Version 1 exports:
 - `source_map_from_generated_rust(rust)` → generated Rust line markers mapped
   back to Jet source lines.
 
+The compile-time `CompilerChecked` value preserves the source text, checked
+function/effect facts, and optional structured semantic index alongside its
+syntax and diagnostics. The CLI `check` operation serializes that same value
+inside its file-addressed JSON envelope; it does not replace structured facts
+with a JSON string or a second partial shape.
+
 Diagnostics are cloned into value records (`code`, severity, message, why,
 fix, span). Semantic facts are cloned from the existing semindex schema. No
 API returns `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state,

@@ -161,6 +161,66 @@ fn compiler_api_json_mirrors_are_schema_versioned() {
 }
 
 #[test]
+fn compiler_check_json_is_the_typed_value_not_a_second_shape() {
+    let source = "fn run() { print(\"same\") }\n";
+    let path = fixture_file("compiler_api_check_shape.jet", source);
+    let parsed = jet::Compiler::eval_core_call(
+        "core.compiler",
+        "parse",
+        vec![jet::AST::CtValue::Str(source.to_string())],
+        jet::Diagnostics::Span::new(0, 0),
+    )
+    .unwrap()
+    .unwrap();
+    let jet::AST::CtValue::ResOk(parsed) = parsed else {
+        panic!("parse must return a typed success value")
+    };
+    let checked = jet::Compiler::eval_core_call(
+        "core.compiler",
+        "check",
+        vec![*parsed],
+        jet::Diagnostics::Span::new(0, 0),
+    )
+    .unwrap()
+    .unwrap();
+    let jet::AST::CtValue::ResOk(checked) = checked else {
+        panic!("check must return a typed success value")
+    };
+    let typed_json = checked.to_json();
+    let cli_json = jet::Compiler::check_file_json(&path);
+    assert!(
+        cli_json.contains(&format!("\"value\":{typed_json}")),
+        "CLI check must serialize the exact typed CompilerChecked value: {cli_json}"
+    );
+    assert!(typed_json.contains("\"functions\":"));
+    assert!(typed_json.contains("\"effects\":"));
+    assert!(typed_json.contains("\"semantic_index\":{"));
+}
+
+#[test]
+fn compiler_check_failure_keeps_semantic_index_absent() {
+    let source = "fn run() { missing_name() }\n";
+    let checked = jet::Compiler::eval_core_call(
+        "core.compiler",
+        "check",
+        vec![jet::AST::CtValue::Struct {
+            type_name: "CompilerSyntaxTree".to_string(),
+            fields: vec![
+                ("schema_version".to_string(), jet::AST::CtValue::Int(1)),
+                ("source".to_string(), jet::AST::CtValue::Str(source.to_string())),
+            ],
+        }],
+        jet::Diagnostics::Span::new(0, 0),
+    )
+    .unwrap()
+    .unwrap();
+    let jet::AST::CtValue::ResOk(checked) = checked else {
+        panic!("check must return a typed success value")
+    };
+    assert!(checked.to_json().contains("\"semantic_index\":null"));
+}
+
+#[test]
 fn compiler_api_cli_returns_the_same_json_envelope() {
     let path = fixture_file("compiler_api_cli.jet", "fn run() { print(\"cli\") }\n");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))

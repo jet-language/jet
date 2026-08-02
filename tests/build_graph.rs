@@ -289,6 +289,72 @@ fn typed_probes_record_reproducibility_and_provenance() {
 }
 
 #[test]
+fn declared_target_toolchain_wins_over_ambient_host_tool() {
+    let false_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths))
+        .map(|directory| directory.join("false"))
+        .find(|path| path.is_file())
+        .expect("the test host needs a `false` executable");
+    let mut b = BuildContext::new();
+    let toolchain = b
+        .toolchain(
+            "declared-native",
+            ToolchainSpec::target(
+                "x86_64-linux-gnu",
+                BuildProvenance::jetpack_dependency(
+                    "toolchain.native#1",
+                    LockRecord::new("toolchain:native", "sha256:native"),
+                ),
+            )
+            .with_host_triple("x86_64-linux-gnu")
+            .with_tool("cc", false_path.to_string_lossy()),
+        )
+        .unwrap();
+    let probe = b
+        .probe(
+            "declared-cc",
+            ProbeSpec::header_check("stddef.h").with_toolchain(toolchain),
+        )
+        .unwrap();
+    let target = b
+        .add_library(
+            "declared-native-probe",
+            TargetSpec::new()
+                .with_toolchain(toolchain)
+                .with_probe(probe),
+        )
+        .unwrap();
+    let plan = b.plan_with_default(target).unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "jet-declared-toolchain-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let grants = [BuildCapability::Exec]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let error = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &root,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            jet::Comptime::Build::BuildExecutionError::ProbeFailed { detail, .. }
+                if detail.contains(false_path.to_string_lossy().as_ref())
+        ),
+        "declared target tool must be used instead of ambient PATH: {error:?}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn foreign_toolchain_probe_and_signer_handles_are_rejected() {
     let mut a = BuildContext::new();
     let mut b = BuildContext::new();

@@ -392,11 +392,12 @@ to Jet code.
 
 The CLI mirror, `jet inspect compiler <lex|parse|check|source-map>`, uses the
 same schema version and a `value` envelope for every operation. The `check`
-value is the file-addressed `CheckedFile` shape (`api_version`, `diagnostics`,
-`syntax`, `semantic_index`); the other values are the corresponding
-`CompilerLexed`, `CompilerSyntaxTree`, or `CompilerSourceMap` shape. JSON is a
-boundary format only. The Rust and Jet surfaces call the same compiler
-operations, and the CLI performs no additional checking or policy decisions.
+value is the file-addressed `CompilerChecked` shape (`schema_version`,
+`source`, `syntax`, `diagnostics`, `functions`, `effects`, and an optional
+`semantic_index`); the other values are the corresponding `CompilerLexed`,
+`CompilerSyntaxTree`, or `CompilerSourceMap` shape. JSON is a boundary format
+only. The Rust and Jet surfaces call the same compiler operations, and the CLI
+performs no additional checking or policy decisions.
 
 ## Compiler-extension plugins (D-DX5-HOOK1=A)
 

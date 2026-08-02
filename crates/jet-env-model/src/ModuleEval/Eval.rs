@@ -106,84 +106,17 @@ fn collect_comptime_globals<'a>(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    let mut states = HashMap::<String, u8>::new();
-    let mut resolved = HashMap::new();
-    let mut stack = Vec::new();
-    let mut names = definitions.keys().cloned().collect::<Vec<_>>();
-    names.sort();
-    for name in names {
-        resolve_comptime_global(
-            &name,
-            &definitions,
-            &mut states,
-            &mut resolved,
-            &mut stack,
-            funcs,
-            base_dir,
-        )?;
-    }
-    Ok(resolved)
-}
-
-fn resolve_comptime_global<'a>(
-    name: &str,
-    definitions: &HashMap<String, (crate::Diagnostics::Span, &'a Expr)>,
-    states: &mut HashMap<String, u8>,
-    resolved: &mut HashMap<String, crate::Comptime::CtValue>,
-    stack: &mut Vec<String>,
-    funcs: &HashMap<String, &'a Func>,
-    base_dir: &Path,
-) -> Result<(), Diagnostic> {
-    if matches!(states.get(name), Some(2)) {
-        return Ok(());
-    }
-    if matches!(states.get(name), Some(1)) {
-        let start = stack.iter().position(|item| item == name).unwrap_or(0);
-        let mut cycle = stack[start..].to_vec();
-        cycle.push(name.to_string());
-        let span = definitions
-            .get(name)
-            .map(|(span, _)| *span)
-            .unwrap_or(crate::Diagnostics::Span::new(0, 0));
-        return Err(Diagnostic::error(
-            "E0338",
-            format!("computed module fields form a cycle: {}", cycle.join(" -> ")),
-            "module-level comptime values must have a deterministic dependency order".to_string(),
-            "break the cycle by making one value independent or by moving the shared computation into a pure function".to_string(),
-            Some(span),
-        ));
-    }
-    let Some((span, value)) = definitions.get(name).copied() else {
-        return Ok(());
-    };
-    states.insert(name.to_string(), 1);
-    stack.push(name.to_string());
-    let mut dependencies = Vec::<(String, crate::Diagnostics::Span)>::new();
-    crate::Comptime::walk_identifiers(value, &mut |candidate, candidate_span| {
-        if definitions.contains_key(candidate) {
-            dependencies.push((candidate.to_string(), candidate_span));
-        }
-    });
-    let mut seen = HashSet::new();
-    dependencies.retain(|(dependency, _)| seen.insert(dependency.clone()));
-    for (dependency, _) in dependencies {
-        resolve_comptime_global(
-            &dependency,
-            definitions,
-            states,
-            resolved,
-            stack,
-            funcs,
-            base_dir,
-        )?;
-    }
-    check_build_io(value)?;
-    let value = Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, resolved)?;
-    resolved.insert(name.to_string(), value);
-    stack.pop();
-    states.insert(name.to_string(), 2);
-    let _ = span;
-    Ok(())
+    let computed = evaluate_named_fields(
+        &definitions,
+        &HashMap::new(),
+        funcs,
+        &HashSet::new(),
+        base_dir,
+        None,
+        "module-level comptime values must have a deterministic dependency order",
+        "break the cycle by making one value independent or by moving the shared computation into a pure function",
+    )?;
+    Ok(computed.values)
 }
 
 fn evaluate_module<'a>(
