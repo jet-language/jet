@@ -10,8 +10,8 @@ use crate::Comptime::{self, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    Expr, FleetFieldValue, FleetLit, Func, ImageFieldValue, ImageFromRef, ImageLit, ServiceEntry,
-    SystemFieldValue, SystemLit, VmTestFieldValue, VmTestLit,
+    ContribValue, Expr, FleetFieldValue, FleetLit, Func, ImageFieldValue, ImageFromRef, ImageLit,
+    Item, ServiceEntry, SystemFieldValue, SystemLit, VmTestFieldValue, VmTestLit,
 };
 
 use super::Diagnostics::{
@@ -22,7 +22,8 @@ use super::Diagnostics::{
 };
 use super::Eval::{check_build_io, extract_packages};
 use super::Types::{
-    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
+    FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind,
+    ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
 };
 
 /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
@@ -473,11 +474,15 @@ fn eval_base(
 /// U15: field-check a `fleet.<name>: { hosts: { … } }` record and capture it as
 /// a `FleetPlan`. The one known field is `hosts:`; each host references a
 /// `System` (cross-checked against the known systems at plan assembly, E1242).
-/// Override records are captured verbatim (sliced from `src`), not applied.
+/// Override records are evaluated into typed field values. The exact source
+/// slice remains alongside those values for explain/round-trip provenance.
 pub(super) fn evaluate_fleet(
     path: &str,
     lit: &FleetLit,
     src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
 ) -> Result<FleetPlan, Diagnostic> {
     let mut hosts: Option<Vec<HostPlan>> = None;
     for field in &lit.fields {
@@ -485,13 +490,18 @@ pub(super) fn evaluate_fleet(
             FleetFieldValue::Hosts(entries) => {
                 let mut captured = Vec::new();
                 for e in entries {
-                    let overrides = e
-                        .overrides
-                        .map(|span| src[span.start..span.end].trim().to_string());
+                    let (overrides, override_source) = match e.overrides {
+                        Some(span) => {
+                            let source = src[span.start..span.end].trim().to_string();
+                            (Some(evaluate_host_override(&source, span, base_dir, funcs, globals)?), Some(source))
+                        }
+                        None => (None, None),
+                    };
                     captured.push(HostPlan {
                         name: e.name.clone(),
                         system: e.system.clone(),
                         overrides,
+                        override_source,
                     });
                 }
                 hosts = Some(captured);
@@ -512,6 +522,9 @@ pub(super) fn evaluate_vmtest(
     path: &str,
     lit: &VmTestLit,
     src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
 ) -> Result<VmTestPlan, Diagnostic> {
     let mut hosts: Option<Vec<HostPlan>> = None;
     let mut run = None;
@@ -520,13 +533,18 @@ pub(super) fn evaluate_vmtest(
             VmTestFieldValue::Hosts(entries) => {
                 let mut captured = Vec::new();
                 for e in entries {
-                    let overrides = e
-                        .overrides
-                        .map(|span| src[span.start..span.end].trim().to_string());
+                    let (overrides, override_source) = match e.overrides {
+                        Some(span) => {
+                            let source = src[span.start..span.end].trim().to_string();
+                            (Some(evaluate_host_override(&source, span, base_dir, funcs, globals)?), Some(source))
+                        }
+                        None => (None, None),
+                    };
                     captured.push(HostPlan {
                         name: e.name.clone(),
                         system: e.system.clone(),
                         overrides,
+                        override_source,
                     });
                 }
                 hosts = Some(captured);
@@ -548,6 +566,284 @@ pub(super) fn evaluate_vmtest(
         run,
         assertions,
     })
+}
+
+/// Evaluate a fleet/vmtest copy-with-update tail as a typed record. The
+/// parser already knows the field grammar; this small synthetic module gives
+/// the tail the same AST and comptime evaluator used by ordinary System
+/// fields, without introducing a second override parser.
+fn evaluate_host_override(
+    source: &str,
+    original_span: Span,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<HostOverride, Diagnostic> {
+    let wrapped = format!("module system.fleet_override {source}");
+    let program = super::Eval::parse_program(&wrapped).map_err(|mut diagnostic| {
+        diagnostic.span = Some(original_span);
+        diagnostic
+    })?;
+    let module = program.items.iter().find_map(|item| match item {
+        Item::Module(module) => Some(module),
+        _ => None,
+    }).ok_or_else(|| {
+        Diagnostic::error(
+            "E0003",
+            "host override is not a record".to_string(),
+            "fleet overrides use the same record evaluator as system fields".to_string(),
+            "write `.{ field: value }` after the system reference".to_string(),
+            Some(original_span),
+        )
+    })?;
+    let contribution = module.contributions.first().ok_or_else(|| {
+        Diagnostic::error(
+            "E0003",
+            "host override is empty".to_string(),
+            "a host override must contain at least one typed field".to_string(),
+            "add a field inside the override record".to_string(),
+            Some(original_span),
+        )
+    })?;
+    let ContribValue::System(lit) = &contribution.value else {
+        return Err(Diagnostic::error(
+            "E0003",
+            "host override is not a system record".to_string(),
+            "fleet overrides use System field semantics".to_string(),
+            "write named fields inside `.{ … }`".to_string(),
+            Some(original_span),
+        ));
+    };
+
+    // Host fields form the same small pure dependency graph as ordinary
+    // computed module fields. Resolve the generic fields before materializing
+    // services/options so declaration order cannot change a fleet's meaning.
+    let field_names = lit
+        .fields
+        .iter()
+        .map(|field| field.name.clone())
+        .collect::<HashSet<_>>();
+    let field_exprs = lit
+        .fields
+        .iter()
+        .filter_map(|field| match &field.value {
+            SystemFieldValue::Other(expr) => Some((field.name.clone(), (field.span, expr))),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let dependencies = lit
+        .fields
+        .iter()
+        .map(|field| {
+            let mut names = Vec::new();
+            collect_host_field_dependencies(&field.value, &field_names, &mut names);
+            names.sort();
+            names.dedup();
+            (field.name.clone(), names)
+        })
+        .collect::<HashMap<_, _>>();
+    let mut resolved = globals.clone();
+    let mut states = HashMap::<String, u8>::new();
+    let mut stack = Vec::new();
+    let mut names = field_exprs.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+    for name in names {
+        resolve_host_field(
+            &name,
+            &field_exprs,
+            &dependencies,
+            &mut states,
+            &mut resolved,
+            &mut stack,
+            base_dir,
+            funcs,
+        )?;
+    }
+    let mut fields = Vec::new();
+    let mut provenance = Vec::new();
+    for field in &lit.fields {
+        let value = match &field.value {
+            SystemFieldValue::Platform { os, arch, span } => {
+                HostOverrideValue::Platform(check_platform(os, arch, *span)?)
+            }
+            SystemFieldValue::Packages(expr) => {
+                check_build_io(expr)?;
+                HostOverrideValue::Packages(extract_packages(expr, &wrapped)?.packages)
+            }
+            SystemFieldValue::Services(entries) => HostOverrideValue::Services(
+                entries
+                    .iter()
+                    .map(|entry| evaluate_service(entry, base_dir, funcs, &resolved))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            SystemFieldValue::Options(entries) => {
+                let mut options = Vec::new();
+                for entry in entries {
+                    let value = evaluate_host_option(
+                        &entry.value,
+                        entry.value_span,
+                        source,
+                        wrapped.len() - source.len(),
+                        funcs,
+                        base_dir,
+                        &resolved,
+                    )?;
+                    options.push(OptionPlan {
+                        key: entry.key.clone(),
+                        value,
+                    });
+                }
+                HostOverrideValue::Options(options)
+            }
+            SystemFieldValue::Other(expr) => {
+                check_build_io(expr)?;
+                HostOverrideValue::Value(Comptime::evaluate(
+                    expr,
+                    funcs,
+                    &HashSet::new(),
+                    base_dir,
+                    &resolved,
+                )?)
+            }
+        };
+        fields.push((field.name.clone(), value));
+        provenance.push(HostOverrideProvenance {
+            field: field.name.clone(),
+            dependencies: dependencies
+                .get(&field.name)
+                .cloned()
+                .unwrap_or_default(),
+            pure: true,
+            source: host_field_source(source, field.span, wrapped.len() - source.len()),
+        });
+    }
+    Ok(HostOverride {
+        fields,
+        source: source.to_string(),
+        provenance,
+    })
+}
+
+/// Evaluate a fleet option through the shared pure evaluator when it is an
+/// actual value, while preserving the existing option grammar for symbolic
+/// atoms such as `default.fish` and `laptop`. Those atoms are typed strings in
+/// the option plan, not ambient lookups. A bare name that resolves in the
+/// computed-field environment still takes the evaluator path.
+fn evaluate_host_option(
+    expr: &Expr,
+    value_span: Span,
+    source: &str,
+    prefix_len: usize,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    resolved: &HashMap<String, CtValue>,
+) -> Result<String, Diagnostic> {
+    check_build_io(expr)?;
+    let value = match expr {
+        Expr::Ident(name, _) if !resolved.contains_key(name) => None,
+        Expr::Field(..) => None,
+        Expr::Str(..) => None,
+        _ => Some(Comptime::evaluate(
+            expr,
+            funcs,
+            &HashSet::new(),
+            base_dir,
+            resolved,
+        )?),
+    };
+    Ok(value
+        .map(|value| value.jet_show())
+        .unwrap_or_else(|| host_field_source(source, value_span, prefix_len)))
+}
+
+fn collect_host_field_dependencies(
+    value: &SystemFieldValue,
+    field_names: &HashSet<String>,
+    dependencies: &mut Vec<String>,
+) {
+    let mut collect = |expr: &Expr| {
+        crate::Comptime::walk_identifiers(expr, &mut |name, _| {
+            if field_names.contains(name) {
+                dependencies.push(name.to_string());
+            }
+        });
+    };
+    match value {
+        SystemFieldValue::Packages(expr) | SystemFieldValue::Other(expr) => collect(expr),
+        SystemFieldValue::Services(entries) => {
+            for entry in entries {
+                for (_, _, expr) in &entry.fields {
+                    collect(expr);
+                }
+            }
+        }
+        SystemFieldValue::Options(entries) => {
+            for entry in entries {
+                collect(&entry.value);
+            }
+        }
+        SystemFieldValue::Platform { .. } => {}
+    }
+}
+
+fn resolve_host_field(
+    name: &str,
+    fields: &HashMap<String, (Span, &Expr)>,
+    dependencies: &HashMap<String, Vec<String>>,
+    states: &mut HashMap<String, u8>,
+    resolved: &mut HashMap<String, CtValue>,
+    stack: &mut Vec<String>,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<(), Diagnostic> {
+    if matches!(states.get(name), Some(2)) {
+        return Ok(());
+    }
+    let Some((span, expr)) = fields.get(name).copied() else {
+        return Ok(());
+    };
+    if matches!(states.get(name), Some(1)) {
+        let start = stack.iter().position(|field| field == name).unwrap_or(0);
+        let mut cycle = stack[start..].to_vec();
+        cycle.push(name.to_string());
+        return Err(Diagnostic::error(
+            "E0338",
+            format!("computed fleet fields form a cycle: {}", cycle.join(" -> ")),
+            "host override values must have a deterministic dependency order".to_string(),
+            "break the cycle by making one field independent or by moving the shared computation into a pure function".to_string(),
+            Some(span),
+        ));
+    }
+    states.insert(name.to_string(), 1);
+    stack.push(name.to_string());
+    for dependency in dependencies.get(name).into_iter().flatten() {
+        resolve_host_field(
+            dependency,
+            fields,
+            dependencies,
+            states,
+            resolved,
+            stack,
+            base_dir,
+            funcs,
+        )?;
+    }
+    check_build_io(expr)?;
+    let value = Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, resolved)?;
+    resolved.insert(name.to_string(), value);
+    stack.pop();
+    states.insert(name.to_string(), 2);
+    Ok(())
+}
+
+fn host_field_source(source: &str, span: Span, prefix_len: usize) -> String {
+    let start = span.start.saturating_sub(prefix_len);
+    let end = span.end.saturating_sub(prefix_len);
+    source
+        .get(start..end)
+        .unwrap_or(source)
+        .trim()
+        .to_string()
 }
 
 fn vmtest_assertions(run: &str) -> Vec<String> {

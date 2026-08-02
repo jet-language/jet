@@ -31,7 +31,8 @@ pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, evaluate_env_with_profile, is_module_surface};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
-    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode,
+    FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
+    PromptPathMode, PromptStripMode,
     ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 pub use Environment::{
@@ -1093,9 +1094,18 @@ module fleet.prod {
         assert_eq!(fleet.hosts[0].name, "web1");
         assert_eq!(fleet.hosts[0].system, "web");
         assert_eq!(
-            fleet.hosts[0].overrides.as_deref(),
+            fleet.hosts[0].override_source.as_deref(),
             Some("{ region: \"us-east\" }")
         );
+        assert_eq!(
+            fleet.hosts[0].overrides.as_ref().unwrap().fields[0].0,
+            "region"
+        );
+        assert!(matches!(
+            &fleet.hosts[0].overrides.as_ref().unwrap().fields[0].1,
+            super::Types::HostOverrideValue::Value(crate::Comptime::CtValue::Str(value))
+                if value == "us-east"
+        ));
         assert_eq!(fleet.hosts[1].name, "web2");
         assert_eq!(fleet.hosts[1].system, "web");
     }

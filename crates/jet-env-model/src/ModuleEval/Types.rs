@@ -299,9 +299,41 @@ pub struct HostPlan {
     pub name: String,
     /// The referenced `System`'s role name (the `<name>` in `system.<name>`).
     pub system: String,
-    /// The raw `.{ … }` copy-with-update override text, if written. Captured
-    /// verbatim; not semantically applied until fleet realization (Phase D).
-    pub overrides: Option<String>,
+    /// The typed `.{ … }` copy-with-update override, if written. Every field
+    /// is evaluated through the same pure comptime path as a `System` field.
+    pub overrides: Option<HostOverride>,
+    /// Exact source text retained as provenance for explain/round-trip output.
+    pub override_source: Option<String>,
+}
+
+/// One host-local copy-with-update record. The value variants preserve the
+/// closed System field shapes while still allowing future fleet-only fields
+/// such as `region` to remain typed comptime values. `source` is provenance;
+/// consumers use `fields`, never deferred source evaluation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostOverride {
+    pub fields: Vec<(String, HostOverrideValue)>,
+    pub source: String,
+    /// The dependency/purity facts used to produce each typed field. Consumers
+    /// can explain why a host value changed without re-evaluating source text.
+    pub provenance: Vec<HostOverrideProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostOverrideProvenance {
+    pub field: String,
+    pub dependencies: Vec<String>,
+    pub pure: bool,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostOverrideValue {
+    Platform(String),
+    Packages(Vec<Merge::Pkg>),
+    Services(Vec<ServicePlan>),
+    Options(Vec<OptionPlan>),
+    Value(crate::Comptime::CtValue),
 }
 
 /// D-JOS-VMTEST1/D-JOS-VMASSERT1: a declarative VM test scenario.

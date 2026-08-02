@@ -253,10 +253,10 @@ fn evaluate_module<'a>(
                 images.push(evaluate_image(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             (Namespace::Fleet, ContribValue::Fleet(lit)) => {
-                fleets.push(evaluate_fleet(&c.path, lit, src)?);
+                fleets.push(evaluate_fleet(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             (Namespace::VmTest, ContribValue::VmTest(lit)) => {
-                vmtests.push(evaluate_vmtest(&c.path, lit, src)?);
+                vmtests.push(evaluate_vmtest(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             // Namespace/value-shape mismatches can't occur: the parser pairs each
             // namespace with its dedicated value parser (see `contribution`).

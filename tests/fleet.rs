@@ -68,10 +68,78 @@ module fleet.prod {
     assert_eq!(fleet.hosts.len(), 2);
     assert_eq!(fleet.hosts[0].system, "web");
     assert_eq!(
-        fleet.hosts[0].overrides.as_deref(),
+        fleet.hosts[0].override_source.as_deref(),
         Some("{ region: \"us-east\" }")
     );
     assert_eq!(fleet.hosts[1].overrides, None);
+}
+
+#[test]
+fn fleet_override_computes_fields_in_dependency_order_with_provenance() {
+    let src = r#"
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ region: base + 2, base: 40 }
+    }
+}
+"#;
+    let plan = evaluate_env(src, &std::env::temp_dir()).unwrap();
+    let override_plan = plan.fleets[0].hosts[0].overrides.as_ref().unwrap();
+    assert!(matches!(
+        &override_plan.fields[0].1,
+        jet_env_model::ModuleEval::HostOverrideValue::Value(jet::Comptime::CtValue::Int(42))
+    ));
+    let region = override_plan
+        .provenance
+        .iter()
+        .find(|fact| fact.field == "region")
+        .unwrap();
+    assert_eq!(region.dependencies, vec!["base"]);
+    assert!(region.pure);
+    assert!(region.source.contains("region"));
+}
+
+#[test]
+fn fleet_override_options_keep_symbolic_atoms_and_evaluate_values() {
+    let src = r#"
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ options: [network.hostName: laptop, filesystem.timeZone: "UTC", tuning.retries: base + 1], base: 4 }
+    }
+}
+"#;
+    let plan = evaluate_env(src, &std::env::temp_dir()).unwrap();
+    let override_plan = plan.fleets[0].hosts[0].overrides.as_ref().unwrap();
+    let jet_env_model::ModuleEval::HostOverrideValue::Options(options) = &override_plan.fields[0].1 else {
+        panic!("expected options override, got {:?}", override_plan.fields[0]);
+    };
+    assert_eq!(
+        options
+            .iter()
+            .map(|option| (option.key.as_str(), option.value.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("network.hostName", "laptop"),
+            ("filesystem.timeZone", "\"UTC\""),
+            ("tuning.retries", "5"),
+        ]
+    );
+}
+
+#[test]
+fn fleet_override_dependency_cycle_is_rejected_before_capture() {
+    let src = r#"
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ region: base + 1, base: region + 1 }
+    }
+}
+"#;
+    let error = evaluate_env(src, &std::env::temp_dir()).unwrap_err();
+    assert_eq!(error.code, "E0338");
 }
 
 /// I5: the committed typed-fleet fixture is the executable spec — it parses,
