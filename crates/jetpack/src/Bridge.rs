@@ -271,13 +271,8 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     format!("{}:{}:{}", output.kind.as_str(), output.system, output.attribute)
                 };
                 match &output.kind {
-                    super::SemanticLock::FlakeOutputKind::Package => {
-                        if !output.attribute.is_empty()
-                            && !facts.packages.iter().any(|package| package == &output.attribute)
-                        {
-                            facts.packages.push(output.attribute.clone());
-                        }
-                    }
+                    super::SemanticLock::FlakeOutputKind::Package =>
+                        record_package_output_fact(&mut facts, output, &system),
                     super::SemanticLock::FlakeOutputKind::DevShell => {
                         if output.attribute != "default"
                             && !facts.unmapped.iter().any(|item| item == &label)
@@ -361,9 +356,14 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                 return 1;
             }
         }
-        Err(error) => facts
-            .unmapped
-            .push(format!("flake graph: {error}")),
+        Err(error) => {
+            theme.error(
+                "couldn't load the foreign graph",
+                &error.to_string(),
+                "refresh the semantic lock after confirming the flake source is correct.",
+            );
+            return 1;
+        }
     }
     facts.unmapped.sort();
     facts.unmapped.dedup();
@@ -390,6 +390,29 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     }
     println!("{}", render_shim(&facts));
     0
+}
+
+fn record_package_output_fact(
+    facts: &mut DevShellFacts,
+    output: &super::SemanticLock::FlakeOutput,
+    system: &str,
+) {
+    if output.system == system {
+        if !output.attribute.is_empty()
+            && !facts.packages.iter().any(|package| package == &output.attribute)
+        {
+            facts.packages.push(output.attribute.clone());
+        }
+        return;
+    }
+    let label = if output.system.is_empty() {
+        format!("packages:{}", output.attribute)
+    } else {
+        format!("packages:{}:{}", output.system, output.attribute)
+    };
+    if !facts.unmapped.iter().any(|item| item == &label) {
+        facts.unmapped.push(label);
+    }
 }
 
 #[cfg(test)]
@@ -519,6 +542,49 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_rejects_a_stale_semantic_lock() {
+        let dir = scratch("stale_graph");
+        let system = host_system();
+        let source = format!(
+            "{{ devShells.{system}.default = {{ packages = [ ]; }}; }}"
+        );
+        std::fs::write(dir.join("flake.nix"), &source).unwrap();
+        let fixtures = scratch("stale_graph_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        assert_eq!(cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures)), 0);
+        std::fs::write(dir.join("flake.nix"), format!("{source}\n# changed\n")).unwrap();
+        assert_eq!(cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures)), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cross_system_package_output_is_not_advertised_in_the_host_shim() {
+        let host = host_system();
+        let other = if host == "aarch64-linux" {
+            "x86_64-linux"
+        } else {
+            "aarch64-linux"
+        };
+        let source = format!("{{ packages.{other}.default = \"foreign\"; }}");
+        let graph = FlakeGraph::parse("flake.nix", &source).unwrap();
+        let mut facts = DevShellFacts::default();
+        for output in &graph.outputs {
+            if output.kind == super::SemanticLock::FlakeOutputKind::Package {
+                record_package_output_fact(&mut facts, output, &host);
+            }
+        }
+        assert!(facts.packages.is_empty());
+        assert_eq!(facts.unmapped, vec![format!("packages:{other}:default")]);
     }
 
     #[test]
