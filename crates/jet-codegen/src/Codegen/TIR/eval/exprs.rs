@@ -2182,6 +2182,10 @@ impl<'a> EvalCtx<'a> {
                         Type::Named(type_name) => self
                             .struct_fields
                             .get(type_name)
+                            .or_else(|| {
+                                self.struct_fields
+                                    .get(type_name.strip_prefix("user_").unwrap_or(type_name))
+                            })
                             .map(|fields| {
                                 CtValue::List(
                                     fields

@@ -1022,20 +1022,28 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
         sandbox: proof.clone(),
     };
 
-    let mut wrong_platform = proof.clone();
-    wrong_platform.platform = "windows-x86_64".to_string();
-    let wrong_policy = RemoteCachePolicy::with_grants(
-        false,
-        false,
-        true,
-        wrong_platform.clone(),
-    );
-    let mut wrong_request = request.clone();
-    wrong_request.sandbox = wrong_platform;
-    assert!(matches!(
-        transport.submit_execution(&wrong_request, &wrong_policy),
-        Err(RemoteCacheError::InvalidRecord(_))
-    ));
+    let mutations: [fn(&mut RemoteSandboxProof); 4] = [
+        |proof: &mut RemoteSandboxProof| proof.worker_id = "worker-b".to_string(),
+        |proof: &mut RemoteSandboxProof| proof.platform = "windows-x86_64".to_string(),
+        |proof: &mut RemoteSandboxProof| proof.abi = "foreign".to_string(),
+        |proof: &mut RemoteSandboxProof| proof.worker_receipt = "forged".to_string(),
+    ];
+    for mutate in mutations {
+        let mut wrong_proof = proof.clone();
+        mutate(&mut wrong_proof);
+        let wrong_policy = RemoteCachePolicy::with_grants(
+            false,
+            false,
+            true,
+            wrong_proof.clone(),
+        );
+        let mut wrong_request = request.clone();
+        wrong_request.sandbox = wrong_proof;
+        assert!(matches!(
+            transport.submit_execution(&wrong_request, &wrong_policy),
+            Err(RemoteCacheError::InvalidRecord(_))
+        ));
+    }
 
     transport.submit_execution(&request, &policy).unwrap();
     transport.cancel_execution(&key, &policy).unwrap();
@@ -1205,6 +1213,73 @@ fn remote_driver_consumes_authenticated_worker_result() {
     )
     .unwrap();
     worker.join().unwrap();
+    assert!(execution.report.events.iter().any(|event| {
+        matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action: finished,
+                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+            } if *finished == action.id()
+        )
+    }));
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn remote_execution_timeout_uses_declared_local_fallback() {
+    let project_root = std::env::temp_dir().join(format!(
+        "jet_remote_fallback_{}_{}",
+        std::process::id(),
+        "local"
+    ));
+    let _ = fs::remove_dir_all(&project_root);
+    fs::create_dir_all(&project_root).unwrap();
+    let remote_root = project_root.join("remote-transport");
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "local-fallback",
+            ActionSpec::uncached_phony([
+                "sh",
+                "-c",
+                "mkdir -p build && printf fallback > build/fallback.txt",
+            ])
+            .with_outputs(["build/fallback.txt"])
+            .with_cap(BuildCapability::Exec)
+            .with_cap(BuildCapability::FS)
+            .with_cap(BuildCapability::Net),
+        )
+        .unwrap();
+    let target = b
+        .add_executable("fallback", TargetSpec::new().with_action(action))
+        .unwrap();
+    let plan = b.plan_with_default(target).unwrap();
+    let grants = [
+        BuildCapability::Exec,
+        BuildCapability::FS,
+        BuildCapability::Net,
+    ]
+    .into_iter()
+    .collect();
+    let binding = RemoteBuildBinding::new("builder-fallback", &remote_root, b"fallback-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_execute(true)
+        .with_local_fallback(true)
+        .with_timeout_ms(20);
+
+    let execution = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &project_root,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(project_root.join("build/fallback.txt")).unwrap(),
+        "fallback"
+    );
     assert!(execution.report.events.iter().any(|event| {
         matches!(
             event,
