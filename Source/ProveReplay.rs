@@ -1327,7 +1327,7 @@ fn json_str(value: &str) -> String {
     out
 }
 
-fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
+pub(crate) fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
     if json_mode {
         println!(
             "{{\"schema_version\":1,\"code\":{},\"severity\":\"error\",\"message\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}",

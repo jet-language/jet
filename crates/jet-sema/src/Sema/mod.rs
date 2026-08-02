@@ -1936,8 +1936,8 @@ pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub(crate) use CheckerMarkers::check_marker_vocabulary;
 pub(crate) use CheckerSchedule::check_every_marker;
 pub use Effects::{
-    effect_covers, effect_root, effect_row_var, parse_effect_name, resolve_effect_name, show_set,
-    undeclared_effect, Effect, EffectSet,
+    builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, parse_effect_name,
+    resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,
 };
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::effect_key;

@@ -14,6 +14,8 @@ macOS/Windows execution remains Epoch 9 (owner-directed deferral).
 | Solver counterexample | E2950 exit 1 | `--lens solver` + certificate check |
 | Absolute capture path escape | refused / project-relative | capture path resolver |
 
+| Safe capture reaches Rand/IO/Net | E3627 exit 1 before producer | AST effect preflight in CmdProve |
+
 Static cross-platform design checks (no native execution required in E3):
 
 - Artifact family is `.jetproof` / `.jetproof-replay` only (D-ARTIFACT-EXT1).

@@ -3129,6 +3129,11 @@ Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
 symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
 
+Tensor serialization is the canonical wire shape=axis,...;data=value,... .
+The serializer uses shortest round-tripping finite f64 text. The decoder
+rejects duplicate or unknown fields, non-canonical axes or values, non-finite
+data, and storage-length mismatches before constructing a Tensor.
+
 `#Kernel(.parallel) fn` is the explicit safe-kernel declaration selected by
 `D-COMPUTE-KERNEL-SURFACE1=B`. Sema accepts the marker only after proving the
 current conservative kernel subset: read-only parameters, no reachable

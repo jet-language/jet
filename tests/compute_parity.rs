@@ -34,6 +34,18 @@ fn run() {
         .Err(_) -> { print("corrupt:rejected") }
     }
 
+    bad_axis :: compute.deserialize("shape=02;data=1.0")
+    if bad_axis == {
+        .Ok(_) -> { print("axis:accepted") }
+        .Err(_) -> { print("axis:rejected") }
+    }
+
+    bad_field :: compute.deserialize("shape=1;data=1.0;data=1.0")
+    if bad_field == {
+        .Ok(_) -> { print("field:accepted") }
+        .Err(_) -> { print("field:rejected") }
+    }
+
     bounds :: compute.kernel_bounds_ok([2, 3], [2, 0])
     if bounds == {
         .Ok(_) -> { print("bounds:accepted") }
@@ -51,7 +63,7 @@ fn compute_cpu_oracle_aot_covers_storage_views_algebra_and_corruption() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\nbounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nbounds:rejected\n"
     );
 }
 
@@ -61,6 +73,6 @@ fn compute_cpu_oracle_default_run_matches_aot_meaning() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\nbounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nbounds:rejected\n"
     );
 }

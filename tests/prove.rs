@@ -172,6 +172,21 @@ fn prove_capture_does_not_finalize_after_front_end_failure() {
     assert!(!artifact.exists(), "front-end failure must not leave a replay artifact");
 }
 
+#[test]
+fn prove_capture_refuses_reachable_io_before_the_child_runs() {
+    let root = workspace("capture_io_preflight");
+    fs::write(root.join("main.jet"), "fn run() { print(\"not captured\") }\n").unwrap();
+    let artifact = root.join("io.jetproof-replay");
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=io.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3627]"));
+    assert!(!artifact.exists(), "preflight refusal must happen before artifact creation");
+}
+
 #[cfg(unix)]
 #[test]
 fn prove_rejects_a_symlink_target() {
@@ -322,6 +337,25 @@ fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
     let json = String::from_utf8(machine.stdout).unwrap();
     assert!(json.contains("\"code\":\"E2941\""), "{json}");
     assert!(!json.contains("\"evidence\""), "malformed CLI emitted a ProofReport: {json}");
+}
+
+#[test]
+fn prove_lens_shows_failed_unselected_evidence() {
+    let root = workspace("lens_projection");
+    fs::write(
+        root.join("main.jet"),
+        "#Test(\"outside\") { require(false, \"lens failure\") }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--lens", "contracts"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("OUTSIDE SELECTED LENSES"), "{stdout}");
+    assert!(stdout.contains("unit outside"), "{stdout}");
 }
 
 #[test]

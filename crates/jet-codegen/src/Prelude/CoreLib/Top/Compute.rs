@@ -1385,11 +1385,16 @@ fn jet_compute_raw_kernel_contract(
     Ok(JetRawKernelContract {
         reason,
         arity,
-        bounds: true,
-        alias_free: true,
-        race_free: true,
-        barrier_uniform: true,
-        differential: "CPU-oracle-required".to_string(),
+        // This constructor records the obligations at the unsafe boundary. It
+        // cannot prove the provider body: no provider body reaches Prelude.
+        // Keep the receipt honest so a typed descriptor is not mistaken for a
+        // compiler proof. A provider bridge must replace these fields with its
+        // independently checked contract before launch.
+        bounds: false,
+        alias_free: false,
+        race_free: false,
+        barrier_uniform: false,
+        differential: "required; not verified by Jet".to_string(),
     })
 }
 
@@ -1732,50 +1737,87 @@ fn jet_compute_serialize(tensor: &JetTensor) -> String {
     let data = tensor
         .data
         .iter()
-        .map(|v| format!("{v}"))
+        // Debug formatting is Rust's shortest round-tripping f64 spelling.
+        // Keep it stable across the AOT/JIT/interpreter Prelude boundary.
+        .map(|v| format!("{v:?}"))
         .collect::<Vec<_>>()
         .join(",");
     format!("shape={shape};data={data}")
 }
 
 fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
-    let Some((shape_part, data_part)) = payload.split_once(";data=") else {
+    let mut fields = payload.split(';');
+    let Some(shape_part) = fields.next() else {
         return Err(JetComputeError::InvalidShape(
             "deserialize expects shape=…;data=…".to_string(),
         ));
     };
+    let Some(data_part) = fields.next() else {
+        return Err(JetComputeError::InvalidShape(
+            "deserialize expects shape=…;data=…".to_string(),
+        ));
+    };
+    if fields.next().is_some() || !data_part.starts_with("data=") {
+        return Err(JetComputeError::Serialization(
+            "deserialize contains duplicate or unknown fields".to_string(),
+        ));
+    }
     let shape_str = shape_part
         .strip_prefix("shape=")
         .ok_or_else(|| JetComputeError::Serialization("missing shape=".to_string()))?;
-    let shape: Vec<i64> = if shape_str.is_empty() {
-        Vec::new()
-    } else {
-        shape_str
-            .split(',')
-            .map(|p| {
-                p.parse::<i64>().map_err(|_| {
-                    JetComputeError::Serialization(format!("bad shape axis `{p}`"))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    let data: Vec<f64> = if data_part.is_empty() {
-        Vec::new()
-    } else {
-        data_part
-            .split(',')
-            .map(|p| {
-                p.parse::<f64>().map_err(|_| {
-                    JetComputeError::Serialization(format!("bad data value `{p}`"))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    if data.iter().any(|value| !value.is_finite()) {
+    if shape_str.is_empty() {
         return Err(JetComputeError::Serialization(
-            "serialized Tensor contains a non-finite value".to_string(),
+            "serialized Tensor shape cannot be empty".to_string(),
         ));
     }
+    let shape: Vec<i64> = shape_str
+        .split(',')
+        .map(|p| {
+            if p.is_empty() {
+                return Err(JetComputeError::Serialization(
+                    "serialized Tensor shape contains an empty axis".to_string(),
+                ));
+            }
+            let axis = p.parse::<i64>().map_err(|_| {
+                JetComputeError::Serialization(format!("bad shape axis `{p}`"))
+            })?;
+            if axis.to_string() != p {
+                return Err(JetComputeError::Serialization(format!(
+                    "non-canonical shape axis `{p}`"
+                )));
+            }
+            Ok(axis)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let data_str = data_part.strip_prefix("data=").unwrap_or("");
+    let data: Vec<f64> = if data_str.is_empty() {
+        Vec::new()
+    } else {
+        data_str
+            .split(',')
+            .map(|p| {
+                if p.is_empty() {
+                    return Err(JetComputeError::Serialization(
+                        "serialized Tensor data contains an empty value".to_string(),
+                    ));
+                }
+                let value = p.parse::<f64>().map_err(|_| {
+                    JetComputeError::Serialization(format!("bad data value `{p}`"))
+                })?;
+                if !value.is_finite() {
+                    return Err(JetComputeError::Serialization(
+                        "serialized Tensor contains a non-finite value".to_string(),
+                    ));
+                }
+                if format!("{value:?}") != p {
+                    return Err(JetComputeError::Serialization(format!(
+                        "non-canonical data value `{p}`"
+                    )));
+                }
+                Ok(value)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
     let expected = jet_compute_storage_len(&shape)?;
     if expected != data.len() {
         return Err(JetComputeError::Serialization(format!(

@@ -4,14 +4,14 @@
 //! canonical ProofReport/artifact boundary.
 
 use std::fs;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use jet::AST::{Func, Item};
+use jet::AST::{Expr, Func, Item, Stmt};
 use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
 use jet::ExitCodes;
 
@@ -46,7 +46,6 @@ struct ContractDeclaration {
     line: usize,
     column: usize,
     marker: &'static str,
-    claim: String,
 }
 
 struct TestItem {
@@ -152,6 +151,11 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         execution_adapter: "dev-tir-v1".to_string(),
         target_triple: host_target_triple(),
     };
+    if let Some(opts) = capture.as_ref() {
+        if let Err(status) = preflight_capture_target(&target, opts, json) {
+            exit(status);
+        }
+    }
     let capture_authority = if let Some(opts) = capture {
         match crate::ProveReplay::prepare_safe_capture(&opts, json) {
             Ok(authority) => Some(authority),
@@ -302,7 +306,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(ExitCodes::ICE);
         }
     }
-    if failed == 0 {
+    if failed == 0 && producer_exit != ExitCodes::ICE {
         if let Some(authority) = capture_authority.as_ref() {
             if let Err(status) = crate::ProveReplay::finalize_safe_capture(
                 &identity,
@@ -331,6 +335,9 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             if let Some(diagnostic) = &item.diagnostic {
                 eprintln!("{}", diagnostic.render(&item.path, &item.source));
             }
+        }
+        for row in outside_selected_lenses(&lenses, &items, &tests, &budgets, &declarations) {
+            println!("{row}");
         }
         if show("tests") || lenses.is_empty() {
             if !tests.is_empty() {
@@ -403,6 +410,514 @@ fn lens_shows(lenses: &[String], facet: &str) -> bool {
         return facet != "solver";
     }
     lenses.iter().any(|lens| lens == facet)
+}
+
+fn outside_selected_lenses(
+    lenses: &[String],
+    items: &[FrontEndItem],
+    tests: &[TestItem],
+    budgets: &jet::BudgetView::BudgetProjection,
+    declarations: &[ContractDeclaration],
+) -> Vec<String> {
+    if lenses.is_empty() {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    for item in items.iter().filter(|item| item.diagnostic.is_some()) {
+        rows.push(format!("  front end failed at {}:{}", item.path, item.line));
+    }
+    for item in tests.iter().filter(|item| item.state >= 1) {
+        let kind = match item.kind {
+            1 => "contract",
+            2 => "runtime",
+            3 => "property",
+            4 => "doctest",
+            _ => "unit",
+        };
+        if !lens_shows(lenses, if item.kind == 1 { "contracts" } else { "tests" }) {
+            rows.push(format!(
+                "  {kind} {}: {}",
+                item.name,
+                item.message.replace('\n', " ").replace('\r', " ")
+            ));
+        }
+    }
+    for declaration in declarations {
+        let observed = tests.iter().any(|item| {
+            item.kind == 1
+                && item.name == declaration.marker
+                && item.line as usize == declaration.line
+                && source_paths_match(&item.path, &declaration.path)
+                && item.state <= 1
+        });
+        if !observed && !lens_shows(lenses, "contracts") {
+            rows.push(format!(
+                "  contract {} at {}:{}: not observed",
+                declaration.marker, declaration.path, declaration.line
+            ));
+        }
+    }
+    for fact in &budgets.facts {
+        let unavailable = fact.evidence == "unavailable";
+        let failed = fact.outcome != "pass";
+        if (unavailable || failed) && !lens_shows(lenses, "budgets") {
+            rows.push(format!(
+                "  budget {}: {} ({})",
+                fact.budget_id, fact.outcome, fact.evidence
+            ));
+        }
+    }
+    if rows.is_empty() {
+        return vec!["OUTSIDE SELECTED LENSES", "  none failed or unavailable"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+    }
+    let mut output = vec!["OUTSIDE SELECTED LENSES".to_string()];
+    output.extend(rows);
+    output
+}
+
+#[derive(Clone)]
+struct CaptureSite {
+    operation: String,
+    effect: Option<jet::Sema::Effect>,
+}
+
+/// Capture authority is checked against the parsed program before the child
+/// producer starts. Safe capture can record only Time; sensitive capture may
+/// authorize Rand/IO/Net later, but it still cannot model native, task, or
+/// provider boundaries. This is deliberately conservative: an unknown call
+/// shape fails closed instead of discovering an ambient effect after it ran.
+fn preflight_capture_target(
+    target: &Target,
+    opts: &crate::ProveReplay::CaptureOpts,
+    json_mode: bool,
+) -> Result<(), i32> {
+    let mut sites = Vec::new();
+    for member in &target.members {
+        let source = String::from_utf8_lossy(&member.bytes);
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+        if !lex_diagnostics.is_empty() {
+            continue;
+        }
+        let Ok(program) = jet::Parser::parse(&tokens) else {
+            continue;
+        };
+        let aliases = program
+            .imports
+            .iter()
+            .filter_map(|import| {
+                let module = import.core_module_path()?;
+                let alias = import.import_alias();
+                Some((alias, module))
+            })
+            .fold(HashMap::new(), |mut aliases, (alias, module)| {
+                aliases.insert(alias.clone(), module.clone());
+                if let Some(short) = alias.rsplit('.').next() {
+                    aliases.entry(short.to_string()).or_insert(module);
+                }
+                aliases
+            });
+        collect_capture_items(&program.items, &aliases, &mut sites);
+    }
+
+    for site in sites {
+        let Some(effect) = site.effect else {
+            return capture_preflight_error(
+                "E3625",
+                &site.operation,
+                "the reachable call shape is opaque to the replay authority",
+                "route the operation through a supported deterministic capability, or remove it from the captured target",
+                json_mode,
+            );
+        };
+        match effect {
+            jet::Sema::Effect::Time => {}
+            jet::Sema::Effect::Rand | jet::Sema::Effect::IO | jet::Sema::Effect::Net
+                if !opts.sensitive =>
+            {
+                return capture_preflight_error(
+                    "E3627",
+                    &site.operation,
+                    &format!(
+                        "safe capture reached raw {}; untainted values still require sensitive-data consent",
+                        effect.name()
+                    ),
+                    "inject deterministic data, or explicitly use --capture-sensitive",
+                    json_mode,
+                );
+            }
+            jet::Sema::Effect::Rand | jet::Sema::Effect::IO | jet::Sema::Effect::Net => {}
+            other => {
+                return capture_preflight_error(
+                    "E3625",
+                    &site.operation,
+                    &format!("replay capture has no authority adapter for the {} effect", other.name()),
+                    "route the operation through a supported deterministic capability, or change the capture target",
+                    json_mode,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn capture_preflight_error(
+    code: &str,
+    operation: &str,
+    why: &str,
+    fix: &str,
+    json_mode: bool,
+) -> Result<(), i32> {
+    let what = if code == "E3627" {
+        "replay capture refused sensitive data".to_string()
+    } else {
+        format!("replay capture cannot model {operation}")
+    };
+    crate::ProveReplay::emit_diag(code, &what, why, fix, json_mode);
+    Err(jet::ExitCodes::USER_ERROR)
+}
+
+fn collect_capture_items(
+    items: &[Item],
+    aliases: &HashMap<String, String>,
+    sites: &mut Vec<CaptureSite>,
+) {
+    for item in items {
+        match item {
+            Item::Func(func) => collect_capture_func(func, aliases, sites),
+            Item::Impl(implementation) => {
+                for func in &implementation.methods {
+                    collect_capture_func(func, aliases, sites);
+                }
+            }
+            Item::Struct(definition) => {
+                for func in &definition.methods {
+                    collect_capture_func(func, aliases, sites);
+                }
+            }
+            Item::Enum(definition) => {
+                for func in &definition.methods {
+                    collect_capture_func(func, aliases, sites);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_capture_items(body, aliases, sites);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_capture_func(
+    func: &Func,
+    aliases: &HashMap<String, String>,
+    sites: &mut Vec<CaptureSite>,
+) {
+    collect_capture_statements(&func.body, aliases, sites);
+}
+
+fn collect_capture_statements(
+    statements: &[Stmt],
+    aliases: &HashMap<String, String>,
+    sites: &mut Vec<CaptureSite>,
+) {
+    for statement in statements {
+        match statement {
+            Stmt::Expr(expr) | Stmt::Yield(expr, _) => collect_capture_expr(expr, aliases, sites),
+            Stmt::Val(binding) => collect_capture_expr(&binding.init, aliases, sites),
+            Stmt::Assign { target, value, .. } => {
+                collect_capture_lvalue(target, aliases, sites);
+                collect_capture_expr(value, aliases, sites);
+            }
+            Stmt::Return(Some(expr), _)
+            | Stmt::BreakValue(expr, _)
+            | Stmt::BreakLabelValue(_, _, expr, _) => collect_capture_expr(expr, aliases, sites),
+            Stmt::While { cond, body, .. } => {
+                collect_capture_expr(cond, aliases, sites);
+                collect_capture_statements(body, aliases, sites);
+            }
+            Stmt::For { kind, body, .. } => {
+                match kind {
+                    jet::AST::ForKind::Range { start, end, step, .. } => {
+                        collect_capture_expr(start, aliases, sites);
+                        collect_capture_expr(end, aliases, sites);
+                        if let Some(step) = step {
+                            collect_capture_expr(step, aliases, sites);
+                        }
+                    }
+                    jet::AST::ForKind::In { collection, step } => {
+                        collect_capture_expr(collection, aliases, sites);
+                        if let Some(step) = step {
+                            collect_capture_expr(step, aliases, sites);
+                        }
+                    }
+                }
+                collect_capture_statements(body, aliases, sites);
+            }
+            Stmt::Switch { subject, arms, else_body, .. }
+            | Stmt::ComptimeSwitch { subject, arms, else_body, .. } => {
+                collect_capture_expr(subject, aliases, sites);
+                for arm in arms {
+                    collect_capture_expr(&arm.cond, aliases, sites);
+                    collect_capture_statements(&arm.body, aliases, sites);
+                }
+                if let Some(body) = else_body {
+                    collect_capture_statements(body, aliases, sites);
+                }
+            }
+            Stmt::CountedLoop { init, cond, step, body, .. } => {
+                collect_capture_expr(&init.init, aliases, sites);
+                collect_capture_expr(cond, aliases, sites);
+                if let Some(step) = step {
+                    collect_capture_statements(std::slice::from_ref(step), aliases, sites);
+                }
+                collect_capture_statements(body, aliases, sites);
+            }
+            Stmt::Unsafe { body, .. } => {
+                sites.push(CaptureSite {
+                    operation: "#Unsafe raw boundary".to_string(),
+                    effect: None,
+                });
+                collect_capture_statements(body, aliases, sites);
+            }
+            Stmt::TaskGroup { body, .. } | Stmt::Reactive { body, .. } => {
+                sites.push(CaptureSite {
+                    operation: "task/concurrency boundary".to_string(),
+                    effect: None,
+                });
+                collect_capture_statements(body, aliases, sites);
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. } => collect_capture_statements(body, aliases, sites),
+            Stmt::Return(None, _)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..) => {}
+            _ => {}
+        }
+    }
+}
+
+fn collect_capture_lvalue(
+    target: &jet::AST::LValue,
+    aliases: &HashMap<String, String>,
+    sites: &mut Vec<CaptureSite>,
+) {
+    match target {
+        jet::AST::LValue::Local { .. } => {}
+        jet::AST::LValue::Index { base, index, .. } => {
+            collect_capture_expr(base, aliases, sites);
+            collect_capture_expr(index, aliases, sites);
+        }
+        jet::AST::LValue::Field { base, .. } => collect_capture_expr(base, aliases, sites),
+    }
+}
+
+fn collect_capture_expr(
+    expr: &Expr,
+    aliases: &HashMap<String, String>,
+    sites: &mut Vec<CaptureSite>,
+) {
+    match expr {
+        Expr::Call(call) => {
+            if let Some(effect) = jet::Sema::builtin_effect(&call.name) {
+                sites.push(CaptureSite {
+                    operation: call.name.clone(),
+                    effect: Some(effect),
+                });
+            } else if let Some((module, method)) = call.name.rsplit_once('.') {
+                if let Some(effect) = jet::Sema::core_effect(module, method) {
+                    sites.push(CaptureSite {
+                        operation: call.name.clone(),
+                        effect: Some(effect),
+                    });
+                }
+            }
+            for arg in &call.args {
+                collect_capture_expr(&arg.expr, aliases, sites);
+            }
+        }
+        Expr::MethodCall { receiver, method, args, .. } => {
+            if let Some(path) = capture_receiver_path(receiver) {
+                let mut parts = path.split('.');
+                if let Some(alias) = parts.next() {
+                    if let Some(module) = aliases.get(alias) {
+                        let suffix = parts.collect::<Vec<_>>().join(".");
+                        let module = if suffix.is_empty() {
+                            module.clone()
+                        } else {
+                            format!("{module}.{suffix}")
+                        };
+                        if let Some(effect) = jet::Sema::core_effect(&module, method) {
+                            sites.push(CaptureSite {
+                                operation: format!("{module}.{method}"),
+                                effect: Some(effect),
+                            });
+                        }
+                    }
+                }
+            }
+            collect_capture_expr(receiver, aliases, sites);
+            for arg in args {
+                collect_capture_expr(&arg.expr, aliases, sites);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            sites.push(CaptureSite {
+                operation: "opaque callable".to_string(),
+                effect: None,
+            });
+            collect_capture_expr(callee, aliases, sites);
+            for arg in args {
+                collect_capture_expr(&arg.expr, aliases, sites);
+            }
+        }
+        Expr::Str(parts, _) => {
+            for part in parts {
+                if let jet::AST::StrPart::Interp(value, _) = part {
+                    collect_capture_expr(value, aliases, sites);
+                }
+            }
+        }
+        Expr::ListLit(items, _) => {
+            for item in items {
+                collect_capture_expr(item, aliases, sites);
+            }
+        }
+        Expr::TupleLit(items, _, _) => {
+            for (_, item) in items {
+                collect_capture_expr(item, aliases, sites);
+            }
+        }
+        Expr::MemberSpread { base, .. }
+        | Expr::Spread(base, _)
+        | Expr::Deref(base, _)
+        | Expr::RawOf(base, _)
+        | Expr::Copy(base, _)
+        | Expr::Place(base, _, _)
+        | Expr::Field(base, _, _)
+        | Expr::Present(base, _)
+        | Expr::Ok(base, _)
+        | Expr::Err(base, _)
+        | Expr::Try(base, _, _)
+        | Expr::Paren(base, _) => collect_capture_expr(base, aliases, sites),
+        Expr::MapLit(entries, _) => {
+            for (key, value) in entries {
+                collect_capture_expr(key, aliases, sites);
+                collect_capture_expr(value, aliases, sites);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_capture_expr(base, aliases, sites);
+            collect_capture_expr(index, aliases, sites);
+        }
+        Expr::Slice { base, start, end, range, .. } => {
+            collect_capture_expr(base, aliases, sites);
+            if let Some(range) = range {
+                collect_capture_expr(range, aliases, sites);
+            } else {
+                collect_capture_expr(start, aliases, sites);
+                collect_capture_expr(end, aliases, sites);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            collect_capture_expr(start, aliases, sites);
+            collect_capture_expr(end, aliases, sites);
+        }
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            collect_capture_expr(inner, aliases, sites)
+        }
+        Expr::Binary(_, left, right, _) => {
+            collect_capture_expr(left, aliases, sites);
+            collect_capture_expr(right, aliases, sites);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for operand in operands {
+                collect_capture_expr(operand, aliases, sites);
+            }
+        }
+        Expr::OptField { base, .. } => collect_capture_expr(base, aliases, sites),
+        Expr::StructLit { fields, .. } => {
+            for (_, _, value) in fields {
+                collect_capture_expr(value, aliases, sites);
+            }
+        }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|value| collect_capture_expr(value, aliases, sites))
+        }
+        Expr::EnumLit { args, .. } => {
+            for arg in args {
+                match arg {
+                    jet::AST::EnumLitArg::Positional(value)
+                    | jet::AST::EnumLitArg::Named { expr: value, .. } => {
+                        collect_capture_expr(value, aliases, sites)
+                    }
+                }
+            }
+        }
+        Expr::Tainted(inner, _, _) | Expr::PatternTest { subject: inner, .. } => {
+            collect_capture_expr(inner, aliases, sites)
+        }
+        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            collect_capture_expr(cond, aliases, sites);
+            collect_capture_statements(then_body, aliases, sites);
+            collect_capture_expr(then_value, aliases, sites);
+            collect_capture_statements(else_body, aliases, sites);
+            collect_capture_expr(else_value, aliases, sites);
+        }
+        Expr::Lambda(lambda) => match &lambda.body {
+            jet::AST::LambdaBody::Expr(value) => collect_capture_expr(value, aliases, sites),
+            jet::AST::LambdaBody::Block(body) => collect_capture_statements(body, aliases, sites),
+        },
+        Expr::OrFallback { value, fallback, .. } => {
+            collect_capture_expr(value, aliases, sites);
+            match fallback {
+                jet::AST::OrFallback::Value(value)
+                | jet::AST::OrFallback::Return(Some(value), _) => {
+                    collect_capture_expr(value, aliases, sites)
+                }
+                jet::AST::OrFallback::Panic { args, .. } => {
+                    for arg in args {
+                        collect_capture_expr(&arg.expr, aliases, sites);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Expr::PtrFromAddr { addr, .. } => {
+            sites.push(CaptureSite {
+                operation: "native pointer boundary".to_string(),
+                effect: None,
+            });
+            collect_capture_expr(addr, aliases, sites);
+        }
+        _ => {}
+    }
+}
+
+fn capture_receiver_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, field, _) => Some(format!("{}.{field}", capture_receiver_path(base)?)),
+        _ => None,
+    }
 }
 
 fn semantic_front_end_items(
@@ -533,7 +1048,6 @@ fn collect_func_semantics(
                 line,
                 column,
                 marker,
-                claim,
             });
         }
     }
