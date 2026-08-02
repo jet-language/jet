@@ -3,16 +3,18 @@ use core.db as db
 
 fn run() {
     conn := db.open_memory()
-    created :: db.migrate(conn, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate")
-    skipped :: db.migrate(conn, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate again")
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    created :: db.migrate(scoped, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate")
+    skipped :: db.migrate(scoped, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
     insert :: SQL.{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
-    _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
-    failed :: db.transaction(conn, "bad batch", ["INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)", "INSERT INTO missing_table VALUES (1)"]) ?? 0
-    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
+    _inserted :: scoped.execute(insert.template(), db.params(insert)) ?? panic("insert")
+    failed :: db.transaction(scoped, "bad batch", ["INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)", "INSERT INTO missing_table VALUES (1)"]) ?? 0
+    row :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
-    count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
+    count :: scoped.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
     counted :: count ?? panic("missing count")
     print(created)
     print(skipped)
@@ -21,5 +23,5 @@ fn run() {
     print(db.row_text(found, "name") ?? "bad")
     print(db.row_int(found, "active") ?? 0)
     print(db.row_int(counted, "n") ?? 0)
-    _closed :: conn.close()
+    _closed :: scoped.close()
 }

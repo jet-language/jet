@@ -175,19 +175,158 @@
         tokens
     }
 
-    fn db_sql_target_table(sql: &str, tokens: &[(usize, usize, String)], kind: &str) -> Option<String> {
-        let index = if matches!(kind, "select" | "delete") {
-            tokens
-                .iter()
-                .position(|(_, _, word)| word == "from")?
-                .checked_add(1)?
-        } else {
-            tokens
-                .iter()
-                .position(|(_, _, word)| word == kind)?
-                .checked_add(1)?
+    /// Policy rewriting only accepts the small, closed SQL shape that the
+    /// transformer can prove safe. Comments are rejected instead of being
+    /// copied through: a trailing `--` can otherwise hide the predicate that
+    /// this function appends.
+    fn db_sql_contains_comment(sql: &str) -> bool {
+        let bytes = sql.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\'' {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        if bytes.get(i + 1) == Some(&b'\'') {
+                            i += 2;
+                        } else {
+                            i += 1;
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            if bytes.get(i..i + 2) == Some(b"--")
+                || bytes.get(i..i + 2) == Some(b"/*")
+                || bytes.get(i..i + 2) == Some(b"*/")
+            {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    fn db_sql_target_index(tokens: &[(usize, usize, String)], kind: &str) -> Option<usize> {
+        let keyword = match kind {
+            "select" | "delete" => "from",
+            "insert" => "into",
+            _ => kind,
         };
+        tokens
+            .iter()
+            .position(|(_, _, word)| word == keyword)
+            .and_then(|index| index.checked_add(1))
+    }
+
+    fn db_sql_target_table(
+        tokens: &[(usize, usize, String)],
+        kind: &str,
+    ) -> Option<String> {
+        let index = db_sql_target_index(tokens, kind)?;
         tokens.get(index).map(|(_, _, word)| word.clone())
+    }
+
+    /// Reject joins, aliases, subqueries, and other shapes for which adding a
+    /// bare `owner = ?` predicate is not a proof of row isolation. A policy
+    /// scope fails closed rather than guessing which relation an unqualified
+    /// owner column belongs to.
+    fn db_sql_simple_target(sql: &str, tokens: &[(usize, usize, String)], kind: &str) -> bool {
+        let count = |word: &str| tokens.iter().filter(|(_, _, token)| token == word).count();
+        if count("join") > 0
+            || count("union") > 0
+            || count("with") > 0
+            || count("except") > 0
+            || count("intersect") > 0
+            || count("conflict") > 0
+            || count("upsert") > 0
+            || count("replace") > 0
+            || count("select") > if kind == "select" { 1 } else { 0 }
+            || count("from") > if matches!(kind, "select" | "delete") { 1 } else { 0 }
+        {
+            return false;
+        }
+        let Some(target) = db_sql_target_index(tokens, kind) else {
+            return false;
+        };
+        let Some((_, target_end, _)) = tokens.get(target) else {
+            return false;
+        };
+        match kind {
+            "select" | "delete" => {
+                let clause = tokens
+                    .iter()
+                    .skip(target + 1)
+                    .find(|(_, _, word)| {
+                        matches!(word.as_str(), "where" | "order" | "group" | "limit" | "offset" | "returning")
+                    })
+                    .map(|(start, _, _)| *start)
+                    .unwrap_or(sql.len());
+                sql[*target_end..clause].trim().is_empty()
+            }
+            "update" => {
+                let Some((set_index, (set_start, _, _))) = tokens
+                    .iter()
+                    .enumerate()
+                    .skip(target + 1)
+                    .find(|(_, (_, _, word))| word == "set")
+                else {
+                    return false;
+                };
+                let _ = set_index;
+                sql[*target_end..*set_start].trim().is_empty()
+            }
+            "insert" => count("values") == 1 && count("select") == 0,
+            _ => false,
+        }
+    }
+
+    fn db_sql_insert_columns_and_values(
+        sql: &str,
+        tokens: &[(usize, usize, String)],
+    ) -> Option<(Vec<String>, usize)> {
+        let into = tokens.iter().position(|(_, _, word)| word == "into")?;
+        let table_end = tokens.get(into.checked_add(1)?)?.1;
+        let values = tokens.iter().position(|(_, _, word)| word == "values")?;
+        let column_start = sql[table_end..].find('(')?.checked_add(table_end)?;
+        let column_end = sql[column_start..].find(')')?.checked_add(column_start)?;
+        let value_start = sql[tokens.get(values)?.1..]
+            .find('(')?
+            .checked_add(tokens.get(values)?.1)?;
+        let value_end = sql[value_start..].find(')')?.checked_add(value_start)?;
+        let columns = sql[column_start + 1..column_end]
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        let values = sql[value_start + 1..value_end]
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        if columns.is_empty()
+            || columns.len() != values.len()
+            || columns.iter().any(|column| {
+                column.is_empty()
+                    || !column
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            || values.iter().any(|value| *value != "?")
+        {
+            return None;
+        }
+        let owner = columns
+            .iter()
+            .position(|column| column.eq_ignore_ascii_case("owner"))?;
+        Some((
+            columns
+                .into_iter()
+                .map(str::to_ascii_lowercase)
+                .collect(),
+            owner,
+        ))
     }
 
     fn db_sql_clause_start(tokens: &[(usize, usize, String)], after: usize) -> Option<usize> {
@@ -200,6 +339,37 @@
             .map(|(start, _, _)| *start)
     }
 
+    fn db_sql_update_mutates_owner(tokens: &[(usize, usize, String)]) -> bool {
+        let Some(set_index) = tokens.iter().position(|(_, _, word)| word == "set") else {
+            return false;
+        };
+        let end_index = tokens
+            .iter()
+            .enumerate()
+            .skip(set_index + 1)
+            .find(|(_, (_, _, word))| {
+                matches!(word.as_str(), "where" | "order" | "group" | "limit" | "offset" | "returning")
+            })
+            .map(|(index, _)| index)
+            .unwrap_or(tokens.len());
+        tokens[set_index + 1..end_index]
+            .iter()
+            .any(|(_, _, word)| word == "owner")
+    }
+
+    fn db_sql_is_migration_metadata(sql: &str) -> bool {
+        let normalized = sql
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        normalized.starts_with("create table if not exists __jet_migrations")
+            || normalized.starts_with("select checksum from __jet_migrations where name = ?")
+            || normalized.starts_with(
+                "insert into __jet_migrations (name, checksum) values (?, ?)",
+            )
+    }
+
     /// Apply the closed owner policy to one SQL operation. Unsupported SQL is
     /// rejected, never passed through unscoped. The returned bind list carries
     /// the user as a parameter, so the policy value cannot become SQL text.
@@ -210,33 +380,111 @@
         expression: &str,
         user: &str,
     ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_policy_inner(sql, params, table, expression, user, false)
+    }
+
+    /// Apply a policy while executing an explicit `db.migrate` step. Schema
+    /// statements are an authority of migration, but row statements still use
+    /// the same table/predicate/bind transformation as ordinary scope calls.
+    pub fn jet_db_apply_migration_policy(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        expression: &str,
+        user: &str,
+    ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_policy_inner(sql, params, table, expression, user, true)
+    }
+
+    fn jet_db_apply_policy_inner(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        expression: &str,
+        user: &str,
+        allow_schema: bool,
+    ) -> Result<(String, Vec<DBValue>), DBError> {
         jet_db_policy_validate(table, expression).map_err(|message| DBError { message })?;
         if sql.len() > 1024 * 1024
-            || sql.chars().any(|c| c == ';' || c == '\0' || c.is_control() && !c.is_whitespace())
+            || sql
+                .chars()
+                .any(|c| c == ';' || c == '\0' || (c.is_control() && !c.is_whitespace()))
         {
             return Err(DBError {
                 message: "policy-scoped SQL must be one statement without control characters".to_string(),
+            });
+        }
+        if db_sql_contains_comment(sql) {
+            return Err(DBError {
+                message: "policy-scoped SQL cannot contain comments".to_string(),
+            });
+        }
+        if user.is_empty() || user.len() > 1024 * 1024 || user.chars().any(char::is_control) {
+            return Err(DBError {
+                message: "policy user identity is empty, too long, or contains control characters"
+                    .to_string(),
             });
         }
         let tokens = db_sql_tokens(sql);
         let Some((_, _, first)) = tokens.first() else {
             return Err(DBError { message: "policy-scoped SQL is empty".to_string() });
         };
-        if expression.trim() == "true" {
+        if db_sql_is_migration_metadata(sql) {
+            if !allow_schema {
+                return Err(DBError {
+                    message: "migration metadata is managed only by db.migrate".to_string(),
+                });
+            }
             return Ok((sql.to_string(), params.clone()));
         }
         let kind = first.as_str();
-        if !matches!(kind, "select" | "update" | "delete") {
+        if !matches!(kind, "select" | "update" | "delete" | "insert") {
             if matches!(kind, "create" | "alter" | "drop" | "pragma" | "begin" | "commit" | "rollback") {
-                return Ok((sql.to_string(), params.clone()));
+                if allow_schema {
+                    return Ok((sql.to_string(), params.clone()));
+                }
+                return Err(DBError {
+                    message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls".to_string(),
+                });
             }
             return Err(DBError {
-                message: "owner policy supports SELECT, UPDATE, and DELETE only".to_string(),
+                message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only".to_string(),
             });
         }
-        if db_sql_target_table(sql, &tokens, kind).as_deref() != Some(&table.to_ascii_lowercase()) {
+        let expected_table = table.to_ascii_lowercase();
+        if db_sql_target_table(&tokens, kind).as_deref() != Some(expected_table.as_str()) {
             return Err(DBError {
                 message: format!("policy scope targets table `{table}`"),
+            });
+        }
+        if !db_sql_simple_target(sql, &tokens, kind) {
+            return Err(DBError {
+                message: "policy-scoped SQL must name one simple target table without joins or subqueries".to_string(),
+            });
+        }
+        if expression.trim() == "true" {
+            return Ok((sql.to_string(), params.clone()));
+        }
+        if kind == "insert" {
+            let Some((columns, owner_index)) = db_sql_insert_columns_and_values(sql, &tokens)
+            else {
+                return Err(DBError {
+                    message: "owner policy requires INSERT columns and `?` values with an owner column"
+                        .to_string(),
+                });
+            };
+            if columns.len() != params.len() {
+                return Err(DBError {
+                    message: "owner policy INSERT bind count does not match its columns".to_string(),
+                });
+            }
+            let mut scoped_params = params.clone();
+            scoped_params[owner_index] = DBValue::Text(user.to_string());
+            return Ok((sql.to_string(), scoped_params));
+        }
+        if kind == "update" && db_sql_update_mutates_owner(&tokens) {
+            return Err(DBError {
+                message: "owner policy does not allow changing the owner column".to_string(),
             });
         }
         let mut scoped_params = params.clone();
@@ -247,14 +495,31 @@
             .map(|(start, end, _)| (*start, *end));
         let insertion = where_token
             .and_then(|(_, end)| db_sql_clause_start(&tokens, end))
+            .or_else(|| db_sql_clause_start(&tokens, 0))
             .unwrap_or_else(|| sql.len());
         let (head, tail) = sql.split_at(insertion);
-        let predicate = if where_token.is_some() {
-            " AND owner = ?"
+        let suffix = if tail.trim().is_empty() {
+            String::new()
         } else {
-            " WHERE owner = ?"
+            format!(" {}", tail.trim_start())
         };
-        Ok((format!("{}{}{}", head.trim_end(), predicate, tail), scoped_params))
+        let scoped_sql = if let Some((where_start, where_end)) = where_token {
+            let condition = sql[where_end..insertion].trim();
+            if condition.is_empty() {
+                return Err(DBError {
+                    message: "policy-scoped SQL has an empty WHERE clause".to_string(),
+                });
+            }
+            format!(
+                "{}WHERE ({}) AND owner = ?{}",
+                &sql[..where_start],
+                condition,
+                suffix,
+            )
+        } else {
+            format!("{} WHERE owner = ?{}", head.trim_end(), suffix)
+        };
+        Ok((scoped_sql, scoped_params))
     }
 
     // ── core.db wire codec ──────────────────────────────────────────────────────
@@ -497,6 +762,131 @@
             hash = hash.wrapping_mul(0x100000001b3);
         }
         format!("{hash:016x}")
+    }
+
+    /// One transaction/migration state machine for every execution tier. The
+    /// backend only supplies begin/commit/rollback and policy-bound SQL I/O;
+    /// ordering, checksums, and rollback meaning stay here (I9).
+    pub trait JetDBBackend {
+        fn begin(&mut self) -> bool;
+        fn commit(&mut self) -> bool;
+        fn rollback(&mut self);
+        fn execute(
+            &mut self,
+            sql: &String,
+            params: &Vec<DBValue>,
+            allow_schema: bool,
+        ) -> Result<i64, DBError>;
+        fn query(
+            &mut self,
+            sql: &String,
+            params: &Vec<DBValue>,
+            allow_schema: bool,
+        ) -> Result<Vec<std::collections::BTreeMap<String, DBValue>>, DBError>;
+    }
+
+    pub fn jet_db_transaction<B: JetDBBackend>(
+        backend: &mut B,
+        label: &String,
+        steps: &Vec<String>,
+    ) -> Result<i64, DBError> {
+        if !backend.begin() {
+            return Err(DBError {
+                message: format!("could not begin transaction: {label}"),
+            });
+        }
+        let empty = Vec::new();
+        let mut done = 0;
+        for sql in steps {
+            match backend.execute(sql, &empty, false) {
+                Ok(_) => done += 1,
+                Err(error) => {
+                    backend.rollback();
+                    return Err(error);
+                }
+            }
+        }
+        if backend.commit() {
+            Ok(done)
+        } else {
+            Err(DBError {
+                message: "could not commit transaction".to_string(),
+            })
+        }
+    }
+
+    pub fn jet_db_migrate<B: JetDBBackend>(
+        backend: &mut B,
+        name: &String,
+        steps: &Vec<String>,
+    ) -> Result<i64, DBError> {
+        if !backend.begin() {
+            return Err(DBError {
+                message: format!("could not begin migration `{name}`"),
+            });
+        }
+        let empty = Vec::new();
+        let create_sql =
+            "CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)"
+                .to_string();
+        if let Err(error) = backend.execute(&create_sql, &empty, true) {
+            backend.rollback();
+            return Err(error);
+        }
+        let checksum = jet_db_migration_checksum(steps);
+        let check_sql = "SELECT checksum FROM __jet_migrations WHERE name = ?".to_string();
+        let check_params = vec![DBValue::Text(name.clone())];
+        let existing = match backend.query(&check_sql, &check_params, true) {
+            Ok(rows) => rows,
+            Err(error) => {
+                backend.rollback();
+                return Err(error);
+            }
+        };
+        if let Some(row) = existing.into_iter().next() {
+            let old = row
+                .get("checksum")
+                .and_then(|value| value.text().ok())
+                .unwrap_or_default();
+            if old == checksum {
+                if backend.commit() {
+                    return Ok(0);
+                }
+                return Err(DBError {
+                    message: format!("could not commit migration `{name}`"),
+                });
+            }
+            backend.rollback();
+            return Err(DBError {
+                message: format!("migration `{name}` checksum changed"),
+            });
+        }
+        let mut done = 0;
+        for sql in steps {
+            match backend.execute(sql, &empty, true) {
+                Ok(_) => done += 1,
+                Err(error) => {
+                    backend.rollback();
+                    return Err(error);
+                }
+            }
+        }
+        let insert_sql = "INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)".to_string();
+        let insert_params = vec![
+            DBValue::Text(name.clone()),
+            DBValue::Text(checksum),
+        ];
+        if let Err(error) = backend.execute(&insert_sql, &insert_params, true) {
+            backend.rollback();
+            return Err(error);
+        }
+        if backend.commit() {
+            Ok(done)
+        } else {
+            Err(DBError {
+                message: format!("could not commit migration `{name}`"),
+            })
+        }
     }
 
     // ── D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin wire helpers ────────────

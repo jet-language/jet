@@ -5,11 +5,13 @@
 // diagnostic code: `DB.Read` does not cover its sibling `DB.Write`.
 use core.db as db
 
-fn touch(conn: DBConnection) =[DB.Read]=> {
+fn touch(conn: DBScope) =[DB.Read]=> {
     _rows :: conn.execute("UPDATE person SET active = 1", []) ?? 0
 }
 
 fn run() {
     conn :: db.open_memory()
-    touch(conn)
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped :: conn.with_policy(policy, "owner") ?? panic("scope")
+    touch(scoped)
 }

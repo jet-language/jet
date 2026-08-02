@@ -7,34 +7,36 @@ use core.db as db
 
 fn run() {
     conn :: db.open_memory()
-    _created :: conn.execute("CREATE TABLE greet (id INTEGER PRIMARY KEY, msg TEXT)", []) ?? panic("create failed")
+    policy :: db.policy("greet", "true") ?? panic("policy failed")
+    scoped :: conn.with_policy(policy, "owner") ?? panic("scope failed")
+    _created :: db.migrate(scoped, "greet-v1", ["CREATE TABLE greet (id INTEGER PRIMARY KEY, msg TEXT)"]) ?? panic("create failed")
     // An "injection-looking" literal — because it is a BIND PARAMETER, not
     // spliced SQL text, it round-trips as inert data.
     evil :: "'; DROP TABLE greet; --"
-    _ins1 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text(evil)]) ?? panic("insert failed")
-    _ins2 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("hello, jet.db!")]) ?? panic("insert failed")
-    rows :: conn.query("SELECT msg FROM greet ORDER BY id", []) ?? panic("query failed")
+    _ins1 :: scoped.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text(evil)]) ?? panic("insert failed")
+    _ins2 :: scoped.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("hello, jet.db!")]) ?? panic("insert failed")
+    rows :: scoped.query("SELECT msg FROM greet ORDER BY id", []) ?? panic("query failed")
     loop row, rows {
         msg_val :: row.get("msg") ?? panic("missing msg")
         msg :: msg_val.text() ?? panic("msg is not text")
         print(msg)
     }
     // Prove the table survived the "injection": still exactly 2 rows.
-    count_opt :: conn.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
+    count_opt :: scoped.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
     if count_opt == .Val(count_row) {
         n_val :: count_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")
         print("row count: {n}")
     }
     // A transaction: an insert inside begin/rollback must not stick.
-    _begun :: conn.begin()
-    _ins3 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("temporary")]) ?? panic("insert failed")
-    _rolledback :: conn.rollback()
-    after_opt :: conn.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
+    _begun :: scoped.begin()
+    _ins3 :: scoped.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("temporary")]) ?? panic("insert failed")
+    _rolledback :: scoped.rollback()
+    after_opt :: scoped.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
     if after_opt == .Val(after_row) {
         n_val :: after_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")
         print("row count after rollback: {n}")
     }
-    _closed :: conn.close()
+    _closed :: scoped.close()
 }

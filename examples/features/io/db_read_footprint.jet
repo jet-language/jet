@@ -9,7 +9,7 @@ use core.db as db
 // A checked read-only query: its inferred effect is exactly `DB.Read`, so the
 // `=[DB.Read]=>` bound holds. Decoding a row value (`.get`/`.int`) is pure, so it
 // adds no effect — only the `conn.query_one` read does.
-fn person_count(conn: DBConnection) =[DB.Read]=> Int {
+fn person_count(conn: DBScope) =[DB.Read]=> Int {
     row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
     if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")
@@ -20,9 +20,11 @@ fn person_count(conn: DBConnection) =[DB.Read]=> Int {
 
 fn run() {
     conn :: db.open_memory()
-    _created :: conn.execute("CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)", []) ?? panic("create failed")
-    _a :: conn.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Ada")]) ?? panic("insert failed")
-    _b :: conn.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Grace")]) ?? panic("insert failed")
-    print("people: {person_count(conn)}")
-    _closed :: conn.close()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped :: conn.with_policy(policy, "owner") ?? panic("scope")
+    _created :: db.migrate(scoped, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"]) ?? panic("create failed")
+    _a :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Ada")]) ?? panic("insert failed")
+    _b :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Grace")]) ?? panic("insert failed")
+    print("people: {person_count(scoped)}")
+    _closed :: scoped.close()
 }

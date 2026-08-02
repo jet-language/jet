@@ -82,10 +82,11 @@ fn new_scope(connection: u64, table: String, expression: String, user: String) -
         return 0;
     }
     let id = NEXT_DB_SCOPE.fetch_add(1, Ordering::Relaxed);
+    let base = base_handle(connection);
     DB_SCOPES.with(|scopes| {
         scopes
             .borrow_mut()
-            .insert(id, (base_handle(connection), table, expression, user));
+            .insert(id, (base, table, expression, user));
     });
     id as i64
 }
@@ -183,12 +184,13 @@ extern "C" fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) ->
     let Some((table, expression)) = policy_record_parts(policy) else {
         return 0;
     };
-    new_scope(
+    let scope = new_scope(
         connection as u64,
         table,
         expression,
         clone_heap_string(user),
-    )
+    );
+    scope
 }
 
 fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DBValue>>) -> i64 {
@@ -338,11 +340,6 @@ extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
     }
 }
 
-fn empty_params_wire() -> String {
-    let empty: Vec<wire::DBValue> = Vec::new();
-    wire::jet_db_encode_params(&empty)
-}
-
 fn list_of_strings(list: i64) -> Vec<String> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);
@@ -355,114 +352,107 @@ fn list_of_strings(list: i64) -> Vec<String> {
     })
 }
 
-extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
-    let name_s = clone_heap_string(name);
-    let steps_v = list_of_strings(steps);
-    let empty = empty_params_wire();
-    if !runtime::jet_db_begin(conn as u64) {
-        return result_err_msg(&format!("could not begin migration `{name_s}`"));
-    }
-    let create_sql =
-        "CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)"
-            .to_string();
-    match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
-        conn as u64,
-        &create_sql,
-        &empty,
-    )) {
-        Err(e) => {
-            let _ = runtime::jet_db_rollback(conn as u64);
-            return result_err_msg(&e.message);
-        }
-        Ok(_) => {}
-    }
-    let checksum = wire::jet_db_migration_checksum(&steps_v);
-    let check_sql = "SELECT checksum FROM __jet_migrations WHERE name = ?".to_string();
-    let check_vec = vec![wire::DBValue::Text(name_s.clone())];
-    let check_params = wire::jet_db_encode_params(&check_vec);
-    let existing = match wire::jet_db_decode_query_result(&runtime::jet_db_query(
-        conn as u64,
-        &check_sql,
-        &check_params,
-    )) {
-        Err(e) => {
-            let _ = runtime::jet_db_rollback(conn as u64);
-            return result_err_msg(&e.message);
-        }
-        Ok(rows) => rows,
+fn scoped_execute(
+    scope: u64,
+    sql: &str,
+    params: &Vec<wire::DBValue>,
+    allow_schema: bool,
+) -> Result<i64, wire::DBError> {
+    let Some((base, table, expression, user)) = scope_parts(scope) else {
+        return Err(wire::DBError {
+            message: "database row operations require a policy scope".to_string(),
+        });
     };
-    if let Some(row) = existing.into_iter().next() {
-        let old = row
-            .get("checksum")
-            .and_then(|v| v.text().ok())
-            .unwrap_or_default();
-        if old == checksum {
-            if runtime::jet_db_commit(conn as u64) {
-                return result_ok_bits(0);
-            }
-            return result_err_msg(&format!("could not commit migration `{name_s}`"));
-        }
-        let _ = runtime::jet_db_rollback(conn as u64);
-        return result_err_msg(&format!("migration `{name_s}` checksum changed"));
-    }
-    let mut done: i64 = 0;
-    for sql in &steps_v {
-        match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
-            conn as u64, sql, &empty,
-        )) {
-            Ok(_) => done += 1,
-            Err(e) => {
-                let _ = runtime::jet_db_rollback(conn as u64);
-                return result_err_msg(&e.message);
-            }
-        }
-    }
-    let insert_sql = "INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)".to_string();
-    let insert_vec = vec![
-        wire::DBValue::Text(name_s.clone()),
-        wire::DBValue::Text(checksum),
-    ];
-    let insert_params = wire::jet_db_encode_params(&insert_vec);
-    match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
-        conn as u64,
-        &insert_sql,
-        &insert_params,
-    )) {
-        Err(e) => {
-            let _ = runtime::jet_db_rollback(conn as u64);
-            return result_err_msg(&e.message);
-        }
-        Ok(_) => {}
-    }
-    if runtime::jet_db_commit(conn as u64) {
-        result_ok_bits(done as u64)
+    let (sql, values) = if allow_schema {
+        wire::jet_db_apply_migration_policy(sql, params, &table, &expression, &user)?
     } else {
-        result_err_msg(&format!("could not commit migration `{name_s}`"))
+        wire::jet_db_apply_policy(sql, params, &table, &expression, &user)?
+    };
+    let result = runtime::jet_db_execute(base, &sql, &wire::jet_db_encode_params(&values));
+    wire::jet_db_decode_execute_result(&result)
+}
+
+fn scoped_query(
+    scope: u64,
+    sql: &str,
+    params: &Vec<wire::DBValue>,
+    allow_schema: bool,
+) -> Result<Vec<std::collections::BTreeMap<String, wire::DBValue>>, wire::DBError> {
+    let Some((base, table, expression, user)) = scope_parts(scope) else {
+        return Err(wire::DBError {
+            message: "database row operations require a policy scope".to_string(),
+        });
+    };
+    let (sql, values) = if allow_schema {
+        wire::jet_db_apply_migration_policy(sql, params, &table, &expression, &user)?
+    } else {
+        wire::jet_db_apply_policy(sql, params, &table, &expression, &user)?
+    };
+    let result = runtime::jet_db_query(base, &sql, &wire::jet_db_encode_params(&values));
+    wire::jet_db_decode_query_result(&result)
+}
+
+struct JitDbBackend {
+    scope: u64,
+}
+
+impl wire::JetDBBackend for JitDbBackend {
+    fn begin(&mut self) -> bool {
+        runtime::jet_db_begin(base_handle(self.scope))
+    }
+
+    fn commit(&mut self) -> bool {
+        runtime::jet_db_commit(base_handle(self.scope))
+    }
+
+    fn rollback(&mut self) {
+        let _ = runtime::jet_db_rollback(base_handle(self.scope));
+    }
+
+    fn execute(
+        &mut self,
+        sql: &String,
+        params: &Vec<wire::DBValue>,
+        allow_schema: bool,
+    ) -> Result<i64, wire::DBError> {
+        scoped_execute(self.scope, sql, params, allow_schema)
+    }
+
+    fn query(
+        &mut self,
+        sql: &String,
+        params: &Vec<wire::DBValue>,
+        allow_schema: bool,
+    ) -> Result<Vec<std::collections::BTreeMap<String, wire::DBValue>>, wire::DBError> {
+        scoped_query(self.scope, sql, params, allow_schema)
     }
 }
 
-extern "C" fn jet_jit_db_transaction(conn: i64, _label: i64, steps: i64) -> i64 {
+extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
+    let scope = conn as u64;
+    if scope_parts(scope).is_none() {
+        return result_err_msg("database migration requires a policy scope");
+    }
+    let name_s = clone_heap_string(name);
     let steps_v = list_of_strings(steps);
-    let empty = empty_params_wire();
-    if !runtime::jet_db_begin(conn as u64) {
-        return result_err_msg("could not begin transaction");
+    let mut backend = JitDbBackend { scope };
+    match wire::jet_db_migrate(&mut backend, &name_s, &steps_v) {
+        Ok(done) => result_ok_bits(done as u64),
+        Err(error) => result_err_msg(&error.message),
     }
-    let mut done: i64 = 0;
-    for sql in &steps_v {
-        match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
-            conn as u64, sql, &empty,
-        )) {
-            Ok(_) => done += 1,
-            Err(e) => {
-                let _ = runtime::jet_db_rollback(conn as u64);
-                return result_err_msg(&e.message);
-            }
-        }
+}
+
+extern "C" fn jet_jit_db_transaction(conn: i64, label: i64, steps: i64) -> i64 {
+    let scope = conn as u64;
+    if scope_parts(scope).is_none() {
+        return result_err_msg("database transaction requires a policy scope");
     }
-    if runtime::jet_db_commit(conn as u64) {
-        result_ok_bits(done as u64)
-    } else {
-        result_err_msg("could not commit transaction")
+    let label_s = clone_heap_string(label);
+    let steps_v = list_of_strings(steps);
+    let mut backend = JitDbBackend { scope };
+    match wire::jet_db_transaction(&mut backend, &label_s, &steps_v) {
+        Ok(done) => result_ok_bits(done as u64),
+        Err(error) => result_err_msg(&error.message),
     }
 }
 
