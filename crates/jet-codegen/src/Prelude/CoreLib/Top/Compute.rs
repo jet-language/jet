@@ -921,7 +921,7 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
     }
     Ok(JetTensor {
         shape: tensor.shape.clone(),
-        strides: tensor.strides.clone(),
+        strides: jet_compute_row_major_strides(&tensor.shape)?,
         data: std::sync::Arc::new(data),
         device: receipt.selected,
         last_placement: receipt,

@@ -89,10 +89,8 @@ pub fn store_cached(key: &str, bin: &Path) {
         return;
     }
     if fs::rename(&tmp, &dest).is_err() {
-        // Rename can fail across some filesystems; fall back to a direct copy
-        // and clean up the temp file either way.
-        let _ = fs::copy(&tmp, &dest);
         let _ = fs::remove_file(&tmp);
+        return;
     }
     let digest_path = cached_digest(key);
     let digest_tmp = dir.join(format!("bin.sha256.tmp.{}", std::process::id()));
@@ -101,8 +99,8 @@ pub fn store_cached(key: &str, bin: &Path) {
         return;
     }
     if fs::rename(&digest_tmp, &digest_path).is_err() {
-        let _ = fs::copy(&digest_tmp, &digest_path);
         let _ = fs::remove_file(&digest_tmp);
+        return;
     }
 }
 
