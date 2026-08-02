@@ -183,6 +183,7 @@ pub(crate) struct Obligation {
     pub origin: String,
     pub span: String,
     pub formula: Formula,
+    pub unsupported_reason: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -234,6 +235,14 @@ pub(crate) fn run_solver_producer(
     }
     let mut out = Vec::new();
     for obligation in obligations {
+        if let Some(reason) = obligation.unsupported_reason {
+            out.push(SolverEvidence {
+                evidence_id: evidence_id_for(&obligation, "unknown"),
+                obligation,
+                outcome: SolverOutcome::Unknown { reason, steps: 0 },
+            });
+            continue;
+        }
         if obligation.formula.term_count() > MAX_TERMS
             || obligation.formula.variables().len() > MAX_VARS
         {
@@ -395,6 +404,7 @@ fn walk_items(
                         origin: path.to_string(),
                         span: span_text,
                         formula,
+                        unsupported_reason: None,
                     });
                 }
             }
@@ -465,20 +475,40 @@ fn collect_func_contracts(
     func: &jet::AST::Func,
     out: &mut Vec<Obligation>,
 ) {
+    if func.post.is_empty() {
+        return;
+    }
     let mut assumptions = Vec::new();
+    let mut unsupported_reason = None;
     for clause in &func.pre {
-        if let Some(ineqs) = expr_to_inequalities(&clause.cond) {
-            assumptions.extend(ineqs);
+        match expr_to_inequalities(&clause.cond) {
+            Some(ineqs) => assumptions.extend(ineqs),
+            None => unsupported_reason = Some("unsupported_formula"),
         }
+    }
+    let mut substitutions = func
+        .params
+        .iter()
+        .map(|param| (param.name.clone(), Affine::var(&param.name, 1)))
+        .collect::<BTreeMap<_, _>>();
+    match affine_return_expression(func, &substitutions) {
+        Ok(Some(return_value)) => {
+            substitutions.insert("result".into(), return_value);
+        }
+        Ok(None) => unsupported_reason = Some("unsupported_formula"),
+        Err(reason) => unsupported_reason = Some(reason),
     }
     let mut claim = Vec::new();
     for clause in &func.post {
-        if let Some(ineqs) = expr_to_inequalities(&clause.cond) {
-            claim.extend(ineqs);
+        match expr_to_inequalities_with_subst(&clause.cond, &substitutions) {
+            Some(ineqs) => claim.extend(ineqs),
+            None => unsupported_reason = Some("unsupported_formula"),
         }
     }
     if claim.is_empty() {
-        return;
+        if unsupported_reason.is_none() {
+            return;
+        }
     }
     let formula = Formula {
         assumptions,
@@ -499,7 +529,46 @@ fn collect_func_contracts(
         origin: format!("{path}::{}", func.name),
         span,
         formula,
+        unsupported_reason,
     });
+}
+
+/// Return the affine value of a covered straight-line function body.
+///
+/// The solver is deliberately stricter than the parser: only immutable named
+/// bindings followed by one affine return are covered. Every other shape is
+/// an honest `unsupported_formula`, never an unconstrained-result proof.
+fn affine_return_expression(
+    func: &jet::AST::Func,
+    substitutions: &BTreeMap<String, Affine>,
+) -> Result<Option<Affine>, &'static str> {
+    let Some((last, prefix)) = func.body.split_last() else {
+        return Ok(None);
+    };
+    let mut substitutions = substitutions.clone();
+    for statement in prefix {
+        let jet::AST::Stmt::Val(binding) = statement else {
+            return Err("unsupported_formula");
+        };
+        if binding.mutable
+            || binding.pattern.is_some()
+            || binding.uninit
+            || binding.arena_view
+            || binding.string_view
+        {
+            return Err("unsupported_formula");
+        }
+        let value = expr_to_affine_with_subst(&binding.init, &substitutions)
+            .ok_or("unsupported_formula")?;
+        substitutions.insert(binding.name.clone(), value);
+    }
+    match last {
+        jet::AST::Stmt::Return(Some(value), _) => Ok(Some(
+            expr_to_affine_with_subst(value, &substitutions)
+                .ok_or("unsupported_formula")?,
+        )),
+        _ => Err("unsupported_formula"),
+    }
 }
 
 fn collect_call_preconditions(
@@ -510,37 +579,59 @@ fn collect_call_preconditions(
     specs: &BTreeMap<String, FunctionSpec>,
     out: &mut Vec<Obligation>,
 ) {
-    let assumptions = func
-        .pre
-        .iter()
-        .filter_map(|clause| expr_to_inequalities(&clause.cond))
-        .flatten()
-        .collect::<Vec<_>>();
-    let mut calls = Vec::<jet::AST::Call>::new();
-    for statement in &func.body {
-        visit_stmt_calls(statement, &mut |call| calls.push(call.clone()));
+    let mut assumptions = Vec::new();
+    let mut caller_pre_unsupported = false;
+    for clause in &func.pre {
+        match expr_to_inequalities(&clause.cond) {
+            Some(ineqs) => assumptions.extend(ineqs),
+            None => caller_pre_unsupported = true,
+        }
     }
-    for call in calls {
+    let mut caller_substitutions = func
+        .params
+        .iter()
+        .map(|param| (param.name.clone(), Affine::var(&param.name, 1)))
+        .collect::<BTreeMap<_, _>>();
+    let mut calls = Vec::<(jet::AST::Call, BTreeMap<String, Affine>)>::new();
+    for statement in &func.body {
+        visit_stmt_calls(statement, &mut |call| {
+            calls.push((call.clone(), caller_substitutions.clone()))
+        });
+        if let jet::AST::Stmt::Val(binding) = statement {
+            if !binding.mutable && binding.pattern.is_none() {
+                if let Some(value) = expr_to_affine_with_subst(
+                    &binding.init,
+                    &caller_substitutions,
+                ) {
+                    caller_substitutions.insert(binding.name.clone(), value);
+                }
+            }
+        }
+    }
+    for (call, caller_substitutions) in calls {
         let Some(spec) = specs.get(&call.name) else {
             continue;
         };
         if spec.pre.is_empty() {
             continue;
         }
-        let Some(substitutions) = bind_call_arguments(&spec.params, &call.args) else {
-            continue;
-        };
         let mut claim = Vec::new();
-        let mut supported = true;
-        for condition in &spec.pre {
-            let Some(inequalities) = expr_to_inequalities_with_subst(condition, &substitutions)
-            else {
-                supported = false;
-                break;
-            };
-            claim.extend(inequalities);
+        let mut unsupported_reason = caller_pre_unsupported.then_some("unsupported_formula");
+        if let Some(substitutions) = bind_call_arguments(
+            &spec.params,
+            &call.args,
+            &caller_substitutions,
+        ) {
+            for condition in &spec.pre {
+                match expr_to_inequalities_with_subst(condition, &substitutions) {
+                    Some(inequalities) => claim.extend(inequalities),
+                    None => unsupported_reason = Some("unsupported_formula"),
+                }
+            }
+        } else {
+            unsupported_reason = Some("unsupported_formula");
         }
-        if !supported || claim.is_empty() {
+        if claim.is_empty() && unsupported_reason.is_none() {
             continue;
         }
         let formula = Formula { assumptions: assumptions.clone(), claim };
@@ -561,6 +652,7 @@ fn collect_call_preconditions(
             origin,
             span,
             formula,
+            unsupported_reason,
         });
     }
 }
@@ -568,6 +660,7 @@ fn collect_call_preconditions(
 fn bind_call_arguments(
     params: &[String],
     args: &[jet::AST::CallArg],
+    caller_substitutions: &BTreeMap<String, Affine>,
 ) -> Option<BTreeMap<String, Affine>> {
     if params.len() != args.len() || args.iter().any(|arg| arg.spread) {
         return None;
@@ -588,7 +681,7 @@ fn bind_call_arguments(
         if index >= slots.len() || slots[index].is_some() {
             return None;
         }
-        let affine = expr_to_affine_with_subst(&arg.expr, &BTreeMap::new())?;
+        let affine = expr_to_affine_with_subst(&arg.expr, caller_substitutions)?;
         slots[index] = Some(affine);
     }
     if slots.iter().any(Option::is_none) {
@@ -1577,9 +1670,103 @@ mod tests {
             ],
             claim: vec![Inequality::le(Affine::var("value", -1))],
         };
-        match prove_obligation(&formula) {
-            Ok(SolverOutcome::Proved { .. }) => {}
-            other => panic!("expected proved, got {other:?}"),
-        }
+        assert!(matches!(
+            prove_obligation(&formula),
+            Ok(SolverOutcome::Proved { .. })
+        ));
+    }
+
+    #[test]
+    fn reports_a_counterexample_for_an_unbounded_claim() {
+        let formula = Formula {
+            assumptions: Vec::new(),
+            claim: vec![Inequality::le(Affine::var("value", 1))],
+        };
+        assert!(matches!(
+            prove_obligation(&formula),
+            Ok(SolverOutcome::Disproved { assignment, .. })
+                if assignment.get("value").is_some_and(|value| *value >= 1)
+        ));
+    }
+
+    #[test]
+    fn rejects_a_malformed_certificate() {
+        let formula = Formula {
+            assumptions: vec![Inequality::le(Affine::constant(-1))],
+            claim: vec![Inequality::le(Affine::constant(0))],
+        };
+        assert!(check_certificate(&formula, "{}").is_err());
+    }
+
+    #[test]
+    fn discharges_a_straight_line_affine_postcondition_from_the_body() {
+        let source = r#"
+#[Pre(value > 0, "positive"), Post(result > value, "grows")]
+fn grow(value: Int) => Int {
+    next :: value + 1
+    return next
+}
+"#;
+        let evidence = run_solver_producer(
+            &[("grow.jet".into(), source.into())],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(matches!(
+            evidence[0].outcome,
+            SolverOutcome::Proved { .. }
+        ));
+    }
+
+    #[test]
+    fn carries_dominating_affine_bindings_into_a_call_precondition() {
+        let source = r#"
+#Pre(value > 0, "positive")
+fn checked(value: Int) => Int { return value }
+
+#Pre(input > 0, "positive input")
+fn caller(input: Int) => Int {
+    shifted :: input + 1
+    return checked(shifted)
+}
+"#;
+        let evidence = run_solver_producer(
+            &[("calls.jet".into(), source.into())],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].obligation.kind, "call_precondition");
+        assert!(matches!(
+            evidence[0].outcome,
+            SolverOutcome::Proved { .. }
+        ));
+    }
+
+    #[test]
+    fn marks_an_uncovered_postcondition_body_unknown_instead_of_disproving_it() {
+        let source = r#"
+#Post(result > value, "grows")
+fn nonlinear(value: Int) => Int {
+    return value * value
+}
+"#;
+        let evidence = run_solver_producer(
+            &[("nonlinear.jet".into(), source.into())],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(matches!(
+            evidence[0].outcome,
+            SolverOutcome::Unknown {
+                reason: "unsupported_formula",
+                ..
+            }
+        ));
     }
 }

@@ -399,7 +399,12 @@ fn finalize_artifact(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(error.to_string());
     }
     #[cfg(unix)]
-    if let Some(parent) = path.parent() {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    #[cfg(unix)]
+    {
         let directory = fs::File::open(parent).map_err(|e| e.to_string())?;
         directory.sync_all().map_err(|e| e.to_string())?;
     }
@@ -1239,4 +1244,56 @@ fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
 pub(crate) fn fail_usage(message: &str) -> ! {
     eprintln!("error: {message}");
     exit(ExitCodes::USAGE);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity() -> ReplayIdentity {
+        ReplayIdentity {
+            entry: "examples/prove.jet".into(),
+            source_digest: "source-digest".into(),
+            execution_adapter: "dev-tir-v1".into(),
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+        }
+    }
+
+    #[test]
+    fn safe_time_artifact_round_trips_and_preserves_authority() {
+        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let header = parse_and_verify(&bytes).unwrap();
+        assert_eq!(header.get("schema").map(String::as_str), Some("jet.replay"));
+        assert_eq!(header.get("run_outcome").map(String::as_str), Some("exit"));
+        assert_eq!(header.get("run_status").map(String::as_str), Some("0"));
+        assert_eq!(extract_first_time_ms(&bytes).unwrap(), 1_234);
+    }
+
+    #[test]
+    fn safe_time_artifact_detects_payload_tampering() {
+        let mut bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+        let payload = 16 + hlen + 15;
+        bytes[payload] ^= 1;
+        assert!(parse_and_verify(&bytes).is_err());
+    }
+
+    #[test]
+    fn replay_rejects_a_different_target_identity() {
+        let path = std::env::temp_dir().join(format!(
+            "jet-replay-identity-{}-{}.jetproof-replay",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        fs::write(&path, bytes).unwrap();
+        let mut different = identity();
+        different.source_digest = "different-source".into();
+        let result = prepare_replay(&different, &path.to_string_lossy());
+        fs::remove_file(&path).unwrap();
+        assert!(matches!(result, Err(("E3621", _))));
+    }
 }

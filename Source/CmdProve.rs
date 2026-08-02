@@ -953,12 +953,12 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         if !metadata.is_dir() {
             return Err(format!("proof target `{raw}` is not a file or directory"));
         }
-        let kind = match fs::symlink_metadata(path.join("pkg.jet")) {
-            Ok(metadata) if metadata.is_file() => "package",
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!("proof manifest `{}` is a symlink", path.join("pkg.jet").display()));
-            }
-            _ => "workspace",
+        let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)?
+            || has_proof_manifest(path, jet::Syntax::PAYLOAD_FILE)?
+        {
+            "package"
+        } else {
+            "workspace"
         };
         let mut found = Vec::new();
         collect_jet_files(path, &mut found)?;
@@ -1009,6 +1009,18 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     })
 }
 
+fn has_proof_manifest(dir: &Path, name: &str) -> Result<bool, String> {
+    let path = dir.join(name);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(format!("proof manifest `{}` is a symlink", path.display()))
+        }
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("couldn't inspect proof manifest `{}`: {error}", path.display())),
+    }
+}
+
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let entries = fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
     for entry in entries {
@@ -1027,7 +1039,10 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         } else if metadata.is_file()
             && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
         {
-            out.push(path);
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            if !matches!(name, "package.jet" | "pkg.jet" | "build.jet") {
+                out.push(path);
+            }
         }
     }
     Ok(())
@@ -1056,7 +1071,10 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             continue;
         }
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        if matches!(name, "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet") {
+        if matches!(
+            name,
+            "package.jet" | "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet"
+        ) {
             out.push(path);
         }
     }
@@ -1533,4 +1551,35 @@ fn ensure_jetproof_parent(path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::resolve_target;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn canonical_package_marker_selects_package_and_enters_identity() {
+        let root = PathBuf::from(format!(
+            "/tmp/jet-prove-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("package.jet"), "name: \"demo\"\n").unwrap();
+        fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+
+        let target = resolve_target(&root.to_string_lossy()).unwrap();
+        assert_eq!(target.kind, "package");
+        assert!(target
+            .identity_members
+            .iter()
+            .any(|(path, _)| path.ends_with("/package.jet")));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

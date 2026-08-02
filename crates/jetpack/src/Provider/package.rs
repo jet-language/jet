@@ -1,8 +1,131 @@
 //! Canonical Jet package facts used by the core provider.
 
 use super::{PackageManifest, SHA256};
-use jet_pkg_model::Package::{PackageFacts, PackageOutputKind};
+use jet_pkg_model::Package::{MemberRef, PackageFacts, PackageOutputKind};
 use std::path::{Path, PathBuf};
+
+/// Resolve the canonical Package that owns a requested package/output. A
+/// monorepo root can carry `members: find(...)`; a sparse source checkout then
+/// contains both that root marker and the addressed member marker. The member
+/// must win, otherwise the provider would compile the workspace root as the
+/// requested package and silently lose the package boundary.
+pub(super) fn find_canonical_package(
+    repo: &Path,
+    requested: &str,
+) -> Result<Option<(PathBuf, PackageFacts)>, String> {
+    let root_marker = repo.join(crate::Syntax::PACKAGE_FILE);
+    let root_marker_metadata = match std::fs::symlink_metadata(&root_marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if root_marker_metadata.file_type().is_symlink() {
+        return Err(format!("canonical Package marker is a symlink: {}", root_marker.display()));
+    }
+    if !root_marker_metadata.is_file() {
+        return Ok(None);
+    }
+    let root = PackageFacts::load(repo)
+        .ok_or_else(|| format!("canonical Package {} could not be read", root_marker.display()))?
+        .map_err(|error| format!("canonical Package {} is invalid: {error}", root_marker.display()))?;
+    let root_matches = root.name == requested || root.outputs.contains_key(requested);
+    if root_matches || root.members.is_empty() {
+        return Ok(Some((repo.to_path_buf(), root)));
+    }
+
+    let mut candidates = Vec::new();
+    root.validate_members_in(repo)
+        .map_err(|error| format!("canonical Package members are invalid: {error}"))?;
+    collect_canonical_packages(repo, &root.members, requested, &mut candidates)?;
+    match candidates.len() {
+        0 => Err(format!(
+            "canonical Package `{requested}` was not found under {}",
+            repo.display()
+        )),
+        1 => Ok(candidates.pop()),
+        _ => Err(format!(
+            "canonical Package `{requested}` is ambiguous under {}",
+            repo.display()
+        )),
+    }
+}
+
+fn collect_canonical_packages(
+    repo: &Path,
+    members: &[MemberRef],
+    requested: &str,
+    out: &mut Vec<(PathBuf, PackageFacts)>,
+) -> Result<(), String> {
+    let mut seen = Vec::new();
+    for member in members {
+        let (relative, discover) = match member {
+            MemberRef::Path(path) => (path.as_str(), false),
+            MemberRef::Find(path) => (path.as_str(), true),
+        };
+        let member_root = repo.join(relative);
+        let metadata = std::fs::symlink_metadata(&member_root)
+            .map_err(|error| format!("could not inspect Package member `{relative}`: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(
+                "Package member `{relative}` is not a regular directory"
+            ));
+        }
+        if discover {
+            let entries = std::fs::read_dir(&member_root)
+                .map_err(|error| format!("could not read Package member discovery `{relative}`: {error}"))?;
+            for entry in entries {
+                let path = entry
+                    .map_err(|error| error.to_string())?
+                    .path();
+                let metadata = std::fs::symlink_metadata(&path)
+                    .map_err(|error| error.to_string())?;
+                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                if metadata.file_type().is_symlink()
+                    || !metadata.is_dir()
+                    || name.starts_with('.')
+                    || matches!(name, "build" | "target")
+                {
+                    continue;
+                }
+                collect_one_canonical_package(&path, requested, &mut seen, out)?;
+            }
+        } else {
+            collect_one_canonical_package(&member_root, requested, &mut seen, out)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_one_canonical_package(
+    path: &Path,
+    requested: &str,
+    seen: &mut Vec<PathBuf>,
+    out: &mut Vec<(PathBuf, PackageFacts)>,
+) -> Result<(), String> {
+    if seen.iter().any(|candidate| candidate == path) {
+        return Ok(());
+    }
+    seen.push(path.to_path_buf());
+    let marker = path.join(crate::Syntax::PACKAGE_FILE);
+    let marker_metadata = match std::fs::symlink_metadata(&marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if marker_metadata.file_type().is_symlink() {
+        return Err(format!("canonical Package marker is a symlink: {}", marker.display()));
+    }
+    if !marker_metadata.is_file() {
+        return Err(format!("canonical Package marker is not a file: {}", marker.display()));
+    }
+    let facts = PackageFacts::load(path)
+        .ok_or_else(|| format!("canonical Package {} could not be read", marker.display()))?
+        .map_err(|error| format!("canonical Package {} is invalid: {error}", marker.display()))?;
+    if facts.name == requested || facts.outputs.contains_key(requested) {
+        out.push((path.to_path_buf(), facts));
+    }
+    Ok(())
+}
 
 pub(super) fn toolchain_facts(
     toolchain: Option<&crate::Toolchain::Toolchain>,

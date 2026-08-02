@@ -10,7 +10,6 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
-use jet_pkg_model::Package::PackageFacts;
 use super::PackageManifest;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
@@ -37,8 +36,8 @@ use remote::{
     source_repo, tree_fingerprint, RemoteSource,
 };
 use package::{
-    canonical_package_kind, canonical_source_dir, core_recipe_identity, toolchain_facts,
-    validate_core_source_tree,
+    canonical_package_kind, canonical_source_dir, core_recipe_identity, find_canonical_package,
+    toolchain_facts, validate_core_source_tree,
 };
 #[cfg(test)]
 use remote::file_has_top_level_run;
@@ -184,18 +183,14 @@ pub fn cache_expectation(
         ProviderKind::Core => {
             let upstream = table.upstream(spec.source.label())?;
             let repo = source_repo(upstream, &spec.package, ctx).ok()?;
-            let canonical = if repo.join("package.jet").is_file() {
-                match PackageFacts::load(&repo) {
-                    Some(Ok(facts)) => Some(facts),
-                    Some(Err(_)) => return None,
-                    None => None,
-                }
-            } else {
-                None
+            let canonical_package = match find_canonical_package(&repo, &spec.package) {
+                Ok(package) => package,
+                Err(_) => return None,
             };
-            let src_dir = canonical
+            let canonical = canonical_package.as_ref().map(|(_, facts)| facts);
+            let src_dir = canonical_package
                 .as_ref()
-                .and_then(|facts| canonical_source_dir(&repo, facts))
+                .and_then(|(root, facts)| canonical_source_dir(root, facts))
                 .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
             validate_core_source_tree(&src_dir).ok()?;
             let source_fingerprint =
@@ -211,7 +206,6 @@ pub fn cache_expectation(
                 (manifest, None)
             };
             let kind = canonical
-                .as_ref()
                 .and_then(|facts| canonical_package_kind(facts, &spec.package))
                 .or_else(|| {
                     manifest
@@ -224,7 +218,7 @@ pub fn cache_expectation(
                 &spec.package,
                 manifest.as_ref(),
                 kind,
-                canonical.as_ref(),
+                canonical,
             );
             let fp = tree_fingerprint(&src_dir);
             Some(super::Store::CacheExpectation {
@@ -636,21 +630,10 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, &spec.package, ctx)?;
+        let canonical_package = find_canonical_package(&repo, &spec.package)
+            .map_err(ProviderError::CoreBuild)?;
         let (src_dir, canonical, canonical_kind, canonical_version) =
-            if repo.join("package.jet").is_file() {
-                let facts = PackageFacts::load(&repo)
-                    .ok_or_else(|| {
-                        ProviderError::CoreBuild(format!(
-                            "canonical Package {} could not be read",
-                            repo.join("package.jet").display()
-                        ))
-                    })?
-                    .map_err(|error| {
-                        ProviderError::CoreBuild(format!(
-                            "canonical Package {} is invalid: {error}",
-                            repo.join("package.jet").display()
-                        ))
-                    })?;
+            if let Some((package_root, facts)) = canonical_package {
                 let source = facts.source.as_deref().unwrap_or(".");
                 let source_path = Path::new(source);
                 if source_path.is_absolute()
@@ -660,10 +643,10 @@ impl Provider for CoreProvider {
                 {
                     return Err(ProviderError::CoreBuild(format!(
                         "canonical Package source `{source}` escapes {}",
-                        repo.display()
+                        package_root.display()
                     )));
                 }
-                let source_dir = repo.join(source_path);
+                let source_dir = package_root.join(source_path);
                 let kind = canonical_package_kind(&facts, &spec.package)
                     .unwrap_or_else(|| infer_package_kind(&source_dir));
                 (
@@ -1384,7 +1367,8 @@ fn stage_adapter_source(
 }
 
 /// U9 remote probe: classify an `…@github`/git upstream as `Core` (it carries a
-/// `pkg.jet`) or `Nix` (it does not), peeking **only** `pkg.jet` — never
+/// `package.jet` or migration-era `pkg.jet`) or `Nix` (it does not), peeking
+/// **only** the root package marker — never
 /// cloning a nixpkgs-sized repo just to classify it.
 ///
 /// Resolution order:
@@ -1393,9 +1377,9 @@ fn stage_adapter_source(
 /// 2. Offline with no cache: we can't probe, so default to `nix`.
 /// 3. Online: a lightweight `git` peek — a partial, no-checkout, depth-1 clone
 ///    (`--filter=tree:0`, so blobs/subtrees are never downloaded) into a temp
-///    dir, then `git ls-tree <rev> pkg.jet`. Present → `Core`; absent or any
-///    peek failure → `Nix` (the safe default; a github flake still realizes
-///    through nix).
+///    dir, then `git ls-tree <rev> package.jet pkg.jet`. Present → `Core`;
+///    absent or any peek failure → `Nix` (the safe default; a github flake
+///    still realizes through nix).
 fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> ProviderKind {
     let Ok(remote) = parse_remote_source(upstream) else {
         return ProviderKind::Nix;
@@ -1403,7 +1387,10 @@ fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> Provide
     // (1) Reuse a prior fetch.
     let cache = source_cache_dir(cache_dir, &remote);
     if cache.is_dir() {
-        return pack_kind(cache.join(crate::Syntax::PAYLOAD_FILE).is_file());
+        return pack_kind(
+            cache.join(crate::Syntax::PACKAGE_FILE).is_file()
+                || cache.join(crate::Syntax::PAYLOAD_FILE).is_file(),
+        );
     }
     // (2) Offline can't reach the network; a remote we haven't cached stays nix.
     if offline {
@@ -1421,16 +1408,17 @@ fn pack_kind(has_pack: bool) -> ProviderKind {
     }
 }
 
-/// Peek whether `remote` has a `pkg.jet` at its root, without a full clone.
+/// Peek whether `remote` has a package marker at its root, without a full clone.
 ///
 /// Fetches **only the named rev** into a throwaway repo, shallow (`--depth 1`)
 /// and partial (`--filter=tree:0`, so trees/blobs are deferred), then reads the
 /// root tree with `git ls-tree FETCH_HEAD`. Even a nixpkgs-sized repo transfers
 /// just the one commit object plus the lazily-fetched root tree. `git fetch`
 /// resolves a branch, tag, **or** commit SHA uniformly, so the rev's exact
-/// `pkg.jet` is peeked regardless of how it was pinned. Any failure (no `git`,
-/// network error, unfetchable rev) is treated as "no pkg.jet" by the caller
-/// (→ nix), the safe default.
+/// The canonical `package.jet` marker is preferred, with `pkg.jet` retained for
+/// migration-era sources. Any failure (no `git`, network error, unfetchable
+/// rev) is treated as "no package marker" by the caller (→ nix), the safe
+/// default.
 fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     if network_denied() {
         return false;
@@ -1477,7 +1465,12 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
         && Command::new("git")
             .arg("-C")
             .arg(&tmp)
-            .args(["ls-tree", "FETCH_HEAD", crate::Syntax::PAYLOAD_FILE])
+            .args([
+                "ls-tree",
+                "FETCH_HEAD",
+                crate::Syntax::PACKAGE_FILE,
+                crate::Syntax::PAYLOAD_FILE,
+            ])
             .output()
             .map(|o| o.status.success() && !o.stdout.is_empty())
             .unwrap_or(false);
@@ -2389,6 +2382,64 @@ mod tests {
             Err(e) => assert_eq!(e.code(), Some("E1233"), "expected E1233, got {e:?}"),
             Ok(r) => panic!("expected E1233, but realize succeeded: {r:?}"),
         }
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn canonical_monorepo_realization_uses_the_requested_member_root() {
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+        let base = unique_dir("jpk-canonical-mono");
+        let repo = base.join("mono");
+        let store = base.join("store");
+        let source = repo.join("packages/hello/src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(
+            repo.join("package.jet"),
+            "name: \"workspace\"\nmembers: find(\"./packages\")\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("packages/hello/package.jet"),
+            "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: .{ hello: .Executable.{ entry: run } }\ndefaults: .{ run: hello }\n",
+        )
+        .unwrap();
+        std::fs::write(source.join("main.jet"), "fn run() { print(\"hello\") }\n").unwrap();
+        std::fs::create_dir_all(repo.join("stray")).unwrap();
+        std::fs::write(
+            repo.join("stray/package.jet"),
+            "name: \"stray\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let (root, facts) = find_canonical_package(&repo, "hello")
+            .unwrap()
+            .expect("member Package must be discoverable");
+        assert_eq!(root, repo.join("packages/hello"));
+        assert_eq!(facts.name, "hello");
+        assert!(find_canonical_package(&repo, "stray").is_err());
+
+        let upstream = format!("path:{}", repo.to_string_lossy());
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+        let spec = classify_in("hello@mine", &table).unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: true,
+            project_dir: None,
+        };
+        let realized = realize(&spec, &table, &ctx).unwrap();
+        let output = Path::new(&realized.out);
+        assert!(output.join("main.jet").is_file());
+        assert!(!output.join("package.jet").is_file(), "source root is the member source dir");
+        assert_eq!(realized.version, "0.1.0");
+
+        let before = cache_expectation(&spec, &table, &ctx).expect("canonical cache identity");
+        assert_eq!(before.identity, realized.cache_identity);
+        std::fs::write(source.join("extra.jet"), "fn extra() {}\n").unwrap();
+        let after = cache_expectation(&spec, &table, &ctx).expect("changed cache identity");
+        assert_ne!(before.identity.source_fingerprint, after.identity.source_fingerprint);
+        assert_ne!(before.owned_output, after.owned_output);
         std::fs::remove_dir_all(&base).ok();
     }
 

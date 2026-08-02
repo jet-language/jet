@@ -86,6 +86,96 @@ fn prove_usage_and_missing_target_have_exact_exit_classes() {
 }
 
 #[test]
+fn prove_uses_canonical_package_marker_in_target_identity() {
+    let root = workspace("canonical_package");
+    fs::write(root.join("package.jet"), "name: \"demo\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", ".", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"kind\":\"package\""), "{report}");
+    assert!(report.contains("package.jet"), "canonical marker missing from identity: {report}");
+}
+
+#[test]
+fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
+    let root = workspace("replay_round_trip");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let artifact = root.join("capture.jetproof-replay");
+    let artifact_arg = artifact.file_name().unwrap().to_string_lossy().to_string();
+    let captured = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", &format!("--capture={artifact_arg}"), "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        captured.status.code(),
+        Some(0),
+        "stderr={} stdout={} artifact={}",
+        String::from_utf8_lossy(&captured.stderr),
+        String::from_utf8_lossy(&captured.stdout),
+        artifact.display()
+    );
+    assert!(artifact.is_file());
+
+    let replayed = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay", &artifact_arg, "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(replayed.status.code(), Some(0), "{}", String::from_utf8_lossy(&replayed.stderr));
+    let report = String::from_utf8(replayed.stdout).unwrap();
+    assert!(report.contains("\"facet\":\"replay\""), "{report}");
+
+    let mut corrupt = fs::read(&artifact).unwrap();
+    let middle = corrupt.len() / 2;
+    corrupt[middle] ^= 1;
+    fs::write(&artifact, corrupt).unwrap();
+    let rejected = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay", &artifact_arg])
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("Error [E3622]"));
+}
+
+#[test]
+fn prove_rejects_capture_path_escape_before_writing_an_artifact() {
+    let root = workspace("capture_escape");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=../escape.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3629]"));
+    assert!(!root.parent().unwrap().join("escape.jetproof-replay").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_rejects_a_symlink_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = workspace("symlink_target");
+    fs::write(root.join("real.jet"), "fn run() {}\n").unwrap();
+    symlink(root.join("real.jet"), root.join("link.jet")).unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "link.jet"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("must not be a symlink"));
+}
+
+#[test]
 fn prove_uses_structured_test_evidence_and_continues_after_failure() {
     let root = workspace("test_continuation");
     fs::write(

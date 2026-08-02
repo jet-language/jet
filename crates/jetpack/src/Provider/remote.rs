@@ -4,6 +4,7 @@ use super::{ensure_network_allowed, Ctx, ProviderError};
 use crate::PackageManifest;
 use crate::RefSpec::Source;
 use crate::SHA256;
+use jet_pkg_model::Package::PackageFacts;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -75,7 +76,8 @@ pub(super) fn file_has_top_level_run(src: &str) -> bool {
 /// place; `github:` and git URLs are fetched into a Jetpack source cache.
 ///
 /// `want_package` is the package being realized. When the remote is a monorepo
-/// (the package lives in a subdirectory with its own `pkg.jet`), resolution is
+/// (the package lives in a subdirectory with its own `package.jet` or
+/// migration-era `pkg.jet`), resolution is
 /// index-first: only that member's subtree — plus its in-repo dependencies — is
 /// materialized via a sparse checkout, never the whole repo (Slice C, D-MONOREF1).
 pub(super) fn source_repo(upstream: &str, want_package: &str, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
@@ -149,7 +151,7 @@ enum SparseOutcome {
 /// Fetch only the `want_package` member's subtree from a remote monorepo using a
 /// partial clone (`--filter=blob:none`) + cone `git sparse-checkout`. Reads the
 /// repo's object tree with `git ls-tree`/`git show` (no full checkout) to build
-/// the member index, walks the member's `pkg.jet` for in-repo deps, then checks
+/// the member index, walks the member's package marker for in-repo deps, then checks
 /// out just those subtrees. This is the generalization of the peek-only
 /// `remote_has_pack_jet` probe into a real materializing fetch.
 fn try_sparse_member_fetch(
@@ -230,13 +232,37 @@ fn try_sparse_member_fetch(
         return SparseOutcome::NotMonorepo;
     };
 
-    // Walk the member's `pkg.jet` for in-repo dependencies, resolving each
-    // against the member index. An in-repo path dep that names a directory in
-    // the repo which is not a member is E1233.
+    // Walk the member's package marker for in-repo dependencies, resolving
+    // each against the member index. An in-repo path dep that names a
+    // directory in the repo which is not a member is E1233.
     let mut wanted: Vec<String> = vec![target.clone()];
     let all_dirs = all_tree_dirs(&listing);
-    if let Some(pkg_src) = git_out(&["show", &format!("FETCH_HEAD:{target}/pkg.jet")]) {
-        if let Ok(manifest) = PackageManifest::parse(&pkg_src) {
+    let marker = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
+        .iter()
+        .map(|name| format!("FETCH_HEAD:{target}/{name}"))
+        .find_map(|path| git_out(&["show", &path]));
+    if let Some(marker) = marker {
+        if let Ok(facts) = PackageFacts::parse(&marker, format!("{target}/package")) {
+            for (name, source) in facts.deps {
+                match classify_canonical_dep(&name, &source, &target, &member_dirs, &all_dirs) {
+                    InRepoDep::Member(path) => {
+                        if !wanted.contains(&path) {
+                            wanted.push(path);
+                        }
+                    }
+                    InRepoDep::OutsideWorkspace(path) => {
+                        return SparseOutcome::DepOutside(ProviderError::MemberOutsideWorkspace(
+                            format!(
+                                "package `{want_package}` depends on in-repo `{path}`, which is \
+                                 not a workspace member of `{}`",
+                                remote.label
+                            ),
+                        ));
+                    }
+                    InRepoDep::External => {}
+                }
+            }
+        } else if let Ok(manifest) = PackageManifest::parse(&marker) {
             for dep in &manifest.deps {
                 match classify_in_repo_dep(dep, &target, &member_dirs, &all_dirs) {
                     InRepoDep::Member(path) => {
@@ -260,7 +286,7 @@ fn try_sparse_member_fetch(
     }
 
     // Materialize exactly the wanted subtrees (cone mode also keeps root files,
-    // so the repo-root `pkg.jet`/`workspace.jet` are available for discovery).
+    // so the repo-root package marker/workspace file are available for discovery).
     if !git_ok(&["sparse-checkout", "init", "--cone"]) {
         return SparseOutcome::SparseFailed;
     }
@@ -294,14 +320,17 @@ impl Drop for TmpDirGuard {
     }
 }
 
-/// The directories that contain a `pkg.jet` (workspace members, `find()`
-/// semantics), from a `git ls-tree -r --name-only` listing. Root-level `pkg.jet`
-/// (the repo manifest) is not a member subtree.
+/// The directories that contain a package marker (workspace members,
+/// `find()` semantics), from a `git ls-tree -r --name-only` listing. Root-level
+/// markers are not member subtrees.
 fn member_dirs_from_listing(listing: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for line in listing.lines() {
         let line = line.trim();
-        if let Some(dir) = line.strip_suffix("/pkg.jet") {
+        let dir = line
+            .strip_suffix(&format!("/{}", crate::Syntax::PACKAGE_FILE))
+            .or_else(|| line.strip_suffix(&format!("/{}", crate::Syntax::PAYLOAD_FILE)));
+        if let Some(dir) = dir {
             if !dir.is_empty() && !out.contains(&dir.to_string()) {
                 out.push(dir.to_string());
             }
@@ -309,6 +338,34 @@ fn member_dirs_from_listing(listing: &str) -> Vec<String> {
     }
     out.sort();
     out
+}
+
+fn classify_canonical_dep(
+    name: &str,
+    source: &str,
+    member_dir: &str,
+    member_dirs: &[String],
+    all_dirs: &[String],
+) -> InRepoDep {
+    if let Some(member) = member_dirs.iter().find(|dir| dir_basename(dir) == name) {
+        return InRepoDep::Member(member.clone());
+    }
+    let path_like = source == "."
+        || source == ".."
+        || source.starts_with("./")
+        || source.starts_with("../");
+    if path_like {
+        let resolved = join_repo_relative(member_dir, source);
+        if let Some(resolved) = resolved {
+            if member_dirs.contains(&resolved) {
+                return InRepoDep::Member(resolved);
+            }
+            if all_dirs.contains(&resolved) {
+                return InRepoDep::OutsideWorkspace(resolved);
+            }
+        }
+    }
+    InRepoDep::External
 }
 
 /// Every directory that appears in the tree listing (for in-repo dep checks).
@@ -540,6 +597,43 @@ pub(super) fn source_cache_dir(store_dir: &Path, remote: &RemoteSource) -> PathB
         .as_bytes(),
     );
     root.join(&key[..16])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_member_index_ignores_root_and_deduplicates_migration_markers() {
+        let listing = "package.jet\npackages/app/package.jet\npackages/app/pkg.jet\npackages/logging/package.jet\n";
+        assert_eq!(
+            member_dirs_from_listing(listing),
+            vec!["packages/app".to_string(), "packages/logging".to_string()]
+        );
+    }
+
+    #[test]
+    fn canonical_path_dependency_resolves_by_target_not_alias() {
+        let members = vec!["packages/app".to_string(), "packages/logging".to_string()];
+        let dirs = vec![
+            "packages".to_string(),
+            "packages/app".to_string(),
+            "packages/logging".to_string(),
+            "packages/tools".to_string(),
+        ];
+        assert!(matches!(
+            classify_canonical_dep("log", "../logging", "packages/app", &members, &dirs),
+            InRepoDep::Member(path) if path == "packages/logging"
+        ));
+        assert!(matches!(
+            classify_canonical_dep("ghost", "../tools", "packages/app", &members, &dirs),
+            InRepoDep::OutsideWorkspace(path) if path == "packages/tools"
+        ));
+        assert!(matches!(
+            classify_canonical_dep("http", "4.2", "packages/app", &members, &dirs),
+            InRepoDep::External
+        ));
+    }
 }
 
 /// A content fingerprint over a whole directory tree: every file's relative
