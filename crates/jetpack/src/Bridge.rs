@@ -568,23 +568,52 @@ mod tests {
     }
 
     #[test]
-    fn cross_system_package_output_is_not_advertised_in_the_host_shim() {
+    fn cmd_flake_excludes_cross_system_package_from_host_shim() {
+        const CHILD: &str = "JETPACK_BRIDGE_CROSS_SYSTEM_CHILD";
         let host = host_system();
         let other = if host == "aarch64-linux" {
             "x86_64-linux"
         } else {
             "aarch64-linux"
         };
-        let source = format!("{{ packages.{other}.default = \"foreign\"; }}");
-        let graph = FlakeGraph::parse("flake.nix", &source).unwrap();
-        let mut facts = DevShellFacts::default();
-        for output in &graph.outputs {
-            if output.kind == crate::SemanticLock::FlakeOutputKind::Package {
-                record_package_output_fact(&mut facts, output, &host);
-            }
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "Bridge::tests::cmd_flake_excludes_cross_system_package_from_host_shim",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "child failed\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stdout.contains("packages: []"), "stdout: {stdout}");
+            assert!(!stdout.contains("foreign"), "stdout: {stdout}");
+            assert!(
+                stderr.contains(&format!("packages:{other}:default")),
+                "stderr: {stderr}"
+            );
+            return;
         }
-        assert!(facts.packages.is_empty());
-        assert_eq!(facts.unmapped, vec![format!("packages:{other}:default")]);
+        let source = format!("{{ packages.{other}.default = \"foreign\"; }}");
+        let dir = scratch("cross_system");
+        std::fs::write(dir.join("flake.nix"), source).unwrap();
+        let fixtures = scratch("cross_system_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+        assert_eq!(cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures)), 0);
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
     }
 
     #[test]
