@@ -100,6 +100,10 @@ fn epoch3_string_and_set_surface_runs_on_default_tier() {
     print(SortedSet.from(["z", "z", "a"]).len())
     print(SortedSet.from(["z", "a"]).first() ?? "none")
     print(SortedSet.from(["z", "a"]).last() ?? "none")
+    typed_words := SortedSet<String>.{SortedSet.new()}
+    print(typed_words.add("z"))
+    print(typed_words.add("z"))
+    print(typed_words.first() ?? "none")
 }
 "#,
     )
@@ -118,7 +122,7 @@ fn epoch3_string_and_set_surface_runs_on_default_tier() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n1\n2\na\nz\n"
+        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n1\n2\na\nz\ntrue\nfalse\nz\n"
     );
 }
 

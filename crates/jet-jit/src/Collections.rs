@@ -1521,8 +1521,8 @@ fn copy_list(rt: &mut crate::JitRuntime, values: impl IntoIterator<Item = i64>) 
     list
 }
 
-extern "C" fn jet_jit_sorted_set_new() -> i64 {
-    Concurrency::with_runtime_mut(|rt| sorted_set_handle(rt, BTreeSet::new(), false))
+extern "C" fn jet_jit_sorted_set_new(string_kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| sorted_set_handle(rt, BTreeSet::new(), string_kind != 0))
 }
 
 extern "C" fn jet_jit_sorted_set_from(list: i64, string_kind: i64) -> i64 {
@@ -2400,6 +2400,8 @@ pub(crate) fn declare_collections_host_fns(
     let cc = module.target_config().default_call_conv;
     let mut sig_new = Signature::new(cc);
     sig_new.returns.push(AbiParam::new(types::I64));
+    let mut sig_sorted_set_new = sig_new.clone();
+    sig_sorted_set_new.params.push(AbiParam::new(types::I64));
     let mut sig_uninit = Signature::new(cc);
     sig_uninit.params.push(AbiParam::new(types::I64));
     sig_uninit.returns.push(AbiParam::new(types::I64));
@@ -2609,7 +2611,7 @@ pub(crate) fn declare_collections_host_fns(
         bag_has: import("jet_jit_bag_has", &sig_list_eq)?,
         bag_count: import("jet_jit_bag_count", &sig_get_opt)?,
         bag_len: import("jet_jit_bag_len", &sig_len)?,
-        sorted_set_new: import("jet_jit_sorted_set_new", &sig_new)?,
+        sorted_set_new: import("jet_jit_sorted_set_new", &sig_sorted_set_new)?,
         sorted_set_from: import("jet_jit_sorted_set_from", &sig_set_from)?,
         sorted_set_insert: import("jet_jit_sorted_set_insert", &sig_list_eq)?,
         sorted_set_remove: import("jet_jit_sorted_set_remove", &sig_push)?,

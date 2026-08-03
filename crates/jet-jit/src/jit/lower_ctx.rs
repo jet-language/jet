@@ -12932,7 +12932,18 @@ impl LowerCtx<'_, '_> {
                     };
                     if let Some(host_id) = host_id {
                         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[]);
+                        let call = if matches!(prelude_path, Some(path) if path.ends_with("BTreeSet")) {
+                            let string_kind = matches!(
+                                &expr.ty,
+                                Type::Apply { name, args }
+                                    if name == jet_foundation::Syntax::TYPE_SORTED_SET
+                                        && args.first().is_some_and(|ty| matches!(ty, Type::String))
+                            );
+                            let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                            self.b.ins().call(host_ref, &[kind])
+                        } else {
+                            self.b.ins().call(host_ref, &[])
+                        };
                         return Ok(self.b.inst_results(call)[0]);
                     }
                 }
