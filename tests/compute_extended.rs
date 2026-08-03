@@ -34,7 +34,7 @@ fn autodiff_sparse_simd_and_streams_use_real_paths() {
     assert_aot_and_default_parity(
         "compute_autodiff_targeted",
         include_str!("../examples/features/tooling/compute_autodiff.jet"),
-        &["grad:", "jvp:", "vjp:", "nnz:2", "mv:", "profile:F32Strict+Reproducible+Tile8", "ComputeStream"],
+        &["grad:", "jvp:", "vjp:", "nnz:2", "mv:", "profile=F32Strict+Reproducible", "ComputeStream"],
     );
 }
 
@@ -53,16 +53,16 @@ fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
 }
 
 #[test]
-fn raw_kernel_boundary_and_f32_profile_are_explicit() {
+fn safe_kernel_boundary_and_f32_profile_are_explicit() {
     assert_aot_and_default_parity(
         "compute_kernel_targeted",
         include_str!("../examples/features/tooling/compute_kernel.jet"),
-        &["kernel:42", "bounds:true", "raw:unsupported:"],
+        &["kernel:42", "bounds:true"],
     );
     assert_aot_and_default_parity(
         "compute_simd_targeted",
         include_str!("../examples/features/tooling/compute_simd.jet"),
-        &["profile:F32Strict+Reproducible+Tile8", "tile:[19.0, 22.0, 43.0, 50.0]"],
+        &["profile=F32Strict+Reproducible", "tile:[19.0, 22.0, 43.0, 50.0]"],
     );
 }
 
@@ -79,14 +79,17 @@ fn safe_kernel_rejects_effectful_bodies_before_codegen() {
 }
 
 #[test]
-fn raw_kernel_contract_cannot_escape_the_unsafe_gate() {
+fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
     let diagnostics = jet::compile(
         "use core.compute as compute\nfn run() { compute.raw_kernel_contract(\"no gate\", 1) }\n",
     )
-    .expect_err("raw kernel contracts must be rejected outside #Unsafe");
+    .expect_err("the CPU compute module must not expose a raw-contract constructor");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3101"),
-        "missing E3101: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.what.contains("raw_kernel_contract")
+                || diagnostic.fix.contains("core.compute")
+        }),
+        "missing provider-boundary diagnostic: {diagnostics:?}"
     );
 }
 

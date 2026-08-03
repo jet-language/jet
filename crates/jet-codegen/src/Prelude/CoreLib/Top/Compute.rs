@@ -329,13 +329,9 @@ fn jet_compute_validate_placement(
     device: JetComputeDevice,
     receipt: &JetComputePlacementReceipt,
 ) -> Result<(), JetComputeError> {
-    if device == JetComputeDevice::Auto
-        || receipt.requested == JetComputeDevice::Auto
-        || receipt.selected == JetComputeDevice::Auto
-    {
+    if device == JetComputeDevice::Auto || receipt.selected == JetComputeDevice::Auto {
         return Err(JetComputeError::Unsupported(
-            "Auto placement requires a registered production backend; the CPU oracle is not a fallback"
-                .to_string(),
+            "a Tensor must record the concrete backend selected by Auto placement".to_string(),
         ));
     }
     let Some(expected_capabilities) = jet_compute_registered_capabilities(&receipt.profile) else {
@@ -345,7 +341,11 @@ fn jet_compute_validate_placement(
         )));
     };
     if device != receipt.selected
-        || receipt.requested != receipt.selected
+        || !matches!(
+            (receipt.requested, receipt.selected),
+            (JetComputeDevice::Cpu, JetComputeDevice::Cpu)
+                | (JetComputeDevice::Auto, JetComputeDevice::Cpu)
+        )
         || receipt.backend != CPU_ORACLE_BACKEND
         || receipt.version != CPU_ORACLE_VERSION
         || receipt.cache != CPU_ORACLE_CACHE
@@ -409,14 +409,9 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
 fn jet_compute_place(
     requested: JetComputeDevice,
 ) -> Result<JetComputePlacementReceipt, JetComputeError> {
-    // The only registered capability in this slice is an explicit CPU oracle.
-    // Auto must not turn that oracle into a hidden production fallback.
-    if requested == JetComputeDevice::Auto {
-        return Err(JetComputeError::Unsupported(
-            "Auto placement has no registered production backend; CPU oracle selection requires an explicit CPU pin"
-                .to_string(),
-        ));
-    }
+    // Epoch 3 registers one CPU capability. Auto selects that capability and
+    // records the choice; it never fabricates an accelerator or silently
+    // changes precision. Experts can still pin CPU explicitly.
     let capabilities = CPU_ORACLE_F64_CAPABILITIES
         .iter()
         .map(|capability| (*capability).to_string())
@@ -430,7 +425,11 @@ fn jet_compute_place(
         profile: CPU_ORACLE_F64_PROFILE.to_string(),
         cache: CPU_ORACLE_CACHE.to_string(),
         capabilities,
-        reason: "policy=explicit; capability=cpu-oracle.f64".to_string(),
+        reason: if requested == JetComputeDevice::Auto {
+            "policy=auto; selected=cpu; capability=cpu-oracle.f64".to_string()
+        } else {
+            "policy=explicit; selected=cpu; capability=cpu-oracle.f64".to_string()
+        },
     })
 }
 
@@ -465,15 +464,15 @@ fn jet_compute_tensor_from_shape(
 }
 
 fn jet_compute_zeros(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice::Cpu)
+    jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice::Auto)
 }
 
 fn jet_compute_ones(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice::Cpu)
+    jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice::Auto)
 }
 
 fn jet_compute_full(shape: &Vec<i64>, value: f64) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice::Cpu)
+    jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice::Auto)
 }
 
 fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError> {
@@ -488,7 +487,7 @@ fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError
     let shape = vec![len];
     let strides = jet_compute_row_major_strides(&shape)?;
     let storage_len = jet_compute_storage_len(&shape)?;
-    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
+    let receipt = jet_compute_place(JetComputeDevice::Auto)?;
     Ok(JetTensor {
         shape,
         strides,
@@ -1596,7 +1595,9 @@ fn jet_compute_validate_transfer_receipt(
 
 impl JetShow for JetComputeStream {
     fn jet_show(&self) -> String {
-        format!("ComputeStream(id={}, device={})", self.id, self.device.jet_show())
+        // Stream identity is runtime-local; exposing it would make AOT/JIT
+        // output differ despite identical compute semantics.
+        format!("ComputeStream(device={})", self.device.jet_show())
     }
 }
 
@@ -1706,55 +1707,6 @@ fn jet_compute_kernel_bounds_ok(
         }
     }
     Ok(true)
-}
-
-/// Opaque proof token reserved for a provider-generated raw-kernel boundary.
-/// The safe Prelude cannot mint one from a reason string and an arity: those
-/// values do not prove address spaces, read/write sets, effects, or barriers.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum JetRawKernelContract {}
-
-impl JetShow for JetRawKernelContract {
-    fn jet_show(&self) -> String {
-        match *self {}
-    }
-}
-
-fn jet_compute_raw_kernel_contract_show(contract: &JetRawKernelContract) -> String {
-    contract.jet_show()
-}
-
-/// A reason and an arity are not a typed raw-kernel boundary contract. Refuse
-/// this legacy convenience entry point until an explicit provider bridge can
-/// supply the proof token and its differential receipt.
-fn jet_compute_raw_kernel_contract(
-    reason: String,
-    arity: i64,
-) -> Result<JetRawKernelContract, JetComputeError> {
-    if reason.trim().is_empty() {
-        return Err(JetComputeError::Device(
-            "raw kernel contract requires a non-empty #Unsafe reason".to_string(),
-        ));
-    }
-    if arity < 0 {
-        return Err(JetComputeError::InvalidShape(
-            "raw kernel arity must be non-negative".to_string(),
-        ));
-    }
-    if arity > 1024 {
-        return Err(JetComputeError::Unsupported(
-            "raw kernel arity exceeds the audited limit of 1024".to_string(),
-        ));
-    }
-    if reason.chars().any(char::is_control) {
-        return Err(JetComputeError::Device(
-            "raw kernel contract reason must not contain control characters".to_string(),
-        ));
-    }
-    let _ = (reason, arity);
-    Err(JetComputeError::Unsupported(
-        "raw kernel contracts require a provider-issued typed boundary proof; reason and arity alone cannot certify launch safety".to_string(),
-    ))
 }
 
 // ── #1141 / D-COMPUTE-AUTODIFF1: reverse-mode VJP + JVP for dense ops ────────

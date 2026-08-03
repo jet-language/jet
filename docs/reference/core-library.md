@@ -3095,10 +3095,10 @@ the capability. Cleanup stays on `Close` via `close(...)`.
 D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
 ranked Tensor operation family. Tensor views retain the owner allocation and
 strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
-This slice registers one explicit `cpu-oracle` capability. Its receipt records
-backend, version, profile, cache, and closed capabilities. `Auto` does not use
-that oracle as a hidden production fallback. It returns typed
-`ComputeError::Unsupported` until a provider registers a production backend.
+This slice registers one CPU capability. Its receipt records backend, version,
+profile, cache, and closed capabilities. `Auto` selects that CPU capability,
+records the choice, and never fabricates an accelerator or changes precision.
+Experts can pin CPU explicitly.
 
 ```jet
 use core.compute as compute
@@ -3132,9 +3132,9 @@ fn run() {
 
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
-symbols (I9). No accelerator provider is registered in this slice. Missing
-provider capability returns typed `ComputeError::Unsupported`; no engine
-substitutes the CPU oracle.
+symbols (I9). No accelerator provider is registered in this slice. Requests
+that need one return typed `ComputeError::Unsupported`; no engine substitutes
+an accelerator.
 
 Tensor serialization is the canonical wire `shape=axis,...;data=value,...`.
 The serializer uses shortest round-tripping finite f64 text. The decoder
@@ -3164,14 +3164,11 @@ ordered reduction. The ratified production profile and provider capabilities
 remain gated, and unsupported requests fail before launch.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
-provider-issued opaque contract. The legacy `raw_kernel_contract(reason, arity)`
-entry point remains a deliberate fail-closed diagnostic because the built-in
-CPU oracle is not a raw-device provider; reason and arity cannot prove address
-spaces, read/write sets, effects, races, or barriers. `RawKernelContract` has
-no ambient constructor or empty wire value. A provider-issued typed `#Unsafe`
-boundary proof is required before raw code can be launched, and no descriptor
-or display label can stand in for that proof. The first provider belongs to the
-explicit accelerator-provider work tracked outside Epoch 3.
+provider-issued opaque contract. The CPU module exposes no public contract
+constructor because a reason and arity cannot prove address spaces, read/write
+sets, effects, races, or barriers. A provider-issued typed `#Unsafe` boundary
+proof is required before raw code can be launched. The first such provider
+belongs to the accelerator-provider work outside Epoch 3.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).
@@ -3221,13 +3218,21 @@ by `retry(id)` after a process restart. The ordinary tree remains the bounded
 local delivery path.
 
 Snapshot and EventLog state also require an explicit injected authority. The
-authority carries the store, schema, and version; it is checked before the
-adapter starts and has the same meaning in AOT and ambient execution.
+adapter receives a typed store capability plus its schema and version. The
+store is checked before the adapter starts and has the same meaning in AOT and
+ambient execution; no process-global path is consulted.
 
 ```jet
-state := services.state_authority("orders.state", "orders", 1)?
-services.set_state_event_log(&tree, state)?
+store := services.state_store("orders.state")?
+services.set_state_event_log(&tree, store, "orders", 1)?
 ```
+
+Generation handoff writes a rollback copy of durable state before switching
+endpoints and returns a typed `ServiceUpgradeReceipt` through
+`services.upgrade_receipt(tree)`. The receipt binds the old and new generation,
+migration class, rollback availability, and pinned shards. Rollback verifies
+that receipt, restores the durable copy atomically, and refuses forward-only
+state. A stateless handoff records that no state rollback was needed.
 
 ```jet
 use core.services as services

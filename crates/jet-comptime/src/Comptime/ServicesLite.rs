@@ -8,6 +8,14 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
 include!("../../../jet-codegen/src/Prelude/TaskGroup.rs");
@@ -295,6 +303,29 @@ fn ct_to_state_adapter(v: &CtValue, span: Span) -> Result<JetServiceStateAdapter
     }
 }
 
+fn state_store_to_ct(store: &JetServiceStateStore) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceStateStore".to_string(),
+        fields: vec![("path".to_string(), CtValue::Str(store.path.clone()))],
+    }
+}
+
+fn ct_to_state_store(value: &CtValue, span: Span) -> Result<JetServiceStateStore, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ServiceStateStore", span));
+    };
+    if type_name != "ServiceStateStore" {
+        return Err(unsupported("ServiceStateStore", span));
+    }
+    let path = fields
+        .iter()
+        .find(|(name, _)| name == "path")
+        .map(|(_, value)| value)
+        .ok_or_else(|| unsupported("ServiceStateStore path", span))?;
+    let path = ct_to_service_string(path, MAX_SERVICE_STATE_STORE, "service state store", span)?;
+    jet_services_state_store(path).map_err(|error| unsupported(&error.jet_show(), span))
+}
+
 fn state_authority_to_ct(authority: &JetServiceStateAuthority) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceStateAuthority".to_string(),
@@ -423,6 +454,44 @@ fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnos
     })
 }
 
+fn upgrade_receipt_to_ct(receipt: &JetServiceUpgradeReceipt) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceUpgradeReceipt".to_string(),
+        fields: vec![
+            ("from_generation".to_string(), CtValue::Int(receipt.from_generation)),
+            ("to_generation".to_string(), CtValue::Int(receipt.to_generation)),
+            ("migration".to_string(), CtValue::Str(receipt.migration.clone())),
+            ("rollback_store".to_string(), CtValue::Str(receipt.rollback_store.clone())),
+            ("rollback_available".to_string(), CtValue::Bool(receipt.rollback_available)),
+            (
+                "pinned_shards".to_string(),
+                CtValue::List(receipt.pinned_shards.iter().cloned().map(CtValue::Str).collect()),
+            ),
+        ],
+    }
+}
+
+fn ct_to_upgrade_receipt(v: &CtValue, span: Span) -> Result<JetServiceUpgradeReceipt, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = v else {
+        return Err(unsupported("ServiceUpgradeReceipt", span));
+    };
+    if type_name != "ServiceUpgradeReceipt" {
+        return Err(unsupported("ServiceUpgradeReceipt", span));
+    }
+    let field = |name: &str| {
+        fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+            .ok_or_else(|| unsupported("ServiceUpgradeReceipt field", span))
+    };
+    Ok(JetServiceUpgradeReceipt {
+        from_generation: match field("from_generation")? { CtValue::Int(n) => *n, _ => return Err(unsupported("upgrade from generation", span)) },
+        to_generation: match field("to_generation")? { CtValue::Int(n) => *n, _ => return Err(unsupported("upgrade to generation", span)) },
+        migration: ct_to_service_string(field("migration")?, 32, "upgrade migration", span)?,
+        rollback_store: ct_to_service_string(field("rollback_store")?, MAX_SERVICE_STATE_STORE, "upgrade rollback store", span)?,
+        rollback_available: match field("rollback_available")? { CtValue::Bool(v) => *v, _ => return Err(unsupported("upgrade rollback availability", span)) },
+        pinned_shards: ct_str_list(field("pinned_shards")?, span)?,
+    })
+}
+
 fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceTree".to_string(),
@@ -536,6 +605,13 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
             (
                 "previous_generation".to_string(),
                 CtValue::Int(tree.previous_generation),
+            ),
+            (
+                "last_upgrade".to_string(),
+                tree.last_upgrade.as_ref().map_or_else(
+                    || CtValue::None(Type::Named("ServiceUpgradeReceipt".to_string())),
+                    |receipt| CtValue::Some(Box::new(upgrade_receipt_to_ct(receipt))),
+                ),
             ),
             ("directory_key".to_string(), bytes_to_ct(&tree.directory_key)),
         ],
@@ -700,6 +776,11 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         Some((_, CtValue::Some(value))) => Some(ct_to_state_authority(value, span)?),
         Some(_) => return Err(unsupported("service state authority", span)),
     };
+    let last_upgrade = match fields.iter().find(|(name, _)| name == "last_upgrade") {
+        None | Some((_, CtValue::None(_))) => None,
+        Some((_, CtValue::Some(value))) => Some(ct_to_upgrade_receipt(value, span)?),
+        Some(_) => return Err(unsupported("service upgrade receipt", span)),
+    };
     let partitioned = match fields.iter().find(|(name, _)| name == "partitioned") {
         Some((_, value)) => ct_str_list(value, span)?,
         None => Vec::new(),
@@ -784,6 +865,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             CtValue::Int(n) => *n,
             _ => return Err(unsupported("previous service generation", span)),
         },
+        last_upgrade,
     };
     jet_services_validate_tree(&tree)
         .map_err(|error| unsupported(&error.jet_show(), span))?;
@@ -1036,25 +1118,15 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "restart_rest_for_one" => Ok(restart_to_ct(jet_services_restart_rest_for_one())),
         "delivery_at_most_once" => Ok(delivery_to_ct(jet_services_delivery_at_most_once())),
         "delivery_durable" => Ok(delivery_to_ct(jet_services_delivery_durable())),
-        "state_authority" => {
-            let store = ct_to_service_string(
+        "state_store" => {
+            let path = ct_to_service_string(
                 one(0)?,
                 MAX_SERVICE_STATE_STORE,
                 "service state store",
                 span,
             )?;
-            let schema = ct_to_service_string(
-                one(1)?,
-                MAX_SERVICE_STATE_SCHEMA,
-                "service state schema",
-                span,
-            )?;
-            let version = match one(2)? {
-                CtValue::Int(version) => *version,
-                _ => return Err(unsupported("service state version", span)),
-            };
-            Ok(match jet_services_state_authority(store, schema, version) {
-                Ok(authority) => CtValue::ResOk(Box::new(state_authority_to_ct(&authority))),
+            Ok(match jet_services_state_store(path) {
+                Ok(store) => CtValue::ResOk(Box::new(state_store_to_ct(&store))),
                 Err(error) => CtValue::ResErr(Box::new(map_err(error))),
             })
         }
@@ -1211,12 +1283,32 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let result = match method {
                 "set_state_empty" => jet_services_set_state_empty(&mut tree),
                 "set_state_snapshot" => {
-                    let authority = ct_to_state_authority(one(1)?, span)?;
-                    jet_services_set_state_snapshot(&mut tree, authority)
+                    let store = ct_to_state_store(one(1)?, span)?;
+                    let schema = ct_to_service_string(
+                        one(2)?,
+                        MAX_SERVICE_STATE_SCHEMA,
+                        "service state schema",
+                        span,
+                    )?;
+                    let version = match one(3)? {
+                        CtValue::Int(version) => *version,
+                        _ => return Err(unsupported("service state version", span)),
+                    };
+                    jet_services_set_state_snapshot(&mut tree, store, schema, version)
                 }
                 _ => {
-                    let authority = ct_to_state_authority(one(1)?, span)?;
-                    jet_services_set_state_event_log(&mut tree, authority)
+                    let store = ct_to_state_store(one(1)?, span)?;
+                    let schema = ct_to_service_string(
+                        one(2)?,
+                        MAX_SERVICE_STATE_SCHEMA,
+                        "service state schema",
+                        span,
+                    )?;
+                    let version = match one(3)? {
+                        CtValue::Int(version) => *version,
+                        _ => return Err(unsupported("service state version", span)),
+                    };
+                    jet_services_set_state_event_log(&mut tree, store, schema, version)
                 }
             };
             Ok(match result {
@@ -1348,6 +1440,10 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 Err(e) => mutate_err(tree, map_err(e)),
             })
         }
+        "upgrade_receipt" => Ok(match jet_services_upgrade_receipt(&ct_to_tree(one(0)?, span)?) {
+            Ok(receipt) => CtValue::ResOk(Box::new(upgrade_receipt_to_ct(&receipt))),
+            Err(error) => CtValue::ResErr(Box::new(map_err(error))),
+        }),
         "observe" => Ok(CtValue::Str(jet_services_observe(&ct_to_tree(
             one(0)?,
             span,

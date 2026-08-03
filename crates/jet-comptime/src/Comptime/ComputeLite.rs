@@ -185,17 +185,6 @@ fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferRecei
     })
 }
 
-fn ct_to_raw_kernel_contract(
-    value: &CtValue,
-    span: Span,
-) -> Result<JetRawKernelContract, Diagnostic> {
-    let _ = value;
-    Err(unsupported(
-        "provider-issued raw-kernel contract (not forgeable in ambient)",
-        span,
-    ))
-}
-
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
     // CtValue owns lists; Prelude remains authority for validation and logical
     // element selection at this engine boundary.
@@ -794,21 +783,6 @@ pub fn apply(
             Ok(b) => CtValue::ResOk(Box::new(CtValue::Bool(b))),
             Err(e) => err_compute(e),
         }),
-        "raw_kernel_contract" => {
-            let reason = match one(0)? {
-                CtValue::Str(s) => s.clone(),
-                _ => return Err(unsupported("raw kernel reason", span)),
-            };
-            Ok(
-                match jet_compute_raw_kernel_contract(reason, as_int(one(1)?, span)?) {
-                    Ok(contract) => match contract {},
-                    Err(e) => err_compute(e),
-                },
-            )
-        }
-        "raw_kernel_contract_show" => Ok(CtValue::Str(
-            jet_compute_raw_kernel_contract_show(&ct_to_raw_kernel_contract(one(0)?, span)?),
-        )),
         "jvp_add" | "jvp_mul" | "jvp_matmul" => Ok(match if method == "jvp_add" {
             jet_compute_jvp_add(
                 &ct_to_tensor(one(0)?, span)?,

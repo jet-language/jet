@@ -1,5 +1,6 @@
 // D-COMPUTE-KERNEL1 / D-COMPUTE-KERNEL-SURFACE1=B (#1139/#1140): the safe
-// marker carries a sema proof; raw provider contracts stay behind #Unsafe.
+// marker carries a sema proof. Raw contracts are issued only by accelerator
+// providers; the Epoch 3 CPU surface exposes no forgeable constructor.
 use core.compute as compute
 
 #Kernel(.parallel) fn lane_add(left: Int, right: Int) => Int = left + right;
@@ -8,12 +9,4 @@ fn run() {
     print("kernel:{lane_add(20, 22)}")
     ok :: compute.kernel_bounds_ok([2, 3], [1, 2]) ?? panic("bounds")
     print("bounds:{ok}")
-
-    #Unsafe("raw compute kernel contract for audited expert path") {
-        label :: compute.raw_kernel_contract("demo-kernel", 2)
-        if label == {
-            .Ok(contract) -> { print("raw:{compute.raw_kernel_contract_show(contract)}") }
-            .Err(error) -> { print("raw:unsupported:{error}") }
-        }
-    }
 }

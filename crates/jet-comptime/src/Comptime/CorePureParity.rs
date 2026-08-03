@@ -420,6 +420,22 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
+        CtValue::Struct { type_name, fields } if type_name == "ServiceUpgradeReceipt" => {
+            let field = |name: &str| fields.iter().find(|(field, _)| field == name).map(|(_, value)| value);
+            let CtValue::Int(from) = field("from_generation")? else { return None; };
+            let CtValue::Int(to) = field("to_generation")? else { return None; };
+            let CtValue::Str(migration) = field("migration")? else { return None; };
+            let CtValue::Bool(rollback_available) = field("rollback_available")? else { return None; };
+            let CtValue::List(pinned) = field("pinned_shards")? else { return None; };
+            let pinned = pinned
+                .iter()
+                .map(|value| match value { CtValue::Str(value) => Some(value.clone()), _ => None })
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!(
+                "ServiceUpgradeReceipt(from={from}, to={to}, migration={migration}, rollback_available={rollback_available}, pinned={})",
+                pinned.join(",")
+            ))
+        }
         // Match AOT/JIT `DataError::display_text` / JetShow — not Rust Debug
         // of the mangled `user_DataError { user_kind: … }` shape (#1250).
         CtValue::Struct { type_name, fields }

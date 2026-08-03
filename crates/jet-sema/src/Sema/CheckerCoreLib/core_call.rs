@@ -4212,9 +4212,6 @@ impl<'a> Checker<'a> {
             // hatch, not a safe compute constructor. Keep the fixed signature
             // and normal type checking, but require the same lexical audit
             // gate as the other low-level memory/device operations.
-            if module == "core.compute" && name == "raw_kernel_contract" && !self.in_unsafe {
-                self.diags.push(e3101("core.compute.raw_kernel_contract", span));
-            }
             if module == "core.crypto.expert" && name == "x25519" {
                 let validation_diag_start = self.diags.len();
                 if !(2..=3).contains(&args.len()) {

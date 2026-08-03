@@ -208,10 +208,11 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream"
-        | "GradTriple" | "SparseTensor" | "RawKernelContract"
+        | "GradTriple" | "SparseTensor"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
-        | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateAuthority" | "ServiceReceipt"
+        | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
+        | "ServiceUpgradeReceipt"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.

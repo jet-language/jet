@@ -727,6 +727,20 @@ fn jet_data_stream_fail<T>(
     Err(error)
 }
 
+fn jet_data_field_errors_reason(errors: Vec<jet_std::FieldError>) -> String {
+    errors
+        .into_iter()
+        .map(|error| {
+            if error.path.is_empty() {
+                error.reason
+            } else {
+                format!("{}: {}", error.path, error.reason)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn jet_data_stream_decode_csv_row<T: user_Decode>(
     headers: &[String],
     row: Vec<String>,
@@ -742,11 +756,11 @@ fn jet_data_stream_decode_csv_row<T: user_Decode>(
         .collect();
     T::jet_decode_traced(&jet_std::DataTree::Object(obj))
         .map(|(v, _)| v)
-        .map_err(|e| {
+        .map_err(|errors| {
             let mut error = jet_data_error(
                 jet_std::DataErrorKind::Decode,
                 "csv_reader",
-                e.reason,
+                jet_data_field_errors_reason(errors),
             );
             error.row = Some(row_index);
             error
@@ -982,11 +996,11 @@ fn jet_data_stream_next<T: user_Decode>(
                     stream.row_index += 1;
                     match T::jet_decode_traced(&tree) {
                         Ok((value, _)) => Ok(Some(value)),
-                        Err(e) => {
+                        Err(errors) => {
                             let mut error = jet_data_error(
                                 jet_std::DataErrorKind::Decode,
                                 "json_reader",
-                                e.reason,
+                                jet_data_field_errors_reason(errors),
                             );
                             error.row = Some(stream.row_index);
                             jet_data_stream_fail(stream, error)

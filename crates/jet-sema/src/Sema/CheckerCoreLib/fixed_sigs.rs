@@ -922,17 +922,6 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Bool, Type::Named("ComputeError".to_string()))),
         )),
-        ("core.compute", "raw_kernel_contract") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(
-                Type::Named("RawKernelContract".to_string()),
-                Type::Named("ComputeError".to_string()),
-            )),
-        )),
-        ("core.compute", "raw_kernel_contract_show") => Some((
-            vec![(read, Type::Named("RawKernelContract".to_string()))],
-            Some(Type::String),
-        )),
         ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => Some((
             vec![
                 (read, Type::Named("Tensor".to_string())),
@@ -1046,10 +1035,10 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::Named("Duration".to_string()))],
             Some(Type::Named("ServiceRuntime".to_string())),
         )),
-        ("core.services", "state_authority") => Some((
-            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+        ("core.services", "state_store") => Some((
+            vec![(read, Type::String)],
             Some(result_ty(
-                Type::Named("ServiceStateAuthority".to_string()),
+                Type::Named("ServiceStateStore".to_string()),
                 Type::Named("ServiceError".to_string()),
             )),
         )),
@@ -1177,7 +1166,9 @@ pub fn core_fixed_sig(
         ("core.services", "set_state_snapshot" | "set_state_event_log") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
-                (read, Type::Named("ServiceStateAuthority".to_string())),
+                (read, Type::Named("ServiceStateStore".to_string())),
+                (read, Type::String),
+                (read, Type::Int),
             ],
             Some(result_ty(
                 Type::Named("Unit".into()),
@@ -1252,6 +1243,13 @@ pub fn core_fixed_sig(
         ("core.services", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
             vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
             Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "upgrade_receipt") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(
+                Type::Named("ServiceUpgradeReceipt".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "endpoint_show") => Some((
             vec![(read, Type::Named("ServiceEndpoint".to_string()))],

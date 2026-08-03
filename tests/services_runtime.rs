@@ -267,11 +267,17 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
 }
 
 const SOURCE: &str = r#"
+use core.path as path
 use core.services as services
+use core.testing as testing
 
 fn run() {
     tree := services.tree("delivery")
     services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("service-failure")
+    store_path :: path.join(temp, "delivery.state")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "delivery-events", 1) ?? panic("state")
     worker :: services.worker(&tree, "worker", 1) ?? panic("worker")
     services.start(&tree) ?? panic("start")
 
@@ -325,8 +331,8 @@ fn run() {
     temp := testing.temp_dir("service-state")
     snapshot := services.tree("snapshot")
     snapshot_store :: path.join(temp, "snapshot.state")
-    snapshot_authority :: services.state_authority(snapshot_store, "snapshot", 1) ?? panic("snapshot authority")
-    services.set_state_snapshot(&snapshot, snapshot_authority) ?? panic("snapshot state")
+    snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
+    services.set_state_snapshot(&snapshot, snapshot_authority, "snapshot", 1) ?? panic("snapshot state")
     snapshot_worker :: services.worker(&snapshot, "worker", 2) ?? panic("snapshot worker")
     services.start(&snapshot) ?? panic("snapshot start")
     services.commit_snapshot(&snapshot, "state-v1") ?? panic("snapshot commit")
@@ -336,8 +342,8 @@ fn run() {
 
     events := services.tree("events")
     event_store :: path.join(temp, "events.state")
-    event_authority :: services.state_authority(event_store, "events", 1) ?? panic("event authority")
-    services.set_state_event_log(&events, event_authority) ?? panic("event state")
+    event_authority :: services.state_store(event_store) ?? panic("event store")
+    services.set_state_event_log(&events, event_authority, "events", 1) ?? panic("event state")
     event_worker :: services.worker(&events, "worker", 2) ?? panic("event worker")
     services.start(&events) ?? panic("event start")
     services.append_event(&events, "first") ?? panic("event one")
@@ -347,6 +353,9 @@ fn run() {
     services.stop(&events) ?? panic("event stop")
 
     workflow := services.tree("workflow")
+    workflow_store_path :: path.join(temp, "workflow.state")
+    workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
+    services.set_state_event_log(&workflow, workflow_store, "workflow-events", 1) ?? panic("workflow state")
     workflow_worker :: services.worker(&workflow, "worker", 2) ?? panic("workflow worker")
     services.start(&workflow) ?? panic("workflow start")
     run_id :: services.workflow_start(&workflow, "checkout", 1) ?? panic("workflow id")
@@ -367,8 +376,9 @@ fn run() {
     services.directory_register(&cluster, "api", endpoint) ?? panic("directory register")
     services.drain_worker(&cluster, endpoint) ?? panic("cluster drain")
     handed :: services.handoff_generation(&cluster) ?? panic("handoff")
+    receipt :: services.upgrade_receipt(cluster) ?? panic("upgrade receipt")
     current :: services.directory_resolve(cluster, "api") ?? panic("directory resolve")
-    print("generation:{handed}:{services.directory_generation(cluster)}:{services.endpoint_show(current)}")
+    print("generation:{handed}:{services.directory_generation(cluster)}:{services.endpoint_show(current)}:{receipt}")
     stale :: services.send(&cluster, endpoint, "late")
     if stale == {
         .Ok(_) -> { print("stale:accepted") }
@@ -391,7 +401,7 @@ fn services_state_workflow_identity_and_upgrade_are_real_aot_paths() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0)\n"
+        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
     );
 }
 
@@ -405,6 +415,6 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0)\n"
+        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
     );
 }

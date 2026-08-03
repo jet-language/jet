@@ -589,7 +589,6 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
         "ComputeStream" => Some("JetComputeStream"),
         "GradTriple" => Some("JetComputeGradTriple"),
         "SparseTensor" => Some("JetSparseCsr"),
-        "RawKernelContract" => Some("JetRawKernelContract"),
         _ => None,
     }
 }
@@ -603,7 +602,8 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "ServiceRestart" => Some("JetServiceRestart"),
         "ServiceDelivery" => Some("JetServiceDelivery"),
         "ServiceRuntime" => Some("JetServiceRuntime"),
-        "ServiceStateAuthority" => Some("JetServiceStateAuthority"),
+        "ServiceStateStore" => Some("JetServiceStateStore"),
+        "ServiceUpgradeReceipt" => Some("JetServiceUpgradeReceipt"),
         "ServiceReceipt" => Some("JetServiceReceipt"),
         _ => None,
     }

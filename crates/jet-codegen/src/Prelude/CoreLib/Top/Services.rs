@@ -135,12 +135,27 @@ enum JetServiceMigration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetServiceStateStore {
+    path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetServiceStateAuthority {
     store: String,
     schema: String,
     version: i64,
     migration: String,
     adapter: JetServiceStateAdapter,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetServiceUpgradeReceipt {
+    from_generation: i64,
+    to_generation: i64,
+    migration: String,
+    rollback_store: String,
+    rollback_available: bool,
+    pinned_shards: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,6 +191,7 @@ struct JetServiceTree {
     task_group: std::sync::Arc<JetTaskGroupRuntime<String>>,
     chaos_fails: i64,
     previous_generation: i64,
+    last_upgrade: Option<JetServiceUpgradeReceipt>,
 }
 
 impl JetShow for JetServiceRestart {
@@ -213,6 +229,37 @@ impl JetShow for JetServiceStateAuthority {
             self.migration,
             jet_services_state_adapter_name(&self.adapter),
         )
+    }
+}
+
+impl JetShow for JetServiceStateStore {
+    fn jet_show(&self) -> String {
+        format!("ServiceStateStore({})", self.path)
+    }
+}
+
+impl JetShow for JetServiceUpgradeReceipt {
+    fn jet_show(&self) -> String {
+        format!(
+            "ServiceUpgradeReceipt(from={}, to={}, migration={}, rollback_available={}, pinned={})",
+            self.from_generation,
+            self.to_generation,
+            self.migration,
+            self.rollback_available,
+            self.pinned_shards.join(","),
+        )
+    }
+}
+
+impl JetDisplay for JetServiceUpgradeReceipt {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for JetServiceUpgradeReceipt {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
     }
 }
 
@@ -298,16 +345,28 @@ fn jet_services_tree(name: String) -> JetServiceTree {
         task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
         chaos_fails: 0,
         previous_generation: 0,
+        last_upgrade: None,
     }
 }
 
-pub fn jet_services_state_authority(
-    store: String,
+pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
+    service_authority_validate_text(
+        &path,
+        "service state store",
+        MAX_SERVICE_STATE_STORE,
+        false,
+    )?;
+    jet_services_state_validate_path(std::path::Path::new(&path))?;
+    Ok(JetServiceStateStore { path })
+}
+
+fn jet_services_state_authority(
+    store: &JetServiceStateStore,
     schema: String,
     version: i64,
 ) -> Result<JetServiceStateAuthority, JetServiceError> {
     jet_services_state_authority_with_migration(
-        store,
+        store.path.clone(),
         schema,
         version,
         JetServiceMigration::Reversible,
@@ -1402,7 +1461,16 @@ fn jet_services_send_durable(
     }
     jet_services_validate_endpoint(tree, endpoint)?;
     match jet_services_runtime_send(&runtime, endpoint, &message, &idempotency_key)? {
-        JetServiceReceipt::Accepted(_) | JetServiceReceipt::Duplicate(_) => {
+        JetServiceReceipt::Accepted(id) => {
+            if let Err(error) = jet_services_send(tree, endpoint, message.clone()) {
+                if let JetServiceError::Full(_) = error {
+                    let _ = jet_services_runtime_dead_letter(&runtime, &id);
+                    if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
+                        tree.dead_letters.push(id);
+                    }
+                }
+                return Err(error);
+            }
             if tree.idempotency_seen.len() < MAX_SERVICE_IDEMPOTENCY
                 && !tree
                     .idempotency_seen
@@ -1414,6 +1482,7 @@ fn jet_services_send_durable(
             }
             Ok(())
         }
+        JetServiceReceipt::Duplicate(_) => Ok(()),
         JetServiceReceipt::Retained { .. } => Ok(()),
         JetServiceReceipt::DeadLettered(id) => {
             if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
@@ -1461,7 +1530,9 @@ fn jet_services_set_state_empty(tree: &mut JetServiceTree) -> Result<(), JetServ
 
 fn jet_services_set_state_snapshot(
     tree: &mut JetServiceTree,
-    authority: JetServiceStateAuthority,
+    store: JetServiceStateStore,
+    schema: String,
+    version: i64,
 ) -> Result<(), JetServiceError> {
     if tree.started {
         return Err(JetServiceError::Policy(
@@ -1473,6 +1544,7 @@ fn jet_services_set_state_snapshot(
             "cannot replace a state adapter after it has records".to_string(),
         ));
     }
+    let authority = jet_services_state_authority(&store, schema, version)?;
     tree.state_adapter = JetServiceStateAdapter::Snapshot;
     tree.state_authority = Some(jet_services_attach_state_authority(
         &authority,
@@ -1483,7 +1555,9 @@ fn jet_services_set_state_snapshot(
 
 fn jet_services_set_state_event_log(
     tree: &mut JetServiceTree,
-    authority: JetServiceStateAuthority,
+    store: JetServiceStateStore,
+    schema: String,
+    version: i64,
 ) -> Result<(), JetServiceError> {
     if tree.started {
         return Err(JetServiceError::Policy(
@@ -1495,6 +1569,7 @@ fn jet_services_set_state_event_log(
             "cannot replace a state adapter after it has records".to_string(),
         ));
     }
+    let authority = jet_services_state_authority(&store, schema, version)?;
     tree.state_adapter = JetServiceStateAdapter::EventLog;
     tree.state_authority = Some(jet_services_attach_state_authority(
         &authority,
@@ -2914,6 +2989,57 @@ fn jet_services_reconcile_worker(
     jet_services_authority_update(&worker.endpoint, true)
 }
 
+fn jet_services_prepare_rollback(
+    tree: &JetServiceTree,
+) -> Result<(String, bool, String), JetServiceError> {
+    let Some(authority) = tree.state_authority.as_ref() else {
+        return Ok((String::new(), false, "none".to_string()));
+    };
+    if authority.migration == "forward_only" {
+        return Ok((String::new(), false, authority.migration.clone()));
+    }
+    let rollback_store = format!("{}.rollback-g{}", authority.store, tree.generation);
+    service_authority_validate_text(
+        &rollback_store,
+        "service rollback store",
+        MAX_SERVICE_STATE_STORE,
+        false,
+    )?;
+    let records = jet_services_state_store_load(authority, &tree.state_adapter)?;
+    let rollback_authority = JetServiceStateAuthority {
+        store: rollback_store.clone(),
+        ..authority.clone()
+    };
+    jet_services_state_store_write(&rollback_authority, &tree.state_adapter, &records)?;
+    Ok((rollback_store, true, authority.migration.clone()))
+}
+
+fn jet_services_restore_rollback(
+    tree: &mut JetServiceTree,
+    receipt: &JetServiceUpgradeReceipt,
+) -> Result<(), JetServiceError> {
+    if !receipt.rollback_available {
+        return Ok(());
+    }
+    let authority = tree.state_authority.as_ref().ok_or_else(|| {
+        JetServiceError::Policy("upgrade receipt requires a state authority".to_string())
+    })?;
+    let rollback_authority = JetServiceStateAuthority {
+        store: receipt.rollback_store.clone(),
+        ..authority.clone()
+    };
+    let records = jet_services_state_store_load(&rollback_authority, &tree.state_adapter)?;
+    jet_services_state_store_write(authority, &tree.state_adapter, &records)?;
+    match tree.state_adapter {
+        JetServiceStateAdapter::Snapshot => tree.snapshot = records.first().cloned(),
+        JetServiceStateAdapter::EventLog => tree.event_log = records,
+        JetServiceStateAdapter::Empty => {}
+    }
+    std::fs::remove_file(&receipt.rollback_store).map_err(|error| {
+        jet_services_state_error(format!("cannot retire service rollback store: {error}"))
+    })
+}
+
 fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
@@ -2931,11 +3057,14 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
             )));
         }
     }
-    tree.previous_generation = tree.generation;
-    tree.generation = tree
+    let (rollback_store, rollback_available, migration) = jet_services_prepare_rollback(tree)?;
+    let from_generation = tree.generation;
+    let to_generation = tree
         .generation
         .checked_add(1)
         .ok_or_else(|| JetServiceError::Policy("service generation exhausted".to_string()))?;
+    tree.previous_generation = from_generation;
+    tree.generation = to_generation;
     for worker in &mut tree.workers {
         if tree.draining.iter().any(|name| name == &worker.name)
             && !tree.partitioned.iter().any(|name| name == &worker.name)
@@ -2966,8 +3095,24 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
     for worker in &tree.workers {
         jet_services_authority_update(&worker.endpoint, worker.running)?;
     }
+    tree.last_upgrade = Some(JetServiceUpgradeReceipt {
+        from_generation,
+        to_generation,
+        migration,
+        rollback_store,
+        rollback_available,
+        pinned_shards: Vec::new(),
+    });
     tree.draining.clear();
     Ok(tree.generation)
+}
+
+fn jet_services_upgrade_receipt(
+    tree: &JetServiceTree,
+) -> Result<JetServiceUpgradeReceipt, JetServiceError> {
+    tree.last_upgrade.clone().ok_or_else(|| {
+        JetServiceError::Policy("service tree has no completed generation handoff".to_string())
+    })
 }
 
 fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
@@ -2981,16 +3126,23 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
             "no previous generation to roll back to".to_string(),
         ));
     }
-    if tree
-        .state_authority
-        .as_ref()
-        .is_some_and(|authority| authority.migration == "forward_only")
+    let receipt = tree.last_upgrade.clone().ok_or_else(|| {
+        JetServiceError::Policy("service tree has no rollback receipt".to_string())
+    })?;
+    if receipt.to_generation != tree.generation
+        || receipt.from_generation != tree.previous_generation
     {
+        return Err(JetServiceError::Stale(
+            "service rollback receipt does not match the active generation".to_string(),
+        ));
+    }
+    if receipt.migration == "forward_only" {
         return Err(JetServiceError::Policy(
             "forward-only state migration cannot roll back; publish a forward recovery generation"
                 .to_string(),
         ));
     }
+    jet_services_restore_rollback(tree, &receipt)?;
     tree.generation = tree.previous_generation;
     tree.previous_generation = 0;
     for worker in &mut tree.workers {
@@ -3014,6 +3166,7 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
     for worker in &tree.workers {
         jet_services_authority_update(&worker.endpoint, worker.running)?;
     }
+    tree.last_upgrade = None;
     Ok(tree.generation)
 }
 
@@ -3032,7 +3185,7 @@ fn jet_services_chaos_fail(tree: &mut JetServiceTree) -> Result<i64, JetServiceE
 
 fn jet_services_observe(tree: &JetServiceTree) -> String {
     format!(
-        "Observe(workers={}, started={}, generation={}, dead_letters={}, events={}, chaos={}, draining={}, partitions={})",
+        "Observe(workers={}, started={}, generation={}, dead_letters={}, events={}, chaos={}, draining={}, partitions={}, rollback={})",
         tree.workers.len(),
         tree.started,
         tree.generation,
@@ -3041,5 +3194,6 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         tree.chaos_fails,
         tree.draining.len(),
         tree.partitioned.len()
+        ,tree.last_upgrade.as_ref().is_some_and(|receipt| receipt.rollback_available)
     )
 }

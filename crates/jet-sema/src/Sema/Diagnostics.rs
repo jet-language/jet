@@ -883,6 +883,7 @@ pub(crate) fn is_displayable(
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DISPLAY)
+                || n == "ServiceUpgradeReceipt"
                 || matches!(
                     n.as_str(),
                     Syntax::TYPE_INT
@@ -986,6 +987,7 @@ pub(crate) fn is_debuggable(
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DEBUG)
+                || n == "ServiceUpgradeReceipt"
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { .. } if ty.quantity_parts().is_some() => true,

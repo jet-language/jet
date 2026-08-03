@@ -1014,17 +1014,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.compute", "raw_kernel_contract") => format!(
-            "{}(({}).clone(), {})",
-            helper("jet_compute_raw_kernel_contract"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "raw_kernel_contract_show") => format!(
-            "{}(&({}))",
-            helper("jet_compute_raw_kernel_contract_show"),
-            arg(0)
-        ),
         ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => format!(
             "{}(&({}), &({}), &({}), &({}))",
             helper(&format!("jet_compute_{method}")),
@@ -1104,12 +1093,10 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.services", "state_authority") => format!(
-            "{}(({}).clone(), ({}).clone(), {})",
-            helper("jet_services_state_authority"),
-            arg(0),
-            arg(1),
-            arg(2)
+        ("core.services", "state_store") => format!(
+            "{}(({}).clone())",
+            helper("jet_services_state_store"),
+            arg(0)
         ),
         ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
         ("core.services", "restart_one_for_one") => {
@@ -1210,16 +1197,20 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_services_set_state_empty"), arg(0))
         }
         ("core.services", "set_state_snapshot") => format!(
-            "{}(&mut ({}), ({}).clone())",
+            "{}(&mut ({}), ({}).clone(), ({}).clone(), {})",
             helper("jet_services_set_state_snapshot"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2),
+            arg(3)
         ),
         ("core.services", "set_state_event_log") => format!(
-            "{}(&mut ({}), ({}).clone())",
+            "{}(&mut ({}), ({}).clone(), ({}).clone(), {})",
             helper("jet_services_set_state_event_log"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2),
+            arg(3)
         ),
         ("core.services", "commit_snapshot") => format!(
             "{}(&mut ({}), ({}).clone())",
@@ -1289,6 +1280,11 @@ pub(crate) fn emit_tir_core_call(
         ("core.services", "handoff_generation") => format!(
             "{}(&mut ({}))",
             helper("jet_services_handoff_generation"),
+            arg(0)
+        ),
+        ("core.services", "upgrade_receipt") => format!(
+            "{}(&({}))",
+            helper("jet_services_upgrade_receipt"),
             arg(0)
         ),
         ("core.services", "rollback_generation") => format!(

@@ -2,13 +2,13 @@
 use core.compute as compute
 
 fn run() {
-    a :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("a")
-    b :: compute.from_list([4.0, 5.0, 6.0]) ?? panic("b")
+    a :: compute.from_list([2.0]) ?? panic("a")
+    b :: compute.from_list([4.0]) ?? panic("b")
     g :: compute.value_and_grad_mul(a, b) ?? panic("vag")
     print("grad:{compute.to_list(compute.grad_a(g))}")
 
-    ta :: compute.ones([3]) ?? panic("ta")
-    tb :: compute.ones([3]) ?? panic("tb")
+    ta :: compute.ones([1]) ?? panic("ta")
+    tb :: compute.ones([1]) ?? panic("tb")
     j :: compute.jvp_mul(a, b, ta, tb) ?? panic("jvp")
     print("jvp:{compute.to_list(j)}")
     va :: compute.vjp_add(a, b, ta) ?? panic("vjp")
