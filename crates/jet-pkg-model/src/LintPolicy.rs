@@ -18,17 +18,29 @@ use crate::PackageManifest::PackManifest;
 /// all) is the default — the returned list is always empty and every lint
 /// stays a warning (I1/D-LINTPOLICY1: warn-never-block by default).
 pub fn enforce(lints: &[Diagnostic], manifest: &PackManifest) -> Vec<Diagnostic> {
-    let Some(deny) = manifest.lints_deny.as_ref() else {
-        return Vec::new();
-    };
-    if deny.is_empty() {
-        return Vec::new();
-    }
     lints
         .iter()
-        .filter(|d| deny.iter().any(|code| code == &d.code))
+        .filter(|d| is_denied(&d.code, manifest))
         .map(e1293)
         .collect()
+}
+
+/// Return only findings that remain warnings under this package's policy.
+/// Denied findings are rendered by `enforce` as E1293 instead; keeping them
+/// out of the warning stream makes the policy wall a single, truthful report.
+pub fn non_denied(lints: &[Diagnostic], manifest: &PackManifest) -> Vec<Diagnostic> {
+    lints
+        .iter()
+        .filter(|lint| !is_denied(&lint.code, manifest))
+        .cloned()
+        .collect()
+}
+
+fn is_denied(code: &str, manifest: &PackManifest) -> bool {
+    manifest
+        .lints_deny
+        .as_ref()
+        .is_some_and(|deny| deny.iter().any(|denied| denied == code))
 }
 
 /// E1293: a lint policy.lints denies fired. Carries the original lint's

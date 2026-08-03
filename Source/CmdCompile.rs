@@ -181,6 +181,20 @@ fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> Bui
     }
 }
 
+/// D-LINTPOLICY1: load the one package policy used by the compile driver.
+/// Keeping the manifest root beside the parsed value lets the warning display
+/// and the later E1293 gate inspect the same policy without re-parsing it.
+fn load_pkg_manifest(
+    source_file: &str,
+) -> Option<(PathBuf, jet::PackageManifest::PackManifest)> {
+    let source_path = Path::new(source_file);
+    let search_from = source_path.parent().unwrap_or(Path::new("."));
+    let root = jet::Loader::find_manifest_root(search_from)?;
+    let raw = fs::read_to_string(root.join(jet::Syntax::PAYLOAD_FILE)).ok()?;
+    let manifest = jet::PackageManifest::parse(&raw).ok()?;
+    Some((root, manifest))
+}
+
 pub(crate) fn run_compile_cmd(
     cmd: &str,
     file: &str,
@@ -377,6 +391,8 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
+    let package_manifest = load_pkg_manifest(file);
+
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
     // deny-path enforcement below can see them alongside the already-loaded
@@ -439,15 +455,24 @@ pub(crate) fn run_compile_cmd(
                 // via `jet lint --a11y`; ordinary build/run never surfaces them.
                 let lints = crate::CmdDevTools::visible_lints(&out.lints);
                 visible_lints = lints.clone();
-                if !lints.is_empty() {
+                let warning_lints = package_manifest
+                    .as_ref()
+                    .map(|(_, manifest)| jet::LintPolicy::non_denied(&lints, manifest))
+                    .unwrap_or_else(|| lints.clone());
+                if !warning_lints.is_empty() {
                     if mode.json {
-                        eprint!("{}", jet::render_all_json(file, &src, &lints));
+                        eprint!("{}", jet::render_all_json(file, &src, &warning_lints));
                     } else {
                         eprint!(
                             "{}",
-                            jet::render_all_colored(file, &src, &lints, mode.color_stderr())
+                            jet::render_all_colored(
+                                file,
+                                &src,
+                                &warning_lints,
+                                mode.color_stderr(),
+                            )
                         );
-                        let n = lints.len();
+                        let n = warning_lints.len();
                         eprintln!(
                             "\n{} warning{} emitted (compilation continues)",
                             n,
@@ -512,63 +537,57 @@ pub(crate) fn run_compile_cmd(
             // Program stdout stays the program's (U7 / D-DEVMODE1); tool
             // chatter goes to stderr.
             eprintln!("{}", jet::EffectBudget::summary_line(&entries));
-            let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
-            if let Some(root) = jet::Loader::find_manifest_root(search_from) {
-                let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
-                if let Some(manifest) = fs::read_to_string(&pack_path)
-                    .ok()
-                    .and_then(|raw| jet::PackageManifest::parse(&raw).ok())
-                {
-                    let configured_names = manifest
-                        .effects_allow
-                        .iter()
-                        .flatten()
-                        .chain(manifest.effects_deny.iter().flatten())
-                        .chain(manifest.grants.iter().flat_map(|(_, names)| names));
-                    let mut violations = Vec::new();
-                    for name in configured_names {
-                        if jet::Sema::parse_effect_name(name).is_some() {
-                            if let Err(suggestion) = jet::Sema::resolve_effect_name(
+            if let Some((root, manifest)) = package_manifest.as_ref() {
+                let configured_names = manifest
+                    .effects_allow
+                    .iter()
+                    .flatten()
+                    .chain(manifest.effects_deny.iter().flatten())
+                    .chain(manifest.grants.iter().flat_map(|(_, names)| names));
+                let mut violations = Vec::new();
+                for name in configured_names {
+                    if jet::Sema::parse_effect_name(name).is_some() {
+                        if let Err(suggestion) = jet::Sema::resolve_effect_name(
+                            name,
+                            &effect_facts.fact_registry,
+                        ) {
+                            violations.push(jet::Sema::undeclared_effect(
                                 name,
-                                &effect_facts.fact_registry,
-                            ) {
-                                violations.push(jet::Sema::undeclared_effect(
-                                    name,
-                                    suggestion.as_deref(),
-                                    None,
-                                ));
-                            }
+                                suggestion.as_deref(),
+                                None,
+                            ));
                         }
                     }
-                    violations.extend(jet::EffectBudget::enforce(&entries, &manifest));
-                    if !violations.is_empty() {
-                        report_problems(mode, file, &src, &violations);
-                        exit(ExitCodes::USER_ERROR);
-                    }
-                    // D-LINTPOLICY1=A (the override law): a team's
-                    // `policy.lints.deny` promotes named lints from warnings
-                    // to a build failure (E1293); absent entirely, every
-                    // lint above already printed as a warning and nothing
-                    // blocks (I1/D-LINTPOLICY1 default).
-                    let lint_violations =
-                        jet::LintPolicy::enforce(&visible_lints, &manifest);
-                    if !lint_violations.is_empty() {
-                        report_problems(mode, file, &src, &lint_violations);
-                        exit(ExitCodes::USER_ERROR);
-                    }
-                    // Record per-dependency effect provenance + grants in the
-                    // lockfile, when one already exists (`jet fetch` owns
-                    // creating it).
-                    if let Some(mut lock) = jet::Lock::load(&root) {
-                        jet::EffectBudget::update_lock_provenance(
-                            &mut lock, &entries, &manifest,
-                        );
-                        let _ = fs::write(
-                            jet::PkgStore::lock_path(&root),
-                            jet::Lock::write(&lock),
-                        );
-                    }
                 }
+                violations.extend(jet::EffectBudget::enforce(&entries, manifest));
+                if !violations.is_empty() {
+                    report_problems(mode, file, &src, &violations);
+                    exit(ExitCodes::USER_ERROR);
+                }
+                // Record per-dependency effect provenance + grants in the
+                // lockfile, when one already exists (`jet fetch` owns
+                // creating it).
+                if let Some(mut lock) = jet::Lock::load(root) {
+                    jet::EffectBudget::update_lock_provenance(
+                        &mut lock, &entries, manifest,
+                    );
+                    let _ = fs::write(
+                        jet::PkgStore::lock_path(root),
+                        jet::Lock::write(&lock),
+                    );
+                }
+            }
+        }
+
+        // D-LINTPOLICY1=A: denied findings were withheld from the warning
+        // stream above and must surface exactly once as E1293. Keep this gate
+        // outside effect-fact availability; lint policy does not depend on a
+        // solved effect graph.
+        if let Some((_, manifest)) = package_manifest.as_ref() {
+            let lint_violations = jet::LintPolicy::enforce(&visible_lints, manifest);
+            if !lint_violations.is_empty() {
+                report_problems(mode, file, &src, &lint_violations);
+                exit(ExitCodes::USER_ERROR);
             }
         }
     }

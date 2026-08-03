@@ -1471,6 +1471,10 @@ fn cli_build_enforces_lint_policy_e1293() {
         stderr.contains("E1293") && stderr.contains("L0504"),
         "expected E1293 naming L0504, got:\n{stderr}"
     );
+    assert!(
+        !stderr.contains("Warning [L0504]"),
+        "a denied lint must not also be printed as a plain warning:\n{stderr}"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }

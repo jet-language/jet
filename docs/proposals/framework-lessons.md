@@ -18,8 +18,9 @@ claim that the open transport and validation boundaries are complete.
 
 ## Current implementation boundary
 
-- D-BINPAT1, D-ENVHOOK1, and D-LINTPOLICY1 remain shipped in their existing
-  parser, tooling, and policy paths.
+- D-BINPAT1 and D-ENVHOOK1 remain shipped in their existing parser and tooling
+  paths. D-LINTPOLICY1 keeps the default warning path and removes a denied
+  finding from that path before emitting its single E1293 policy failure.
 - D-STM1 now has explicit guard-owned buffering and canonical lock-fold commit.
   Optimistic retry-on-conflict is not claimed.
 - D-AUTH1 now uses typed process-global records, checked lifetimes, single-use
