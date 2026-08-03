@@ -1906,15 +1906,8 @@ mod supervision_tests {
 }
 
 fn resolve_target(raw: &str) -> Result<Target, String> {
-    let input_path = Path::new(raw);
-    let path = if input_path.is_absolute() {
-        input_path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("can't resolve proof target `{raw}`: {error}"))?
-            .join(input_path)
-    };
-    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+    let path = Path::new(raw);
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("can't find proof target `{raw}`")
         } else {
@@ -1933,15 +1926,15 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         if !metadata.is_dir() {
             return Err(format!("proof target `{raw}` is not a file or directory"));
         }
-        let kind = if has_proof_manifest(&path, jet::Syntax::PACKAGE_FILE)?
-            || has_proof_manifest(&path, jet::Syntax::PAYLOAD_FILE)?
+        let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)?
+            || has_proof_manifest(path, jet::Syntax::PAYLOAD_FILE)?
         {
             "package"
         } else {
             "workspace"
         };
         let mut found = Vec::new();
-        collect_jet_files(&path, &mut found)?;
+        collect_jet_files(path, &mut found)?;
         if found.is_empty() {
             return Err(format!("proof target `{raw}` contains no .jet files"));
         }
@@ -1963,7 +1956,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         .collect::<Vec<_>>();
     if metadata.is_dir() {
         let mut closure_paths = Vec::new();
-        collect_identity_files(&path, &mut closure_paths)?;
+        collect_identity_files(path, &mut closure_paths)?;
         for closure_path in closure_paths {
             let bytes = fs::read(&closure_path)
                 .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
@@ -1973,7 +1966,17 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             }
         }
     } else {
-        if let Some(root) = path.parent().and_then(jet::Loader::find_manifest_root) {
+        let manifest_root = path
+            .parent()
+            .and_then(jet::Loader::find_manifest_root)
+            .map(|root| {
+                if root.as_os_str().is_empty() {
+                    PathBuf::from(".")
+                } else {
+                    root
+                }
+            });
+        if let Some(root) = manifest_root {
             let mut closure_paths = Vec::new();
             collect_identity_files(&root, &mut closure_paths)?;
             for closure_path in closure_paths {
@@ -2058,7 +2061,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     );
     Ok(Target {
         kind,
-        root: normalized(&path),
+        root: normalized(path),
         identity_members,
         input_sha256: jet::SHA256::sha256_hex(&identity),
         source_digest,
