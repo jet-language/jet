@@ -383,3 +383,110 @@ fn prove_solver_lens_emits_checked_certificate_evidence() {
     assert!(report.contains("\"status\":\"proved\""), "{report}");
     assert!(report.contains("\"solver\":{\"disproved\":0,\"proved\":1"), "{report}");
 }
+
+#[test]
+fn prove_capture_rejects_multi_member_targets_before_authority_or_artifact() {
+    let root = workspace("replay_cardinality");
+    fs::write(root.join("a.jet"), "fn a() {}\n").unwrap();
+    fs::write(root.join("b.jet"), "fn b() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", ".", "--capture=multi.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3624]"));
+    assert!(!root.join("multi.jetproof-replay").exists());
+}
+
+#[test]
+fn prove_sensitive_capture_json_is_a_single_stdout_diagnostic() {
+    let root = workspace("replay_sensitive_json");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture-sensitive", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "JSON capture leaked stderr");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("\"code\":\"E3627\""), "{stdout}");
+    assert!(!root.join(".jetproof-replay").exists());
+}
+
+#[test]
+fn prove_replay_rejects_schema_and_identity_changes_as_typed_failures() {
+    let root = workspace("replay_identity_schema");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let artifact = "capture.jetproof-replay";
+    let captured = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", &format!("--capture={artifact}"), "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(captured.status.code(), Some(0));
+
+    let artifact_path = root.join(artifact);
+    let original = fs::read(&artifact_path).unwrap();
+    let mut incompatible = original.clone();
+    incompatible[10] = 1;
+    fs::write(&artifact_path, incompatible).unwrap();
+    let schema = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay", artifact, "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(schema.status.code(), Some(1));
+    assert!(schema.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&schema.stdout).contains("\"code\":\"E3620\""));
+
+    fs::write(&artifact_path, original).unwrap();
+    fs::write(root.join("main.jet"), "fn run() { require(false) }\n").unwrap();
+    let identity = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay", artifact, "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(identity.status.code(), Some(1));
+    assert!(identity.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&identity.stdout).contains("\"code\":\"E3621\""));
+}
+
+#[test]
+fn prove_presentation_lenses_keep_the_complete_json_report_unchanged() {
+    let root = workspace("lens_report_identity");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let full = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--json"])
+        .output()
+        .unwrap();
+    let contracts = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--lens", "contracts", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(full.status.code(), Some(0));
+    assert_eq!(contracts.status.code(), Some(0));
+    assert_eq!(full.stdout, contracts.stdout);
+}
+
+#[test]
+fn prove_solver_lens_reports_a_verified_counterexample() {
+    let root = workspace("solver_counterexample");
+    fs::write(
+        root.join("bad.jet"),
+        "#[Post(result > value, \"grows\")] fn unchanged(value: Int) => Int { return value }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"code\":\"E2950\""), "{report}");
+    assert!(report.contains("\"status\":\"disproved\""), "{report}");
+}
