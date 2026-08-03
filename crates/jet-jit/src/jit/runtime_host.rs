@@ -116,13 +116,17 @@ pub(crate) struct JitRuntime {
     pub(crate) cbor_writers: Vec<crate::enc_stream::CBORWriterSlot>,
     /// Typed `core.data` pull streams (`csv_reader` → Event rows).
     pub(crate) data_streams: Vec<crate::Data::DataStreamSlot>,
-    /// `Set<T>` handles — 1-based indices (#729 collections/set). Int elems only.
+    /// `Set<T>` handles — 1-based indices (#729 collections/set), with the
+    /// parallel kind tag preserving String equality at the host boundary.
     pub(crate) sets: Vec<std::collections::HashSet<i64>>,
+    /// Parallel element-kind tags: `true` means String, `false` means Int.
+    pub(crate) set_string_kinds: Vec<bool>,
     /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
     pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
     /// `Bag<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
     pub(crate) bags: Vec<std::collections::HashMap<i64, usize>>,
     pub(crate) sorted_sets: Vec<std::collections::BTreeSet<i64>>,
+    pub(crate) sorted_set_string_kinds: Vec<bool>,
     pub(crate) priority_queues: Vec<std::collections::BinaryHeap<i64>>,
     pub(crate) lrus: Vec<Collections::LruState>,
     pub(crate) bit_sets: Vec<std::collections::BTreeSet<i64>>,

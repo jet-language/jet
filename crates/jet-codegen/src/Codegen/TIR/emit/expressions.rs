@@ -1160,26 +1160,23 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).iter().cloned().collect::<Vec<_>>()", recv)
                     }
                 }
-                TBuiltinOp::SetUnion => format!(
-                    "({}).union(&({})).cloned().collect::<std::collections::HashSet<_>>()",
-                    recv,
-                    a(0)
-                ),
-                TBuiltinOp::SetIntersection => format!(
-                    "({}).intersection(&({})).cloned().collect::<std::collections::HashSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SetDifference => format!(
-                    "({}).difference(&({})).cloned().collect::<std::collections::HashSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SetSymmetricDifference => format!(
-                    "({}).symmetric_difference(&({})).cloned().collect::<std::collections::HashSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SetIsSubset => format!("({}).is_subset(&({}))", recv, a(0)),
-                TBuiltinOp::SetIsSuperset => format!("({}).is_superset(&({}))", recv, a(0)),
-                TBuiltinOp::SetIsDisjoint => format!("({}).is_disjoint(&({}))", recv, a(0)),
+                TBuiltinOp::SetUnion => format!("jet_set_union(&({}), &({}))", recv, a(0)),
+                TBuiltinOp::SetIntersection => {
+                    format!("jet_set_intersection(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SetDifference => {
+                    format!("jet_set_difference(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SetSymmetricDifference => {
+                    format!("jet_set_symmetric_difference(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SetIsSubset => format!("jet_set_is_subset(&({}), &({}))", recv, a(0)),
+                TBuiltinOp::SetIsSuperset => {
+                    format!("jet_set_is_superset(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SetIsDisjoint => {
+                    format!("jet_set_is_disjoint(&({}), &({}))", recv, a(0))
+                }
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",
@@ -1191,26 +1188,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SortedSetToList => {
                     format!("({}).iter().cloned().collect::<Vec<_>>()", recv)
                 }
-                TBuiltinOp::SortedSetUnion => format!(
-                    "({}).union(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
-                    recv,
-                    a(0)
-                ),
-                TBuiltinOp::SortedSetIntersection => format!(
-                    "({}).intersection(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SortedSetDifference => format!(
-                    "({}).difference(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SortedSetSymmetricDifference => format!(
-                    "({}).symmetric_difference(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
-                    recv, a(0)
-                ),
-                TBuiltinOp::SortedSetIsSubset => format!("({}).is_subset(&({}))", recv, a(0)),
-                TBuiltinOp::SortedSetIsSuperset => format!("({}).is_superset(&({}))", recv, a(0)),
-                TBuiltinOp::SortedSetIsDisjoint => format!("({}).is_disjoint(&({}))", recv, a(0)),
+                TBuiltinOp::SortedSetUnion => {
+                    format!("jet_sorted_set_union(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetIntersection => {
+                    format!("jet_sorted_set_intersection(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetDifference => {
+                    format!("jet_sorted_set_difference(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetSymmetricDifference => {
+                    format!("jet_sorted_set_symmetric_difference(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetIsSubset => {
+                    format!("jet_sorted_set_is_subset(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetIsSuperset => {
+                    format!("jet_sorted_set_is_superset(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::SortedSetIsDisjoint => {
+                    format!("jet_sorted_set_is_disjoint(&({}), &({}))", recv, a(0))
+                }
                 TBuiltinOp::PriorityQueueFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BinaryHeap<_>>()",

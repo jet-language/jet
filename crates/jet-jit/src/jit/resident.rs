@@ -46,9 +46,11 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         cbor_writers: Vec::new(),
         data_streams: Vec::new(),
         sets: Vec::new(),
+        set_string_kinds: Vec::new(),
         deques: Vec::new(),
         bags: Vec::new(),
         sorted_sets: Vec::new(),
+        sorted_set_string_kinds: Vec::new(),
         priority_queues: Vec::new(),
         lrus: Vec::new(),
         bit_sets: Vec::new(),
@@ -146,9 +148,11 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.cbor_writers.clear();
     rt.data_streams.clear();
     rt.sets.clear();
+    rt.set_string_kinds.clear();
     rt.deques.clear();
     rt.bags.clear();
     rt.sorted_sets.clear();
+    rt.sorted_set_string_kinds.clear();
     rt.priority_queues.clear();
     rt.lrus.clear();
     rt.bit_sets.clear();

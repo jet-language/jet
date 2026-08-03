@@ -1978,35 +1978,60 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetFrom => {
-            jit_list_int_type(&recv.ty) && args.is_empty()
+            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
         }
         TBuiltinOp::SetInsert | TBuiltinOp::SetRemove => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
-                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[0].ty, Type::Int | Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetToList => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
-        TBuiltinOp::SetUnion => {
+        TBuiltinOp::SetUnion
+        | TBuiltinOp::SetIntersection
+        | TBuiltinOp::SetDifference
+        | TBuiltinOp::SetSymmetricDifference
+        | TBuiltinOp::SetIsSubset
+        | TBuiltinOp::SetIsSuperset
+        | TBuiltinOp::SetIsDisjoint => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
-                    if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                    if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::SortedSetFrom | TBuiltinOp::PriorityQueueFrom => {
-            jit_list_int_type(&recv.ty) && args.is_empty()
+        TBuiltinOp::SortedSetFrom => {
+            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
         }
         TBuiltinOp::SortedSetInsert | TBuiltinOp::SortedSetRemove => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
+                && matches!(&args[0].ty, Type::Int | Type::String)
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::SortedSetUnion
+        | TBuiltinOp::SortedSetIntersection
+        | TBuiltinOp::SortedSetDifference
+        | TBuiltinOp::SortedSetSymmetricDifference
+        | TBuiltinOp::SortedSetIsSubset
+        | TBuiltinOp::SortedSetIsSuperset
+        | TBuiltinOp::SortedSetIsDisjoint => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Apply { name, args: targs }
+                    if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::PriorityQueueFrom => {
+            jit_list_int_type(&recv.ty) && args.is_empty()
         }
         TBuiltinOp::SortedSetToList
         | TBuiltinOp::PriorityQueuePeek

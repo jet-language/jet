@@ -15393,7 +15393,13 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.set_from_list, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
+                let string_kind = matches!(
+                    &recv.ty,
+                    Type::List(elem) | Type::FixedList { elem, .. }
+                        if matches!(elem.as_ref(), Type::String)
+                );
+                let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                let call = self.b.ins().call(host_ref, &[recv_val, kind]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::SetInsert => {
@@ -15451,7 +15457,13 @@ impl LowerCtx<'_, '_> {
                 let host = self
                     .module
                     .declare_func_in_func(self.host.coll.sorted_set_from, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
+                let string_kind = matches!(
+                    &recv.ty,
+                    Type::List(elem) | Type::FixedList { elem, .. }
+                        if matches!(elem.as_ref(), Type::String)
+                );
+                let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                let call = self.b.ins().call(host, &[recv_val, kind]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::SortedSetInsert => {

@@ -1574,10 +1574,10 @@ comptime, and default `jet run`.
 Competitor accounting is explicit: Python `partition`/`count`, Rust
 `find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
 Kotlin `indexOf`/`count`, and JavaScript `indexOf`/`split` map to the rows
-above or the existing `before`/`after`/`split` methods. Locale collation,
-locale-sensitive casing, and regex replacement remain the documented v1
-out-of-scope cases in `core.text`; they require the existing explicit i18n or
-regex decisions and are not silently added to the ambient String surface.
+above or the existing `before`/`after`/`split` methods. Locale collation and
+locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
+replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
+are not silently added to the ambient String surface.
 
 ---
 

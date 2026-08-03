@@ -53,6 +53,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
+    include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
@@ -1888,11 +1889,19 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/Disjoint.rs")).unwrap();
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
+        let set_algebra =
+            std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let typed_text =
+            std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
+        let shared_protocol =
+            std::fs::read_to_string(root.join("src/Prelude/SharedProtocol.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
+        let numeric_widen =
+            std::fs::read_to_string(root.join("src/Prelude/NumericWiden.rs")).unwrap();
         let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
         let exact_units =
             std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
@@ -1908,12 +1917,16 @@ mod tests {
                 "src/Prelude/Core/ExpiringSecret.rs",
                 expiring_secret.as_str(),
             ),
+            ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
+            ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
             ),
+            ("src/Prelude/NumericWiden.rs", numeric_widen.as_str()),
             ("src/Prelude/Observe.rs", observe.as_str()),
             (
                 "../jet-foundation/src/ExactUnitConversion.rs",
@@ -1951,6 +1964,9 @@ mod tests {
         let expiring_secret_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
             .unwrap();
+        let set_algebra_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/SetAlgebra.rs\")")
+            .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
@@ -1974,7 +1990,8 @@ mod tests {
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
-                && expiring_secret_pos < core_pos
+                && expiring_secret_pos < set_algebra_pos
+                && set_algebra_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
@@ -1992,9 +2009,13 @@ mod tests {
                 range_bounds.as_str(),
                 disjoint.as_str(),
                 expiring_secret.as_str(),
+                set_algebra.as_str(),
                 core.as_str(),
+                typed_text.as_str(),
                 collections.as_str(),
+                shared_protocol.as_str(),
                 runtime_control.as_str(),
+                numeric_widen.as_str(),
                 observe.as_str(),
                 exact_units.as_str(),
                 structural_debug.as_str(),
@@ -2011,8 +2032,11 @@ mod tests {
             disjoint.as_str(),
             expiring_secret.as_str(),
             core.as_str(),
+            typed_text.as_str(),
             collections.as_str(),
+            shared_protocol.as_str(),
             runtime_control.as_str(),
+            numeric_widen.as_str(),
             observe.as_str(),
             exact_units.as_str(),
             structural_debug.as_str(),
@@ -2022,10 +2046,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 227_757, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 286_529, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "69343721d4715c9dca3a4d27b93dee8bd4ef73640c7500bbe3d3fabfc71150b2",
+            "7f1aedb94694ab3ce188edd8cec00752964fba2520db36691369b8629dccf7d6",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
