@@ -213,7 +213,7 @@ fn check_lsp() -> Check {
 }
 
 fn check_registry() -> Check {
-    let registry = crate::Publish::Registry::resolve_publish_registry();
+    let registry = crate::Publish::resolve_publish_registry();
     let safe_url = redact_registry_url(&registry.url);
     if registry.url.starts_with("file://") {
         let path = registry.url.trim_start_matches("file://");

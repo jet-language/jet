@@ -319,7 +319,11 @@ fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
         | service_prelude::JetServiceError::Unknown(message)
         | service_prelude::JetServiceError::NotStarted(message)
         | service_prelude::JetServiceError::Policy(message)
-        | service_prelude::JetServiceError::Unavailable(message) => message,
+        | service_prelude::JetServiceError::Unavailable(message)
+        | service_prelude::JetServiceError::Partitioned(message)
+        | service_prelude::JetServiceError::Revoked(message)
+        | service_prelude::JetServiceError::Stale(message)
+        | service_prelude::JetServiceError::Expired(message) => message,
     };
     CtValue::Struct {
         type_name: "ServiceError".to_string(),

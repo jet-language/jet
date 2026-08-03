@@ -505,7 +505,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         eprintln!("error: couldn't write the registry index entry: {}", e);
         exit(ExitCodes::USER_ERROR);
     }
-    let artifact = jet::Publish::Registry::artifact_path(repo, name, version)
+    let artifact = jet::Publish::artifact_path(repo, name, version)
         .unwrap_or_else(|error| {
             eprintln!("error: invalid registry artifact path: {error}");
             exit(ExitCodes::USER_ERROR);
@@ -741,7 +741,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         match fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("error: couldn't read advisory database `{}`: {}", path, e);
+                eprintln!("error: couldn't read advisory database `{}`: {}", path.display(), e);
                 exit(ExitCodes::USER_ERROR);
             }
         }

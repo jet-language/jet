@@ -204,6 +204,7 @@ mod tests {
                 hash: "sha256-deadbeef".to_string(),
             }],
             overlay_policy: Default::default(),
+            source_digest: String::new(),
         };
         write(&tmp, &plan);
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();

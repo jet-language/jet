@@ -159,7 +159,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     action,
-                    Store::verify_cache_entry(&roots, target, role),
+                    Store::verify_cache_transfer(&roots, target, role),
                 ),
                 "substitute" => {
                     let Some(destination) = parsed.flags.archive_to.as_deref() else {

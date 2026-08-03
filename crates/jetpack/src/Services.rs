@@ -1149,8 +1149,19 @@ fn spawn_service_supervisor(
     command.env(SERVICE_SUPERVISOR_ENV, "1");
     command
         .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("couldn't hand service `{}` to its supervisor: {error}", plan.name))
+        .map_err(|error| format!("couldn't hand service `{}` to its supervisor: {error}", plan.name))?;
+    let dir = service_dir(project_dir, &plan.name);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pid_path(&dir).is_file() && !supervisor_error_path(&dir).is_file() {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "service `{}` supervisor did not publish runtime state",
+                plan.name
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(())
 }
 
 fn restart_env(env: &ShellEnv) -> ShellEnv {
@@ -1394,8 +1405,22 @@ fn monitor_service(
                 return;
             }
             if let Err(error) = stop_process(&started.state, plan.shutdown.as_ref()) {
-                finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
-                return;
+                match started.child.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        return;
+                    }
+                    Err(wait_error) => {
+                        finish_supervisor(
+                            &project_dir,
+                            &plan,
+                            started.state.pid,
+                            Some(&format!("{error}; couldn't reap service: {wait_error}")),
+                        );
+                        return;
+                    }
+                }
             }
             let _ = started.child.wait();
             restarts += 1;
@@ -1500,7 +1525,7 @@ fn finish_supervisor(
         return;
     };
     if let Some(error) = error {
-        let _ = write_atomic(supervisor_error_path(&dir), error.as_bytes());
+        let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
     } else {
         let _ = fs::remove_file(supervisor_error_path(&dir));
     }

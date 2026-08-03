@@ -7,7 +7,8 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
-use crate::Publish::{self, SemVer, VersionReq};
+use crate::Publish::{self, VersionReq};
+use crate::Publish::SemVer::SemVer;
 use crate::Store;
 use crate::Syntax;
 use crate::SHA256::tree_hash;
@@ -449,7 +450,13 @@ impl<'a> Resolver<'a> {
             DepSpec::Registry(version_req) => {
                 let registry = Publish::resolve_publish_registry();
                 let (available, _warnings) = Publish::resolve_and_verify(&registry, dep_name)
-                    .map_err(|diagnostic| vec![diagnostic])?;
+                    .map_err(|diagnostic| {
+                        vec![registry_diagnostic(
+                            dep_name,
+                            &diagnostic.what,
+                            &diagnostic.fix,
+                        )]
+                    })?;
                 let requirement = VersionReq::parse(version_req).ok_or_else(|| {
                     vec![registry_diagnostic(
                         dep_name,
@@ -686,7 +693,7 @@ fn build_dep_dirs_from_lock(
                     )]
                 })?;
                 let Some(locked) = lock.packages.iter().find(|package| {
-                    package.name == dep_name
+                    package.name == *dep_name
                         && SemVer::parse(&package.version)
                             .is_some_and(|version| requirement.matches(&version))
                         && matches!(&package.source, LockSource::Registry { .. })

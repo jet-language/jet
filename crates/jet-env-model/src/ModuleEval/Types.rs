@@ -407,6 +407,7 @@ pub struct EnvPlan {
     /// D-ENV-INTEGRATIONS1: typed integrations before host realization.
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
+    pub environment_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

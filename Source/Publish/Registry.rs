@@ -4,7 +4,9 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Publish::Index::{self, IndexEntry};
+use crate::Publish::Sign;
 use crate::SHA256;
+use super::Tuf::verify_registry_package;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;

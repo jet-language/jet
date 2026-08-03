@@ -621,7 +621,7 @@ module mobile {
     imports: [
         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
         env.security.certificates([dev_certificate]),
-        env.network.hosts({"api.local": "127.0.0.1"}),
+        env.network.hosts(["api.local": "127.0.0.1"]),
         env.agent.codex(mcp: [repo_server]),
         env.editor.vscode()
     ]

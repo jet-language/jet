@@ -1154,7 +1154,7 @@ fn merge_output_fields(
                 current.insert(key.clone(), value.clone());
             }
             Some(existing) if existing == value => {}
-            Some(existing) if output_structured_field(key) => {}
+            Some(_) if output_structured_field(key) => {}
             Some(existing) => {
                 return Err(ComposeError::Conflict {
                     field,

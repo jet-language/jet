@@ -1247,7 +1247,7 @@ fn merge_package_scalar(
                 .field_priorities
                 .insert(field.to_string(), existing_priority.max(incoming_priority));
         }
-        Some(existing_value) if incoming_priority > existing_priority => {
+        Some(_) if incoming_priority > existing_priority => {
             match field {
                 "source" => existing.source = Some(incoming_value.clone()),
                 "version" => existing.version = Some(incoming_value.clone()),
