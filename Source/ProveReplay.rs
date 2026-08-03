@@ -38,6 +38,9 @@ pub(crate) struct ReplayIdentity {
     pub profile: String,
     pub tir_hash: String,
     pub tir_schema: String,
+    /// Stable identity of the one statically authorized `core.time.now` call.
+    /// The zero placeholder is no longer accepted in a replay frame.
+    pub time_site_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -428,6 +431,7 @@ fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String
         ("build_digest", identity.build_digest.as_str()),
         ("lock_digest", identity.lock_digest.as_str()),
         ("tir_hash", identity.tir_hash.as_str()),
+        ("time_site_id", identity.time_site_id.as_str()),
     ] {
         if value.len() != 64
             || !value
@@ -628,7 +632,7 @@ fn build_safe_time_artifact(
         ("call_id", Json::Int(0)),
         (
             "site_id",
-            Json::Str("0000000000000000000000000000000000000000000000000000000000000000".into()),
+            Json::Str(identity.time_site_id.clone()),
         ),
         (
             "unix_ns",
@@ -1059,7 +1063,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     if !matches!(root.get("call_id"), Some(JSONValue::Number(0))) {
         return Err("Time payload call_id is invalid".into());
     }
-    if !matches!(root.get("site_id"), Some(JSONValue::String(site)) if site.len() == 64 && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())) {
+    if !matches!(root.get("site_id"), Some(JSONValue::String(site)) if site.len() == 64 && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) && site.bytes().any(|byte| byte != b'0')) {
         return Err("Time payload site_id is invalid".into());
     }
     let JSONValue::Object(unix_ns) = root
@@ -1649,6 +1653,7 @@ mod tests {
             profile: "dev".into(),
             tir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             tir_schema: "1".into(),
+            time_site_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
         }
     }
 

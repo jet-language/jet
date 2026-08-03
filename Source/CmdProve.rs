@@ -169,6 +169,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         profile: "dev".to_string(),
         tir_hash: target.tir_hash.clone(),
         tir_schema: "1".to_string(),
+        time_site_id: time_site_id_for_target(&target),
     };
     if (capture.is_some() || replay.is_some()) && target.members.len() != 1 {
         let paths = target
@@ -191,7 +192,16 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    if let Some(opts) = capture.as_ref() {
+    let capture_opts = capture.clone();
+    let capture_authority = if let Some(opts) = capture {
+        match crate::ProveReplay::prepare_safe_capture(&opts, json) {
+            Ok(authority) => Some(authority),
+            Err(status) => exit(status),
+        }
+    } else {
+        None
+    };
+    if let Some(opts) = capture_opts.as_ref() {
         if let Err(status) = preflight_capture_target(&target, opts, json) {
             exit(status);
         }
@@ -201,32 +211,25 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(status);
         }
     }
-    let capture_authority = if let Some(opts) = capture {
-        match crate::ProveReplay::prepare_safe_capture(&opts, json) {
-            Ok(authority) => Some(authority),
-            Err(status) => exit(status),
-        }
-    } else {
-        None
-    };
     let mut replay_authority = if let Some(path) = replay {
         match crate::ProveReplay::prepare_replay(&identity, &path) {
             Ok(authority) => {
                 let mut authority = authority;
-                let time_ms = match authority.consume_time() {
-                    Ok(time_ms) => time_ms,
-                    Err(why) => {
-                        crate::ProveReplay::emit_diag(
-                            "E3623",
-                            "replay diverged from captured authority",
-                            &why,
-                            "recapture with `--capture` so the normal producer result is authoritative",
-                            json,
-                        );
-                        exit(ExitCodes::USER_ERROR);
-                    }
-                };
-                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", time_ms.to_string());
+                let time_sites = capture_sites_for_target(&target)
+                    .into_iter()
+                    .filter(|site| supported_time_capture_site(site))
+                    .count();
+                if time_sites == 0 {
+                    crate::ProveReplay::emit_diag(
+                        "E3623",
+                        "replay diverged from captured authority",
+                        "the target has no statically identified `core.time.now` call site for the captured Time record",
+                        "replay the matching target, or recapture a target with one supported Time call",
+                        json,
+                    );
+                    exit(ExitCodes::USER_ERROR);
+                }
+                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
                 if !json {
                     eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
                 }
@@ -341,7 +344,21 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         ExitCodes::OK
     };
-    if let Some(authority) = replay_authority.as_ref() {
+    if let Some(authority) = replay_authority.as_mut() {
+        // Consume the one statically authorized record only after the normal
+        // producer has reached the matching call-site proof boundary. A
+        // target with no such site is rejected during preflight; an artifact
+        // with an extra/reordered record is rejected by the cursor checks.
+        if let Err(why) = authority.consume_time() {
+            crate::ProveReplay::emit_diag(
+                "E3623",
+                "replay diverged from captured authority",
+                &why,
+                "recapture with `--capture` so the normal producer result is authoritative",
+                json,
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
         if let Err(why) = authority.finish() {
             crate::ProveReplay::emit_diag(
                 "E3623",
@@ -491,6 +508,21 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         );
     }
     exit(exit_code);
+}
+
+fn time_site_id_for_target(target: &Target) -> String {
+    let (path, offset) = target
+        .members
+        .first()
+        .map(|member| {
+            let source = String::from_utf8_lossy(&member.bytes);
+            (
+                member.path.as_str(),
+                source.find("time.now").unwrap_or(usize::MAX),
+            )
+        })
+        .unwrap_or((target.root.as_str(), usize::MAX));
+    jet::SHA256::sha256_hex(format!("{path}:{offset}:core.time.now").as_bytes())
 }
 
 fn lens_shows(lenses: &[String], facet: &str) -> bool {
@@ -665,6 +697,15 @@ fn preflight_capture_target(
                 );
             }
         }
+    }
+    if time_sites == 0 {
+        return capture_preflight_error(
+            "E3625",
+            "core.time.now",
+            "safe replay needs exactly one statically identified Time call site; this target has none",
+            "capture a target with one `core.time.now` call, or use an injected deterministic capability",
+            json_mode,
+        );
     }
     Ok(())
 }
@@ -1917,6 +1958,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     if metadata.file_type().is_symlink() {
         return Err(format!("proof target `{raw}` must not be a symlink"));
     }
+    reject_symlink_ancestors(path)?;
     let (kind, mut paths) = if metadata.is_file() {
         if path.extension().and_then(|ext| ext.to_str()) != Some(jet::Syntax::FILE_EXT) {
             return Err(format!("proof target `{raw}` is not a .jet file"));
@@ -2071,6 +2113,47 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         tir_hash,
         members,
     })
+}
+
+fn reject_symlink_ancestors(path: &Path) -> Result<(), String> {
+    let mut current = if path.is_absolute() {
+        PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("couldn't resolve proof target parent: {error}"))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir => {
+                current = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                current.pop();
+            }
+            std::path::Component::Normal(name) => current.push(name),
+            std::path::Component::Prefix(_) => {
+                return Err(format!(
+                    "proof target {} has an unsupported path prefix",
+                    path.display()
+                ));
+            }
+        }
+        let metadata = fs::symlink_metadata(&current).map_err(|error| {
+            format!(
+                "couldn't inspect proof target ancestor {}: {error}",
+                current.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "proof target {} must not pass through symlink {}",
+                path.display(),
+                current.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn append_proof_field(bytes: &mut Vec<u8>, label: &str, value: &[u8]) {
