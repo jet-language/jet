@@ -49,6 +49,12 @@ pub(crate) struct CaptureAuthority {
     explicit_path: Option<PathBuf>,
 }
 
+impl CaptureAuthority {
+    pub(crate) fn time_ms(&self) -> i64 {
+        i64::try_from(self.unix_ns / 1_000_000).unwrap_or(i64::MAX)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ReplayAuthority {
     pub time_ms: i64,
@@ -703,6 +709,7 @@ fn header_json(
                     "source_digest".into(),
                     Json::Str(identity.source_digest.clone()),
                 ),
+                ("time_site_id".into(), Json::Str(identity.time_site_id.clone())),
                 (
                     "target_triple".into(),
                     Json::Str(identity.target_triple.clone()),
@@ -1242,6 +1249,7 @@ fn flatten_identity_fields(
             "lock_digest",
             "profile",
             "source_digest",
+            "time_site_id",
             "target_triple",
             "tir_hash",
             "tir_schema",
@@ -1255,6 +1263,7 @@ fn flatten_identity_fields(
             "lock_digest",
             "profile",
             "source_digest",
+            "time_site_id",
             "target_triple",
             "tir_hash",
             "tir_schema",
@@ -1269,13 +1278,14 @@ fn flatten_identity_fields(
         "lock_digest",
         "profile",
         "source_digest",
+        "time_site_id",
         "target_triple",
         "tir_hash",
         "tir_schema",
     ] {
         let _ = string_field(identity, key)?;
     }
-    for key in ["build_digest", "lock_digest", "source_digest", "tir_hash"] {
+    for key in ["build_digest", "lock_digest", "source_digest", "time_site_id", "tir_hash"] {
         let value = string_field(identity, key)?;
         if value.len() != 64
             || !value
@@ -1319,6 +1329,7 @@ fn flatten_identity_fields(
         "core_abi",
         "lock_digest",
         "profile",
+        "time_site_id",
         "tir_hash",
         "tir_schema",
     ] {
@@ -1479,6 +1490,7 @@ fn identity_matches(
         ("tir_schema", identity.tir_schema.as_str()),
         ("execution_adapter", identity.execution_adapter.as_str()),
         ("target_triple", identity.target_triple.as_str()),
+        ("time_site_id", identity.time_site_id.as_str()),
     ] {
         check(key, expected)?;
     }
@@ -1720,6 +1732,17 @@ mod tests {
         let mut different = identity();
         different.core_abi = "2".into();
         assert_eq!(header.get("core_abi").map(String::as_str), Some("1"));
+        assert!(identity_matches(&header, &different).is_err());
+    }
+
+    #[test]
+    fn replay_rejects_time_site_identity_changes() {
+        let original = identity();
+        let bytes = build_safe_time_artifact(&original, 1_234_567_890, "exit", 0).unwrap();
+        let header = parse_and_verify(&bytes).unwrap();
+        let mut different = original.clone();
+        different.time_site_id = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into();
+        assert_eq!(header.get("time_site_id").map(String::as_str), Some(original.time_site_id.as_str()));
         assert!(identity_matches(&header, &different).is_err());
     }
 
