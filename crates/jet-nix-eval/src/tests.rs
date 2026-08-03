@@ -275,6 +275,23 @@ fn native_devshell_rejects_truncated_expressions_without_panicking() {
 }
 
 #[test]
+fn native_evaluator_rejects_oversized_input_before_parsing() {
+    let source = "x".repeat((1 << 20) + 1);
+    assert!(matches!(
+        evaluate_devshell(&source, "x86_64-linux"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+    assert!(matches!(
+        evaluate_derivation(&source, "x86_64-linux"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+    assert!(matches!(
+        evaluate_derivation_output(&source, "x86_64-linux", "out"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+}
+
+#[test]
 fn native_devshell_evaluates_indented_string_interpolation() {
     let evaluated = evaluate_devshell(
         r#"{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }"#,

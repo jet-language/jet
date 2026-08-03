@@ -633,8 +633,11 @@ impl PackageFacts {
                 }
                 let (name, nested) = package_member_identity(&candidate)?;
                 if nested {
+                    let manifest = package_manifest_path(&candidate)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| candidate.display().to_string());
                     return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` declares members"
+                        "member Package `{relative}` at `{manifest}` declares members"
                     )));
                 }
                 if names.iter().any(|existing| existing == &name) {
@@ -2249,6 +2252,55 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
         )
         .unwrap_err();
         assert!(error.to_string().contains("outputs.app.entry"));
+    }
+
+    #[test]
+    fn scalar_config_conflict_names_both_sources_and_does_not_mutate() {
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
+            .unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
+            .unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"2\" }", "configs/two.jet")
+            .unwrap();
+
+        let error = facts.compose([first, second]).unwrap_err();
+        match error {
+            ComposeError::Conflict {
+                field,
+                left_origin,
+                right_origin,
+                left,
+                right,
+            } => {
+                assert_eq!(field, "version");
+                assert_eq!(left_origin, "configs/one.jet");
+                assert_eq!(right_origin, "configs/two.jet");
+                assert_eq!(left, "1");
+                assert_eq!(right, "2");
+            }
+            other => panic!("expected scalar conflict, got {other:?}"),
+        }
+        assert_eq!(facts.version, None);
+        assert!(facts.field_provenance("version").is_empty());
+    }
+
+    #[test]
+    fn equal_scalar_config_contributors_keep_ordered_provenance() {
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
+            .unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
+            .unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/two.jet")
+            .unwrap();
+
+        facts.compose([first, second]).unwrap();
+        assert_eq!(facts.version.as_deref(), Some("1"));
+        let origins = facts
+            .field_provenance("version")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(origins, ["configs/one.jet", "configs/two.jet"]);
     }
 
     #[test]

@@ -16,6 +16,7 @@ const REQUEST_MAGIC: &str = "jet-shared-store-request-v1";
 const RESPONSE_MAGIC: &str = "jet-shared-store-response-v1";
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 const MAX_REQUEST_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_REFERENCE_BYTES: usize = 4096;
 const SHARED_DIR: &str = "shared-store";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +47,7 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
     if metadata.len() as usize > MAX_CONFIG_BYTES {
         return Err(invalid("shared-store config is too large"));
     }
+    require_private_mode(&path, "shared-store config")?;
     let text = fs::read_to_string(&path)?;
     let mut fields = std::collections::BTreeMap::new();
     let mut lines = text.lines();
@@ -75,12 +77,14 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
         }
         Ok(path)
     };
-    Ok(Some(SharedStoreConfig {
+    let config = SharedStoreConfig {
         socket: decode("socket")?,
         shared_root: decode("shared_root")?,
         trust_key: decode("trust_key")?,
         writer_token: decode("writer_token")?,
-    }))
+    };
+    validate_config_paths(roots, &config)?;
+    Ok(Some(config))
 }
 
 /// Create the user-owned broker configuration and socket-activation units.
@@ -89,6 +93,7 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
 pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     let base = roots.root.join(SHARED_DIR);
     ensure_private_dir(&base)?;
+    let base = base.canonicalize()?;
     let shared_root = base.join("root");
     ensure_private_dir(&shared_root)?;
     let trust_dir = base.join("trust");
@@ -136,12 +141,14 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
         let socket_unit = unit_dir.join("jet-shared-store.socket");
         let service_unit = unit_dir.join("jet-shared-store.service");
         let socket_text = format!(
-            "[Unit]\nDescription=Jet shared-store broker socket\n\n[Socket]\nListenStream={}\nSocketMode=0600\n\n[Install]\nWantedBy=sockets.target\n",
-            config.socket.display()
+            "[Unit]\nDescription=Jet shared-store broker socket\n\n[Socket]\nListenStream={}\nSocketMode=0600\nDirectoryMode=0700\nRemoveOnStop=yes\n\n[Install]\nWantedBy=sockets.target\n",
+            systemd_escape_path(&config.socket)
         );
         let service_text = format!(
-            "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\n",
-            executable.display()
+            "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=read-only\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={} {}\n",
+            systemd_escape_path(&executable),
+            systemd_escape_path(&base),
+            systemd_escape_path(&config.shared_root)
         );
         atomic_write(&socket_unit, socket_text.as_bytes())?;
         atomic_write(&service_unit, service_text.as_bytes())?;
@@ -161,6 +168,13 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
     }
 }
 
+#[cfg(unix)]
+fn systemd_escape_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace(' ', "\\x20")
+}
+
 /// Import a shared entry into the user's Hangar when the optional broker
 /// installation has already published one. Returns `None` when no broker is
 /// configured or the socket is not currently available.
@@ -175,22 +189,39 @@ pub fn reuse_shared_entry(
     if !config.socket.exists() {
         return Ok(None);
     }
-    let shared = Roots {
-        root: config.shared_root.clone(),
-        dev_mode: false,
-    };
-    let candidate = super::find_by_reference(&shared, reference);
-    let Some(candidate) = candidate else {
-        return Ok(None);
-    };
-    let proof = super::verify_cache_entry(&shared, &candidate, reference, expectation);
-    if !proof.trusted() {
-        return Err(invalid("shared-store entry failed cache identity verification"));
-    }
     let key = config.trust_key.to_string_lossy().to_string();
-    let (bytes, _) = Archive::export_archive(&shared, &candidate.id, true, Some(&key))?;
-    Archive::import_archive(roots, &bytes, Some(&key), false)?;
-    Ok(super::find_by_reference(roots, reference))
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        let mut stream = match UnixStream::connect(&config.socket) {
+            Ok(stream) => stream,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let token = read_secret(&config.writer_token, "shared-store writer token")?;
+        write_read_request(&mut stream, &token, reference)?;
+        let Some(bytes) = read_archive_response(&mut stream)? else {
+            return Ok(None);
+        };
+        Archive::import_archive(roots, &bytes, Some(&key), false)?;
+        let Some(candidate) = super::find_by_reference(roots, reference) else {
+            return Err(invalid("shared-store broker returned no matching entry"));
+        };
+        let proof = super::verify_cache_entry(roots, &candidate, reference, expectation);
+        if !proof.trusted() {
+            return Err(invalid("shared-store entry failed cache identity verification"));
+        }
+        Ok(Some(candidate))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (config, key, reference, expectation);
+        Err(invalid("shared-store sockets are unsupported on this host"))
+    }
 }
 
 /// Promote a verified local entry when a broker is configured. Missing broker
@@ -244,14 +275,27 @@ pub fn serve_shared_store_fd(roots: &Roots, fd: i32) -> io::Result<()> {
     let config = shared_store_config(roots)?
         .ok_or_else(|| invalid("shared-store broker is not installed"))?;
     let token = read_secret(&config.writer_token, "shared-store writer token")?;
-    let archive = read_request(&mut stream, &token)?;
+    let request = read_request(&mut stream, &token)?;
     let shared = Roots {
         root: config.shared_root,
         dev_mode: false,
     };
     let key = config.trust_key.to_string_lossy().to_string();
-    Archive::import_archive(&shared, &archive, Some(&key), false)?;
-    write_response(&mut stream, "ok")
+    match request {
+        BrokerRequest::Write(archive) => {
+            Archive::import_archive(&shared, &archive, Some(&key), false)?;
+            write_response(&mut stream, "ok")
+        }
+        BrokerRequest::Read(reference) => {
+            let Some(entry) = super::find_by_reference(&shared, &reference) else {
+                return write_response(&mut stream, "missing");
+            };
+            super::verify_hangar_object(&shared, &entry)
+                .map_err(|error| io::Error::other(error.what()))?;
+            let (archive, _) = Archive::export_archive(&shared, &entry.id, true, Some(&key))?;
+            write_archive_response(&mut stream, &archive)
+        }
+    }
 }
 
 #[cfg(not(unix))]
@@ -259,11 +303,18 @@ pub fn serve_shared_store_fd(_roots: &Roots, _fd: i32) -> io::Result<()> {
     Err(invalid("shared-store socket activation is unsupported on this host"))
 }
 
+#[derive(Debug)]
+enum BrokerRequest {
+    Write(Vec<u8>),
+    Read(String),
+}
+
 fn write_request(stream: &mut impl Write, token: &[u8], archive: &[u8]) -> io::Result<()> {
     if archive.len() > MAX_REQUEST_BYTES {
         return Err(invalid("shared-store archive exceeds the request limit"));
     }
     writeln!(stream, "{REQUEST_MAGIC}")?;
+    writeln!(stream, "op=write")?;
     writeln!(stream, "token={}", encode_hex(token))?;
     writeln!(stream, "bytes={}", archive.len())?;
     writeln!(stream)?;
@@ -271,7 +322,22 @@ fn write_request(stream: &mut impl Write, token: &[u8], archive: &[u8]) -> io::R
     stream.flush()
 }
 
-fn read_request(stream: &mut impl Read, expected_token: &[u8]) -> io::Result<Vec<u8>> {
+fn write_read_request(stream: &mut impl Write, token: &[u8], reference: &str) -> io::Result<()> {
+    if reference.is_empty()
+        || reference.len() > MAX_REFERENCE_BYTES
+        || reference.chars().any(char::is_control)
+    {
+        return Err(invalid("shared-store reference is invalid"));
+    }
+    writeln!(stream, "{REQUEST_MAGIC}")?;
+    writeln!(stream, "op=read")?;
+    writeln!(stream, "token={}", encode_hex(token))?;
+    writeln!(stream, "reference={}", encode_hex(reference.as_bytes()))?;
+    writeln!(stream)?;
+    stream.flush()
+}
+
+fn read_request(stream: &mut impl Read, expected_token: &[u8]) -> io::Result<BrokerRequest> {
     let mut header = Vec::new();
     loop {
         let mut byte = [0u8; 1];
@@ -298,7 +364,9 @@ fn read_request(stream: &mut impl Read, expected_token: &[u8]) -> io::Result<Vec
         let (key, value) = line
             .split_once('=')
             .ok_or_else(|| invalid("shared-store request has a malformed field"))?;
-        if !matches!(key, "token" | "bytes") || fields.insert(key, value).is_some() {
+        if !matches!(key, "op" | "token" | "bytes" | "reference")
+            || fields.insert(key, value).is_some()
+        {
             return Err(invalid("shared-store request has an unknown or duplicate field"));
         }
     }
@@ -310,23 +378,65 @@ fn read_request(stream: &mut impl Read, expected_token: &[u8]) -> io::Result<Vec
     {
         return Err(invalid("shared-store writer token is invalid"));
     }
-    let length = fields
-        .get("bytes")
-        .ok_or_else(|| invalid("shared-store request has no archive length"))?
-        .parse::<usize>()
-        .map_err(|_| invalid("shared-store archive length is invalid"))?;
-    if length > MAX_REQUEST_BYTES {
-        return Err(invalid("shared-store archive exceeds the request limit"));
+    match fields
+        .get("op")
+        .ok_or_else(|| invalid("shared-store request has no operation"))?
+    {
+        "write" => {
+            if fields.contains_key("reference") {
+                return Err(invalid(
+                    "shared-store write request cannot include a reference",
+                ));
+            }
+            let length = fields
+                .get("bytes")
+                .ok_or_else(|| invalid("shared-store request has no archive length"))?
+                .parse::<usize>()
+                .map_err(|_| invalid("shared-store archive length is invalid"))?;
+            if length > MAX_REQUEST_BYTES {
+                return Err(invalid("shared-store archive exceeds the request limit"));
+            }
+            let mut archive = vec![0u8; length];
+            stream.read_exact(&mut archive)?;
+            Ok(BrokerRequest::Write(archive))
+        }
+        "read" => {
+            if fields.contains_key("bytes") {
+                return Err(invalid("shared-store read request cannot include archive bytes"));
+            }
+            let encoded = fields
+                .get("reference")
+                .ok_or_else(|| invalid("shared-store read request has no reference"))?;
+            let reference = String::from_utf8(decode_hex(encoded)?)
+                .map_err(|_| invalid("shared-store reference is not UTF-8"))?;
+            if reference.is_empty()
+                || reference.len() > MAX_REFERENCE_BYTES
+                || reference.chars().any(char::is_control)
+            {
+                return Err(invalid("shared-store reference is invalid"));
+            }
+            Ok(BrokerRequest::Read(reference))
+        }
+        _ => Err(invalid("shared-store request has an unknown operation")),
     }
-    let mut archive = vec![0u8; length];
-    stream.read_exact(&mut archive)?;
-    Ok(archive)
 }
 
 fn write_response(stream: &mut impl Write, status: &str) -> io::Result<()> {
     writeln!(stream, "{RESPONSE_MAGIC}")?;
     writeln!(stream, "status={status}")?;
     writeln!(stream)?;
+    stream.flush()
+}
+
+fn write_archive_response(stream: &mut impl Write, archive: &[u8]) -> io::Result<()> {
+    if archive.len() > MAX_REQUEST_BYTES {
+        return Err(invalid("shared-store archive exceeds the response limit"));
+    }
+    writeln!(stream, "{RESPONSE_MAGIC}")?;
+    writeln!(stream, "status=ok")?;
+    writeln!(stream, "bytes={}", archive.len())?;
+    writeln!(stream)?;
+    stream.write_all(archive)?;
     stream.flush()
 }
 
@@ -340,8 +450,121 @@ fn read_response(stream: &mut impl Read) -> io::Result<bool> {
     Ok(lines.any(|line| line == "status=ok"))
 }
 
+fn read_archive_response(stream: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
+    let mut header = Vec::new();
+    loop {
+        let mut byte = [0u8; 1];
+        stream.read_exact(&mut byte)?;
+        header.push(byte[0]);
+        if header.ends_with(b"\n\n") {
+            break;
+        }
+        if header.len() > 4096 {
+            return Err(invalid("shared-store response header is too large"));
+        }
+    }
+    let text = std::str::from_utf8(&header)
+        .map_err(|_| invalid("shared-store response header is not UTF-8"))?;
+    let mut fields = std::collections::BTreeMap::new();
+    let mut lines = text.lines();
+    if lines.next() != Some(RESPONSE_MAGIC) {
+        return Err(invalid("shared-store response has an unknown format"));
+    }
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| invalid("shared-store response has a malformed field"))?;
+        if !matches!(key, "status" | "bytes") || fields.insert(key, value).is_some() {
+            return Err(invalid("shared-store response has an unknown or duplicate field"));
+        }
+    }
+    match fields
+        .get("status")
+        .ok_or_else(|| invalid("shared-store response has no status"))?
+    {
+        "missing" => {
+            if fields.contains_key("bytes") {
+                return Err(invalid(
+                    "shared-store missing response cannot include archive bytes",
+                ));
+            }
+            Ok(None)
+        }
+        "ok" => {
+            let length = fields
+                .get("bytes")
+                .ok_or_else(|| invalid("shared-store response has no archive length"))?
+                .parse::<usize>()
+                .map_err(|_| invalid("shared-store response archive length is invalid"))?;
+            if length > MAX_REQUEST_BYTES {
+                return Err(invalid("shared-store archive exceeds the response limit"));
+            }
+            let mut archive = vec![0u8; length];
+            stream.read_exact(&mut archive)?;
+            Ok(Some(archive))
+        }
+        _ => Err(invalid("shared-store response has an unknown status")),
+    }
+}
+
 fn config_path(roots: &Roots) -> PathBuf {
     roots.root.join(SHARED_DIR).join("config")
+}
+
+fn validate_config_paths(roots: &Roots, config: &SharedStoreConfig) -> io::Result<()> {
+    let base = roots
+        .root
+        .join(SHARED_DIR)
+        .canonicalize()
+        .map_err(|error| invalid(&format!("could not resolve shared-store directory: {error}")))?;
+    let expected = [
+        ("socket", base.join("broker.sock"), &config.socket),
+        ("shared root", base.join("root"), &config.shared_root),
+        ("trust key", base.join("trust").join("hangar.key"), &config.trust_key),
+        (
+            "writer token",
+            base.join("trust").join("writer.token"),
+            &config.writer_token,
+        ),
+    ];
+    for (label, expected, actual) in expected {
+        if actual != &expected {
+            return Err(invalid(&format!(
+                "shared-store {label} is outside the installed private boundary"
+            )));
+        }
+    }
+    validate_private_directory(&base, "shared-store directory")?;
+    validate_private_directory(&config.shared_root, "shared-store root")?;
+    let trust_dir = base.join("trust");
+    validate_private_directory(&trust_dir, "shared-store trust directory")?;
+    for (path, label) in [
+        (&config.trust_key, "shared-store trust key"),
+        (&config.writer_token, "shared-store writer token"),
+    ] {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid(&format!("{label} is not a regular file")));
+        }
+        require_private_mode(path, label)?;
+    }
+    if let Ok(metadata) = fs::symlink_metadata(&config.socket) {
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("shared-store broker socket is a symlink"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_private_directory(path: &Path, label: &str) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid(&format!("{label} is not a real directory")));
+    }
+    require_private_mode(path, label)
 }
 
 #[cfg(unix)]
@@ -536,4 +759,81 @@ fn decode_hex(value: &str) -> io::Result<Vec<u8>> {
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn write_request_round_trips_through_authenticated_parser() {
+        let mut encoded = Vec::new();
+        write_request(&mut encoded, b"token", b"archive").unwrap();
+
+        let request = read_request(&mut Cursor::new(encoded), b"token").unwrap();
+        match request {
+            BrokerRequest::Write(archive) => assert_eq!(archive, b"archive"),
+            BrokerRequest::Read(_) => panic!("write request parsed as read"),
+        }
+    }
+
+    #[test]
+    fn request_operations_reject_fields_from_the_other_operation() {
+        let write = format!(
+            "{REQUEST_MAGIC}\nop=write\ntoken={}\nbytes=0\nreference=00\n\n",
+            encode_hex(b"token")
+        );
+        let error = read_request(&mut Cursor::new(write.into_bytes()), b"token").unwrap_err();
+        assert!(error.to_string().contains("cannot include a reference"));
+
+        let read = format!(
+            "{REQUEST_MAGIC}\nop=read\ntoken={}\nreference={}\nbytes=0\n\n",
+            encode_hex(b"token"),
+            encode_hex(b"app")
+        );
+        let error = read_request(&mut Cursor::new(read.into_bytes()), b"token").unwrap_err();
+        assert!(error.to_string().contains("cannot include archive bytes"));
+    }
+
+    #[test]
+    fn archive_response_round_trips_success_and_missing_status() {
+        let mut encoded = Vec::new();
+        write_archive_response(&mut encoded, b"archive").unwrap();
+        assert_eq!(
+            read_archive_response(&mut Cursor::new(encoded)).unwrap(),
+            Some(b"archive".to_vec())
+        );
+
+        let missing = format!("{RESPONSE_MAGIC}\nstatus=missing\n\n");
+        assert_eq!(
+            read_archive_response(&mut Cursor::new(missing.into_bytes())).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn configured_paths_must_stay_inside_the_installed_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-shared-store-config-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(SHARED_DIR)).unwrap();
+        let base = root.join(SHARED_DIR).canonicalize().unwrap();
+        let config = SharedStoreConfig {
+            socket: root.join("outside.sock"),
+            shared_root: base.join("root"),
+            trust_key: base.join("trust/hangar.key"),
+            writer_token: base.join("trust/writer.token"),
+        };
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+
+        let error = validate_config_paths(&roots, &config).unwrap_err();
+        assert!(error.to_string().contains("outside the installed private boundary"));
+        let _ = fs::remove_dir_all(root);
+    }
 }

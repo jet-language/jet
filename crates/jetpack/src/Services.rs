@@ -2119,40 +2119,58 @@ pub fn up_ordered(
             Health::Healthy | Health::Unhealthy
         );
         if let Err(error) = up_one(project_dir, env, plan) {
-            let cleanup = started
-                .iter()
-                .filter_map(|name| plans.iter().find(|candidate| &candidate.name == name))
-                .filter_map(|plan| down_one(project_dir, plan).err())
-                .collect::<Vec<_>>();
-            return Err(if cleanup.is_empty() {
-                error
-            } else {
-                format!("{error}; cleanup failed: {}", cleanup.join("; "))
+            let cleanup = down_ordered(project_dir, plans, &started).err();
+            return Err(match cleanup {
+                None => error,
+                Some(cleanup) => format!("{error}; cleanup failed: {cleanup}"),
             });
         }
         if !wait_healthy_with_env(project_dir, Some(env), plan, timeout) {
             let current_error = format!("service `{}` did not become healthy", plan.name);
-            let cleanup = (!was_running)
-                .then_some(plan)
-                .into_iter()
-                .chain(
-                    started
-                        .iter()
-                        .filter_map(|name| plans.iter().find(|candidate| &candidate.name == name)),
-                )
-                .filter_map(|plan| down_one(project_dir, plan).err())
-                .collect::<Vec<_>>();
-            return Err(if cleanup.is_empty() {
-                current_error
-            } else {
-                format!("{current_error}; cleanup failed: {}", cleanup.join("; "))
+            let mut cleanup_indexes = started.clone();
+            if !was_running {
+                cleanup_indexes.push(index);
+            }
+            let cleanup = down_ordered(project_dir, plans, &cleanup_indexes).err();
+            return Err(match cleanup {
+                None => current_error,
+                Some(cleanup) => format!("{current_error}; cleanup failed: {cleanup}"),
             });
         }
         if !was_running {
-            started.push(plan.name.clone());
+            started.push(index);
         }
     }
-    Ok(started)
+    Ok(started
+        .into_iter()
+        .map(|index| plans[index].name.clone())
+        .collect())
+}
+
+/// Stop a dependency-first selection in reverse order. Callers use the same
+/// graph result for startup and teardown, so a dependent is never left alive
+/// while its dependency is being removed. The function attempts every entry
+/// before returning a combined failure.
+pub fn down_ordered(
+    project_dir: &Path,
+    plans: &[DevServicePlan],
+    dependency_first: &[usize],
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for &index in dependency_first.iter().rev() {
+        let Some(plan) = plans.get(index) else {
+            errors.push(format!("service dependency order contains unknown index {index}"));
+            continue;
+        };
+        if let Err(error) = down_one(project_dir, plan) {
+            errors.push(format!("{}: {error}", plan.name));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// Restart one service under its declared bounded restart budget. The normal
@@ -2384,6 +2402,45 @@ mod tests {
         assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
         assert!(matches!(health_one(&dir, &p), Health::Disabled));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dependency_order_is_dependency_first_and_rejects_cycles() {
+        let mut database = plan("database", "sleep 30");
+        let mut api = plan("api", "sleep 30");
+        let worker = plan("worker", "sleep 30");
+        api.after = vec!["database".to_string()];
+        database.depends_on = vec!["worker".to_string()];
+
+        let plans = vec![api.clone(), database.clone(), worker];
+        let order = dependency_order(&plans).unwrap();
+        let names = order
+            .iter()
+            .map(|index| plans[*index].name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["worker", "database", "api"]);
+
+        let mut cycle = api;
+        cycle.depends_on = vec!["database".to_string()];
+        let cyclic = vec![cycle, database];
+        let error = dependency_order(&cyclic).unwrap_err();
+        assert!(error.contains("service dependency cycle"), "{error}");
+        assert!(error.contains("api") && error.contains("database"), "{error}");
+    }
+
+    #[test]
+    fn dependency_order_rejects_unknown_and_disabled_dependencies() {
+        let mut unknown = plan("api", "sleep 1");
+        unknown.after = vec!["database".to_string()];
+        let error = dependency_order(&[unknown]).unwrap_err();
+        assert!(error.contains("depends on unknown service"), "{error}");
+
+        let mut disabled = plan("database", "sleep 1");
+        disabled.enable = false;
+        let mut dependent = plan("api", "sleep 1");
+        dependent.after = vec!["database".to_string()];
+        let error = dependency_order(&[dependent, disabled]).unwrap_err();
+        assert!(error.contains("depends on disabled service"), "{error}");
     }
 
     #[cfg(unix)]

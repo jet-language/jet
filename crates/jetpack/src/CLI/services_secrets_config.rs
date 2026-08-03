@@ -68,16 +68,28 @@ pub(super) fn wait_for_services_ready(
             return Err(2);
         }
     };
+    let mut started = Vec::new();
     for index in order {
         let svc = &services[index];
+        let already_running = matches!(
+            Services::health_one_with_env(project_dir, Some(env), svc),
+            Services::Health::Healthy | Services::Health::Unhealthy
+        );
         if let Err(()) = run_before_start_tasks(theme, parsed, roots, project_dir, entry, svc) {
+            cleanup_started_services(theme, project_dir, services, &started);
             return Err(2);
         }
         theme.detail(&format!(
             "waiting for service `{}` to become healthy…",
             svc.name
         ));
-        bring_up_one(theme, project_dir, env, svc).map_err(|_| 2)?;
+        if bring_up_one(theme, project_dir, env, svc).is_err() {
+            cleanup_started_services(theme, project_dir, services, &started);
+            return Err(2);
+        }
+        if !already_running {
+            started.push(index);
+        }
     }
     Ok(())
 }
@@ -324,6 +336,21 @@ fn selected_service_order(
         .collect())
 }
 
+fn cleanup_started_services(
+    theme: &Theme,
+    project_dir: &Path,
+    services: &[ModuleEval::DevServicePlan],
+    started: &[usize],
+) {
+    if let Err(error) = Services::down_ordered(project_dir, services, started) {
+        theme.error(
+            "service cleanup failed",
+            &error,
+            "inspect the service state and logs before retrying the environment.",
+        );
+    }
+}
+
 /// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
 /// every declared dev service is targeted; `logs` requires exactly one name.
 pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -424,8 +451,13 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     return 2;
                 }
             };
+            let mut started = Vec::new();
             for index in order {
                 let svc = &plan.dev_services[index];
+                let already_running = matches!(
+                    Services::health_one_with_env(&project_dir, Some(&env), svc),
+                    Services::Health::Healthy | Services::Health::Unhealthy
+                );
                 if !svc.enable {
                     theme.detail(&format!("service `{}` is disabled, skipping", svc.name));
                     continue;
@@ -438,10 +470,15 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     &find_project_entry(&project_dir),
                     svc,
                 ) {
+                    cleanup_started_services(theme, &project_dir, &plan.dev_services, &started);
                     return 2;
                 }
                 if bring_up_one(theme, &project_dir, &env, svc).is_err() {
+                    cleanup_started_services(theme, &project_dir, &plan.dev_services, &started);
                     return 2;
+                }
+                if !already_running {
+                    started.push(index);
                 }
                 theme.ok(&format!("service `{}` is up", svc.name));
             }
@@ -496,12 +533,23 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         v if v == Syntax::SERVICES_VERB_DOWN => {
-            for svc in &targets {
-                if let Err(error) = Services::down_one(&project_dir, svc) {
-                    theme.error(&format!("couldn't stop service `{}`", svc.name), &error, "");
+            let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
+                Ok(order) => order,
+                Err(error) => {
+                    theme.error(
+                        "service dependency graph is invalid",
+                        &error,
+                        "declare each dependency once, keep it enabled, and remove dependency cycles.",
+                    );
                     return 2;
                 }
-                theme.ok(&format!("service `{}` is down", svc.name));
+            };
+            if let Err(error) = Services::down_ordered(&project_dir, &plan.dev_services, &order) {
+                theme.error("couldn't stop services", &error, "inspect the service logs and state.");
+                return 2;
+            }
+            for index in order.iter().rev() {
+                theme.ok(&format!("service `{}` is down", plan.dev_services[*index].name));
             }
             0
         }

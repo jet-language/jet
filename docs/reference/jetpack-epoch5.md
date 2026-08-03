@@ -24,6 +24,9 @@ members: find("./packages")
 
 `Config` files add typed facts to the Package. Equal facts merge. Conflicting
 facts fail before realization. A Config cannot declare `members`.
+Scalar conflicts name both contributing source files and their values. Successful
+fields retain ordered contributor provenance for lock and explain projections;
+failed composition never mutates the Package facts.
 
 ## Registry delivery and provider facts
 
@@ -203,6 +206,12 @@ module env.dev {
 }
 ```
 
+`after` names a declared service dependency. Jetpack validates names, disabled
+dependencies, and cycles before spawning a process, starts dependencies before
+dependents, and stops the selected graph in reverse order. A failed task,
+startup, or readiness gate cleans up services started by that invocation and
+reports cleanup failures instead of leaving misleading health state.
+
 Jet reserves ports and socket paths before start. It checks process start
 identity before it sends a signal. It bounds restart count and backoff, and it
 stops dependent services before their dependencies.
@@ -235,6 +244,12 @@ invalidates the graph before bridge output is reused.
 Use `jet bridge flake` to review an `env.*` shim. Every field without a
 lossless Jet meaning produces L0204. Missing Nix for a foreign-flake path
 produces E1256. Arbitrary evaluator functions never become Jet values.
+
+The private native evaluator is bounded before parsing: source input is capped
+at 1 MiB, token and expression budgets are finite, imports require explicit
+project-root authority, and only the pinned Stage A systems are accepted.
+Unsupported or over-budget expressions fail with a typed evaluator error. The
+production boundary does not invoke `nix` or require it on `PATH`.
 
 ## Build hooks and images
 

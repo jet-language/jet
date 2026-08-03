@@ -32,6 +32,39 @@ fn private_integration_projects_lazy_flake_without_external_nix() {
 }
 
 #[test]
+fn private_devshell_path_is_independent_of_nix_on_path() {
+    const CHILD: &str = "JETPACK_NATIVE_DEVSHELL_NO_PATH_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "NixEval::Tests::private_devshell_path_is_independent_of_nix_on_path",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let boundary = NativeBoundary::embedded().expect("committed manifest must validate");
+    let evaluated = boundary
+        .evaluate_devshell(
+            "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+            "x86_64-linux",
+        )
+        .expect("native devShell evaluator must not need Nix");
+    assert_eq!(evaluated.packages(), &["fd".to_string()]);
+}
+
+#[test]
 fn private_integration_materializes_derivation_without_external_nix() {
     let evaluated = super::evaluate_derivation(
         r#"builtins.derivationStrict { name = "hello"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; }"#,

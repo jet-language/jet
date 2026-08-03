@@ -617,7 +617,7 @@ renumbered, and no new `W` code may be allocated.
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
-| E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root (D-ECO-MEMBERS1) |
+| E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root; the diagnostic names the member manifest source (D-ECO-MEMBERS1) |
 | E1324 | jetpack | two workspace member paths resolve to the same physical directory (D-ECO-MEMBERS1) |
 | E1325 | jetpack | two workspace members claim the same stable package name (D-ECO-MEMBERS1) |
 | E1326 | jetpack | a managed environment file has an invalid destination, source, mode, permission, or content shape (D-ENV-FILES1) |
@@ -889,7 +889,7 @@ membership, profile, managed-file, service, or task state is applied.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1322 | the workspace member path escapes the workspace root | Membership is rooted in the workspace, including the physical target behind a symlink. | Use a relative path below the workspace root and remove escaping symlinks. |
-| E1323 | a member Package declares `members` | Membership has one level: the workspace root owns discovery. | Remove the nested `members:` field and declare those paths at the workspace root. |
+| E1323 | a member Package declares `members` (the diagnostic names its `package.jet` or `pkg.jet` source) | Membership has one level: the workspace root owns discovery, and source provenance makes the offending Package reviewable. | Remove the nested `members:` field from the named member manifest and declare those paths at the workspace root. |
 | E1324 | two member paths resolve to one physical directory | Two spellings cannot create two Package identities. | Keep one member path for the directory. |
 | E1325 | two members claim the same Package name | Stable package references need one owner. | Rename one Package or remove the duplicate member. |
 | E1326 | a managed environment file declaration is invalid | Managed files are typed and plan before apply; unsafe paths or ambiguous ownership must fail closed. | Use a project-relative destination and a valid `source`/`content`, mode, and permission record. |
