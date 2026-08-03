@@ -106,7 +106,7 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let root = workspace("replay_round_trip");
     fs::write(
         root.join("main.jet"),
-        "use core.time as time\nfn run() { observed :: time.now() }\n",
+        "use core.time as time\n#Test(\"recorded time\") { observed :: time.now() }\n",
     )
     .unwrap();
     let artifact = root.join("capture.jetproof-replay");
@@ -129,6 +129,7 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let artifact_bytes = fs::read(&artifact).unwrap();
     assert!(artifact_bytes.starts_with(b"JREPLAY\0"));
     assert!(String::from_utf8_lossy(&artifact_bytes).contains("\"roots\":[\"Time\"]"));
+    assert!(String::from_utf8_lossy(&artifact_bytes).contains("\"time_site_id\":"));
 
     let replayed = Command::new(jet())
         .current_dir(&root)
@@ -227,6 +228,14 @@ fn prove_lens_union_is_canonical_and_keeps_the_complete_report() {
     let absorbed_stdout = String::from_utf8_lossy(&absorbed.stdout);
     assert!(absorbed_stdout.contains("LENSES   all"));
     assert!(!absorbed_stdout.contains("LENSES   all, tests"));
+
+    let all = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--lens", "all", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(all.status.code(), Some(0), "{}", String::from_utf8_lossy(&all.stderr));
+    assert!(!String::from_utf8_lossy(&all.stdout).contains("\"facet\":\"solver\""));
 }
 
 #[test]
@@ -460,6 +469,8 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     assert!(report.contains("\"code\":\"E3005\""), "{report}");
     assert!(report.contains("\"code\":\"E3001\""), "{report}");
     assert!(report.contains("structured boom"), "{report}");
+    assert!(report.contains("\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\""), "panic was not unit evidence: {report}");
+    assert!(report.contains("\"unit\":{\"failed\":1"), "panic was not counted in unit summary: {report}");
     assert!(report.contains("\"path\":\"./d_later.jet\""), "later producer did not continue: {report}");
 }
 
@@ -580,8 +591,52 @@ fn prove_solver_lens_emits_checked_certificate_evidence() {
         String::from_utf8_lossy(&out.stderr),
         String::from_utf8_lossy(&out.stdout)
     );
-    let report = String::from_utf8(out.stdout).unwrap();
+    let report = String::from_utf8(out.stdout.clone()).unwrap();
     assert!(report.contains("\"facet\":\"solver\""), "{report}");
     assert!(report.contains("\"status\":\"proved\""), "{report}");
+    assert!(report.contains("\"certificateSha256\":"), "{report}");
+    assert!(report.contains("\"backend\":\"native-presburger\""), "{report}");
     assert!(report.contains("\"solver\":{\"disproved\":0,\"proved\":1"), "{report}");
+
+    let repeated = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "checked.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(repeated.status.code(), Some(0));
+    assert_eq!(out.stdout, repeated.stdout, "solver certificate output is not deterministic");
+}
+
+#[test]
+fn prove_solver_counterexample_is_checked_producer_evidence() {
+    let root = workspace("solver_counterexample");
+    fs::write(
+        root.join("bad.jet"),
+        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) => Int { return value }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"code\":\"E2950\""), "{report}");
+    assert!(report.contains("\"outcome\":\"disproved\""), "{report}");
+    assert!(report.contains("\"counterexample\":["), "{report}");
+}
+
+#[test]
+fn prove_capture_sensitive_refuses_without_tty_and_leaves_no_artifact() {
+    let root = workspace("capture_sensitive_non_tty");
+    fs::write(root.join("main.jet"), "use core.time as time\n#Test { observed :: time.now() }\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture-sensitive=sensitive.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3627]"));
+    assert!(!root.join("sensitive.jetproof-replay").exists());
 }
