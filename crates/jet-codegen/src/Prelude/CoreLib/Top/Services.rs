@@ -276,7 +276,7 @@ impl JetShow for JetServiceTree {
 
 fn jet_services_tree(name: String) -> JetServiceTree {
     JetServiceTree {
-        authority: jet_services_authority_new_tree(&name),
+        authority: String::new(),
         name,
         generation: 1,
         delivery: JetServiceDelivery::AtMostOnce,
@@ -301,7 +301,7 @@ fn jet_services_tree(name: String) -> JetServiceTree {
     }
 }
 
-fn jet_services_state_authority(
+pub fn jet_services_state_authority(
     store: String,
     schema: String,
     version: i64,
@@ -464,7 +464,10 @@ fn jet_services_worker(
             tree.name
         )));
     }
-    let endpoint = jet_services_authority_endpoint(
+    if tree.authority.is_empty() {
+        tree.authority = service_authority_provider_issue()?;
+    }
+    let endpoint = service_authority_endpoint_unchecked(
         tree.name.clone(),
         name.clone(),
         tree.generation,
@@ -473,7 +476,7 @@ fn jet_services_worker(
     let mailbox = jet_services_new_mailbox(endpoint.clone(), capacity, Vec::new())?;
     // Build the local mailbox before publishing the endpoint.  A failed
     // channel allocation must not leave a ghost authority in the registry.
-    jet_services_authority_register(&endpoint, false)?;
+    service_authority_register(&endpoint, false)?;
     tree.workers.push(JetServiceWorker {
         name,
         endpoint: endpoint.clone(),
@@ -628,7 +631,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
         let result = match jet_services_authority_update(&worker.endpoint, worker.running) {
             Ok(()) => Ok(()),
             Err(JetServiceError::Partitioned(_)) | Err(JetServiceError::Unavailable(_)) => {
-                jet_services_authority_register(&worker.endpoint, worker.running)
+                service_authority_register(&worker.endpoint, worker.running)
             }
             Err(error) => Err(error),
         };
@@ -705,6 +708,7 @@ fn jet_services_validate_endpoint(
     tree: &JetServiceTree,
     endpoint: &JetServiceEndpoint,
 ) -> Result<(), JetServiceError> {
+    jet_services_authority_validate(endpoint)?;
     if endpoint.authority != tree.authority || endpoint.tree != tree.name {
         return Err(JetServiceError::Revoked(format!(
             "service endpoint {}/{} is not issued by this authority",
@@ -730,7 +734,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
     if tree.name.trim().is_empty()
         || tree.name.chars().any(char::is_control)
         || tree.name.len() > MAX_SERVICE_NAME
-        || tree.authority.trim().is_empty()
+        || (tree.authority.trim().is_empty() && (tree.started || !tree.workers.is_empty()))
         || tree.authority.len() > MAX_SERVICE_NAME
         || tree.authority.chars().any(char::is_control)
         || tree.generation < 1

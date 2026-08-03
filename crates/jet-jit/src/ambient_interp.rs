@@ -313,21 +313,22 @@ fn service_receipt_value(receipt: service_prelude::JetServiceReceipt) -> CtValue
 }
 
 fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
-    let message = match error {
-        service_prelude::JetServiceError::Full(message)
-        | service_prelude::JetServiceError::Ambiguous(message)
-        | service_prelude::JetServiceError::Unknown(message)
-        | service_prelude::JetServiceError::NotStarted(message)
-        | service_prelude::JetServiceError::Policy(message)
-        | service_prelude::JetServiceError::Unavailable(message)
-        | service_prelude::JetServiceError::Partitioned(message)
-        | service_prelude::JetServiceError::Revoked(message)
-        | service_prelude::JetServiceError::Stale(message)
-        | service_prelude::JetServiceError::Expired(message) => message,
+    let (variant, message) = match error {
+        service_prelude::JetServiceError::Full(message) => ("Full", message),
+        service_prelude::JetServiceError::Ambiguous(message) => ("Ambiguous", message),
+        service_prelude::JetServiceError::Unknown(message) => ("Unknown", message),
+        service_prelude::JetServiceError::NotStarted(message) => ("NotStarted", message),
+        service_prelude::JetServiceError::Policy(message) => ("Policy", message),
+        service_prelude::JetServiceError::Unavailable(message) => ("Unavailable", message),
+        service_prelude::JetServiceError::Partitioned(message) => ("Partitioned", message),
+        service_prelude::JetServiceError::Revoked(message) => ("Revoked", message),
+        service_prelude::JetServiceError::Stale(message) => ("Stale", message),
+        service_prelude::JetServiceError::Expired(message) => ("Expired", message),
     };
-    CtValue::Struct {
+    CtValue::Enum {
         type_name: "ServiceError".to_string(),
-        fields: vec![("message".to_string(), CtValue::Str(message))],
+        variant: variant.to_string(),
+        args: vec![(None, CtValue::Str(message))],
     }
 }
 

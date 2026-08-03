@@ -1046,6 +1046,13 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::Named("Duration".to_string()))],
             Some(Type::Named("ServiceRuntime".to_string())),
         )),
+        ("core.services", "state_authority") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(
+                Type::Named("ServiceStateAuthority".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
         ("core.services", "tree") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("ServiceTree".to_string())),
@@ -1160,15 +1167,23 @@ pub fn core_fixed_sig(
             vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
             Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
         )),
-        ("core.services", "set_state_empty" | "set_state_snapshot" | "set_state_event_log") => {
-            Some((
-                vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
-                Some(result_ty(
-                    Type::Named("Unit".into()),
-                    Type::Named("ServiceError".to_string()),
-                )),
-            ))
-        }
+        ("core.services", "set_state_empty") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "set_state_snapshot" | "set_state_event_log") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Named("ServiceStateAuthority".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
         ("core.services", "commit_snapshot" | "append_event") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),

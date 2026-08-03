@@ -317,11 +317,16 @@ fn services_failure_paths_match_default_run() {
 }
 
 const STATE_AND_LIFECYCLE_SOURCE: &str = r#"
+use core.path as path
 use core.services as services
+use core.testing as testing
 
 fn run() {
+    temp := testing.temp_dir("service-state")
     snapshot := services.tree("snapshot")
-    services.set_state_snapshot(&snapshot) ?? panic("snapshot state")
+    snapshot_store :: path.join(temp, "snapshot.state")
+    snapshot_authority :: services.state_authority(snapshot_store, "snapshot", 1) ?? panic("snapshot authority")
+    services.set_state_snapshot(&snapshot, snapshot_authority) ?? panic("snapshot state")
     snapshot_worker :: services.worker(&snapshot, "worker", 2) ?? panic("snapshot worker")
     services.start(&snapshot) ?? panic("snapshot start")
     services.commit_snapshot(&snapshot, "state-v1") ?? panic("snapshot commit")
@@ -330,7 +335,9 @@ fn run() {
     services.stop(&snapshot) ?? panic("snapshot stop")
 
     events := services.tree("events")
-    services.set_state_event_log(&events) ?? panic("event state")
+    event_store :: path.join(temp, "events.state")
+    event_authority :: services.state_authority(event_store, "events", 1) ?? panic("event authority")
+    services.set_state_event_log(&events, event_authority) ?? panic("event state")
     event_worker :: services.worker(&events, "worker", 2) ?? panic("event worker")
     services.start(&events) ?? panic("event start")
     services.append_event(&events, "first") ?? panic("event one")

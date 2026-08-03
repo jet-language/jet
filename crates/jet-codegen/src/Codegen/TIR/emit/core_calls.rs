@@ -1104,6 +1104,13 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.services", "state_authority") => format!(
+            "{}(({}).clone(), ({}).clone(), {})",
+            helper("jet_services_state_authority"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
         ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
         ("core.services", "restart_one_for_one") => {
             format!("{}()", helper("jet_services_restart_one_for_one"))
@@ -1203,14 +1210,16 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_services_set_state_empty"), arg(0))
         }
         ("core.services", "set_state_snapshot") => format!(
-            "{}(&mut ({}))",
+            "{}(&mut ({}), ({}).clone())",
             helper("jet_services_set_state_snapshot"),
-            arg(0)
+            arg(0),
+            arg(1)
         ),
         ("core.services", "set_state_event_log") => format!(
-            "{}(&mut ({}))",
+            "{}(&mut ({}), ({}).clone())",
             helper("jet_services_set_state_event_log"),
-            arg(0)
+            arg(0),
+            arg(1)
         ),
         ("core.services", "commit_snapshot") => format!(
             "{}(&mut ({}), ({}).clone())",

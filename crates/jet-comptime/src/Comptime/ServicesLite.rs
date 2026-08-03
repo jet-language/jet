@@ -787,6 +787,10 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
     };
     jet_services_validate_tree(&tree)
         .map_err(|error| unsupported(&error.jet_show(), span))?;
+    for worker in &tree.workers {
+        jet_services_authority_hydrate(&worker.endpoint, tree.started && worker.running)
+            .map_err(|error| unsupported(&error.jet_show(), span))?;
+    }
     Ok(tree)
 }
 
@@ -798,10 +802,10 @@ fn map_err(err: JetServiceError) -> CtValue {
         JetServiceError::NotStarted(m) => ("NotStarted", m),
         JetServiceError::Policy(m) => ("Policy", m),
         JetServiceError::Unavailable(m) => ("Unavailable", m),
-        JetServiceError::Partitioned(m)
-        | JetServiceError::Revoked(m)
-        | JetServiceError::Stale(m)
-        | JetServiceError::Expired(m) => ("Unavailable", m),
+        JetServiceError::Partitioned(m) => ("Partitioned", m),
+        JetServiceError::Revoked(m) => ("Revoked", m),
+        JetServiceError::Stale(m) => ("Stale", m),
+        JetServiceError::Expired(m) => ("Expired", m),
     };
     CtValue::Enum {
         type_name: "ServiceError".to_string(),
@@ -901,6 +905,28 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "restart_rest_for_one" => Ok(restart_to_ct(jet_services_restart_rest_for_one())),
         "delivery_at_most_once" => Ok(delivery_to_ct(jet_services_delivery_at_most_once())),
         "delivery_durable" => Ok(delivery_to_ct(jet_services_delivery_durable())),
+        "state_authority" => {
+            let store = ct_to_service_string(
+                one(0)?,
+                MAX_SERVICE_STATE_STORE,
+                "service state store",
+                span,
+            )?;
+            let schema = ct_to_service_string(
+                one(1)?,
+                MAX_SERVICE_STATE_SCHEMA,
+                "service state schema",
+                span,
+            )?;
+            let version = match one(2)? {
+                CtValue::Int(version) => *version,
+                _ => return Err(unsupported("service state version", span)),
+            };
+            Ok(match jet_services_state_authority(store, schema, version) {
+                Ok(authority) => CtValue::ResOk(Box::new(state_authority_to_ct(&authority))),
+                Err(error) => CtValue::ResErr(Box::new(map_err(error))),
+            })
+        }
         "set_restart" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
             let restart = ct_to_restart(one(1)?, span)?;

@@ -3202,7 +3202,8 @@ fn run() {
         .Duplicate(_) -> continue
         .Retained(_, until) -> schedule_retry(until)
         .DeadLettered(_) -> report("dead letter")
-        .Rejected(reason) | .Unavailable(reason) -> report(reason)
+        .Rejected(reason) | .Unavailable(reason) | .Partitioned(reason)
+        | .Revoked(reason) | .Stale(reason) | .Expired(reason) -> report(reason)
     }
 }
 ```
@@ -3213,6 +3214,15 @@ AOT and ambient execution; `commit(id)` durably acknowledges a delivered
 receipt and removes its pending copy. An uncommitted receipt can be recovered
 by `retry(id)` after a process restart. The ordinary tree remains the bounded
 local delivery path.
+
+Snapshot and EventLog state also require an explicit injected authority. The
+authority carries the store, schema, and version; it is checked before the
+adapter starts and has the same meaning in AOT and ambient execution.
+
+```jet
+state := services.state_authority("orders.state", "orders", 1)?
+services.set_state_event_log(&tree, state)?
+```
 
 ```jet
 use core.services as services

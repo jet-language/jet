@@ -211,7 +211,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GradTriple" | "SparseTensor" | "RawKernelContract"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
-        | "ServiceDelivery" | "ServiceRuntime" | "ServiceReceipt"
+        | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateAuthority" | "ServiceReceipt"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
@@ -1471,6 +1471,41 @@ pub(crate) fn core_service_receipt_variants(
         ]
         .into_iter()
         .map(|(name, payload)| (name.to_string(), (zero, payload)))
+        .collect(),
+    )
+}
+
+/// D-SERVICE1=D: service failures remain a typed closed sum across AOT,
+/// ambient, and persisted/comptime boundaries.
+pub(crate) fn core_service_error_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    if enum_name != "ServiceError" {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        [
+            "Full",
+            "Ambiguous",
+            "Unknown",
+            "NotStarted",
+            "Policy",
+            "Unavailable",
+            "Partitioned",
+            "Revoked",
+            "Stale",
+            "Expired",
+        ]
+        .into_iter()
+        .map(|name| {
+            (
+                name.to_string(),
+                (zero, VariantPayload::Single(Type::String, zero)),
+            )
+        })
         .collect(),
     )
 }

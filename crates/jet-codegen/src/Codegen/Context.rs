@@ -603,6 +603,7 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "ServiceRestart" => Some("JetServiceRestart"),
         "ServiceDelivery" => Some("JetServiceDelivery"),
         "ServiceRuntime" => Some("JetServiceRuntime"),
+        "ServiceStateAuthority" => Some("JetServiceStateAuthority"),
         "ServiceReceipt" => Some("JetServiceReceipt"),
         _ => None,
     }
@@ -2553,6 +2554,28 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceReceipt".to_string(), variants);
         cx.cloneable.insert("ServiceReceipt".to_string());
+        let error_variants = [
+            "Full",
+            "Ambiguous",
+            "Unknown",
+            "NotStarted",
+            "Policy",
+            "Unavailable",
+            "Partitioned",
+            "Revoked",
+            "Stale",
+            "Expired",
+        ]
+        .into_iter()
+        .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero)))
+        .collect::<Vec<_>>();
+        for (variant, _) in &error_variants {
+            cx.variant_owner
+                .insert(variant.clone(), "ServiceError".to_string());
+        }
+        cx.enum_variants
+            .insert("ServiceError".to_string(), error_variants);
+        cx.cloneable.insert("ServiceError".to_string());
     }
     if cx.core_imports.values().any(|module| module == "core.auth") {
         let zero = Span::new(0, 0);

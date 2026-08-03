@@ -990,7 +990,7 @@ impl<'a> Checker<'a> {
         if enum_name == "AuthError" {
             return true;
         }
-        if enum_name == "ServiceReceipt" {
+        if matches!(enum_name, "ServiceReceipt" | "ServiceError") {
             return true;
         }
         false
@@ -1031,6 +1031,9 @@ impl<'a> Checker<'a> {
             return Some(core_env_error_variants());
         }
         if let Some(v) = core_service_receipt_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_service_error_variants(enum_name) {
             return Some(v);
         }
         // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
