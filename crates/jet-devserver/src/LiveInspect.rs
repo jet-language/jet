@@ -52,7 +52,6 @@ struct LiveResources {
 
 #[derive(Clone, Debug)]
 struct LiveSnapshot {
-    schema_version: i64,
     pid: i64,
     start_id: String,
     captured_ms: u128,
@@ -258,7 +257,6 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
     };
 
     Ok(LiveSnapshot {
-        schema_version,
         pid,
         start_id,
         captured_ms,

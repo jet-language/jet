@@ -135,7 +135,7 @@ enum JetServiceMigration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetServiceStateAuthority {
+pub struct JetServiceStateAuthority {
     store: String,
     schema: String,
     version: i64,
@@ -1139,7 +1139,7 @@ fn jet_services_receive(
                         })?;
                         return Err(delivery_error);
                     }
-                    worker.mailbox.messages.push(message);
+                    worker.mailbox.messages.push(message.clone());
                     if let Err(error) = jet_services_authority_mark_delivered(&store, &id) {
                         // The mailbox now owns this message. Restore the
                         // whole uncommitted suffix before removing it locally.

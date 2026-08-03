@@ -593,7 +593,7 @@ impl<'a> Interp<'a> {
                         Ok(options) => options,
                         Err(error) => {
                             return Ok(CtValue::ResErr(Box::new(decode_error_value(
-                                error,
+                                super::super::super::EncodingLite::cbor_error_value(error),
                                 "invalid CBOR options",
                             ))))
                         }
@@ -602,7 +602,7 @@ impl<'a> Interp<'a> {
                         Ok(tree) => tree,
                         Err(error) => {
                             return Ok(CtValue::ResErr(Box::new(decode_error_value(
-                                error,
+                                super::super::super::EncodingLite::cbor_error_value(error),
                                 "invalid CBOR input",
                             ))))
                         }

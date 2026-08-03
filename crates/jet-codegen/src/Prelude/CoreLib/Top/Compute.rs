@@ -592,6 +592,9 @@ fn jet_compute_slice_checked(
     let first_stride = usize::try_from(first_stride).map_err(|_| {
         JetComputeError::InvalidShape("Tensor view stride is not representable".to_string())
     })?;
+    let axis_start = usize::try_from(axis_start).map_err(|_| {
+        JetComputeError::OutOfBounds("Tensor slice start is not representable".to_string())
+    })?;
     let start_offset = base_offset
         .checked_add(axis_start.checked_mul(first_stride).ok_or_else(|| {
             JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string())
@@ -675,7 +678,7 @@ fn jet_compute_view_mut<'a>(
         Err(error) => jet_panic(file, line, &error.jet_show()),
     };
     let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
-        return jet_panic(
+        jet_panic(
             file,
             line,
             "Tensor mutable view requires exclusive backing storage",
@@ -757,7 +760,7 @@ fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComput
     let offset = jet_compute_offset(tensor, indices)?;
     tensor.data.get(offset).ok_or_else(|| {
         JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-    })
+    }).copied()
 }
 
 fn jet_compute_set(

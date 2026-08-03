@@ -4,6 +4,194 @@ use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
+// `Sync.rs` is shared verbatim with the AOT Prelude.  The comptime tier
+// supplies the same small host boundary that the emitted module gets from
+// `CoreLib/JetStd`: canonical DataTree values, FieldError lists, and Codable
+// traits.  The CRDT and policy algorithms themselves remain in the included
+// Prelude source.
+trait JetShow {
+    fn jet_show(&self) -> String;
+}
+
+#[allow(non_camel_case_types)]
+trait user_Encode {
+    fn jet_encode(&self) -> jet_std::DataTree;
+}
+
+#[allow(non_camel_case_types)]
+trait user_Decode: Sized {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+}
+
+mod jet_std {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+
+    fn quote_json(s: &str) -> String {
+        let mut out = String::from("\"");
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000c}' => out.push_str("\\f"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                _ => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> String {
+        match tree {
+            DataTree::Null => "null".to_string(),
+            DataTree::Bool(value) => value.to_string(),
+            DataTree::Int(value) => value.to_string(),
+            DataTree::Float(value) => format!("{:?}", value),
+            DataTree::Text(value) => quote_json(value),
+            DataTree::Bytes(values) => format!(
+                "[{}]",
+                values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+            ),
+            DataTree::Array(values) => {
+                if values.is_empty() {
+                    return "[]".to_string();
+                }
+                if !pretty {
+                    return format!(
+                        "[{}]",
+                        values
+                            .iter()
+                            .map(|value| render_datatree_json(value, false, depth))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts = values
+                    .iter()
+                    .map(|value| format!("{}{}", pad, render_datatree_json(value, true, depth + 1)))
+                    .collect::<Vec<_>>();
+                format!("[\n{}\n{}]", parts.join(",\n"), end)
+            }
+            DataTree::Object(fields) => {
+                if fields.is_empty() {
+                    return "{}".to_string();
+                }
+                if !pretty {
+                    return format!(
+                        "{{{}}}",
+                        fields
+                            .iter()
+                            .map(|(key, value)| {
+                                format!(
+                                    "{}:{}",
+                                    quote_json(key),
+                                    render_datatree_json(value, false, depth)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts = fields
+                    .iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "{}{}: {}",
+                            pad,
+                            quote_json(key),
+                            render_datatree_json(value, true, depth + 1)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+            }
+        }
+    }
+
+    pub fn datatree_kind(tree: &DataTree) -> &'static str {
+        match tree {
+            DataTree::Null => "null",
+            DataTree::Bool(_) => "Bool",
+            DataTree::Int(_) => "Int",
+            DataTree::Float(_) => "Float",
+            DataTree::Text(_) => "Text",
+            DataTree::Bytes(_) => "Bytes",
+            DataTree::Array(_) => "a list",
+            DataTree::Object(_) => "an object",
+        }
+    }
+}
+
+impl user_Encode for String {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Text(self.clone())
+    }
+}
+
+impl user_Decode for String {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_string(tree)
+    }
+}
+
+impl user_Encode for i64 {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Int(*self)
+    }
+}
+
+impl user_Decode for i64 {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_int(tree)
+    }
+}
+
+impl user_Encode for u64 {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Int(*self as i64)
+    }
+}
+
+impl user_Decode for u64 {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_int(tree).and_then(|value| {
+            u64::try_from(value).map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
+        })
+    }
+}
+
+impl user_Encode for bool {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Bool(*self)
+    }
+}
+
+impl user_Decode for bool {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_bool(tree)
+    }
+}
+
+impl user_Encode for f64 {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Float(*self)
+    }
+}
+
+impl user_Decode for f64 {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_float(tree)
+    }
+}
+
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Sync.rs");
 
 fn text_to_ct(doc: &JetSyncText) -> CtValue {

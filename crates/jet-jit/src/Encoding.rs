@@ -12,7 +12,7 @@ use jet_foundation::AST::{CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 
-/// Canonical `jet_std` JSON/DataTree runtime — types stubbed, algorithm via include!
+/// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
     #[derive(Clone, Debug, PartialEq)]
     pub struct JSONError {

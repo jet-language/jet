@@ -303,7 +303,7 @@ pub(crate) fn prepare_replay(
         .map_err(|message| ("E3622", message))?;
     ensure_read_parent(&path)
         .map_err(|message| ("E3622", message))?;
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
         ("E3622", format!("could not inspect `{artifact_path}`: {error}"))
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -457,7 +457,7 @@ fn validate_replay_path(path: &str) -> Result<PathBuf, String> {
     if path.contains('\0') || path.contains('\\') {
         return Err("replay artifact path must use forward-slash components".into());
     }
-    let components = if let Some(relative) = path.strip_prefix('/') {
+    let mut components = if let Some(relative) = path.strip_prefix('/') {
         relative.split('/')
     } else {
         path.split('/')

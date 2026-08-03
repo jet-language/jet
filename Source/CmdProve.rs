@@ -1906,8 +1906,15 @@ mod supervision_tests {
 }
 
 fn resolve_target(raw: &str) -> Result<Target, String> {
-    let path = Path::new(raw);
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
+    let input_path = Path::new(raw);
+    let path = if input_path.is_absolute() {
+        input_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("can't resolve proof target `{raw}`: {error}"))?
+            .join(input_path)
+    };
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("can't find proof target `{raw}`")
         } else {
@@ -1926,15 +1933,15 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         if !metadata.is_dir() {
             return Err(format!("proof target `{raw}` is not a file or directory"));
         }
-        let kind = if has_proof_manifest(path, jet::Syntax::PACKAGE_FILE)?
-            || has_proof_manifest(path, jet::Syntax::PAYLOAD_FILE)?
+        let kind = if has_proof_manifest(&path, jet::Syntax::PACKAGE_FILE)?
+            || has_proof_manifest(&path, jet::Syntax::PAYLOAD_FILE)?
         {
             "package"
         } else {
             "workspace"
         };
         let mut found = Vec::new();
-        collect_jet_files(path, &mut found)?;
+        collect_jet_files(&path, &mut found)?;
         if found.is_empty() {
             return Err(format!("proof target `{raw}` contains no .jet files"));
         }
@@ -1956,7 +1963,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         .collect::<Vec<_>>();
     if metadata.is_dir() {
         let mut closure_paths = Vec::new();
-        collect_identity_files(path, &mut closure_paths)?;
+        collect_identity_files(&path, &mut closure_paths)?;
         for closure_path in closure_paths {
             let bytes = fs::read(&closure_path)
                 .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
@@ -1987,8 +1994,16 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             true,
         );
         for dependency in dependencies {
-            let dependency_metadata = fs::symlink_metadata(&dependency)
-                .map_err(|e| format!("couldn't inspect proof dependency `{}`: {e}", dependency.display()))?;
+            let dependency_metadata = match fs::symlink_metadata(&dependency) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "couldn't inspect proof dependency `{}`: {error}",
+                        dependency.display()
+                    ))
+                }
+            };
             if dependency_metadata.file_type().is_symlink() {
                 return Err(format!("proof target contains symlink `{}`", dependency.display()));
             }
@@ -2043,7 +2058,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     );
     Ok(Target {
         kind,
-        root: normalized(path),
+        root: normalized(&path),
         identity_members,
         input_sha256: jet::SHA256::sha256_hex(&identity),
         source_digest,

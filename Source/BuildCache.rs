@@ -103,7 +103,8 @@ fn verified_cached_bytes(key: &str) -> Option<(Vec<u8>, fs::Permissions)> {
     if !regular_file(&digest) || !regular_file(&bin) {
         return None;
     }
-    let expected = parse_digest_record(&fs::read(digest).ok()?)?;
+    let digest_bytes = fs::read(digest).ok()?;
+    let expected = parse_digest_record(&digest_bytes)?;
     let mut source = fs::File::open(dir.join("bin")).ok()?;
     let permissions = source.metadata().ok()?.permissions();
     let mut bytes = Vec::new();
