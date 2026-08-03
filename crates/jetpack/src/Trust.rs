@@ -36,6 +36,7 @@ const AUTH_IMAGE: &str = "image";
 const AUTH_FLEET: &str = "fleet";
 const AUTH_JETOS: &str = "jetos";
 const AUTH_VAULT_WRITE: &str = "vault.write";
+const AUTH_INTEGRATION: &str = "integration";
 
 const AUTHORITY_KINDS: &[&str] = &[
     AUTH_PACKAGE,
@@ -46,6 +47,7 @@ const AUTHORITY_KINDS: &[&str] = &[
     AUTH_FLEET,
     AUTH_JETOS,
     AUTH_VAULT_WRITE,
+    AUTH_INTEGRATION,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,11 +534,45 @@ pub fn is_environment_trusted(
     secrets: &[String],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
 ) -> bool {
+    if !integration_grants_trusted(store, facts) {
+        return false;
+    }
     if is_typed_environment(facts) {
         is_typed_environment_trusted(store, project_dir, hash)
     } else {
         is_env_trusted(store, project_dir, hash, refs, secrets)
     }
+}
+
+/// Integration authorities are separate from the broad environment hash.
+/// `--trust` can approve a project definition for one run, but it cannot
+/// manufacture permission to read a credential store, use MCP, or bind a
+/// host provider. The user must review and persist each closed integration
+/// grant explicitly.
+pub fn integration_grants_trusted(
+    store: &Path,
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> bool {
+    missing_integration_grant(store, facts).is_none()
+}
+
+fn missing_integration_grant(
+    store: &Path,
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> Option<String> {
+    let records = list_records(store);
+    facts.integration_facts.task_facts.iter().find_map(|task| {
+        task.grants.iter().find_map(|grant| {
+            let subject = format!("{}:{grant}", task.integration.as_str());
+            records.iter().any(|record| {
+                matches!(
+                    record,
+                    TrustRecord::Grant(stored)
+                        if stored.authority == AUTH_INTEGRATION && stored.subject == subject
+                )
+            }).then_some(subject)
+        })
+    })
 }
 
 fn grant_matches_project_or_hash(grant: &TrustGrant, project_dir: &Path, hash: &str) -> bool {
@@ -771,6 +807,15 @@ pub fn gate_with_environment(
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
     bypass: bool,
 ) -> Result<(), i32> {
+    if let Some(subject) = missing_integration_grant(store, facts) {
+        theme.error_coded(
+            "E1335",
+            "environment integration authority is not granted",
+            &format!("the environment requests integration authority `{subject}`, but no persisted grant authorizes it"),
+            &format!("review the integration, then run `jet trust grant integration:{subject} --scope user`"),
+        );
+        return Err(2);
+    }
     let hash = environment_definition_hash(refs, table, secrets, facts);
     gate_with_hash(
         theme,
@@ -795,6 +840,15 @@ pub fn gate_with_environment_and_snapshot(
     source_snapshot: Option<&str>,
     bypass: bool,
 ) -> Result<(), i32> {
+    if let Some(subject) = missing_integration_grant(store, facts) {
+        theme.error_coded(
+            "E1335",
+            "environment integration authority is not granted",
+            &format!("the environment requests integration authority `{subject}`, but no persisted grant authorizes it"),
+            &format!("review the integration, then run `jet trust grant integration:{subject} --scope user`"),
+        );
+        return Err(2);
+    }
     let hash = environment_definition_hash_with_snapshot(
         refs,
         table,

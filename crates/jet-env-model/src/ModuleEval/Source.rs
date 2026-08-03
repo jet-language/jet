@@ -196,6 +196,7 @@ pub fn evaluate_env_with_profile(
                     name: task.clone(),
                     integration: integration.kind,
                     packages: integration.packages.clone(),
+                    secrets: integration.secrets.clone(),
                     providers: integration.providers.clone(),
                     host_checks: integration.host_checks.clone(),
                     grants: integration.grants.clone(),

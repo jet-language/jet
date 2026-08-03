@@ -156,7 +156,7 @@ pub fn verify_registry_package(
             "sparse package metadata has no witnessed log inclusion",
         )));
     }
-    accept_checkpoint(registry_name, &checkpoint)
+    accept_checkpoint(registry_name, repo, &checkpoint)
         .map_err(|error| metadata_diagnostic(&error))?;
     Ok(metadata.entries)
 }
@@ -465,44 +465,109 @@ fn checkpoint_contains_entry(repo: &Path, expected: &IndexEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn accept_checkpoint(registry_name: &str, checkpoint: &Checkpoint) -> io::Result<()> {
+fn accept_checkpoint(
+    registry_name: &str,
+    repo: &Path,
+    checkpoint: &Checkpoint,
+) -> io::Result<()> {
     let path = crate::Publish::registry_checkpoint_path(registry_name);
-    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(invalid("accepted registry checkpoint is not a regular file"));
+    with_checkpoint_lock(&path, || {
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(invalid("accepted registry checkpoint is not a regular file"));
+            }
+            let text = read_bounded(&path, 1024)?;
+            let mut lines = text.lines();
+            let sequence = lines
+                .next()
+                .ok_or_else(|| invalid("accepted registry checkpoint is malformed"))?
+                .parse::<u64>()
+                .map_err(|_| invalid("accepted registry checkpoint sequence is invalid"))?;
+            let root = lines
+                .next()
+                .ok_or_else(|| invalid("accepted registry checkpoint is missing its root"))?;
+            if sequence > checkpoint.sequence
+                || (sequence == checkpoint.sequence && root != checkpoint.root)
+            {
+                return Err(invalid("registry checkpoint rolled back or forked"));
+            }
+            if sequence == checkpoint.sequence {
+                return Ok(());
+            }
+            let ancestor = if sequence == 0 {
+                empty_log_root()
+            } else {
+                read_log(repo)?
+                    .get(sequence as usize - 1)
+                    .map(|record| record.leaf.clone())
+                    .ok_or_else(|| invalid("registry checkpoint ancestor is not in its log"))?
+            };
+            if root != ancestor {
+                return Err(invalid("registry checkpoint forked from the accepted log"));
+            }
         }
-        let text = read_bounded(&path, 1024)?;
-        let mut lines = text.lines();
-        let sequence = lines
-            .next()
-            .ok_or_else(|| invalid("accepted registry checkpoint is malformed"))?
-            .parse::<u64>()
-            .map_err(|_| invalid("accepted registry checkpoint sequence is invalid"))?;
-        let root = lines
-            .next()
-            .ok_or_else(|| invalid("accepted registry checkpoint is missing its root"))?;
-        if sequence > checkpoint.sequence || (sequence == checkpoint.sequence && root != checkpoint.root)
-        {
-            return Err(invalid("registry checkpoint rolled back or forked"));
+        let parent = path
+            .parent()
+            .ok_or_else(|| invalid("accepted registry checkpoint has no parent"))?;
+        if let Ok(metadata) = std::fs::symlink_metadata(parent) {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid("accepted registry checkpoint parent is not a directory"));
+            }
+        } else {
+            std::fs::create_dir_all(parent)?;
         }
-        if sequence == checkpoint.sequence {
-            return Ok(());
-        }
-    }
-    let parent = path
+        atomic_write(
+            &path,
+            format!("{}\n{}\n", checkpoint.sequence, checkpoint.root).as_bytes(),
+        )
+    })
+}
+
+fn with_checkpoint_lock<T>(state: &Path, action: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    let parent = state
         .parent()
         .ok_or_else(|| invalid("accepted registry checkpoint has no parent"))?;
-    if let Ok(metadata) = std::fs::symlink_metadata(parent) {
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(invalid("accepted registry checkpoint parent is not a directory"));
+    std::fs::create_dir_all(parent)?;
+    let lock_path = state.with_extension("lock");
+    let mut lock = None;
+    for _ in 0..100 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => {
+                lock = Some(file);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if let Ok(metadata) = std::fs::metadata(&lock_path) {
+                    if metadata
+                        .modified()
+                        .ok()
+                        .and_then(|modified| modified.elapsed().ok())
+                        .is_some_and(|age| age > std::time::Duration::from_secs(300))
+                    {
+                        let _ = std::fs::remove_file(&lock_path);
+                        continue;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
         }
-    } else {
-        std::fs::create_dir_all(parent)?;
     }
-    atomic_write(
-        &path,
-        format!("{}\n{}\n", checkpoint.sequence, checkpoint.root).as_bytes(),
-    )
+    let Some(lock) = lock else {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "accepted registry checkpoint is busy",
+        ));
+    };
+    lock.sync_all()?;
+    let result = action();
+    drop(lock);
+    let _ = std::fs::remove_file(lock_path);
+    result
 }
 
 fn log_record_unsigned(sequence: u64, operation: &str, entry: &IndexEntry, previous: &str) -> String {

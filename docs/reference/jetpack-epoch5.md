@@ -33,6 +33,8 @@ The same commit carries signed per-package sparse metadata, an append-only
 transparency log, and a signed checkpoint. The registry publisher key is
 host-pinned under the Jet trust directory; fetch refuses a registry view whose
 metadata is not signed by that pin or whose checkpoint rolls back or forks.
+Fresh consumers may point `JET_REGISTRY_ROOT_KEY` at an administrator-provided
+public root-key file; the repository cannot establish its own first trust.
 The source tree hash is checked before the index changes. `jet fetch` selects
 the highest non-yanked version that satisfies the declared requirement, checks
 the publisher signature and source hash, then records the registry, exact
@@ -251,4 +253,9 @@ Environment modules may import typed first-party integrations such as
 `env.agent.codex(...)`. Each import lowers into the same package, file, secret,
 host-check, provider, and grant facts used by the rest of Jetpack. SDK imports
 carry deterministic safe defaults and preserve expert options in the plan.
-Secret values are never stored in the plan or its fingerprint.
+Secret values are never stored in the plan or its fingerprint. Secret names
+enter the ordinary environment secret check. Provider facts are checked against
+the closed preset mapping, and sensitive integration grants are separate
+persisted trust records: for example,
+`jet trust grant integration:certificates:certificate.read --scope user`.
+The one-shot `--trust` flag does not manufacture an integration authority.

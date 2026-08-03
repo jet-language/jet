@@ -102,6 +102,13 @@ pub fn registry_root_key_path(registry_name: &str) -> PathBuf {
         .join(format!("{}.pub", SHA256::sha256_hex(registry_name.as_bytes())))
 }
 
+fn configured_registry_root_key_path(registry_name: &str) -> Option<PathBuf> {
+    std::env::var_os("JET_REGISTRY_ROOT_KEY")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| Some(registry_root_key_path(registry_name)))
+}
+
 pub fn registry_checkpoint_path(registry_name: &str) -> PathBuf {
     let base = Sign::keys_dir()
         .parent()
@@ -121,7 +128,11 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
             "registry root key is not a 32-byte hexadecimal public key",
         ));
     }
-    let path = registry_root_key_path(registry_name);
+    let configured = std::env::var_os("JET_REGISTRY_ROOT_KEY")
+        .filter(|value| !value.is_empty())
+        .is_some();
+    let path = configured_registry_root_key_path(registry_name)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry root key path is empty"))?;
     if let Ok(metadata) = std::fs::symlink_metadata(&path) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(io::Error::new(
@@ -141,6 +152,12 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "registry root key has no parent")
     })?;
+    if configured {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("configured registry root key is unavailable at {}", path.display()),
+        ));
+    }
     std::fs::create_dir_all(parent)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -159,7 +176,8 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
 }
 
 pub fn read_registry_root_key(registry_name: &str) -> io::Result<String> {
-    let path = registry_root_key_path(registry_name);
+    let path = configured_registry_root_key_path(registry_name)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry root key path is empty"))?;
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
         io::Error::new(
             error.kind(),
@@ -402,8 +420,12 @@ fn push_index_inner(
             ));
         }
         let remote = format!("origin/{branch}");
-        if expected.is_some_and(|entry| remote_contains_entry(repo, &remote, entry)) {
-            return Ok(());
+        if let Some(entry) = expected {
+            if remote_contains_entry(repo, &remote, entry)
+                && verify_remote_winner(registry, entry)?
+            {
+                return Ok(());
+            }
         }
         let rebase = run(&["rebase", &remote])
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
@@ -427,6 +449,27 @@ fn push_index_inner(
         }
     }
     Ok(())
+}
+
+fn verify_remote_winner(
+    registry: &RegistryConfig,
+    expected: &IndexEntry,
+) -> Result<bool, Diagnostic> {
+    let checkout = prepare_publish_checkout(registry)?;
+    let repo = checkout.path();
+    let entries = crate::Publish::verify_registry_package(repo, &registry.name, &expected.name)?;
+    let Some(actual) = entries
+        .into_iter()
+        .find(|entry| entry.version == expected.version)
+    else {
+        return Ok(false);
+    };
+    if actual != *expected {
+        return Ok(false);
+    }
+    crate::Publish::verify_artifact(repo, &actual)
+        .map(|_| true)
+        .map_err(|error| super::Advisory::e2607("concurrent registry winner", &error.to_string()))
 }
 
 fn rebuild_publication_after_race(

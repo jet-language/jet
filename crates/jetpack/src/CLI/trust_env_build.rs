@@ -361,6 +361,40 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
                 ));
             }
         }
+        for secret in &task.secrets {
+            if !plan.secrets.iter().any(|declared| declared == secret) {
+                return Err(format!(
+                    "integration task `{}` lost secret `{secret}` before activation",
+                    task.name
+                ));
+            }
+        }
+        let expected_provider = match task.integration {
+            ModuleEval::IntegrationKind::Android
+            | ModuleEval::IntegrationKind::Apple
+            | ModuleEval::IntegrationKind::Editor => "nixpkgs",
+            ModuleEval::IntegrationKind::Certificates | ModuleEval::IntegrationKind::Vault => "vault",
+            ModuleEval::IntegrationKind::CloudCredentials => "credential-store",
+            ModuleEval::IntegrationKind::Hosts => "host-binding",
+            ModuleEval::IntegrationKind::CodexAgent => "mcp",
+        };
+        if !task.providers.iter().any(|provider| provider == expected_provider) {
+            return Err(format!(
+                "integration task `{}` has no executable `{expected_provider}` provider",
+                task.name
+            ));
+        }
+        if task.providers.iter().any(|provider| {
+            !matches!(
+                provider.as_str(),
+                "nixpkgs" | "vault" | "credential-store" | "host-binding" | "mcp"
+            )
+        }) {
+            return Err(format!(
+                "integration task `{}` names an unsupported provider",
+                task.name
+            ));
+        }
         for provider in &task.providers {
             if !plan.environment.integration_facts.providers.contains(provider) {
                 return Err(format!(

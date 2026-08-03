@@ -85,6 +85,7 @@ pub struct IntegrationTaskFact {
     pub name: String,
     pub integration: IntegrationKind,
     pub packages: Vec<String>,
+    pub secrets: Vec<String>,
     pub providers: Vec<String>,
     pub host_checks: Vec<String>,
     pub grants: Vec<String>,
@@ -113,6 +114,8 @@ impl IntegrationFactProjection {
             text.push_str(&task.name);
             text.push('\t');
             text.push_str(&task.packages.join(","));
+            text.push('\t');
+            text.push_str(&task.secrets.join(","));
             text.push('\t');
             text.push_str(&task.providers.join(","));
             text.push('\t');
@@ -147,6 +150,7 @@ impl IntegrationFactProjection {
         } else if self.task_facts.iter().any(|task| {
             task.name.trim().is_empty()
                 || task.providers.iter().any(|provider| provider.trim().is_empty())
+                || task.secrets.iter().any(|secret| secret.trim().is_empty())
                 || task.host_checks.iter().any(|check| check.trim().is_empty())
                 || task.grants.iter().any(|grant| grant.trim().is_empty())
         }) {
