@@ -1,17 +1,12 @@
 //! Std-only archive and stream-codec evaluator used by comptime, REPL, and
 //! interpreter.
 //!
-//! ZIP writes the same uncompressed single-entry shape as AOT's
-//! `ZipWriter::start_file(FileOptions::default())`; reads accept stored and
-//! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes GNU
-//! archives. GZIP writes stored DEFLATE and reads stored/fixed/dynamic DEFLATE.
-//! Zstandard writes ordinary raw-block frames.
+//! ZIP/TAR use the canonical `core.archive` ABI kernel. GZIP writes stored
+//! DEFLATE and reads stored/fixed/dynamic DEFLATE. Zstandard writes ordinary
+//! raw-block frames.
 //! Invalid inputs stay bounded and follow each public API's existing
 //! empty/`Err` contract.
 
-use std::path::{Component, Path};
-
-const TAR_BLOCK: usize = 512;
 const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
 const ZSTD_BLOCK_MAX: usize = 128 * 1024;
 const ZSTD_WINDOW_MAX: u64 = 128 * 1024 * 1024;
@@ -276,340 +271,27 @@ pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+// Archive behavior is owned by the same source included by the package build,
+// AOT bridge, JIT host, and resident interpreter. Keep these names as the
+// comptime call seam while avoiding a second interpreter implementation.
 pub(super) fn zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
-    let name = name.as_bytes();
-    let Ok(name_len) = u16::try_from(name.len()) else {
-        return Vec::new();
-    };
-    let Ok(size) = u32::try_from(data.len()) else {
-        return Vec::new();
-    };
-    let crc = crc32(data);
-    let mut out = Vec::with_capacity(30 + name.len() + data.len() + 46 + name.len() + 22);
-
-    put_u32(&mut out, 0x0403_4b50);
-    put_u16(&mut out, 10);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0); // stored
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0x21); // 1980-01-01
-    put_u32(&mut out, crc);
-    put_u32(&mut out, size);
-    put_u32(&mut out, size);
-    put_u16(&mut out, name_len);
-    put_u16(&mut out, 0);
-    out.extend_from_slice(name);
-    out.extend_from_slice(data);
-
-    let central_offset = out.len() as u32;
-    put_u32(&mut out, 0x0201_4b50);
-    put_u16(&mut out, 0x031e); // Unix, ZIP 3.0
-    put_u16(&mut out, 10);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0x21);
-    put_u32(&mut out, crc);
-    put_u32(&mut out, size);
-    put_u32(&mut out, size);
-    put_u16(&mut out, name_len);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u32(&mut out, 0);
-    put_u32(&mut out, 0);
-    out.extend_from_slice(name);
-
-    let central_size = out.len() as u32 - central_offset;
-    put_u32(&mut out, 0x0605_4b50);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 1);
-    put_u16(&mut out, 1);
-    put_u32(&mut out, central_size);
-    put_u32(&mut out, central_offset);
-    put_u16(&mut out, 0);
-    out
+    jet_foundation::CoreArchive::jet_archive_zip_compress(name, data)
 }
 
 pub(super) fn zip_decompress(data: &[u8]) -> Vec<u8> {
-    let Some(eocd) = find_eocd(data) else {
-        return Vec::new();
-    };
-    if read_u16(data, eocd + 10).unwrap_or(0) == 0 {
-        return Vec::new();
-    }
-    let Some(central) = read_u32(data, eocd + 16).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    if read_u32(data, central) != Some(0x0201_4b50) {
-        return Vec::new();
-    }
-    let flags = read_u16(data, central + 8).unwrap_or(1);
-    if flags & 1 != 0 {
-        return Vec::new();
-    }
-    let method = read_u16(data, central + 10).unwrap_or(u16::MAX);
-    let Some(compressed_len) = read_u32(data, central + 20).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(expected_len) = read_u32(data, central + 24).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(local) = read_u32(data, central + 42).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    if read_u32(data, local) != Some(0x0403_4b50) {
-        return Vec::new();
-    }
-    let Some(name_len) = read_u16(data, local + 26).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(extra_len) = read_u16(data, local + 28).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(start) = local.checked_add(30 + name_len + extra_len) else {
-        return Vec::new();
-    };
-    let Some(end) = start.checked_add(compressed_len) else {
-        return Vec::new();
-    };
-    let Some(payload) = data.get(start..end) else {
-        return Vec::new();
-    };
-    let out = match method {
-        0 => payload.to_vec(),
-        8 => inflate(payload, expected_len).unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    if out.len() == expected_len { out } else { Vec::new() }
+    jet_foundation::CoreArchive::jet_archive_zip_decompress(data)
 }
 
 pub(super) fn tar_add(archive: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
-    let mut entries = tar_read_all(archive);
-    if let Some(index) = entries.iter().position(|(entry, _)| entry == name) {
-        entries[index] = (name.to_string(), data.to_vec());
-    } else {
-        entries.push((name.to_string(), data.to_vec()));
-    }
-    tar_write_all(&entries)
+    jet_foundation::CoreArchive::jet_archive_tar_add(archive, name, data)
 }
 
 pub(super) fn tar_get(archive: &[u8], name: &str) -> Vec<u8> {
-    tar_read_all(archive)
-        .into_iter()
-        .find_map(|(entry, data)| (entry == name).then_some(data))
-        .unwrap_or_default()
+    jet_foundation::CoreArchive::jet_archive_tar_get(archive, name)
 }
 
 pub(super) fn tar_names_json(archive: &[u8]) -> String {
-    let mut out = String::from("[");
-    for (index, (name, _)) in tar_read_all(archive).iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push('"');
-        for ch in name.chars() {
-            match ch {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                ch => out.push(ch),
-            }
-        }
-        out.push('"');
-    }
-    out.push(']');
-    out
-}
-
-fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
-    let mut out = Vec::new();
-    let mut offset = 0usize;
-    let mut long_name = None;
-    while let Some(header) = data.get(offset..offset.saturating_add(TAR_BLOCK)) {
-        if header.iter().all(|byte| *byte == 0) || !tar_checksum_ok(header) {
-            break;
-        }
-        let Some(size) = tar_number(&header[124..136]).and_then(|n| usize::try_from(n).ok()) else {
-            break;
-        };
-        let Some(payload_start) = offset.checked_add(TAR_BLOCK) else {
-            break;
-        };
-        let Some(payload_end) = payload_start.checked_add(size) else {
-            break;
-        };
-        let Some(payload) = data.get(payload_start..payload_end) else {
-            break;
-        };
-        let kind = header[156];
-        if kind == b'L' {
-            long_name = Some(trim_nul(payload));
-        } else if kind == b'x' {
-            if let Some(path) = pax_path(payload) {
-                long_name = Some(path);
-            }
-        } else if kind != b'g' {
-            let name = long_name.take().unwrap_or_else(|| tar_header_name(header));
-            out.push((name, payload.to_vec()));
-        }
-        let padded = size.saturating_add(TAR_BLOCK - 1) / TAR_BLOCK * TAR_BLOCK;
-        let Some(next) = payload_start.checked_add(padded) else {
-            break;
-        };
-        offset = next;
-    }
-    out
-}
-
-fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (name, data) in entries {
-        if !tar_name_valid(name) {
-            continue;
-        }
-        if split_ustar_name(name).is_none() {
-            let mut long = name.as_bytes().to_vec();
-            long.push(0);
-            append_tar_entry(&mut out, "././#LongLink", &long, b'L');
-        }
-        append_tar_entry(&mut out, name, data, b'0');
-    }
-    out.resize(out.len() + TAR_BLOCK * 2, 0);
-    out
-}
-
-fn tar_name_valid(name: &str) -> bool {
-    !name.is_empty()
-        && !name.as_bytes().contains(&0)
-        && !Path::new(name).components().any(|component| {
-            matches!(
-                component,
-                Component::Prefix(_) | Component::RootDir | Component::ParentDir
-            )
-        })
-}
-
-fn append_tar_entry(out: &mut Vec<u8>, name: &str, data: &[u8], kind: u8) {
-    let mut header = [0u8; TAR_BLOCK];
-    let (path, prefix) = split_ustar_name(name).unwrap_or_else(|| {
-        let bytes = name.as_bytes();
-        (&bytes[..bytes.len().min(100)], &[][..])
-    });
-    header[..path.len()].copy_from_slice(path);
-    header[345..345 + prefix.len()].copy_from_slice(prefix);
-    put_tar_octal(&mut header[100..108], 0o644);
-    put_tar_octal(&mut header[108..116], 0);
-    put_tar_octal(&mut header[116..124], 0);
-    put_tar_octal(&mut header[124..136], data.len() as u64);
-    put_tar_octal(&mut header[136..148], 0);
-    header[148..156].fill(b' ');
-    header[156] = kind;
-    header[257..263].copy_from_slice(b"ustar\0");
-    header[263..265].copy_from_slice(b"00");
-    let checksum = header.iter().map(|byte| *byte as u64).sum();
-    put_tar_checksum(&mut header[148..156], checksum);
-    out.extend_from_slice(&header);
-    out.extend_from_slice(data);
-    out.resize(out.len().div_ceil(TAR_BLOCK) * TAR_BLOCK, 0);
-}
-
-fn split_ustar_name(name: &str) -> Option<(&[u8], &[u8])> {
-    let bytes = name.as_bytes();
-    if bytes.len() <= 100 {
-        return Some((bytes, &[]));
-    }
-    bytes
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(index, byte)| **byte == b'/' && *index <= 155 && bytes.len() - index - 1 <= 100)
-        .map(|(index, _)| (&bytes[index + 1..], &bytes[..index]))
-}
-
-fn tar_header_name(header: &[u8]) -> String {
-    let name = trim_nul(&header[..100]);
-    let prefix = trim_nul(&header[345..500]);
-    if prefix.is_empty() { name } else { format!("{prefix}/{name}") }
-}
-
-fn trim_nul(bytes: &[u8]) -> String {
-    String::from_utf8(
-        bytes[..bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len())].to_vec(),
-    )
-    .unwrap_or_default()
-}
-
-fn pax_path(payload: &[u8]) -> Option<String> {
-    let mut offset = 0;
-    while offset < payload.len() {
-        let space = payload[offset..].iter().position(|byte| *byte == b' ')? + offset;
-        let len = std::str::from_utf8(&payload[offset..space]).ok()?.parse::<usize>().ok()?;
-        let end = offset.checked_add(len)?;
-        let record = payload.get(space + 1..end.checked_sub(1)?)?;
-        if let Some(path) = record.strip_prefix(b"path=") {
-            return String::from_utf8(path.to_vec()).ok();
-        }
-        offset = end;
-    }
-    None
-}
-
-fn tar_checksum_ok(header: &[u8]) -> bool {
-    let Some(stored) = tar_number(&header[148..156]) else {
-        return false;
-    };
-    let actual = header
-        .iter()
-        .enumerate()
-        .map(|(index, byte)| if (148..156).contains(&index) { b' ' } else { *byte })
-        .map(u64::from)
-        .sum::<u64>();
-    stored == actual
-}
-
-fn tar_number(field: &[u8]) -> Option<u64> {
-    if field.first().is_some_and(|byte| byte & 0x80 != 0) {
-        let mut value = u64::from(field[0] & 0x7f);
-        for byte in &field[1..] {
-            value = value.checked_mul(256)?.checked_add(u64::from(*byte))?;
-        }
-        return Some(value);
-    }
-    let text = std::str::from_utf8(field).ok()?.trim_matches(['\0', ' ']);
-    if text.is_empty() { Some(0) } else { u64::from_str_radix(text, 8).ok() }
-}
-
-fn put_tar_octal(field: &mut [u8], value: u64) {
-    field.fill(b'0');
-    field[field.len() - 1] = 0;
-    let digits = format!("{value:o}");
-    if digits.len() < field.len() {
-        let start = field.len() - 1 - digits.len();
-        field[start..start + digits.len()].copy_from_slice(digits.as_bytes());
-    }
-}
-
-fn put_tar_checksum(field: &mut [u8], value: u64) {
-    field.fill(b' ');
-    let digits = format!("{value:06o}");
-    field[..6].copy_from_slice(&digits.as_bytes()[digits.len().saturating_sub(6)..]);
-    field[6] = 0;
-}
-
-fn find_eocd(data: &[u8]) -> Option<usize> {
-    let start = data.len().saturating_sub(65_557);
-    (start..=data.len().checked_sub(22)?)
-        .rev()
-        .find(|offset| {
-            read_u32(data, *offset) == Some(0x0605_4b50)
-                && read_u16(data, *offset + 20)
-                    .is_some_and(|comment| *offset + 22 + usize::from(comment) == data.len())
-        })
+    jet_foundation::CoreArchive::jet_archive_tar_names_json(archive)
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Option<u16> {

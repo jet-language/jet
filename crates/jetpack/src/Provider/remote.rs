@@ -686,16 +686,28 @@ pub(super) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
-        if from.is_dir() {
+        let metadata = std::fs::symlink_metadata(&from)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "refusing symlink in copied package tree: {}",
+                from.display()
+            )));
+        }
+        if metadata.is_dir() {
             copy_tree(&from, &to)?;
-        } else {
+        } else if metadata.is_file() {
             std::fs::copy(&from, &to)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mode = std::fs::metadata(&from)?.permissions().mode();
+                let mode = metadata.permissions().mode();
                 std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
             }
+        } else {
+            return Err(std::io::Error::other(format!(
+                "refusing non-file in copied package tree: {}",
+                from.display()
+            )));
         }
     }
     Ok(())

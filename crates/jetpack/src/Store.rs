@@ -762,7 +762,9 @@ fn verify_cache_entry_with_graph(
     graph: Option<&Closure::ClosureGraph>,
 ) -> CacheVerification {
     let out = Path::new(&entry.out);
-    let output_exists = out.exists();
+    let output_exists = fs::symlink_metadata(out)
+        .map(|metadata| !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir()))
+        .unwrap_or(false);
     let output_digest = output_exists
         && !entry.envelope.output_hash.is_empty()
         && Ingest::try_entry_output_hash(roots, entry)

@@ -1,11 +1,9 @@
 //! `core.archive` host shims (#729).
-//! Calls the canonical ring runtime via `include!` — no third algorithm.
+//! Calls the canonical dependency-free archive ABI source through Foundation —
+//! no third algorithm.
 
 use super::Concurrency;
-
-mod runtime {
-    include!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
-}
+use jet_foundation::CoreArchive as runtime;
 
 fn clone_heap_string(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())

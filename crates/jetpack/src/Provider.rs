@@ -36,8 +36,8 @@ use remote::{
     source_repo, tree_fingerprint, RemoteSource,
 };
 use package::{
-    canonical_package_kind, canonical_source_dir, core_recipe_identity, find_canonical_package,
-    toolchain_facts, validate_core_source_tree,
+    canonical_package_kind, canonical_source_dir, core_recipe_identity, core_tree_fingerprint,
+    find_canonical_package, toolchain_facts, validate_core_source_tree,
 };
 #[cfg(test)]
 use remote::file_has_top_level_run;
@@ -193,18 +193,14 @@ pub fn cache_expectation(
                 .and_then(|(root, facts)| canonical_source_dir(root, facts))
                 .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
             validate_core_source_tree(&src_dir).ok()?;
-            // A Cargo-backed Core package is part of the offline closure. Do
-            // not compare or serve a host-toolchain recipe when the caller
-            // requires pinned delivery: that would turn an offline cache miss
-            // into a machine-specific build.
+            let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
             if ctx.offline
                 && src_dir.join("Cargo.toml").is_file()
-                && !super::Toolchain::Toolchain::resolve().is_some_and(|toolchain| toolchain.pinned)
+                && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned)
             {
                 return None;
             }
-            let source_fingerprint =
-                super::Envelope::try_output_hash_of(&src_dir.to_string_lossy()).ok()?;
+            let source_fingerprint = core_tree_fingerprint(&src_dir).ok()?;
             let (manifest, canonical) = if canonical.is_some() {
                 (None, canonical)
             } else {
@@ -229,13 +225,14 @@ pub fn cache_expectation(
                 manifest.as_ref(),
                 kind,
                 canonical,
-            );
-            let fp = tree_fingerprint(&src_dir);
+                toolchain.as_ref(),
+            )
+            .ok()?;
             Some(super::Store::CacheExpectation {
                 identity: cache_identity(&source_fingerprint, &recipe, ctx),
                 owned_output: Some(
                     ctx.store_dir
-                        .join(format!("{}-{}", spec.package, &fp[..12])),
+                        .join(format!("{}-{}", spec.package, &source_fingerprint[..12])),
                 ),
                 allow_unsigned_local: true,
             })
@@ -698,13 +695,15 @@ impl Provider for CoreProvider {
         validate_core_source_tree(&src_dir).map_err(ProviderError::CoreBuild)?;
         // Content-address the materialized package so identical sources share a
         // store entry and changes get a fresh one.
-        let fp = tree_fingerprint(&src_dir);
+        let fp = core_tree_fingerprint(&src_dir).map_err(ProviderError::CoreBuild)?;
+        let source_fingerprint = fp.clone();
+        let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
         let out_dir = ctx
             .store_dir
             .join(format!("{}-{}", spec.package, &fp[..12]));
         // Reuse is owned by Store verification. Reaching the provider with an
         // existing object means no verified record leased it.
-        if out_dir.exists() {
+        if std::fs::symlink_metadata(&out_dir).is_ok() {
             return Err(ProviderError::CoreBuild(format!(
                 "unverified existing output {}; run `jet clean` before rebuilding",
                 out_dir.display()
@@ -767,15 +766,14 @@ impl Provider for CoreProvider {
                 // crash), never a sibling of the store root.
                 let cargo_toml = out_dir.join("Cargo.toml");
                 if cargo_toml.is_file() {
-                    // D-JPK-BUILDTOOL1=A: compile through the pinned/realized Rust
-                    // toolchain (a fixture stands in for #179's hangar object),
-                    // never a bare host-`cargo` lookup. `resolve` falls back to the
-                    // host dev toolchain when no pin is configured; only a machine
-                    // with neither a toolchain object nor `cargo` yields `None`,
-                    // the E1240 case (surfaced by the build reporting layer).
-                    let toolchain = super::Toolchain::Toolchain::resolve().ok_or_else(|| {
+                    // D-JPK-BUILDTOOL1=A: compile through the resolved toolchain.
+                    // Offline Core is resolved with `resolve_pinned`, so a
+                    // missing fixture is a hard miss rather than a host-Cargo
+                    // fallback. Online development may use the explicit host
+                    // dev toolchain.
+                    let toolchain = toolchain.as_ref().ok_or_else(|| {
                         ProviderError::CoreBuild(
-                            "core library carries Cargo.toml but no pinned Jet toolchain is available"
+                            "core library carries Cargo.toml but no permitted Jet toolchain is available"
                                 .to_string(),
                         )
                     })?;
@@ -788,7 +786,7 @@ impl Provider for CoreProvider {
                     let rlib = build_rlib_from_cargo_mode(
                         &out_dir,
                         ctx.store_dir,
-                        &toolchain,
+                        toolchain,
                         ctx.offline,
                     )
                         .map_err(ProviderError::CoreBuild)?;
@@ -803,17 +801,16 @@ impl Provider for CoreProvider {
         })?;
         let out = out_dir.to_string_lossy().into_owned();
         let envelope = super::Envelope::Envelope::for_output(&out, &spec.raw, recipe_id);
-        let source_fingerprint = super::Envelope::try_output_hash_of(&src_dir.to_string_lossy())
-            .map_err(ProviderError::CoreBuild)?;
         let recipe_identity = core_recipe_identity(
             &src_dir,
             &spec.package,
             manifest.as_ref(),
             kind,
             canonical.as_ref(),
-        );
+            toolchain.as_ref(),
+        )
+        .map_err(ProviderError::CoreBuild)?;
         let identity = cache_identity(&source_fingerprint, &recipe_identity, ctx);
-        let toolchain = super::Toolchain::Toolchain::resolve();
         let producer = producer_record(
             "core",
             &format!("cas:{source_fingerprint}"),
@@ -825,7 +822,8 @@ impl Provider for CoreProvider {
             &toolchain_facts(toolchain.as_ref()),
             &identity,
             BTreeMap::from([
-                ("source.path".into(), src_dir.to_string_lossy().into_owned()),
+                ("source.kind".into(), "core-package-tree".into()),
+                ("source.tree_schema".into(), "jet-core-source-tree-v2".into()),
                 ("source.tree_fingerprint".into(), fp.clone()),
                 ("artifact.kind".into(), recipe_id.to_string()),
                 (
@@ -1011,6 +1009,16 @@ fn build_rlib_from_cargo_mode(
     toolchain: &super::Toolchain::Toolchain,
     offline: bool,
 ) -> Result<String, String> {
+    if offline && !toolchain.pinned {
+        return Err("offline Core builds require a pinned realized toolchain".to_string());
+    }
+    if offline
+        && !std::fs::symlink_metadata(pkg_dir.join("Cargo.lock"))
+            .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+    {
+        return Err("offline Core builds require a regular Cargo.lock".to_string());
+    }
     // Cache hit: a previously realized object already carries its rlib.
     if let Some(existing) = find_rlib_in(pkg_dir) {
         return Ok(existing);
@@ -1028,7 +1036,7 @@ fn build_rlib_from_cargo_mode(
         .arg("--manifest-path")
         .arg(pkg_dir.join("Cargo.toml"));
     if offline {
-        command.arg("--offline");
+        command.arg("--offline").arg("--locked");
     }
     let out = command
         .env("CARGO_TARGET_DIR", &scratch.path)

@@ -17,15 +17,26 @@ satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |
 | `core.compute` | `Tensor` owned | pure (CPU oracle) | `ComputeError` | sync | all | reachable Core runtime + CPU ABI; GPU E6 |
 | `core.services` | tree/endpoint owned | tasks/channels | `ServiceError` | sync mailboxes | all | reachable Core runtime over taskgroup ABI |
-| `core.archive` | bytes owned | pure | string/`Result` | sync | all | package boundary + explicit audited Rust ABI bridge |
+| `core.archive` | bytes owned | pure | empty bytes / JSON `[]` on invalid input | sync | all native + interpreter | one dependency-free audited ABI kernel (`src/lib.rs`) |
+
+The archive facts are also published per operation:
+
+| Operation | Ownership | Effects | Failure | Blocking | Platform | Backend authority |
+|-----------|-----------|---------|---------|----------|----------|-------------------|
+| `zip_compress` | reads `String`, `[U8]` | pure | empty bytes when input cannot be represented | sync | all native + interpreter | canonical archive ABI kernel |
+| `zip_decompress` | reads `[U8]` | pure | empty bytes on malformed or checksum-invalid archive | sync | all native + interpreter | canonical archive ABI kernel |
+| `tar_add` | reads archive/name/data | pure | invalid names are omitted; malformed input starts an empty archive | sync | all native + interpreter | canonical archive ABI kernel |
+| `tar_get` | reads archive/name | pure | empty bytes on malformed or missing entry | sync | all native + interpreter | canonical archive ABI kernel |
+| `tar_names_json` | reads archive | pure | `[]` on malformed or empty archive | sync | all native + interpreter | canonical archive ABI kernel |
 
 ## Differential conformance
 
 1. Sema records the reachable Core closure and its source/ABI classification.
-2. For the shipped `core.archive` bridge, AOT, JIT, and deopt preserve the
-   same canonical ABI behavior; no engine adds a second policy or failure
-   meaning. Web is not an applicable archive tier and must reject an archive
-   call before emission rather than synthesize a browser implementation.
+2. For the shipped `core.archive` bridge, AOT, JIT, deopt, and the resident
+   interpreter include the same canonical ABI source; no engine adds a second
+   policy or failure meaning. Web is not an applicable archive tier and must
+   reject an archive call before emission rather than synthesize a browser
+   implementation.
 3. Native cache identity includes the SHA-256 R10 source/closure descriptor
    (`jet-corelib-r10`) and length-delimited toolchain, dependency, target, mode,
    and instance facts, so a changed source package or ABI kernel cannot reuse a
@@ -49,12 +60,14 @@ Hostile closure checks:
   is never proof of a valid AOT/JIT bridge.
 - Failure while publishing a new binary or digest → explicit build error; a
   partial cache write is never reported as a successful store.
-- `core.archive` CoreProvider, AOT bridge, and JIT host must consume the same
-  audited Rust ABI source; no second algorithm or compiler template is allowed.
-- Offline builds use the pinned Jet toolchain identity recorded in the store;
-  host drift that changes that identity invalidates the cache. An unreadable
-  project manifest also disables cache reuse instead of becoming an empty
-  identity.
+- `core.archive` CoreProvider, AOT bridge, JIT host, and interpreter consume the
+  same audited Rust ABI source; no second algorithm or compiler template is
+  allowed.
+- Offline Cargo-backed Core builds require a regular lockfile and a realized
+  pinned Jet toolchain. A missing pin, missing closure artifact, or unreadable
+  source tree is a miss/error; host Cargo is not a fallback. Host drift that
+  changes the pinned identity invalidates the cache. An unreadable project
+  manifest also disables cache reuse instead of becoming an empty identity.
 
 AOT and default `jet run` (Cranelift / deopt) preserve the same reachable
 `core.archive` meaning through the canonical ABI source. The remaining

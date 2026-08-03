@@ -168,19 +168,76 @@ pub(super) fn toolchain_facts(
     )
 }
 
+/// Strict, path-independent identity for a Core source closure. The generic
+/// provider fingerprint is intentionally best-effort for legacy providers;
+/// Core source must reject unreadable, non-file, and symlink nodes instead of
+/// hashing a narrower tree and reusing a stale object.
+pub(super) fn core_tree_fingerprint(root: &Path) -> Result<String, String> {
+    validate_core_source_tree(root)?;
+    let mut files = Vec::new();
+    collect_core_files(root, root, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut input = Vec::new();
+    input.extend_from_slice(b"jet-core-source-tree-v2");
+    for (relative, path) in files {
+        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+        input.extend_from_slice(&(relative.len() as u64).to_be_bytes());
+        input.extend_from_slice(relative.as_bytes());
+        input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        input.extend_from_slice(&bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::symlink_metadata(&path)
+                .map_err(|error| error.to_string())?
+                .permissions()
+                .mode();
+            input.extend_from_slice(&mode.to_be_bytes());
+        }
+    }
+    Ok(SHA256::sha256_hex(&input))
+}
+
+fn collect_core_files(
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<(String, PathBuf)>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(current).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("core source tree contains symlink {}", path.display()));
+        }
+        if metadata.is_dir() {
+            collect_core_files(root, &path, out)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push((relative, path));
+        } else {
+            return Err(format!("core source tree contains non-file {}", path.display()));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn core_recipe_identity(
     src_dir: &Path,
     package: &str,
     manifest: Option<&PackageManifest::PackManifest>,
     kind: PackageManifest::PackageKind,
     canonical: Option<&PackageFacts>,
-) -> String {
-    let toolchain = crate::Toolchain::Toolchain::resolve();
+    toolchain: Option<&crate::Toolchain::Toolchain>,
+) -> Result<String, String> {
     // The recipe is the semantic build identity, not only the manifest and
     // tool name. Include the complete source closure so a package with the
     // same manifest but a changed nested source tree cannot reuse a stale
     // realization.
-    let source_tree = super::tree_fingerprint(src_dir);
+    let source_tree = core_tree_fingerprint(src_dir)?;
     let artifact = if kind == PackageManifest::PackageKind::Library
         && src_dir.join("Cargo.toml").is_file()
     {
@@ -198,11 +255,11 @@ pub(super) fn core_recipe_identity(
         || normalized_manifest_semantics(manifest),
         canonical_package_semantics,
     );
-    format!(
+    Ok(format!(
         "core-provider-recipe-v4\npackage={package}\nversion={version}\nkind={kind:?}\nartifact={artifact}\nsource_tree={source_tree}\nmanifest={}\ntoolchain={}\n",
         SHA256::sha256_hex(semantics.as_bytes()),
-        toolchain_facts(toolchain.as_ref()),
-    )
+        toolchain_facts(toolchain),
+    ))
 }
 
 /// `PackageFacts` carries parse origins for diagnostics. Origins are not build

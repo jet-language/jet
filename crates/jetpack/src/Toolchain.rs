@@ -12,12 +12,10 @@
 //!    one in tests; #179 will point this at the hangar object. Its `cargo` is
 //!    the pinned compiler, so the bridge's output hash does not depend on
 //!    whatever host `cargo` happens to be on PATH.
-//! 2. the **host toolchain** as the implicit dev toolchain — a freshly-built dev
-//!    compiler with no pinned object still builds, using the installed `cargo`
-//!    (the #179 model: a matching toolchain runs natively).
+//! 2. the **host toolchain** as the implicit dev toolchain — only for online
+//!    development. Offline Core realization never takes this branch.
 //! 3. otherwise **none** — the caller emits `E1240` (no realized toolchain and
-//!    no Nix), naming both fixes. Never a silent host fallthrough on the
-//!    recommended path once a pin exists.
+//!    no Nix), naming both fixes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +56,22 @@ impl Toolchain {
         host_toolchain()
     }
 
+    /// Resolve only a realized toolchain. This is the offline Core contract:
+    /// a missing pin is a miss, never permission to consult host Cargo.
+    pub fn resolve_pinned() -> Option<Toolchain> {
+        let dir = std::env::var_os(TOOLCHAIN_FIXTURE_ENV).map(PathBuf::from)?;
+        from_object(&dir)
+    }
+
+    /// Resolve the toolchain permitted for a Core build mode.
+    pub fn resolve_for_core(offline: bool) -> Option<Toolchain> {
+        if offline {
+            Self::resolve_pinned()
+        } else {
+            Self::resolve()
+        }
+    }
+
     /// The prebuilt ring artifact for `ring`, if this toolchain carries one for
     /// the active platform (D-JPK-RINGSHIP1=C).
     pub fn ring_artifact(&self, ring: &str) -> Option<&Path> {
@@ -67,19 +81,40 @@ impl Toolchain {
 
 /// Read a realized toolchain object at `dir`. Requires an executable `cargo`.
 fn from_object(dir: &Path) -> Option<Toolchain> {
-    let cargo = dir.join("cargo");
-    if !cargo.is_file() {
+    let metadata = std::fs::symlink_metadata(dir).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return None;
     }
-    let version = std::fs::read_to_string(dir.join("version"))
+    let cargo = dir.join("cargo");
+    if !is_regular_file(&cargo) {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if MetadataExt::mode(&std::fs::symlink_metadata(&cargo).ok()?) & 0o111 == 0 {
+            return None;
+        }
+    }
+    let version_path = dir.join("version");
+    let version = is_regular_file(&version_path)
+        .then(|| std::fs::read_to_string(version_path).ok())
+        .flatten()
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     let mut ring_artifacts = HashMap::new();
     let ring_dir = dir.join("ring");
-    if let Ok(rd) = std::fs::read_dir(&ring_dir) {
-        for ent in rd.flatten() {
-            if let Some(name) = ent.file_name().to_str() {
-                ring_artifacts.insert(name.to_string(), ent.path());
+    if std::fs::symlink_metadata(&ring_dir)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        if let Ok(rd) = std::fs::read_dir(&ring_dir) {
+            for ent in rd.flatten() {
+                if is_regular_file(&ent.path()) {
+                    if let Some(name) = ent.file_name().to_str() {
+                        ring_artifacts.insert(name.to_string(), ent.path());
+                    }
+                }
             }
         }
     }
@@ -95,6 +130,12 @@ fn from_object(dir: &Path) -> Option<Toolchain> {
         pinned: true,
         ring_artifacts,
     })
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
 }
 
 /// The host `cargo` as the implicit dev toolchain, if it is on PATH.

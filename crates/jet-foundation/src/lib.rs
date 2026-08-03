@@ -5,6 +5,10 @@ mod BuildEffects;
 pub mod CanonicalAST;
 pub mod CLISchema;
 pub mod Collections;
+/// Canonical, dependency-free `core.archive` ABI kernel. The same source is
+/// included by the package bridge, JIT host, and resident evaluator.
+#[path = "CoreArchive.rs"]
+pub mod CoreArchive;
 pub mod Diagnostics;
 mod ExactUnitConversion;
 pub mod ExitCodes;

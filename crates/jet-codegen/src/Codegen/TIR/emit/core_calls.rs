@@ -2957,7 +2957,7 @@ pub(crate) fn emit_tir_core_call(
         ),
         // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
         // zip/tar containers. Stream codecs lower through core.compress.
-        // Zip compress/decompress use the `zip` crate FFI bridge.
+        // Archive operations use the canonical dependency-free ABI bridge.
         // zip_compress takes (&str, &[u8]); zip_decompress takes &[u8].
         ("core.archive", "zip_compress") => {
             format!(
