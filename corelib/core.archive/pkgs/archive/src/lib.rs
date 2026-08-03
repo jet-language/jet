@@ -180,7 +180,7 @@ pub fn jet_archive_tar_names_json(archive: &[u8]) -> String {
 }
 
 fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
-    let mut out = Vec::new();
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     let mut offset = 0usize;
     let mut long_name = None;
     let mut terminated = false;
