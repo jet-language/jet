@@ -90,7 +90,8 @@ pub fn refresh_registry_metadata(
     for entry in current {
         if known.insert(entry.to_jsonl()) {
             let operation = if entry.yanked { "yank" } else { "publish" };
-            let record = next_log_record(&records, operation, entry)?;
+            let record = next_log_record(&records, operation, entry)
+                .map_err(|error| metadata_diagnostic(&error))?;
             records.push(record);
         }
     }

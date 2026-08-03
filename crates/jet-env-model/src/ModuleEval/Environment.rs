@@ -10,6 +10,39 @@ use std::path::Path;
 use crate::AST::CtKey;
 use crate::Comptime::CtValue;
 
+/// Return the fully-qualified name of a first-party integration call.
+///
+/// The parser represents `env.platform.android(...)` as a method call on the
+/// field path `env.platform`, while bare calls use `Expr::Call`. Both spellings
+/// are the same integration surface and must share one lowering path.
+pub(super) fn qualified_call_name(expr: &crate::AST::Expr) -> Option<String> {
+    match expr {
+        crate::AST::Expr::Call(call) => Some(call.name.clone()),
+        crate::AST::Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            let mut name = expression_path(receiver)?;
+            name.push('.');
+            name.push_str(method);
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn expression_path(expr: &crate::AST::Expr) -> Option<String> {
+    match expr {
+        crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+        crate::AST::Expr::Field(base, member, _) => {
+            let mut name = expression_path(base)?;
+            name.push('.');
+            name.push_str(member);
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
 /// D-ENV-INTEGRATIONS1=A: the closed first-party integration vocabulary. An
 /// integration is a typed projection into ordinary environment facts, not a
 /// second package resolver, lock, effect system, or activation engine.
@@ -224,14 +257,16 @@ impl EnvironmentIntegration {
     pub fn validate_target(&self, target: &str) -> Result<(), String> {
         let target = target.to_ascii_lowercase();
         let supported = match self.kind {
-            Self::Android => target.contains("linux") || target.contains("android"),
-            Self::Apple => target.contains("darwin") || target.contains("macos") || target.contains("ios"),
-            Self::Certificates
-            | Self::Hosts
-            | Self::CodexAgent
-            | Self::Editor
-            | Self::CloudCredentials
-            | Self::Vault => true,
+            IntegrationKind::Android => target.contains("linux") || target.contains("android"),
+            IntegrationKind::Apple => {
+                target.contains("darwin") || target.contains("macos") || target.contains("ios")
+            }
+            IntegrationKind::Certificates
+            | IntegrationKind::Hosts
+            | IntegrationKind::CodexAgent
+            | IntegrationKind::Editor
+            | IntegrationKind::CloudCredentials
+            | IntegrationKind::Vault => true,
         };
         supported.then_some(()).ok_or_else(|| {
             format!(

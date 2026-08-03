@@ -442,7 +442,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
             let staged = stage_objects.join(digest);
             let destination = objects_dir.join(digest);
             let metadata = fs::symlink_metadata(&destination);
-            if metadata.is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            if metadata.as_ref().is_ok_and(|metadata| metadata.file_type().is_symlink()) {
                 rollback_import_moves(&mut moved)?;
                 return Err(invalid(&format!(
                     "existing Hangar object `{digest}` is a symlink"
@@ -532,7 +532,7 @@ fn map_member_path(source_out: &Path, member: &str, destination: &Path) -> io::R
 }
 
 fn verify_live_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
-    super::verify_hangar_object(roots, entry).map_err(|error| io::Error::other(error.to_string()))
+    super::verify_hangar_object(roots, entry).map_err(|error| io::Error::other(error.what()))
 }
 
 fn verify_archive_object(
@@ -674,7 +674,7 @@ fn collect_nodes_at(
             mode: mode_of(&metadata),
             bytes: fs::read(root)?,
         });
-    } else if metadata.file_type().is_symlink() {
+    } else if file_type.is_symlink() {
         let target = fs::read_link(root)?;
         if target.is_absolute() {
             return Err(invalid("absolute symlinks are not portable Hangar archive nodes"));

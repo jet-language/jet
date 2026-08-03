@@ -1767,7 +1767,7 @@ pub fn realize_verified(
         }
     }
 
-    let mut realized = match request {
+    let realized = match request {
         RealizeRequest::Package { spec, table } => {
             super::Provider::realize(spec, table, ctx).map_err(RealizeError::Provider)?
         }
@@ -2241,8 +2241,17 @@ pub(crate) enum ExternalRootError {
 impl std::fmt::Display for ExternalRootError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Conflict { label, .. } => {
-                write!(f, "external root `{label}` changed before the request applied")
+            Self::Conflict {
+                label,
+                expected,
+                current,
+            } => {
+                write!(
+                    f,
+                    "external root `{label}` changed before the request applied (expected {:?}, current {:?})",
+                    expected,
+                    current
+                )
             }
             Self::ReferenceNotFound(reference) => {
                 write!(f, "no Hangar entry matches `{reference}`")

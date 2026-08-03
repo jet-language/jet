@@ -170,7 +170,11 @@ fn read_index_file(bare: &Path, name: &str) -> Option<String> {
 /// the dirty-tree gate (E2605).
 fn init_clean_project(dir: &Path, name: &str, version: &str) {
     write(dir, "pkg.jet", &min_manifest(name, version));
-    write(dir, "main.jet", "fn run() { print(\"hi\"); }\n");
+    write(
+        dir,
+        "main.jet",
+        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hi\"); }\n",
+    );
     for args in &[
         vec!["init", "-b", "main"],
         vec!["config", "user.email", "test@jet.test"],
@@ -2113,7 +2117,7 @@ fn fetch_locked_rejects_missing_lock() {
 }
 
 #[test]
-fn registry_dependency_is_e1207_until_registry_gate_lands() {
+fn registry_dependency_reports_transport_failure() {
     let tmp = tmp_dir("registry_dep_staged");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
@@ -2126,7 +2130,7 @@ fn registry_dependency_is_e1207_until_registry_gate_lands() {
         update_dep: None,
     };
     let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
-        .expect_err("registry dependency must report its staged feature diagnostic");
+        .expect_err("registry dependency must report its verified transport diagnostic");
     assert_eq!(first_diag_code(&diags), "E1207");
     let rendered = jet::Diagnostics::render_all(
         &tmp.join("pkg.jet").to_string_lossy(),

@@ -8,16 +8,19 @@ use std::path::Path;
 
 use crate::Comptime;
 use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
-    ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl, Namespace,
+    CallArg, ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl,
+    Namespace,
 };
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
 use super::Environment::{
     files_from_value, lifecycle_from_field, languages_from_value, profiles_from_value,
-    EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind, LanguageSpec, ProfileSpec,
+    qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
+    LanguageSpec, ProfileSpec,
 };
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -209,6 +212,12 @@ fn evaluate_module<'a>(
     for secret in integration_secrets {
         push_unique_string(&mut secrets, secret);
     }
+    let environment_names = entries
+        .iter()
+        .filter_map(|((namespace, name), _)| {
+            (*namespace == Namespace::Env).then_some(name.clone())
+        })
+        .collect();
     Ok(EvaluatedModule {
         name: m.name.clone(),
         entries,
@@ -224,6 +233,7 @@ fn evaluate_module<'a>(
         languages,
         files,
         integrations,
+        environment_names,
     })
 }
 
@@ -249,16 +259,23 @@ fn evaluate_integration_imports(
     }
     let mut integrations = Vec::new();
     for import in leaves {
-        let Expr::Call(call) = import else {
+        let Some(name) = qualified_call_name(import) else {
             continue;
         };
-        if call.name == Syntax::BUILTIN_FIND {
+        if name == Syntax::BUILTIN_FIND {
             continue;
         }
-        let Some(kind) = IntegrationKind::from_call(&call.name) else {
+        let Some(kind) = IntegrationKind::from_call(&name) else {
             return Err(super::Diagnostics::bad_import_directive(import.span()));
         };
-        let integration = evaluate_integration_call(call, kind, base_dir, funcs, globals)?;
+        let (args, name_span) = match import {
+            Expr::Call(call) => (call.args.as_slice(), call.name_span),
+            Expr::MethodCall {
+                args, method_span, ..
+            } => (args.as_slice(), *method_span),
+            _ => continue,
+        };
+        let integration = evaluate_integration_call(&name, args, kind, base_dir, funcs, globals)?;
         if let Some(existing) = integrations
             .iter()
             .find(|item: &&EnvironmentIntegration| item.name == integration.name)
@@ -269,7 +286,7 @@ fn evaluate_integration_imports(
                     format!("integration `{}` has conflicting declarations", integration.name),
                     "one environment graph cannot silently choose different SDK, host, credential, or grant facts".to_string(),
                     "merge the integration options so they agree, or keep one declaration".to_string(),
-                    Some(call.name_span),
+                    Some(name_span),
                 ));
             }
         } else {
@@ -291,7 +308,8 @@ fn collect_import_leaves<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
 }
 
 fn evaluate_integration_call(
-    call: &crate::AST::Call,
+    name: &str,
+    args: &[CallArg],
     kind: IntegrationKind,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
@@ -299,7 +317,7 @@ fn evaluate_integration_call(
 ) -> Result<EnvironmentIntegration, Diagnostic> {
     let mut integration = EnvironmentIntegration {
         kind,
-        name: call.name.clone(),
+        name: name.to_string(),
         preset: kind.as_str().to_string(),
         ..Default::default()
     };
@@ -357,7 +375,7 @@ fn evaluate_integration_call(
             integration.grants.push("vault.read".into());
         }
     }
-    for (index, arg) in call.args.iter().enumerate() {
+    for (index, arg) in args.iter().enumerate() {
         let key = arg
             .label
             .as_ref()

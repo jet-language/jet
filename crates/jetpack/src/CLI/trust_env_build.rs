@@ -511,7 +511,12 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
             }
             let mut components = relative.components();
             if components.clone().next().is_none()
-                || !components.all(|component| matches!(component, std::path::Component::Normal(_)))
+                || !components.all(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::CurDir | std::path::Component::Normal(_)
+                    )
+                })
             {
                 return None;
             }
@@ -547,6 +552,14 @@ mod tests {
         assert_eq!(
             resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "../outside"),
             None
+        );
+    }
+
+    #[test]
+    fn current_directory_provider_metadata_resolves_inside_realized_output() {
+        assert_eq!(
+            resolve_provider_paths("/hangar/objects/sha256-output", "gem-home", "."),
+            Some("/hangar/objects/sha256-output/.".into())
         );
     }
 

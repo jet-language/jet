@@ -684,14 +684,27 @@ fn package_output_entry(root: &std::path::Path) -> Result<Option<std::path::Path
     let Some(package) = Package::PackageFacts::load(root) else {
         return Ok(None);
     };
-    let package = package.map_err(|error| {
-        let source = if root.join(Syntax::PACKAGE_FILE).is_file() {
-            root.join(Syntax::PACKAGE_FILE)
-        } else {
-            root.join(Syntax::PAYLOAD_FILE)
-        };
-        format!("typed Package `{}` is invalid: {error}", source.display())
-    })?;
+    let package = match package {
+        Ok(package) => package,
+        Err(_error)
+            if !root.join(Syntax::PACKAGE_FILE).is_file()
+                && PackageManifest::PackManifest::load(root)
+                    .is_some_and(|manifest| manifest.is_ok()) =>
+        {
+            // A legacy `pkg.jet` manifest still owns package identity and
+            // publish metadata, but it is not a typed Package output. Let
+            // the normal entry-file fallback handle that project shape.
+            return Ok(None);
+        }
+        Err(error) => {
+            let source = if root.join(Syntax::PACKAGE_FILE).is_file() {
+                root.join(Syntax::PACKAGE_FILE)
+            } else {
+                root.join(Syntax::PAYLOAD_FILE)
+            };
+            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+        }
+    };
     package.resolve_run_entry(root)
 }
 

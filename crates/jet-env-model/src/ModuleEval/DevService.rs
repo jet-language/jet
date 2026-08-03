@@ -335,7 +335,7 @@ fn restart_args(args: &[(Option<String>, CtValue)]) -> Option<(u32, u64, bool)> 
     let mut saw_max = false;
     let mut saw_backoff = false;
     for (name, value) in args {
-        match name.as_deref() {
+        match named_payload_field(name.as_deref()) {
             Some("max") if !saw_max => {
                 max = nonnegative_u32(value)?;
                 saw_max = true;
@@ -395,12 +395,16 @@ fn shutdown_term_args(args: &[(Option<String>, CtValue)]) -> Option<ShutdownPoli
     }
     let grace_ms = match args.first() {
         None => 3_000,
-        Some((name, value)) if name.as_deref().is_none() || matches!(name.as_deref(), Some("grace" | "grace_ms")) => {
+        Some((name, value)) if named_payload_field(name.as_deref()).is_none() || matches!(named_payload_field(name.as_deref()), Some("grace" | "grace_ms")) => {
             nonnegative_u64(value)?
         }
         Some(_) => return None,
     };
     Some(ShutdownPolicy::Term { grace_ms })
+}
+
+fn named_payload_field(name: Option<&str>) -> Option<&str> {
+    name.map(|name| name.strip_prefix("user_").unwrap_or(name))
 }
 
 /// Set `slot` from `v` if it's a `Str`; otherwise capture it in `extra` (same

@@ -19,8 +19,8 @@ use super::Diagnostics::{
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
-    EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, IntegrationKind,
-    LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
+    qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
+    IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
 };
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
@@ -29,20 +29,23 @@ use super::Types::{
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
-/// file that parses with at least one module declaration is evaluated through
-/// `evaluate_env`; everything else (including text that doesn't parse cleanly)
-/// falls back to the directive scanner, which is deliberately tolerant.
+/// file that declares the `module` keyword stays on this path even when its
+/// later syntax is malformed; only the legacy directive surface uses the
+/// tolerant fallback scanner.
 pub fn is_module_surface(src: &str) -> bool {
     let (toks, diags) = crate::Lexer::lex(src);
+    let has_module = toks
+        .iter()
+        .any(|token| matches!(&token.kind, crate::Lexer::TokKind::KwModule));
     if !diags.is_empty() {
-        return false;
+        return has_module;
     }
     match crate::Parser::parse(&toks) {
         Ok(program) => program
             .items
             .iter()
             .any(|item| matches!(item, Item::Module(_))),
-        Err(_) => false,
+        Err(_) => has_module,
     }
 }
 
@@ -377,9 +380,9 @@ pub fn evaluate_env_with_profile(
     if let Err(error) = integration_facts.validate() {
         return Err(Diagnostic::error(
             "E1335",
-            "environment integration lowering was lossy",
+            "environment integration lowering was lossy".to_string(),
             error,
-            "use named secret references and supported typed integration arguments",
+            "use named secret references and supported typed integration arguments".to_string(),
             None,
         ));
     }
@@ -544,8 +547,8 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
             collect_import_directives(import, &mut directives);
         }
         for imp in directives {
-            if let Expr::Call(call) = imp {
-                if IntegrationKind::from_call(&call.name).is_some() {
+            if let Some(name) = qualified_call_name(imp) {
+                if IntegrationKind::from_call(&name).is_some() {
                     continue;
                 }
             }
@@ -692,7 +695,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
             if !m.is_auto_discovered() {
                 continue;
             }
-            let mut map = BTreeMap::new();
+            let mut map: BTreeMap<String, String> = BTreeMap::new();
             for s in &m.sources {
                 let ref_text = unit.src[s.ref_span.start..s.ref_span.end].trim();
                 let span = if is_root { Some(s.ref_span) } else { None };

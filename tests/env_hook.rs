@@ -65,13 +65,14 @@ fn export_cmd(dir: &std::path::Path) -> Command {
 fn write_prompt_only_env(dir: &std::path::Path) {
     fs::write(
         dir.join("env.jet"),
-        "module env.dev {\n  env.dev: Env {\n    prompt: \"smoke\"\n  }\n}\n",
+        "module env.dev {\n  prompt: \"smoke\"\n}\n",
     )
     .unwrap();
 }
 
 fn activation_hash(stdout: &[u8]) -> String {
-    String::from_utf8_lossy(stdout)
+    let text = String::from_utf8_lossy(stdout);
+    text
         .lines()
         .find_map(|line| {
             line.strip_prefix("export JETPACK_ENV_HASH='")
@@ -219,7 +220,7 @@ fn export_changed_definition_reactivates_at_next_prompt() {
     let hash = activation_hash(&first.stdout);
     fs::write(
         scratch.path.join("env.jet"),
-        "module env.dev {\n  env.dev: Env { prompt: \"changed\" }\n}\n",
+        "module env.dev {\n  prompt: \"changed\"\n}\n",
     )
     .unwrap();
     let out = export_cmd(&scratch.path)

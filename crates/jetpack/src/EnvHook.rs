@@ -244,7 +244,7 @@ fn add_input_path(
         for child in children {
             let name = child.file_name().to_string_lossy().into_owned();
             let child_relative = if relative.is_empty() || relative == "." {
-                name
+                name.clone()
             } else {
                 format!("{relative}/{name}")
             };

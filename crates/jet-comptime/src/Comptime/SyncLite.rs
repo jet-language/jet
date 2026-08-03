@@ -4,6 +4,130 @@ use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
+// `Sync.rs` is shared verbatim with the AOT Prelude. The comptime tier only
+// supplies the host boundary that the emitted module gets from JetStd; the
+// CRDT and policy algorithms remain in the included Prelude source.
+trait JetShow {
+    fn jet_show(&self) -> String;
+}
+
+#[allow(non_camel_case_types)]
+trait user_Encode {
+    fn jet_encode(&self) -> jet_std::DataTree;
+}
+
+#[allow(non_camel_case_types)]
+trait user_Decode: Sized {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>;
+}
+
+mod jet_std {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+
+    pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> String {
+        match tree {
+            DataTree::Null => "null".to_string(),
+            DataTree::Bool(value) => value.to_string(),
+            DataTree::Int(value) => value.to_string(),
+            DataTree::Float(value) => format!("{:?}", value),
+            DataTree::Text(value) => quote_json(value),
+            DataTree::Bytes(values) => format!(
+                "[{}]",
+                values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+            ),
+            DataTree::Array(values) => {
+                if values.is_empty() {
+                    return "[]".to_string();
+                }
+                if !pretty {
+                    return format!(
+                        "[{}]",
+                        values
+                            .iter()
+                            .map(|value| render_datatree_json(value, false, depth))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts = values
+                    .iter()
+                    .map(|value| format!("{}{}", pad, render_datatree_json(value, true, depth + 1)))
+                    .collect::<Vec<_>>();
+                format!("[\n{}\n{}]", parts.join(",\n"), end)
+            }
+            DataTree::Object(fields) => {
+                if fields.is_empty() {
+                    return "{}".to_string();
+                }
+                if !pretty {
+                    return format!(
+                        "{{{}}}",
+                        fields
+                            .iter()
+                            .map(|(key, value)| {
+                                format!(
+                                    "{}:{}",
+                                    quote_json(key),
+                                    render_datatree_json(value, false, depth)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts = fields
+                    .iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "{}{}: {}",
+                            pad,
+                            quote_json(key),
+                            render_datatree_json(value, true, depth + 1)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+            }
+        }
+    }
+
+    pub fn datatree_kind(tree: &DataTree) -> &'static str {
+        match tree {
+            DataTree::Null => "null",
+            DataTree::Bool(_) => "Bool",
+            DataTree::Int(_) => "Int",
+            DataTree::Float(_) => "Float",
+            DataTree::Text(_) => "Text",
+            DataTree::Bytes(_) => "Bytes",
+            DataTree::Array(_) => "a list",
+            DataTree::Object(_) => "an object",
+        }
+    }
+
+    fn quote_json(value: &str) -> String {
+        let mut out = String::from("\"");
+        for ch in value.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000c}' => out.push_str("\\f"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
+                ch => out.push(ch),
+            }
+        }
+        out.push('"');
+        out
+    }
+}
+
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Sync.rs");
 
 fn text_to_ct(doc: &JetSyncText) -> CtValue {

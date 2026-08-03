@@ -458,7 +458,7 @@ pub(crate) fn atomic_update(
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_unlocked(roots)?;
         let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
-        let proposed = checked_targets(update.targets, &known)?;
+        let proposed = checked_targets(update.targets.clone(), &known)?;
         let mut state = load_state(roots, &known)?;
         let current = state.get(&update.identity.id).cloned();
 

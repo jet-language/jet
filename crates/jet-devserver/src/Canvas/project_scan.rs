@@ -770,6 +770,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
                     environments,
                     sources,
                     profiles,
+                    languages,
                     json_str(&reload),
                     packages,
                     secrets

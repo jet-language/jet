@@ -231,7 +231,8 @@ fn run_lifecycle_hooks_with_mode(
     Ok(())
 }
 
-/// Bring up one enabled service and block until it's healthy: E1262 for an
+/// Bring up one enabled service and wait for readiness unless its explicit
+/// restart policy hands health/exhaustion to the supervisor: E1262 for an
 /// unrecognized field, a plain error if it can't be started at all, E1261 on
 /// a readiness timeout. Shared by `wait_for_services_ready` (the `jet dev`
 /// health gate) and `cmd_services`'s `up` verb so the two never drift.
@@ -257,6 +258,9 @@ fn bring_up_one(
     if let Err(msg) = Services::up_one(project_dir, env, svc) {
         theme.error(&format!("couldn't start service `{}`", svc.name), &msg, "");
         return Err(());
+    }
+    if svc.restart.is_some() {
+        return Ok(());
     }
     if Services::wait_healthy_with_env(
         project_dir,
@@ -895,14 +899,27 @@ fn package_output_entry(project_dir: &Path) -> Result<Option<PathBuf>, String> {
     let Some(package) = jet_pkg_model::Package::PackageFacts::load(project_dir) else {
         return Ok(None);
     };
-    let package = package.map_err(|error| {
+    let package = match package {
+        Ok(package) => package,
+        Err(_error)
+            if !project_dir.join(Syntax::PACKAGE_FILE).is_file()
+                && crate::PackageManifest::PackManifest::load(project_dir)
+                    .is_some_and(|manifest| manifest.is_ok()) =>
+        {
+            // A legacy `pkg.jet` manifest still owns package identity and
+            // publish metadata, but it is not a typed Package output. Let
+            // the normal entry-file fallback handle that project shape.
+            return Ok(None);
+        }
+        Err(error) => {
         let source = if project_dir.join(Syntax::PACKAGE_FILE).is_file() {
             project_dir.join(Syntax::PACKAGE_FILE)
         } else {
             project_dir.join(Syntax::PAYLOAD_FILE)
         };
-        format!("typed Package `{}` is invalid: {error}", source.display())
-    })?;
+            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+        }
+    };
     package.resolve_run_entry(project_dir)
 }
 

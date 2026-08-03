@@ -2501,14 +2501,27 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
     let Some(package) = jet::Package::PackageFacts::load(root) else {
         return Ok(None);
     };
-    let package = package.map_err(|error| {
-        let source = if root.join(jet::Syntax::PACKAGE_FILE).is_file() {
-            root.join(jet::Syntax::PACKAGE_FILE)
-        } else {
-            root.join(jet::Syntax::PAYLOAD_FILE)
-        };
-        format!("typed Package `{}` is invalid: {error}", source.display())
-    })?;
+    let package = match package {
+        Ok(package) => package,
+        Err(_error)
+            if !root.join(jet::Syntax::PACKAGE_FILE).is_file()
+                && jet::PackageManifest::PackManifest::load(root)
+                    .is_some_and(|manifest| manifest.is_ok()) =>
+        {
+            // A legacy `pkg.jet` manifest still owns package identity and
+            // publish metadata, but it is not a typed Package output. Let
+            // the normal entry-file fallback handle that project shape.
+            return Ok(None);
+        }
+        Err(error) => {
+            let source = if root.join(jet::Syntax::PACKAGE_FILE).is_file() {
+                root.join(jet::Syntax::PACKAGE_FILE)
+            } else {
+                root.join(jet::Syntax::PAYLOAD_FILE)
+            };
+            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+        }
+    };
     package.resolve_run_entry(root)
 }
 

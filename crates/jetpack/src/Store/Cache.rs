@@ -235,7 +235,7 @@ pub fn list_cache_bindings(roots: &Roots) -> io::Result<Vec<CacheBinding>> {
             .file_stem()
             .and_then(|value| value.to_str())
             .ok_or_else(|| invalid("cache binding file name is not UTF-8"))?;
-        let binding = CacheBinding::decode(&fs::read_to_string(path)?)?;
+        let binding = CacheBinding::decode(&fs::read_to_string(&path)?)?;
         if binding.role != file_role {
             return Err(invalid("cache binding role disagrees with its file name"));
         }
@@ -304,7 +304,7 @@ pub fn publish_cache_entry(
     Err(invalid(&format!("all cache mirrors rejected publication: {}", failures.join("; "))))
 }
 
-pub fn verify_cache_entry(
+pub fn verify_cache_transfer(
     roots: &Roots,
     target: &str,
     role: &str,
@@ -317,7 +317,7 @@ pub fn verify_cache_entry(
         let mirror_path = endpoint_path(mirror)?;
         match find_artifact(&mirror_path, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
-                let bytes = read_regular_bounded(&artifact.nar_path, super::NAR_MAX_BYTES as u64)?;
+                let bytes = read_regular_bounded(&artifact.nar_path, super::MAX_NAR_BYTES as u64)?;
                 let digest = super::nar_digest(&bytes);
                 if digest != artifact.info.nar_hash {
                     failures.push(format!("{mirror}: NAR digest mismatch"));

@@ -205,7 +205,7 @@ pub fn copy_layout(source: &Path, destination: &Path) -> io::Result<()> {
         return Err(invalid("OCI copy destination is not a directory"));
     }
     fs::create_dir_all(destination)?;
-    copy_layout_tree(source, destination)
+    copy_layout_tree(&source, destination)
 }
 
 fn copy_layout_tree(source: &Path, destination: &Path) -> io::Result<()> {
@@ -370,7 +370,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
         ));
     }
     let index = JSON::parse(&read_text(root.join("index.json"))?).map_err(io::Error::other)?;
-    let index = object(index, "OCI index")?;
+    let index = object(&index, "OCI index")?;
     let manifests = array(index.get("manifests"), "OCI index manifests")?;
     let descriptor = object(
         manifests
@@ -379,8 +379,8 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
         "OCI manifest descriptor",
     )?;
     let manifest_digest = string_field(descriptor, "digest")?;
-    let manifest = JSON::parse(&read_blob(root, manifest_digest)?).map_err(io::Error::other)?;
-    let manifest = object(manifest, "OCI manifest")?;
+    let manifest = parse_blob_json(root, manifest_digest)?;
+    let manifest = object(&manifest, "OCI manifest")?;
     let layer_values = array(manifest.get("layers"), "OCI manifest layers")?;
     let mut layers = Vec::with_capacity(layer_values.len());
     for value in layer_values {
@@ -405,8 +405,8 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
         "OCI config descriptor",
     )?;
     let config_digest = string_field(config, "digest")?;
-    let config = JSON::parse(&read_blob(root, config_digest)?).map_err(io::Error::other)?;
-    let config = object(config, "OCI config")?;
+    let config = parse_blob_json(root, config_digest)?;
+    let config = object(&config, "OCI config")?;
     let rootfs = object(
         config
             .get("rootfs")
@@ -485,6 +485,12 @@ fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
         return Err(invalid("OCI blob digest mismatch"));
     }
     Ok(bytes)
+}
+
+fn parse_blob_json(root: &Path, digest: &str) -> io::Result<JSON::JSONValue> {
+    let bytes = read_blob(root, digest)?;
+    let text = String::from_utf8(bytes).map_err(|_| invalid("OCI JSON blob is not UTF-8"))?;
+    JSON::parse(&text).map_err(io::Error::other)
 }
 
 fn object<'a>(value: &'a JSON::JSONValue, label: &str) -> io::Result<&'a std::collections::BTreeMap<String, JSON::JSONValue>> {
