@@ -3277,14 +3277,17 @@ exact automatic promotion sites to migrate back to ownership.
 
 ## Writing Core in Jet
 
-Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` are the
-canonical source for compiler-known Core behavior (R10). Sema records helpers a
-program can call; codegen emits only reachable Top modules (`push_corelib_prelude`).
+The ratified target boundary is a minimal audited intrinsic/ABI kernel plus
+ordinary Jet Core packages. The current compiler still carries a compiler-owned
+JetStd kernel closure and optional fragments; sema records their reachable
+closure, but this staged implementation is not ordinary-Jet package authority.
+It must not be described as a completed source-boundary migration.
 
-First-party packages with a separately buildable source tree must not keep a
-copied fallback template. `core.archive` is the concrete model:
-`corelib/core.archive/pkgs/archive/src/lib.rs` is consumed by CoreProvider and
-the hidden bridge without a second copy.
+`core.archive` currently proves the package boundary and one canonical Rust ABI
+source tree: `corelib/core.archive/pkgs/archive/src/lib.rs` is consumed by
+CoreProvider, the AOT bridge, and the JIT host without a second algorithm. It
+does not yet prove ordinary-Jet behavior authority. Do not read this reference
+as claiming that source-authority closeout is complete.
 
 ---
 

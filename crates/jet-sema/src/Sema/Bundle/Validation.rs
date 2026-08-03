@@ -367,6 +367,17 @@ fn is_core_closure_marker(usage: &str) -> bool {
         || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
 }
 
+/// `__core_source` is reserved for a package whose source tree is actually
+/// available to the Core provider. Compiler-owned runtime fragments use only
+/// the intrinsic marker; claiming a source package for them would make cache
+/// and provenance records lie about their authority.
+fn has_core_source_package(module: &str) -> bool {
+    // D-CORE-SOURCE-AUTHORITY1=A: archive is the current Core package boundary.
+    // Keep this list explicit until each remaining compiler-owned surface has a
+    // real package source tree and the sema loader can consume it.
+    module == "core.archive"
+}
+
 /// Attach the semantic Core source and intrinsic closure to the direct helper
 /// set. These entries are compiler metadata, not user-callable helpers: codegen
 /// uses them to select the owning package or audited ABI kernel, and the cache
@@ -383,9 +394,11 @@ pub(crate) fn expand_core_reachable_closure(used: &mut HashSet<String>) {
             .map_or((usage.as_str(), None), |(module, helper)| {
                 (module, Some(helper))
             });
-        used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{module}"));
-        if helper.is_some_and(|helper| !helper.is_empty()) {
-            used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{usage}"));
+        if has_core_source_package(module) {
+            used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{module}"));
+            if helper.is_some_and(|helper| !helper.is_empty()) {
+                used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{usage}"));
+            }
         }
 
         let intrinsic = if module == "core.archive" {

@@ -9,13 +9,14 @@ use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundl
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
 const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v3-cabi";
+const BRIDGE_ARTIFACTS_SCHEMA: &str = "jet-ffi-artifacts-v1";
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -177,8 +178,8 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 /// `core.archive` (zip/tar; D-CORE-COMPRESS1), `jet.db` (D-DEP-DB1), and
 /// `core.compress` (gzip/zstd; D-CORE-COMPRESS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
-/// crate gains the matching dependency and a hand-written runtime. Archive
-/// embeds the canonical vendored package source; the other bridges live under
+/// crate gains the matching dependency and an audited runtime. Archive embeds
+/// the canonical dependency-free vendored package source; the other bridges live under
 /// `crates/jet-pkg-model/src/Prelude/`. The compiler crate
 /// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
 /// bootstrap exceptions, to be native-ized before the end of Epoch 3.
@@ -374,14 +375,6 @@ mod inline_asm_target_tests {
         assert!(diagnostic.what.contains("aarch64-unknown-linux-gnu"));
     }
 }
-
-/// The `zip` crate version that backs `core.archive` zip (D-DEP-ARCHIVE1).
-/// Lives only here — never in the compiler's Cargo.toml (I6).
-pub const ZIP_CRATE_SPEC: (&str, &str) = ("zip", "2");
-
-/// The `tar` crate version that backs `core.archive` tar (D-DEP-ARCHIVE1).
-/// Lives only here — never in the compiler's Cargo.toml (I6).
-pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 
 /// The `rusqlite` crate version that backs `jet.db` (D-DEP-DB1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
@@ -1400,9 +1393,9 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
 ];
 
 /// Canonical vendored `core.archive` implementation, compiled both by
-/// `CoreProvider` and as the hidden bridge fallback. Keeping one source prevents
-/// the offline ring package and direct `jet run` path from drifting apart.
-const ARCHIVE_RUNTIME: &str =
+/// `CoreProvider` and by the hidden bridge. Keeping one source prevents the
+/// offline ring package and direct `jet run` path from drifting apart.
+const ARCHIVE_SOURCE: &str =
     include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
 
 /// Hand-written database runtime emitted into the bridge crate when `jet.db`
@@ -1576,10 +1569,6 @@ fn build_bridge_full(
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     let native_toolchain = inline_native_toolchain(entries, selected_target)?;
-    if needs_archive {
-        deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
-        deps.insert(TAR_CRATE_SPEC.0.to_string(), TAR_CRATE_SPEC.1.to_string());
-    }
     if needs_db {
         deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
     }
@@ -1709,40 +1698,21 @@ fn build_bridge_full(
     } else {
         None
     };
-    // The build is only "cached and ready" when the rlib exists AND — if a helper
-    // is expected — the helper binary exists too (a bridge cached before c146
-    // landed would have the rlib but no helper, so fall through to rebuild).
-    let helper_ready = helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true)
-        && secrets_helper_bin
-            .as_ref()
-            .map(|p| p.is_file())
-            .unwrap_or(true);
-
-    // Fast path (cache hit): the key is content-derived from the exact
-    // extern-rust signature / dep set, so an rlib already sitting at this
-    // path is a valid build for this call — reuse it without touching
-    // `cargo` or rewriting the cached sources. No lock needed: we don't
-    // write anything.
-    if rlib.is_file() && helper_ready && {
-        let stem = format!("lib{}", crate_name);
-        let so = target.join(format!("{stem}.so"));
-        let dylib = target.join(format!("{stem}.dylib"));
-        let dll = target.join(format!("{crate_name}.dll"));
-        so.is_file() || dylib.is_file() || dll.is_file()
-    } {
-        let cdylib = {
-            let stem = format!("lib{}", crate_name);
-            let so = target.join(format!("{stem}.so"));
-            let dylib = target.join(format!("{stem}.dylib"));
-            let dll = target.join(format!("{crate_name}.dll"));
-            if so.is_file() {
-                so
-            } else if dylib.is_file() {
-                dylib
-            } else {
-                dll
-            }
-        };
+    // Fast path (cache hit): existence is not proof. The sidecar records the
+    // exact bytes of every artifact consumed by the compiler/JIT, so a stale
+    // or corrupt cache falls through to a rebuild instead of leaking a later
+    // linker failure.
+    if let Some(artifacts) = bridge_artifact_paths(
+        &cache_root,
+        &rlib,
+        &target,
+        &crate_name,
+        helper_bin.as_deref(),
+        secrets_helper_bin.as_deref(),
+    )
+    .filter(|artifacts| bridge_cache_verified(&cache_root, artifacts))
+    {
+        let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
@@ -1778,26 +1748,17 @@ fn build_bridge_full(
 
     // Re-check under the lock: whoever held it may have just finished
     // building this exact key while we were waiting.
-    if rlib.is_file() && helper_ready && {
-        let stem = format!("lib{}", crate_name);
-        let so = target.join(format!("{stem}.so"));
-        let dylib = target.join(format!("{stem}.dylib"));
-        let dll = target.join(format!("{crate_name}.dll"));
-        so.is_file() || dylib.is_file() || dll.is_file()
-    } {
-        let cdylib = {
-            let stem = format!("lib{}", crate_name);
-            let so = target.join(format!("{stem}.so"));
-            let dylib = target.join(format!("{stem}.dylib"));
-            let dll = target.join(format!("{crate_name}.dll"));
-            if so.is_file() {
-                so
-            } else if dylib.is_file() {
-                dylib
-            } else {
-                dll
-            }
-        };
+    if let Some(artifacts) = bridge_artifact_paths(
+        &cache_root,
+        &rlib,
+        &target,
+        &crate_name,
+        helper_bin.as_deref(),
+        secrets_helper_bin.as_deref(),
+    )
+    .filter(|artifacts| bridge_cache_verified(&cache_root, artifacts))
+    {
+        let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
@@ -1808,6 +1769,17 @@ fn build_bridge_full(
             secrets_helper_bin_path: secrets_helper_bin,
         });
     }
+
+    // A missing or invalid manifest must not let Cargo bless an old/corrupt
+    // output in place. Remove only this exact cache entry's link products;
+    // Cargo will rebuild them under the existing per-key lock.
+    invalidate_bridge_artifacts(
+        &rlib,
+        &target,
+        &crate_name,
+        helper_bin.as_deref(),
+        secrets_helper_bin.as_deref(),
+    );
 
     let src_dir = cache_root.join("src");
     fs::create_dir_all(&src_dir)
@@ -1995,25 +1967,19 @@ fn build_bridge_full(
             )));
         }
     }
-    let cdylib = {
-    let stem = format!("lib{}", crate_name);
-    let so = target.join(format!("{stem}.so"));
-    let dylib = target.join(format!("{stem}.dylib"));
-    let dll = target.join(format!("{crate_name}.dll"));
-    if so.is_file() {
-        so
-    } else if dylib.is_file() {
-        dylib
-    } else {
-        dll
+    let artifacts = bridge_artifact_paths(
+        &cache_root,
+        &rlib,
+        &target,
+        &crate_name,
+        helper_bin.as_deref(),
+        secrets_helper_bin.as_deref(),
+    )
+    .ok_or_else(|| tool_error("FFI build finished without its complete artifact set"))?;
+    if let Err(error) = publish_bridge_manifest(&cache_root, &artifacts) {
+        return Err(tool_error(&error));
     }
-        };
-    if !cdylib.is_file() {
-        return Err(tool_error(&format!(
-            "FFI build finished but the JIT cdylib `{}` is missing",
-            cdylib.display()
-        )));
-    }
+    let cdylib = artifacts[1].clone();
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
@@ -2361,7 +2327,7 @@ fn cache_key_full(
     }
     if needs_archive {
         needs_archive.hash(&mut h);
-        ARCHIVE_RUNTIME.hash(&mut h);
+        ARCHIVE_SOURCE.hash(&mut h);
     }
     if needs_db {
         needs_db.hash(&mut h);
@@ -2498,6 +2464,161 @@ fn type_key(ty: &Type) -> String {
         Type::Tagged { marker, inner } => format!("#{marker}:{}", type_key(inner)),
         Type::Union(members) => members.iter().map(type_key).collect::<Vec<_>>().join("|"),
     }
+}
+
+fn is_lower_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn bridge_cdylib(target: &Path, crate_name: &str) -> Option<PathBuf> {
+    let stem = format!("lib{crate_name}");
+    [
+        target.join(format!("{stem}.so")),
+        target.join(format!("{stem}.dylib")),
+        target.join(format!("{crate_name}.dll")),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
+fn bridge_artifact_paths(
+    cache_root: &Path,
+    rlib: &Path,
+    target: &Path,
+    crate_name: &str,
+    helper_bin: Option<&Path>,
+    secrets_helper_bin: Option<&Path>,
+) -> Option<Vec<PathBuf>> {
+    if !rlib.is_file() {
+        return None;
+    }
+    let cdylib = bridge_cdylib(target, crate_name)?;
+    let mut paths = vec![rlib.to_path_buf(), cdylib];
+    if let Some(helper) = helper_bin {
+        if !helper.is_file() {
+            return None;
+        }
+        paths.push(helper.to_path_buf());
+    }
+    if let Some(helper) = secrets_helper_bin {
+        if !helper.is_file() {
+            return None;
+        }
+        paths.push(helper.to_path_buf());
+    }
+    paths.iter().all(|path| path.starts_with(cache_root)).then_some(paths)
+}
+
+fn invalidate_bridge_artifacts(
+    rlib: &Path,
+    target: &Path,
+    crate_name: &str,
+    helper_bin: Option<&Path>,
+    secrets_helper_bin: Option<&Path>,
+) {
+    let stem = format!("lib{crate_name}");
+    for path in [
+        rlib.to_path_buf(),
+        target.join(format!("{stem}.so")),
+        target.join(format!("{stem}.dylib")),
+        target.join(format!("{crate_name}.dll")),
+    ]
+    .into_iter()
+    .chain(helper_bin.map(Path::to_path_buf))
+    .chain(secrets_helper_bin.map(Path::to_path_buf))
+    {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn artifact_relative_path(cache_root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(cache_root).ok()?;
+    if relative.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return None;
+    }
+    relative.to_str().map(str::to_string)
+}
+
+fn bridge_cache_verified(cache_root: &Path, artifacts: &[PathBuf]) -> bool {
+    let Ok(manifest) = fs::read_to_string(cache_root.join("artifacts.sha256")) else {
+        return false;
+    };
+    let mut lines = manifest.lines();
+    if lines.next() != Some(BRIDGE_ARTIFACTS_SCHEMA) {
+        return false;
+    }
+    let mut expected = BTreeMap::new();
+    for line in lines {
+        let Some((digest, relative)) = line.split_once(' ') else {
+            return false;
+        };
+        if !is_lower_hex(digest) || relative.is_empty() {
+            return false;
+        }
+        let relative_path = Path::new(relative);
+        if relative_path.is_absolute()
+            || relative_path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+            || expected
+                .insert(relative.to_string(), digest.to_string())
+                .is_some()
+        {
+            return false;
+        }
+    }
+    if expected.len() != artifacts.len() {
+        return false;
+    }
+    artifacts.iter().all(|path| {
+        let Some(relative) = artifact_relative_path(cache_root, path) else {
+            return false;
+        };
+        let Some(expected) = expected.get(&relative) else {
+            return false;
+        };
+        fs::read(path)
+            .ok()
+            .is_some_and(|bytes| crate::SHA256::sha256_hex(&bytes) == *expected)
+    })
+}
+
+fn publish_bridge_manifest(cache_root: &Path, artifacts: &[PathBuf]) -> Result<(), String> {
+    let mut manifest = String::from(BRIDGE_ARTIFACTS_SCHEMA);
+    manifest.push('\n');
+    for path in artifacts {
+        let relative = artifact_relative_path(cache_root, path)
+            .ok_or_else(|| format!("FFI artifact escapes cache root: {}", path.display()))?;
+        let bytes = fs::read(path)
+            .map_err(|error| format!("could not read FFI artifact {}: {error}", path.display()))?;
+        manifest.push_str(&crate::SHA256::sha256_hex(&bytes));
+        manifest.push(' ');
+        manifest.push_str(&relative);
+        manifest.push('\n');
+    }
+    let manifest_path = cache_root.join("artifacts.sha256");
+    let temporary = cache_root.join(format!(
+        ".artifacts.sha256.tmp.{}",
+        std::process::id()
+    ));
+    fs::write(&temporary, manifest.as_bytes())
+        .map_err(|error| format!("could not stage {}: {error}", manifest_path.display()))?;
+    if let Err(error) = fs::rename(&temporary, &manifest_path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("could not publish {}: {error}", manifest_path.display()));
+    }
+    Ok(())
 }
 
 fn cache_dir() -> PathBuf {
@@ -2675,7 +2796,7 @@ fn emit_wrapper_lib(
     );
     if needs_archive {
         // D-CORE-COMPRESS1=A: archive runtime touches only zip/tar containers.
-        out.push_str(ARCHIVE_RUNTIME);
+        out.push_str(ARCHIVE_SOURCE);
         out.push('\n');
     }
     if needs_db {

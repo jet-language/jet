@@ -6,8 +6,13 @@
 
 use crate::SHA256::sha256_hex;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+const CACHE_KEY_LEN: usize = 64;
+const DIGEST_LEN: usize = 64;
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Returns `~/.cache/jet/build`.
 /// If `JET_CACHE_DIR` is set, that directory is used instead (for testing).
@@ -35,38 +40,134 @@ pub fn cache_key(source: &str, profile_tag: &str) -> String {
     sha256_hex(&data)
 }
 
+fn is_lower_hex(value: &str, len: usize) -> bool {
+    value.len() == len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn cache_entry_dir(key: &str) -> Option<PathBuf> {
+    is_lower_hex(key, CACHE_KEY_LEN).then(|| cache_dir().join(key))
+}
+
+fn regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+}
+
+fn safe_cache_dir(dir: &Path) -> Result<(), String> {
+    let root = cache_dir();
+    match fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(format!("unsafe build-cache root {}", root.display()))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("could not inspect {}: {error}", root.display())),
+    }
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(format!("unsafe build-cache entry {}", dir.display()))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not inspect {}: {error}", dir.display())),
+    }
+}
+
 /// Path to the cached binary for `key`.
 pub fn cached_bin(key: &str) -> PathBuf {
-    cache_dir().join(key).join("bin")
+    cache_entry_dir(key)
+        .unwrap_or_else(|| cache_dir().join("__invalid-cache-key__"))
+        .join("bin")
 }
 
-fn cached_digest(key: &str) -> PathBuf {
-    cache_dir().join(key).join("bin.sha256")
+fn cached_digest(key: &str) -> Option<PathBuf> {
+    cache_entry_dir(key).map(|dir| dir.join("bin.sha256"))
 }
 
-fn matches_digest(path: &Path, expected: &str) -> bool {
-    fs::read(path)
-        .ok()
-        .map(|bytes| sha256_hex(&bytes) == expected.trim())
-        .unwrap_or(false)
+fn parse_digest_record(bytes: &[u8]) -> Option<&str> {
+    if bytes.len() != DIGEST_LEN + 1 || bytes[DIGEST_LEN] != b'\n' {
+        return None;
+    }
+    let digest = std::str::from_utf8(&bytes[..DIGEST_LEN]).ok()?;
+    is_lower_hex(digest, DIGEST_LEN).then_some(digest)
+}
+
+fn verified_cached_bytes(key: &str) -> Option<(Vec<u8>, fs::Permissions)> {
+    let dir = cache_entry_dir(key)?;
+    let digest = dir.join("bin.sha256");
+    let bin = dir.join("bin");
+    if !regular_file(&digest) || !regular_file(&bin) {
+        return None;
+    }
+    let expected = parse_digest_record(&fs::read(digest).ok()?)?;
+    let mut source = fs::File::open(dir.join("bin")).ok()?;
+    let permissions = source.metadata().ok()?.permissions();
+    let mut bytes = Vec::new();
+    source.read_to_end(&mut bytes).ok()?;
+    (sha256_hex(&bytes) == expected).then_some((bytes, permissions))
+}
+
+fn temp_path(path: &Path, label: &str) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let name = path.file_name()?.to_str()?;
+    let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    Some(parent.join(format!(".{name}.{label}.{}.{}", std::process::id(), id)))
+}
+
+fn publish_bytes(
+    dest: &Path,
+    bytes: &[u8],
+    permissions: Option<fs::Permissions>,
+    label: &str,
+) -> Result<(), String> {
+    let tmp = temp_path(dest, label).ok_or_else(|| {
+        format!("could not derive a temporary path for {}", dest.display())
+    })?;
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|error| format!("could not stage {}: {error}", dest.display()))?;
+        file.write_all(bytes)
+            .map_err(|error| format!("could not stage {}: {error}", dest.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("could not flush {}: {error}", dest.display()))?;
+        if let Some(permissions) = permissions {
+            fs::set_permissions(&tmp, permissions).map_err(|error| {
+                format!("could not preserve {} permissions: {error}", dest.display())
+            })?;
+        }
+        fs::rename(&tmp, dest)
+            .map_err(|error| format!("could not publish {}: {error}", dest.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Copy a cached binary to `dest` when present. Returns `true` on cache hit.
 pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
-    let src = cached_bin(key);
-    let expected = match fs::read_to_string(cached_digest(key)) {
-        Ok(expected) => expected,
-        Err(_) => return false,
+    let Some(dir) = cache_entry_dir(key) else {
+        return false;
     };
-    if !src.is_file() || !matches_digest(&src, &expected) {
+    if safe_cache_dir(&dir).is_err() {
         return false;
     }
+    let Some((bytes, permissions)) = verified_cached_bytes(key) else {
+        return false;
+    };
     if let Some(parent) = dest.parent() {
         if fs::create_dir_all(parent).is_err() {
             return false;
         }
     }
-    fs::copy(&src, dest).is_ok()
+    publish_bytes(dest, &bytes, Some(permissions), "copy").is_ok()
 }
 
 /// Store a freshly built binary in the cache.
@@ -76,7 +177,12 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
 /// therefore never observes a half-written `bin`. Preserve source permissions
 /// so cached native artifacts stay executable.
 pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
-    let dir = cache_dir().join(key);
+    let dir = cache_entry_dir(key)
+        .ok_or_else(|| "refusing to store a cache entry with an invalid key".to_string())?;
+    if !regular_file(bin) {
+        return Err(format!("refusing non-regular build artifact {}", bin.display()));
+    }
+    safe_cache_dir(&dir)?;
     fs::create_dir_all(&dir)
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
     let mut source = fs::File::open(bin)
@@ -91,29 +197,14 @@ pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not read {}: {error}", bin.display()))?;
     let digest = sha256_hex(&bytes);
     let dest = dir.join("bin");
-    let tmp = dir.join(format!("bin.tmp.{}", std::process::id()));
-    if let Err(error) = fs::write(&tmp, &bytes) {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("could not stage {}: {error}", bin.display()));
-    }
-    if let Err(error) = fs::set_permissions(&tmp, permissions) {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("could not preserve {} permissions: {error}", bin.display()));
-    }
-    if let Err(error) = fs::rename(&tmp, &dest) {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("could not publish {}: {error}", dest.display()));
-    }
-    let digest_path = cached_digest(key);
-    let digest_tmp = dir.join(format!("bin.sha256.tmp.{}", std::process::id()));
-    if let Err(error) = fs::write(&digest_tmp, format!("{digest}\n")) {
-        let _ = fs::remove_file(&digest_tmp);
-        return Err(format!("could not write {}: {error}", digest_path.display()));
-    }
-    if let Err(error) = fs::rename(&digest_tmp, &digest_path) {
-        let _ = fs::remove_file(&digest_tmp);
-        return Err(format!("could not publish {}: {error}", digest_path.display()));
-    }
+    publish_bytes(&dest, &bytes, Some(permissions), "store")?;
+    let digest_path = cached_digest(key).expect("validated cache key has a digest path");
+    publish_bytes(
+        &digest_path,
+        format!("{digest}\n").as_bytes(),
+        None,
+        "digest",
+    )?;
     Ok(())
 }
 
@@ -151,9 +242,22 @@ mod tests {
         ));
         fs::write(&path, b"valid").unwrap();
         let digest = sha256_hex(b"valid");
-        assert!(matches_digest(&path, &digest));
+        assert_eq!(
+            parse_digest_record(format!("{digest}\n").as_bytes()),
+            Some(digest.as_str())
+        );
         fs::write(&path, b"corrupt").unwrap();
-        assert!(!matches_digest(&path, &digest));
+        assert_ne!(sha256_hex(&fs::read(&path).unwrap()), digest);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn cache_digest_rejects_loose_or_uppercase_records() {
+        let digest = sha256_hex(b"valid");
+        assert!(parse_digest_record(format!("{digest} \n").as_bytes()).is_none());
+        assert!(
+            parse_digest_record(format!("{}\n", digest.to_ascii_uppercase()).as_bytes())
+                .is_none()
+        );
     }
 }

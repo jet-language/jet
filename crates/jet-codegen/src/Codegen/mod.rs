@@ -387,11 +387,17 @@ fn is_internal_core_usage(usage: &str) -> bool {
         || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
 }
 
-fn is_archive_core_usage(usage: &str) -> bool {
+fn is_core_package_source_usage(usage: &str) -> bool {
     let usage = usage
         .strip_prefix(CORE_SOURCE_MARKER_PREFIX)
         .unwrap_or(usage);
     usage == "core.archive" || usage.starts_with("core.archive::")
+}
+
+fn is_archive_core_usage(usage: &str) -> bool {
+    is_core_package_source_usage(usage)
+        || usage == "core.archive"
+        || usage.starts_with("core.archive::")
 }
 
 fn core_needs_embedded_runtime(used_core: &std::collections::HashSet<String>) -> bool {
@@ -415,7 +421,10 @@ fn core_source_closure_fingerprint(
     for usage in usages {
         append_identity_field(&mut bytes, usage.as_bytes());
     }
-    if used_core.iter().any(|usage| is_archive_core_usage(usage)) {
+    if used_core
+        .iter()
+        .any(|usage| is_core_package_source_usage(usage))
+    {
         for (label, source) in CORE_ARCHIVE_SOURCE_PARTS {
             append_identity_field(&mut bytes, label.as_bytes());
             append_identity_field(&mut bytes, source.as_bytes());

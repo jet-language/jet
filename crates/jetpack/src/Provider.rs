@@ -193,6 +193,16 @@ pub fn cache_expectation(
                 .and_then(|(root, facts)| canonical_source_dir(root, facts))
                 .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
             validate_core_source_tree(&src_dir).ok()?;
+            // A Cargo-backed Core package is part of the offline closure. Do
+            // not compare or serve a host-toolchain recipe when the caller
+            // requires pinned delivery: that would turn an offline cache miss
+            // into a machine-specific build.
+            if ctx.offline
+                && src_dir.join("Cargo.toml").is_file()
+                && !super::Toolchain::Toolchain::resolve().is_some_and(|toolchain| toolchain.pinned)
+            {
+                return None;
+            }
             let source_fingerprint =
                 super::Envelope::try_output_hash_of(&src_dir.to_string_lossy()).ok()?;
             let (manifest, canonical) = if canonical.is_some() {
@@ -769,6 +779,12 @@ impl Provider for CoreProvider {
                                 .to_string(),
                         )
                     })?;
+                    if ctx.offline && !toolchain.pinned {
+                        return Err(ProviderError::CoreBuild(
+                            "offline Core package delivery requires a realized pinned Jet toolchain; refusing the host toolchain"
+                                .to_string(),
+                        ));
+                    }
                     let rlib = build_rlib_from_cargo_mode(
                         &out_dir,
                         ctx.store_dir,

@@ -22,9 +22,10 @@ satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
 ## Differential conformance
 
 1. Sema records the reachable Core closure and its source/ABI classification.
-2. AOT, JIT, and deopt preserve the same canonical Core meaning and ABI
-   behavior where a bridge applies; no engine adds a second policy or failure
-   meaning.
+2. For the shipped `core.archive` bridge, AOT, JIT, and deopt preserve the
+   same canonical ABI behavior; no engine adds a second policy or failure
+   meaning. Web is not an applicable archive tier and must reject an archive
+   call before emission rather than synthesize a browser implementation.
 3. Native cache identity includes the SHA-256 R10 source/closure descriptor
    (`jet-corelib-r10`) and length-delimited toolchain, dependency, target, mode,
    and instance facts, so a changed source package or ABI kernel cannot reuse a
@@ -43,6 +44,9 @@ Hostile closure checks:
   rebuild; no silent reuse of a narrower reachable closure.
 - Missing or mismatched `bin.sha256` → cache miss and rebuild; a truncated or
   modified cached binary is never treated as a valid artifact.
+- Missing or mismatched `artifacts.sha256` in the hidden Core/FFI bridge →
+  remove that cache entry's link products and rebuild; artifact existence alone
+  is never proof of a valid AOT/JIT bridge.
 - Failure while publishing a new binary or digest → explicit build error; a
   partial cache write is never reported as a successful store.
 - `core.archive` CoreProvider, AOT bridge, and JIT host must consume the same
@@ -52,5 +56,7 @@ Hostile closure checks:
   project manifest also disables cache reuse instead of becoming an empty
   identity.
 
-AOT and default `jet run` (Cranelift / deopt) preserve the same reachable Core
-meaning for every applicable module in the table above (I9).
+AOT and default `jet run` (Cranelift / deopt) preserve the same reachable
+`core.archive` meaning through the canonical ABI source. The remaining
+compiler-owned rows require the UL3 source-boundary migration and their
+per-tier proof before this page can claim universal Core parity (I9).
