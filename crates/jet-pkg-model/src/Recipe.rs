@@ -94,14 +94,78 @@ impl BuildRecipe {
 
     /// Bind a build hook to every fact that can change its authority or
     /// result. The returned identity is suitable for both the action-cache key
-    /// and a reviewed trust grant: package, staged source, platform, recipe,
-    /// and the complete declared capability set all participate.
+    /// and a reviewed trust grant: package, provider/source, staged source,
+    /// platform, recipe, and the complete declared capability set all
+    /// participate.
     pub fn build_identity(&self, package: &str, source_digest: &str, platform: &str) -> String {
+        self.build_identity_for_source(package, "", source_digest, platform)
+    }
+
+    /// Build the canonical identity used by a provider-backed hook. The
+    /// compatibility-shaped [`Self::build_identity`] entry point remains for
+    /// callers that do not have a provider/source label; production providers
+    /// must use this source-bound form.
+    pub fn build_identity_for_source(
+        &self,
+        package: &str,
+        provider_source: &str,
+        source_digest: &str,
+        platform: &str,
+    ) -> String {
         let capabilities = self.declared_capabilities().join(",");
         let identity = format!(
-            "jet-build-hook-v1\npackage={package}\nsource={source_digest}\nplatform={platform}\nrecipe={}\ncapabilities={capabilities}\n",
+            "jet-build-hook-v2\npackage={package}\nprovider-source={provider_source}\nsource={source_digest}\nplatform={platform}\nrecipe={}\ncapabilities={capabilities}\n",
             self.recipe_hash()
         );
         format!("build-sha256:{}", SHA256::sha256_hex(identity.as_bytes()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BuildRecipe, BuildStep};
+
+    #[test]
+    fn hook_identity_binds_provider_source() {
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::InstallTree {
+                src: ".".to_string(),
+                dest: ".".to_string(),
+            }],
+        };
+        let local = recipe.build_identity_for_source(
+            "tool",
+            "./vendor/tool",
+            "sha256-source",
+            "linux-x86_64",
+        );
+        let remote = recipe.build_identity_for_source(
+            "tool",
+            "github:owner/tool",
+            "sha256-source",
+            "linux-x86_64",
+        );
+        assert_ne!(local, remote);
+    }
+
+    #[test]
+    fn hook_identity_binds_capability_set() {
+        let copy = BuildRecipe {
+            steps: vec![BuildStep::InstallTree {
+                src: ".".to_string(),
+                dest: ".".to_string(),
+            }],
+        };
+        let exec = BuildRecipe {
+            steps: vec![BuildStep::Exec {
+                tool: "cc".to_string(),
+                args: vec!["-c".to_string(), "main.c".to_string()],
+            }],
+        };
+        let copy_id = copy.build_identity_for_source("tool", "./tool", "source", "linux-x86_64");
+        let exec_id = exec.build_identity_for_source("tool", "./tool", "source", "linux-x86_64");
+        assert_ne!(copy_id, exec_id);
+        assert_eq!(copy.declared_capabilities(), vec!["fs.write"]);
+        assert_eq!(exec.declared_capabilities(), vec!["exec:cc"]);
     }
 }

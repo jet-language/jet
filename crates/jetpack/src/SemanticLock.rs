@@ -227,11 +227,14 @@ pub struct FlakeOutput {
 /// The declarative part of a flake-parts composition that has a direct Jet
 /// graph meaning. Arbitrary evaluator functions stay behind the native Nix
 /// boundary; module paths, systems, and the per-system projection marker are
-/// ordinary graph facts and therefore round-trip through `.jet/lock`.
+/// ordinary graph facts and therefore round-trip through `.jet/lock`. Loaded
+/// graphs also retain content fingerprints for each imported module so a
+/// module edit cannot reuse a stale main-flake lock.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FlakeComposition {
     pub framework: String,
     pub modules: Vec<String>,
+    pub module_sources: Vec<String>,
     pub systems: Vec<String>,
     pub per_system: bool,
 }
@@ -421,12 +424,13 @@ impl FlakeGraph {
                         || record.identity.key == "flake-source")
                 });
             if has_flake_facts {
-                let source_graph = Self::parse_with_lock(
+                let mut source_graph = Self::parse_with_lock(
                     path.display().to_string(),
                     &text,
                     None,
                     false,
                 )?;
+                source_graph.attach_composition_sources(path)?;
                 let locked = Self::from_semantic_lock(path.display().to_string(), &lock)?;
                 if locked.source_fingerprint.is_empty() {
                     return Err(FlakeGraphError::StaleSemanticLock(
@@ -453,7 +457,107 @@ impl FlakeGraph {
                 )))
             }
         };
-        Self::parse_with_lock(path.display().to_string(), &text, lock_text.as_deref(), true)
+        let mut graph = Self::parse_with_lock(
+            path.display().to_string(),
+            &text,
+            lock_text.as_deref(),
+            true,
+        )?;
+        graph.attach_composition_sources(path)?;
+        graph.validate()?;
+        Ok(graph)
+    }
+
+    fn attach_composition_sources(&mut self, path: &Path) -> Result<(), FlakeGraphError> {
+        let Some(composition) = self.composition.as_mut() else {
+            return Ok(());
+        };
+        let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let project_root = project_dir.canonicalize().map_err(|error| {
+            FlakeGraphError::Io(format!(
+                "couldn't resolve flake-parts project root `{}`: {error}",
+                project_dir.display()
+            ))
+        })?;
+        let mut pending = composition
+            .modules
+            .iter()
+            .cloned()
+            .map(|module| (module, project_dir.to_path_buf(), true))
+            .collect::<Vec<_>>();
+        let mut visited = BTreeSet::new();
+        let mut module_sources = Vec::new();
+        while let Some((module, base_dir, root_module)) = pending.pop() {
+            let relative = Path::new(&module);
+            if relative.is_absolute()
+                || (root_module
+                    && relative
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir))
+            {
+                return Err(FlakeGraphError::Io(format!(
+                    "flake-parts module `{module}` must stay inside the flake project"
+                )));
+            }
+            let module_path = base_dir.join(relative);
+            let canonical = module_path.canonicalize().map_err(|error| {
+                FlakeGraphError::Io(format!(
+                    "couldn't read flake-parts module `{module}`: {error}"
+                ))
+            })?;
+            if !canonical.starts_with(&project_root) || !canonical.is_file() {
+                return Err(FlakeGraphError::Io(format!(
+                    "flake-parts module `{module}` must be a file inside the flake project"
+                )));
+            }
+            if !visited.insert(canonical.clone()) {
+                continue;
+            }
+            let bytes = std::fs::read(&canonical).map_err(|error| {
+                FlakeGraphError::Io(format!(
+                    "couldn't read flake-parts module `{module}`: {error}"
+                ))
+            })?;
+            let module_text = std::str::from_utf8(&bytes).map_err(|error| {
+                FlakeGraphError::Io(format!(
+                    "couldn't read flake-parts module `{module}` as UTF-8: {error}"
+                ))
+            })?;
+            let source_name = if root_module {
+                module.to_string()
+            } else {
+                format!(
+                    "./{}",
+                    canonical
+                        .strip_prefix(&project_root)
+                        .map_err(|_| {
+                            FlakeGraphError::Io(format!(
+                                "flake-parts module `{module}` must stay inside the flake project"
+                            ))
+                        })?
+                        .display()
+                )
+            };
+            module_sources.push(format!(
+                "{}\t{}",
+                source_name,
+                crate::SHA256::sha256_hex(&bytes)
+            ));
+            for import in list_assignment_values(&strip_nix_comments(module_text), "imports") {
+                pending.push((
+                    import,
+                    canonical
+                        .parent()
+                        .unwrap_or_else(|| project_root.as_path())
+                        .to_path_buf(),
+                    false,
+                ));
+            }
+        }
+        module_sources.sort();
+        module_sources.dedup();
+        composition.module_sources = module_sources;
+        Ok(())
     }
 
     /// Reconstruct the foreign projection from the unified `.jet/lock`.
@@ -671,6 +775,7 @@ impl FlakeGraph {
             composition,
             unsupported,
         };
+        validate_semantic_root_inputs(&graph)?;
         graph.validate()?;
         Ok(graph)
     }
@@ -792,27 +897,18 @@ impl FlakeGraph {
                 )));
             }
         }
+        let lock_node_values = flake_lock_node_values(&self.lock_nodes)?;
         for node in &self.lock_nodes {
             for edge in &node.inputs {
                 let target = crate::JSON::parse(&edge.target)
                     .map_err(|error| FlakeGraphError::Io(format!("flake.lock edge is invalid: {error}")))?;
-                let targets = match target {
-                    crate::JSON::JSONValue::Str(value) => vec![value],
-                    crate::JSON::JSONValue::Array(values) => values
-                        .into_iter()
-                        .map(|value| {
-                            value.as_str().map(str::to_string).map_err(|error| {
-                                FlakeGraphError::Io(format!("flake.lock edge target is invalid: {error}"))
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                    _ => {
-                        return Err(FlakeGraphError::Io(
-                            "flake.lock edge target must be a node name or node list".to_string(),
-                        ))
-                    }
-                };
-                if let Some(target) = targets.iter().find(|target| !lock_names.contains(target.as_str())) {
+                let target = lock_node_name(Some(&target), &lock_node_values, &node.name)?.ok_or_else(|| {
+                    FlakeGraphError::Io(format!(
+                        "flake.lock node `{}` input `{}` has an empty node reference",
+                        node.name, edge.name
+                    ))
+                })?;
+                if !lock_names.contains(target.as_str()) {
                     return Err(FlakeGraphError::Io(format!(
                         "flake.lock node `{}` input `{}` points to missing node `{target}`",
                         node.name, edge.name
@@ -1112,6 +1208,7 @@ fn parse_flake_parts_composition(text: &str) -> Option<FlakeComposition> {
     Some(FlakeComposition {
         framework: "flake-parts".to_string(),
         modules,
+        module_sources: Vec::new(),
         systems,
         per_system: text.contains("perSystem") || text.contains("per_system"),
     })
@@ -1153,12 +1250,16 @@ fn list_assignment_values(text: &str, name: &str) -> Vec<String> {
         values.extend(
             body.split_whitespace()
                 .map(|value| value.trim_matches([',', ';', '(', ')']))
-                .filter(|value| value.starts_with("./"))
+                .filter(|value| is_relative_module_path(value))
                 .map(str::to_string),
         );
         cursor = close + 1;
     }
     values
+}
+
+fn is_relative_module_path(value: &str) -> bool {
+    value == "." || value == ".." || value.starts_with("./") || value.starts_with("../")
 }
 
 fn quoted_values(text: &str) -> Vec<String> {
@@ -1218,10 +1319,17 @@ fn composition_json(composition: &FlakeComposition) -> String {
         .map(|value| crate::JSON::quote(value))
         .collect::<Vec<_>>()
         .join(",");
+    let module_sources = composition
+        .module_sources
+        .iter()
+        .map(|value| crate::JSON::quote(value))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"framework\":{},\"modules\":[{}],\"perSystem\":{},\"systems\":[{}]}}",
+        "{{\"framework\":{},\"modules\":[{}],\"moduleSources\":[{}],\"perSystem\":{},\"systems\":[{}]}}",
         crate::JSON::quote(&composition.framework),
         modules,
+        module_sources,
         composition.per_system,
         systems
     )
@@ -1295,15 +1403,38 @@ fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
     let locked = object
         .get("locked")
         .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock node locked".to_string()))?;
-    if original.as_object().is_err() || locked.as_object().is_err() {
-        return Err(FlakeGraphError::InvalidAssignment(
+    let name = string_field("name")?;
+    let original_json = canonical_json(original);
+    let locked_json = canonical_json(locked);
+    let original = original.as_object().map_err(|_| {
+        FlakeGraphError::InvalidAssignment(
             "lock node original/locked must be objects".to_string(),
+        )
+    })?;
+    let locked = locked.as_object().map_err(|_| {
+        FlakeGraphError::InvalidAssignment(
+            "lock node original/locked must be objects".to_string(),
+        )
+    })?;
+    if name.is_empty() {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "lock node name is empty".to_string(),
+        ));
+    }
+    if name == "root" && (!original.is_empty() || !locked.is_empty()) {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "root lock node original/locked must be empty objects".to_string(),
+        ));
+    }
+    if name != "root" && (original.is_empty() || locked.is_empty()) {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "non-root lock node original/locked must be non-empty objects".to_string(),
         ));
     }
     let mut node = FlakeLockNode {
-        name: string_field("name")?,
-        original: canonical_json(original),
-        locked: canonical_json(locked),
+        name,
+        original: original_json,
+        locked: locked_json,
         inputs,
     };
     node.inputs.sort();
@@ -1341,16 +1472,34 @@ fn parse_flake_registry(raw: &str) -> Result<FlakeRegistryEntry, FlakeGraphError
     let locked = object
         .get("locked")
         .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing registry locked".to_string()))?;
-    if original.as_object().is_err() || locked.as_object().is_err() {
-        return Err(FlakeGraphError::InvalidAssignment(
+    let original = original.as_object().map_err(|_| {
+        FlakeGraphError::InvalidAssignment(
             "registry original/locked must be objects".to_string(),
+        )
+    })?;
+    let locked = locked.as_object().map_err(|_| {
+        FlakeGraphError::InvalidAssignment(
+            "registry original/locked must be objects".to_string(),
+        )
+    })?;
+    if original.is_empty() || locked.is_empty() {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "registry original/locked must be non-empty objects".to_string(),
+        ));
+    }
+    let alias = string_field("alias")?;
+    let original = canonical_json(&crate::JSON::JSONValue::Object(original.clone()));
+    let locked = canonical_json(&crate::JSON::JSONValue::Object(locked.clone()));
+    if indirect_registry_alias(&original)? != Some(alias.clone()) {
+        return Err(FlakeGraphError::InvalidAssignment(
+            "registry record original is not the recorded indirect alias".to_string(),
         ));
     }
     Ok(FlakeRegistryEntry {
-        alias: string_field("alias")?,
+        alias,
         node: string_field("node")?,
-        original: canonical_json(original),
-        locked: canonical_json(locked),
+        original,
+        locked,
     })
 }
 
@@ -1390,9 +1539,14 @@ fn parse_composition_record(raw: &str) -> Result<FlakeComposition, FlakeGraphErr
             ))
         }
     };
+    let module_sources = match object.get("moduleSources") {
+        Some(_) => string_list("moduleSources")?,
+        None => Vec::new(),
+    };
     Ok(FlakeComposition {
         framework,
         modules: string_list("modules")?,
+        module_sources,
         systems: string_list("systems")?,
         per_system,
     })
@@ -1681,16 +1835,74 @@ fn quoted_rhs(value: &str) -> Option<String> {
     None
 }
 
+fn flake_lock_node_values(
+    nodes: &[FlakeLockNode],
+) -> Result<BTreeMap<String, crate::JSON::JSONValue>, FlakeGraphError> {
+    nodes
+        .iter()
+        .map(|node| {
+            let inputs = node
+                .inputs
+                .iter()
+                .map(|edge| {
+                    crate::JSON::parse(&edge.target)
+                        .map(|target| (edge.name.clone(), target))
+                        .map_err(|error| {
+                            FlakeGraphError::Io(format!(
+                                "flake.lock node `{}` input `{}` is invalid: {error}",
+                                node.name, edge.name
+                            ))
+                        })
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            Ok((
+                node.name.clone(),
+                crate::JSON::JSONValue::Object(BTreeMap::from([(
+                    "inputs".to_string(),
+                    crate::JSON::JSONValue::Object(inputs),
+                )])),
+            ))
+        })
+        .collect()
+}
+
 fn flake_revision(url: &str) -> String {
-    if let Some((_, revision)) = url.split_once("?rev=") {
-        return revision.split('&').next().unwrap_or_default().to_string();
+    if let Some(revision) = url
+        .split_once('?')
+        .and_then(|(_, query)| flake_query_fields(query))
+        .and_then(|query| query.get("rev").cloned())
+    {
+        return revision;
     }
-    let candidate = url.rsplit('/').next().unwrap_or_default();
-    if candidate.len() >= 7 && candidate.chars().all(|ch| ch.is_ascii_hexdigit()) {
+    let candidate = url
+        .split_once('?')
+        .map_or(url, |(base, _)| base)
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
+    if is_flake_revision(candidate) {
         candidate.to_string()
     } else {
         String::new()
     }
+}
+
+fn is_flake_revision(value: &str) -> bool {
+    value.len() >= 7 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn flake_query_fields(query: &str) -> Option<BTreeMap<String, String>> {
+    let mut fields = BTreeMap::new();
+    if query.is_empty() {
+        return Some(fields);
+    }
+    for field in query.split('&') {
+        let (key, value) = field.split_once('=')?;
+        if key.is_empty() || fields.insert(key.to_string(), value.to_string()).is_some() {
+            return None;
+        }
+    }
+    Some(fields)
 }
 
 fn canonical_json(value: &crate::JSON::JSONValue) -> String {
@@ -1736,13 +1948,370 @@ fn canonical_object(
         .unwrap_or_else(|| "{}".to_string())
 }
 
-fn indirect_registry_alias(raw: &str) -> Option<String> {
-    let value = crate::JSON::parse(raw).ok()?;
-    let object = value.as_object().ok()?;
-    if object.get("type")?.as_str().ok()? != "indirect" {
-        return None;
+fn indirect_registry_alias(raw: &str) -> Result<Option<String>, FlakeGraphError> {
+    let value = crate::JSON::parse(raw)
+        .map_err(|error| FlakeGraphError::Io(format!("flake.lock original metadata is invalid: {error}")))?;
+    let object = value.as_object().map_err(|error| {
+        FlakeGraphError::Io(format!("flake.lock original metadata is invalid: {error}"))
+    })?;
+    let Some(kind) = object.get("type") else {
+        return Ok(None);
+    };
+    let kind = kind.as_str().map_err(|error| {
+        FlakeGraphError::Io(format!("flake.lock original type is invalid: {error}"))
+    })?;
+    if kind != "indirect" {
+        return Ok(None);
     }
-    object.get("id")?.as_str().ok().map(str::to_string)
+    let alias = object
+        .get("id")
+        .ok_or_else(|| FlakeGraphError::Io("flake.lock indirect input has no id".to_string()))?
+        .as_str()
+        .map_err(|error| FlakeGraphError::Io(format!("flake.lock indirect id is invalid: {error}")))?;
+    if alias.is_empty() {
+        return Err(FlakeGraphError::Io(
+            "flake.lock indirect input has an empty id".to_string(),
+        ));
+    }
+    Ok(Some(alias.to_string()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FlakeSourceIdentity {
+    Direct {
+        kind: String,
+        owner: String,
+        repo: String,
+        reference: Option<String>,
+        revision: Option<String>,
+        query: BTreeMap<String, String>,
+    },
+    Indirect {
+        alias: String,
+        reference: Option<String>,
+        revision: Option<String>,
+        query: BTreeMap<String, String>,
+    },
+}
+
+fn flake_source_identity(url: &str) -> Option<FlakeSourceIdentity> {
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let query = flake_query_fields(query)?;
+    let (kind, path) = if let Some(path) = base.strip_prefix("github:") {
+        ("github", path)
+    } else if let Some(path) = base.strip_prefix("gitlab:") {
+        ("gitlab", path)
+    } else if let Some(path) = base.strip_prefix("sourcehut:") {
+        ("sourcehut", path)
+    } else if let Some(path) = base.strip_prefix("https://github.com/") {
+        ("github", path)
+    } else if let Some(path) = base.strip_prefix("https://gitlab.com/") {
+        ("gitlab", path)
+    } else {
+        let path = base.strip_prefix("flake:").unwrap_or(base);
+        if path.is_empty() || path.starts_with('.') || path.starts_with('/') || path.contains(':') {
+            return None;
+        }
+        let mut parts = path.split('/');
+        let alias = parts.next()?.to_string();
+        if alias.is_empty() {
+            return None;
+        }
+        let tail = parts.collect::<Vec<_>>();
+        if tail.len() > 2 || tail.iter().any(|part| part.is_empty()) {
+            return None;
+        }
+        let (mut reference, mut revision) = match tail.as_slice() {
+            [] => (None, None),
+            [value] if is_flake_revision(value) => (None, Some((*value).to_string())),
+            [value] => (Some((*value).to_string()), None),
+            [reference, revision] if is_flake_revision(revision) => {
+                (Some((*reference).to_string()), Some((*revision).to_string()))
+            }
+            _ => return None,
+        };
+        if let Some(value) = query.get("ref") {
+            if reference.as_deref().is_some_and(|current| current != value) {
+                return None;
+            }
+            reference = Some(value.clone());
+        }
+        if let Some(value) = query.get("rev") {
+            if revision.as_deref().is_some_and(|current| current != value) {
+                return None;
+            }
+            revision = Some(value.clone());
+        }
+        return Some(FlakeSourceIdentity::Indirect {
+            alias,
+            reference,
+            revision,
+            query,
+        });
+    };
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let owner = parts.next()?.to_string();
+    let repo = parts.next()?.to_string();
+    let tail = parts.collect::<Vec<_>>();
+    let (mut reference, mut revision) = match tail.as_slice() {
+        [] => (None, None),
+        [value] if is_flake_revision(value) => (None, Some((*value).to_string())),
+        values => {
+            let last = values.last().copied().unwrap_or_default();
+            if is_flake_revision(last) {
+                (
+                    Some(values[..values.len() - 1].join("/")),
+                    Some(last.to_string()),
+                )
+            } else {
+                (Some(values.join("/")), None)
+            }
+        }
+    };
+    if let Some(value) = query.get("ref") {
+        if reference.as_deref().is_some_and(|current| current != value) {
+            return None;
+        }
+        reference = Some(value.clone());
+    }
+    if let Some(value) = query.get("rev") {
+        if revision.as_deref().is_some_and(|current| current != value) {
+            return None;
+        }
+        revision = Some(value.clone());
+    };
+    Some(FlakeSourceIdentity::Direct {
+        kind: kind.to_string(),
+        owner,
+        repo,
+        reference,
+        revision,
+        query,
+    })
+}
+
+fn json_string_field<'a>(
+    object: &'a BTreeMap<String, crate::JSON::JSONValue>,
+    key: &str,
+) -> Option<&'a str> {
+    object.get(key).and_then(|value| value.as_str().ok())
+}
+
+fn source_query_matches(
+    query: &BTreeMap<String, String>,
+    original: &BTreeMap<String, crate::JSON::JSONValue>,
+    locked: &BTreeMap<String, crate::JSON::JSONValue>,
+    validate_revision: bool,
+) -> bool {
+    query.iter().all(|(key, expected)| {
+        if key == "rev" && !validate_revision {
+            return true;
+        }
+        let actual = if key == "rev" {
+            json_string_field(locked, key)
+        } else {
+            original
+                .get(key)
+                .or_else(|| locked.get(key))
+                .and_then(|value| value.as_str().ok())
+        };
+        actual == Some(expected.as_str())
+    })
+}
+
+fn source_revision_matches(
+    identity_revision: Option<&String>,
+    input: &FlakeInput,
+    locked: &BTreeMap<String, crate::JSON::JSONValue>,
+    validate_revision: bool,
+) -> bool {
+    if !validate_revision {
+        return true;
+    }
+    let locked_revision = json_string_field(locked, "rev");
+    identity_revision
+        .map(|revision| locked_revision == Some(revision.as_str()))
+        .unwrap_or(true)
+        && (input.revision.is_empty()
+            || locked_revision == Some(input.revision.as_str()))
+}
+
+fn validate_root_input_identity(
+    input: &FlakeInput,
+    node_name: &str,
+    node: &FlakeLockNode,
+    root_inputs: &BTreeMap<String, crate::JSON::JSONValue>,
+    nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+    validate_revision: bool,
+) -> Result<(), FlakeGraphError> {
+    let original = crate::JSON::parse(&node.original)
+        .map_err(|error| FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}")))?;
+    let original = original.as_object().map_err(|error| {
+        FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}"))
+    })?;
+    let locked = crate::JSON::parse(&node.locked)
+        .map_err(|error| FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}")))?;
+    let locked = locked.as_object().map_err(|error| {
+        FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}"))
+    })?;
+
+    if !input.follows.is_empty() {
+        let follows = root_inputs.get(&input.follows).ok_or_else(|| {
+            FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` follows missing root input `{}`",
+                input.name, input.follows
+            ))
+        })?;
+        let follows = lock_node_name(Some(follows), nodes, "root")?.ok_or_else(|| {
+            FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` follows an empty root input `{}`",
+                input.name, input.follows
+            ))
+        })?;
+        if follows != node_name {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` follows `{}` but maps to node `{node_name}`",
+                input.name, input.follows
+            )));
+        }
+        if validate_revision
+            && !input.revision.is_empty()
+            && json_string_field(locked, "rev") != Some(input.revision.as_str())
+        {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` has a different locked revision",
+                input.name
+            )));
+        }
+        return Ok(());
+    }
+
+    // Keep malformed indirect metadata fail-closed even when source identity
+    // parsing falls back to the generic URL form.
+    let _ = indirect_registry_alias(&node.original)?;
+    let original_field = |key: &str| json_string_field(original, key);
+    let matches = match flake_source_identity(&input.url) {
+        Some(FlakeSourceIdentity::Direct {
+            kind,
+            owner,
+            repo,
+            reference,
+            revision,
+            query,
+        }) => {
+            original_field("type") == Some(kind.as_str())
+                && original_field("owner") == Some(owner.as_str())
+                && original_field("repo") == Some(repo.as_str())
+                && original_field("ref") == reference.as_deref()
+                && source_query_matches(&query, original, locked, validate_revision)
+                && source_revision_matches(
+                    revision.as_ref(),
+                    input,
+                    locked,
+                    validate_revision,
+                )
+        }
+        Some(FlakeSourceIdentity::Indirect {
+            alias,
+            reference,
+            revision,
+            query,
+        }) => {
+            original_field("type") == Some("indirect")
+                && original_field("id") == Some(alias.as_str())
+                && original_field("ref") == reference.as_deref()
+                && source_query_matches(&query, original, locked, validate_revision)
+                && source_revision_matches(
+                    revision.as_ref(),
+                    input,
+                    locked,
+                    validate_revision,
+                )
+        }
+        None => {
+            let source_url = input.url.split_once('?').unwrap_or((input.url.as_str(), ""));
+            let original_url = original_field("url")
+                .and_then(|url| Some(url.split_once('?').unwrap_or((url, ""))));
+            original_url
+                .map(|(original_base, original_query)| {
+                    original_base == source_url.0
+                        && flake_query_fields(original_query)
+                            == flake_query_fields(source_url.1)
+                })
+                .unwrap_or(false)
+        }
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(FlakeGraphError::Io(format!(
+            "flake.lock root input `{}` maps to node `{node_name}` with a different source URL or indirect alias",
+            input.name
+        )))
+    }
+}
+
+fn validate_semantic_root_inputs(graph: &FlakeGraph) -> Result<(), FlakeGraphError> {
+    let Some(root) = graph.lock_nodes.iter().find(|node| node.name == "root") else {
+        return Ok(());
+    };
+    let nodes = flake_lock_node_values(&graph.lock_nodes)?;
+    let root_inputs = root
+        .inputs
+        .iter()
+        .map(|edge| {
+            crate::JSON::parse(&edge.target)
+                .map(|target| (edge.name.clone(), target))
+                .map_err(|error| {
+                    FlakeGraphError::StaleSemanticLock(format!(
+                        "root input `{}` is invalid: {error}",
+                        edge.name
+                    ))
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let source_names = graph
+        .inputs
+        .iter()
+        .map(|input| input.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if let Some(input) = root_inputs
+        .keys()
+        .find(|input| !source_names.contains(input.as_str()))
+    {
+        return Err(FlakeGraphError::StaleSemanticLock(format!(
+            "root input `{input}` is not declared by flake.nix"
+        )));
+    }
+    for input in &graph.inputs {
+        let Some(reference) = root_inputs.get(&input.name) else {
+            return Err(FlakeGraphError::StaleSemanticLock(format!(
+                "root input `{}` is missing from the lock",
+                input.name
+            )));
+        };
+        let Some(node_name) = lock_node_name(Some(reference), &nodes, "root")? else {
+            return Err(FlakeGraphError::StaleSemanticLock(format!(
+                "root input `{}` has no node reference",
+                input.name
+            )));
+        };
+        let Some(node) = graph.lock_nodes.iter().find(|node| node.name == node_name) else {
+            return Err(FlakeGraphError::StaleSemanticLock(format!(
+                "root input `{}` points to missing node `{node_name}`",
+                input.name
+            )));
+        };
+        validate_root_input_identity(
+            input,
+            &node_name,
+            node,
+            &root_inputs,
+            &nodes,
+            true,
+        )?;
+    }
+    Ok(())
 }
 
 /// Fill floating input URLs from the sibling `flake.lock`. The source flake
@@ -1776,6 +2345,48 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
             let object = value.as_object().map_err(|error| {
                 FlakeGraphError::Io(format!("flake.lock node `{name}` is invalid: {error}"))
             })?;
+            if name.is_empty() {
+                return Err(FlakeGraphError::Io(
+                    "flake.lock node name is empty".to_string(),
+                ));
+            }
+            let has_original = object.contains_key("original");
+            let has_locked = object.contains_key("locked");
+            if name == "root" {
+                if has_original || has_locked {
+                    return Err(FlakeGraphError::Io(
+                        "flake.lock root node must not carry original/locked metadata".to_string(),
+                    ));
+                }
+            } else if !has_original || !has_locked {
+                let missing = if !has_original { "original" } else { "locked" };
+                return Err(FlakeGraphError::Io(format!(
+                    "flake.lock node `{name}` is missing `{missing}` metadata"
+                )));
+            }
+            if name != "root" {
+                let original = object
+                    .get("original")
+                    .and_then(|value| value.as_object().ok())
+                    .ok_or_else(|| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock node `{name}` original metadata is not an object"
+                        ))
+                    })?;
+                let locked = object
+                    .get("locked")
+                    .and_then(|value| value.as_object().ok())
+                    .ok_or_else(|| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock node `{name}` locked metadata is not an object"
+                        ))
+                    })?;
+                if original.is_empty() || locked.is_empty() {
+                    return Err(FlakeGraphError::Io(format!(
+                        "flake.lock node `{name}` has empty original/locked metadata"
+                    )));
+                }
+            }
             let inputs = match object.get("inputs") {
                 None => Vec::new(),
                 Some(value) => value
@@ -1802,38 +2413,60 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
         .collect::<Result<Vec<_>, FlakeGraphError>>()?;
     graph.lock_nodes.sort();
 
-    graph.registries = root_inputs
+    let lock_names = graph
+        .lock_nodes
         .iter()
-        .filter_map(|(_input, reference)| {
-            let node = lock_node_name(Some(reference))?;
-            let lock_node = graph.lock_nodes.iter().find(|item| item.name == node)?;
-            let alias = indirect_registry_alias(&lock_node.original)?;
-            Some(FlakeRegistryEntry {
-                alias,
-                node,
-                original: lock_node.original.clone(),
-                locked: lock_node.locked.clone(),
-            })
-        })
-        .collect();
+        .map(|node| node.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for (input, reference) in root_inputs {
+        let Some(node) = lock_node_name(Some(reference), nodes, "root")? else {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input `{input}` has no node reference"
+            )));
+        };
+        if !lock_names.contains(node.as_str()) {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input points to missing node `{node}`"
+            )));
+        }
+    }
+    let source_names = graph
+        .inputs
+        .iter()
+        .map(|input| input.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if let Some(input) = root_inputs.keys().find(|input| !source_names.contains(input.as_str())) {
+        return Err(FlakeGraphError::Io(format!(
+            "flake.lock root input `{input}` is not declared by flake.nix"
+        )));
+    }
+    let mut registries = Vec::new();
+    for node in &graph.lock_nodes {
+        let Some(alias) = indirect_registry_alias(&node.original)? else {
+            continue;
+        };
+        registries.push(FlakeRegistryEntry {
+            alias,
+            node: node.name.clone(),
+            original: node.original.clone(),
+            locked: node.locked.clone(),
+        });
+    }
+    graph.registries = registries;
     graph.registries.sort();
 
     for input in &mut graph.inputs {
         let Some(reference) = root_inputs.get(&input.name) else {
-            if input.revision.is_empty() && input.follows.is_empty() {
-                return Err(FlakeGraphError::MissingRevision {
-                    input: input.name.clone(),
-                });
-            }
-            continue;
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock has no root input `{}`",
+                input.name
+            )));
         };
-        let Some(node_name) = lock_node_name(Some(reference)) else {
-            if input.follows.is_empty() {
-                return Err(FlakeGraphError::MissingRevision {
-                    input: input.name.clone(),
-                });
-            }
-            continue;
+        let Some(node_name) = lock_node_name(Some(reference), nodes, "root")? else {
+            return Err(FlakeGraphError::Io(format!(
+                "flake.lock root input `{}` has no node reference",
+                input.name
+            )));
         };
         let Some(node) = graph.lock_nodes.iter().find(|node| node.name == node_name) else {
             return Err(FlakeGraphError::Io(format!(
@@ -1841,6 +2474,7 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                 input.name
             )));
         };
+        validate_root_input_identity(input, &node_name, node, root_inputs, nodes, false)?;
         let locked = crate::JSON::parse(&node.locked)
             .map_err(|error| FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}")))?;
         let locked = locked.as_object().map_err(|error| {
@@ -1866,15 +2500,83 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
     Ok(())
 }
 
-fn lock_node_name(value: Option<&crate::JSON::JSONValue>) -> Option<String> {
-    value
-        .and_then(|value| value.as_str().ok().map(str::to_string))
-        .or_else(|| {
-            value
-                .and_then(|value| value.as_array().ok())
-                .and_then(|values| values.first())
-                .and_then(|value| value.as_str().ok().map(str::to_string))
-        })
+fn lock_node_name(
+    value: Option<&crate::JSON::JSONValue>,
+    nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+    start_node: &str,
+) -> Result<Option<String>, FlakeGraphError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    fn resolve(
+        value: &crate::JSON::JSONValue,
+        nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+        path: &mut BTreeSet<String>,
+        start_node: &str,
+    ) -> Result<Option<String>, FlakeGraphError> {
+        match value {
+            crate::JSON::JSONValue::Str(value) if !value.is_empty() => Ok(Some(value.clone())),
+            crate::JSON::JSONValue::Str(_) => Err(FlakeGraphError::Io(
+                "flake.lock node reference is empty".to_string(),
+            )),
+            crate::JSON::JSONValue::Array(values) => {
+                if values.is_empty() {
+                    return Ok(None);
+                }
+                let mut current = start_node.to_string();
+                for value in values {
+                    let segment = value.as_str().map_err(|error| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock node reference array must contain strings: {error}"
+                        ))
+                    })?;
+                    if segment.is_empty() {
+                        return Err(FlakeGraphError::Io(
+                            "flake.lock node reference array must contain non-empty strings"
+                                .to_string(),
+                        ));
+                    }
+                    let path_key = format!("{current}\0{segment}");
+                    if !path.insert(path_key.clone()) {
+                        return Err(FlakeGraphError::Io(format!(
+                            "flake.lock follow path cycles at `{segment}`"
+                        )));
+                    }
+                    let node = nodes.get(&current).ok_or_else(|| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock follow path starts at missing node `{current}`"
+                        ))
+                    })?;
+                    let inputs = node
+                        .get("inputs")
+                        .ok()
+                        .and_then(|value| value.as_object().ok())
+                        .ok_or_else(|| {
+                            FlakeGraphError::Io(format!(
+                                "flake.lock follow path node `{current}` has no inputs map"
+                            ))
+                        })?;
+                    let target = inputs.get(segment).ok_or_else(|| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock follow path `{segment}` is missing from node `{current}`"
+                        ))
+                    })?;
+                    current = resolve(target, nodes, path, &current)?.ok_or_else(|| {
+                        FlakeGraphError::Io(format!(
+                            "flake.lock follow path `{segment}` resolves to an empty node reference"
+                        ))
+                    })?;
+                    path.remove(&path_key);
+                }
+                Ok(Some(current))
+            }
+            _ => Err(FlakeGraphError::Io(
+                "flake.lock node reference must be a node name or node list".to_string(),
+            )),
+        }
+    }
+
+    resolve(value, nodes, &mut BTreeSet::new(), start_node)
 }
 
 fn propagate_follows(graph: &mut FlakeGraph) -> Result<(), FlakeGraphError> {
@@ -3044,6 +3746,141 @@ mod flake_tests {
     }
 
     #[test]
+    fn transitive_indirect_registry_resolution_round_trips() {
+        let source = r#"
+{
+  inputs.tools.url = "github:example/tools?rev=0123456789abcdef0123456789abcdef01234567";
+  outputs = { tools, ... }: {
+    packages.x86_64-linux.default = tools;
+  };
+}
+"#;
+        let lock = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "tools": "tools" } },
+    "tools": {
+      "inputs": { "nixpkgs": "nixpkgs" },
+      "locked": { "owner": "example", "repo": "tools", "rev": "0123456789abcdef0123456789abcdef01234567", "type": "github" },
+      "original": { "owner": "example", "repo": "tools", "type": "github" }
+    },
+    "nixpkgs": {
+      "locked": { "owner": "NixOS", "repo": "nixpkgs", "rev": "89abcdef0123456789abcdef0123456789abcdef", "type": "github" },
+      "original": { "id": "nixpkgs", "type": "indirect" }
+    }
+  }
+}
+"#;
+        let graph = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(lock),
+            true,
+        )
+        .unwrap();
+        let registry = graph
+            .registries
+            .iter()
+            .find(|entry| entry.alias == "nixpkgs")
+            .unwrap();
+        assert_eq!(registry.node, "nixpkgs");
+        assert!(registry.locked.contains("\"rev\":\"89abcdef"));
+
+        let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+        assert_eq!(restored.registries, graph.registries);
+        assert_eq!(restored.lock_nodes, graph.lock_nodes);
+    }
+
+    #[test]
+    fn indirect_registry_alias_ref_and_query_identity_round_trips_and_rejects_drift() {
+        let source =
+            r#"{ inputs.nixpkgs.url = "nixpkgs/nixos-unstable?ref=nixos-unstable&dir=lib"; }"#;
+        let lock = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0123456789abcdef0123456789abcdef01234567",
+        "type": "github"
+      },
+      "original": {
+        "dir": "lib",
+        "id": "nixpkgs",
+        "ref": "nixos-unstable",
+        "type": "indirect"
+      }
+    }
+  }
+}
+"#;
+        let graph = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(lock),
+            true,
+        )
+        .unwrap();
+        assert_eq!(graph.inputs[0].revision, "0123456789abcdef0123456789abcdef01234567");
+        let registry = graph.registries.first().unwrap();
+        assert_eq!(registry.alias, "nixpkgs");
+        assert_eq!(registry.node, "nixpkgs");
+
+        let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+        assert_eq!(restored, graph);
+
+        let wrong_ref = lock.replace(
+            "\"ref\": \"nixos-unstable\"",
+            "\"ref\": \"nixos-24.11\"",
+        );
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(&wrong_ref),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL")));
+
+        let wrong_query = lock.replace("\"dir\": \"lib\"", "\"dir\": \"share\"");
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(&wrong_query),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL")));
+    }
+
+    #[test]
+    fn flake_lock_follow_paths_resolve_to_terminal_node() {
+        let nodes = crate::JSON::parse(
+            r#"{
+  "root": { "inputs": { "flake-utils": "flake-utils" } },
+  "flake-utils": { "inputs": { "systems": "systems" } },
+  "systems": { "inputs": {} }
+}"#,
+        )
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .clone();
+        let reference = crate::JSON::parse(r#"["flake-utils", "systems"]"#).unwrap();
+        assert_eq!(
+            lock_node_name(Some(&reference), &nodes, "root").unwrap(),
+            Some("systems".to_string())
+        );
+        let reference = crate::JSON::parse(r#"["systems"]"#).unwrap();
+        assert_eq!(
+            lock_node_name(Some(&reference), &nodes, "flake-utils").unwrap(),
+            Some("systems".to_string())
+        );
+    }
+
+    #[test]
     fn flake_lock_revision_drift_fails_closed() {
         let source =
             "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaaa\"; }";
@@ -3065,6 +3902,114 @@ mod flake_tests {
             FlakeGraphError::ConflictingInput { input, field }
                 if input == "nixpkgs" && field == "revision"
         ));
+
+        let wrong_repo = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "other", "repo": "repo" }
+    }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaaa\"; }",
+            Some(wrong_repo),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL")));
+    }
+
+    #[test]
+    fn flake_lock_metadata_and_indirect_alias_fail_closed() {
+        let source = "{ inputs.nixpkgs.url = \"nixpkgs\"; }";
+        let missing_original = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": { "locked": { "rev": "aaaaaaaa" } }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(missing_original),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("missing `original`")));
+
+        let root_metadata = r#"
+{
+  "nodes": {
+    "root": {
+      "inputs": { "nixpkgs": "nixpkgs" },
+      "original": { "type": "github" }
+    },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(root_metadata),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("root node must not carry")));
+
+        let empty_node_name = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(empty_node_name),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("node name is empty")));
+
+        let malformed_indirect = r#"
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "indirect" }
+    }
+  }
+}
+"#;
+        let error = FlakeGraph::parse_with_lock(
+            "flake.nix".to_string(),
+            source,
+            Some(malformed_indirect),
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, FlakeGraphError::Io(reason) if reason.contains("indirect input has no id")));
     }
 
     #[test]
@@ -3091,7 +4036,10 @@ mod flake_tests {
 {
   "nodes": {
     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
-    "nixpkgs": { "locked": { "narHash": "sha256-deadbeef" } }
+    "nixpkgs": {
+      "locked": { "narHash": "sha256-deadbeef" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
   }
 }
 "#;
@@ -3164,6 +4112,7 @@ mod flake_tests {
             Some(FlakeComposition {
                 framework: "flake-parts".to_string(),
                 modules: vec!["./parts/dev.nix".to_string()],
+                module_sources: Vec::new(),
                 systems: vec!["aarch64-darwin".to_string(), "x86_64-linux".to_string()],
                 per_system: true,
             })
@@ -3173,5 +4122,62 @@ mod flake_tests {
         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
         assert_eq!(restored.composition, graph.composition);
         assert_eq!(restored.stable_json(), graph.stable_json());
+    }
+
+    #[test]
+    fn loaded_flake_parts_modules_are_fingerprinted_in_the_same_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-flake-parts-source-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let flake = root.join("flake.nix");
+        let module = root.join("parts/dev.nix");
+        let shared = root.join("shared.nix");
+        let source = r#"
+{
+  inputs.flake-parts.url = "github:hercules-ci/flake-parts?rev=0123456789abcdef0123456789abcdef01234567";
+  outputs = inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ ./parts/dev.nix ];
+      systems = [ "x86_64-linux" ];
+      perSystem = { pkgs, ... }: { devShells.default = pkgs.mkShell { }; };
+    };
+}
+"#;
+        let module_source =
+            "{ imports = [ ../shared.nix ]; perSystem = { pkgs, ... }: { devShells.default = pkgs.mkShell { }; }; }\n";
+        let shared_source = "{ perSystem = { pkgs, ... }: { packages.default = pkgs.hello; }; }\n";
+        std::fs::write(&flake, source).unwrap();
+        std::fs::write(&module, module_source).unwrap();
+        std::fs::write(&shared, shared_source).unwrap();
+
+        let graph = FlakeGraph::load(&flake).unwrap();
+        let module_sources = &graph.composition.as_ref().unwrap().module_sources;
+        assert_eq!(
+            module_sources,
+            &vec![
+                format!(
+                    "./parts/dev.nix\t{}",
+                    crate::SHA256::sha256_hex(module_source.as_bytes())
+                ),
+                format!(
+                    "./shared.nix\t{}",
+                    crate::SHA256::sha256_hex(shared_source.as_bytes())
+                ),
+            ]
+        );
+        std::fs::write(live_path(&root), write(&graph.semantic_lock())).unwrap();
+        assert_eq!(FlakeGraph::load(&flake).unwrap(), graph);
+
+        std::fs::write(&shared, "{ perSystem = { }; }\n").unwrap();
+        let error = FlakeGraph::load(&flake).unwrap_err();
+        assert!(matches!(error, FlakeGraphError::StaleSemanticLock(reason) if reason.contains("composition")));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

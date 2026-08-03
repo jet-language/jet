@@ -1872,6 +1872,8 @@ fn lock_file_content_hash_roundtrip() {
         workspace_members: vec![LockedWorkspaceMember {
             name: "hello".into(),
             path: "packages/hello".into(),
+            source_digest: "no-workspace-source".into(),
+            canonical_path: "/workspace/packages/hello".into(),
         }],
         comptime_inputs: vec![],
         toolchains: Vec::new(),

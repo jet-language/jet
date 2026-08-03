@@ -12,6 +12,7 @@
 //! its own `SemanticLock`/patch-application machinery on top.
 
 use crate::Syntax;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OverlayPolicy {
@@ -42,6 +43,194 @@ impl OverlayPolicy {
             .packages
             .iter()
             .find(|p| p.package == package)
+    }
+
+    /// Resolve one package across overlay declarations in source order.
+    ///
+    /// This compatibility view is intentionally lossless on success. A
+    /// conflicting equal-priority scalar is rejected by the checked method;
+    /// callers that need the diagnostic should use
+    /// `resolve_package_override_checked`.
+    pub fn resolve_package_override(
+        &self,
+        package: &str,
+    ) -> Option<ResolvedPackageOverride> {
+        self.resolve_package_override_checked(package).ok().flatten()
+    }
+
+    /// Resolve one package and retain the precise equal-priority conflict.
+    /// Scalar and keyed environment facts use field priority; flags form a
+    /// set, patches append in overlay order, and every contender remains in
+    /// `provenance`.
+    pub fn resolve_package_override_checked(
+        &self,
+        package: &str,
+    ) -> Result<Option<ResolvedPackageOverride>, OverlayError> {
+        let mut resolved = ResolvedPackageOverride {
+            package: package.to_string(),
+            source: None,
+            version: None,
+            flags: Vec::new(),
+            priority: 0,
+            env: Vec::new(),
+            patches: Vec::new(),
+            allow_unfree: false,
+            field_priorities: BTreeMap::new(),
+            provenance: Vec::new(),
+        };
+        let mut winners = BTreeMap::<String, (i32, usize)>::new();
+        let mut flags = BTreeSet::new();
+        let mut found = false;
+
+        for (order, overlay) in self.overlays.iter().enumerate() {
+            let Some(candidate) = overlay.packages.iter().find(|p| p.package == package) else {
+                continue;
+            };
+            found = true;
+            resolved.priority = resolved.priority.max(candidate.priority);
+
+            if let Some(value) = &candidate.source {
+                let priority = candidate.field_priority("source");
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: "source".to_string(),
+                    value: value.clone(),
+                    priority,
+                });
+                if scalar_override_wins(
+                    &winners,
+                    "source",
+                    priority,
+                    order,
+                    resolved.source.as_deref(),
+                    value,
+                    package,
+                    &self.overlays,
+                )? {
+                    resolved.source = Some(value.clone());
+                    winners.insert("source".to_string(), (priority, order));
+                    resolved
+                        .field_priorities
+                        .insert("source".to_string(), priority);
+                }
+            }
+            if let Some(value) = &candidate.version {
+                let priority = candidate.field_priority("version");
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: "version".to_string(),
+                    value: value.clone(),
+                    priority,
+                });
+                if scalar_override_wins(
+                    &winners,
+                    "version",
+                    priority,
+                    order,
+                    resolved.version.as_deref(),
+                    value,
+                    package,
+                    &self.overlays,
+                )? {
+                    resolved.version = Some(value.clone());
+                    winners.insert("version".to_string(), (priority, order));
+                    resolved
+                        .field_priorities
+                        .insert("version".to_string(), priority);
+                }
+            }
+            for flag in &candidate.flags {
+                let priority = candidate.field_priority("flags");
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: format!("flags.{flag}"),
+                    value: "true".to_string(),
+                    priority,
+                });
+                flags.insert(flag.clone());
+                resolved
+                    .field_priorities
+                    .entry(format!("flags.{flag}"))
+                    .and_modify(|current| *current = (*current).max(priority))
+                    .or_insert(priority);
+            }
+            for (key, value) in &candidate.env {
+                let field = format!("env.{key}");
+                let priority = candidate.field_priority(&field);
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: field.clone(),
+                    value: value.clone(),
+                    priority,
+                });
+                let current = resolved
+                    .env
+                    .iter()
+                    .find(|(name, _)| name == key)
+                    .map(|(_, value)| value.as_str());
+                if scalar_override_wins(
+                    &winners,
+                    &field,
+                    priority,
+                    order,
+                    current,
+                    value,
+                    package,
+                    &self.overlays,
+                )? {
+                    if let Some(existing) = resolved.env.iter_mut().find(|(name, _)| name == key) {
+                        existing.1 = value.clone();
+                    } else {
+                        resolved.env.push((key.clone(), value.clone()));
+                    }
+                    winners.insert(field.clone(), (priority, order));
+                    resolved
+                        .field_priorities
+                        .insert(field, priority);
+                }
+            }
+            for patch in &candidate.patches {
+                let priority = candidate.field_priority("patches");
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: "patches".to_string(),
+                    value: patch.clone(),
+                    priority,
+                });
+                resolved.patches.push(patch.clone());
+                resolved
+                    .field_priorities
+                    .entry(format!("patches.{patch}"))
+                    .and_modify(|current| *current = (*current).max(priority))
+                    .or_insert(priority);
+            }
+            if candidate.allow_unfree {
+                let priority = candidate.field_priority("allowUnfree");
+                resolved.provenance.push(OverrideProvenance {
+                    overlay: overlay.name.clone(),
+                    order,
+                    field: "allowUnfree".to_string(),
+                    value: "true".to_string(),
+                    priority,
+                });
+                resolved.allow_unfree = true;
+                resolved
+                    .field_priorities
+                    .insert("allowUnfree".to_string(), priority);
+            }
+        }
+
+        if !found {
+            return Ok(None);
+        }
+        resolved.flags = flags.into_iter().collect();
+        resolved.env.sort();
+        Ok(Some(resolved))
     }
 
     pub fn allows_unfree(&self, package: &str) -> bool {
@@ -76,12 +265,77 @@ pub struct PackageOverride {
     /// D-JOS-PRIORITY1 tier for scalar/environment facts in this record.
     /// Ordinary is `0`; `Default`, `Force`, and `Priority(n)` are explicit.
     pub priority: i32,
+    /// Priority is attached to the contribution that carries it, not to the
+    /// whole package record. `priority` remains the aggregate maximum for
+    /// compatibility and quick display; resolution reads this map first.
+    pub field_priorities: BTreeMap<String, i32>,
     /// Environment overrides are stored as typed key/value facts.  The
     /// keyed-record parser and the legacy dotted spelling both lower here so
     /// provider consumers never need a second representation.
     pub env: Vec<(String, String)>,
     pub patches: Vec<String>,
     pub allow_unfree: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPackageOverride {
+    pub package: String,
+    pub source: Option<String>,
+    pub version: Option<String>,
+    pub flags: Vec<String>,
+    pub priority: i32,
+    pub env: Vec<(String, String)>,
+    pub patches: Vec<String>,
+    pub allow_unfree: bool,
+    pub field_priorities: BTreeMap<String, i32>,
+    pub provenance: Vec<OverrideProvenance>,
+}
+
+impl ResolvedPackageOverride {
+    /// Stable identity for the complete resolved overlay fact. The semantic
+    /// lock uses this instead of re-projecting raw overlay declarations.
+    pub fn policy_fingerprint(&self) -> String {
+        let env = self
+            .env
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("+");
+        let provenance = self
+            .provenance
+            .iter()
+            .map(|fact| {
+                format!(
+                    "{}#{}:{}={}@{}",
+                    fact.overlay, fact.order, fact.field, fact.value, fact.priority
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("+");
+        format!(
+            "workspace.overlay.resolved:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            self.package,
+            self.source.as_deref().unwrap_or("source:unchanged"),
+            self.version.as_deref().unwrap_or("version:unchanged"),
+            self.flags.join("+"),
+            env,
+            self.patches.join("+"),
+            self.allow_unfree,
+            self.priority,
+            format!("{:?}", self.field_priorities),
+            provenance,
+            self.provenance.len(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverrideProvenance {
+    pub overlay: String,
+    pub order: usize,
+    pub field: String,
+    pub value: String,
+    pub priority: i32,
 }
 
 impl PackageOverride {
@@ -92,10 +346,18 @@ impl PackageOverride {
             version: None,
             flags: Vec::new(),
             priority: 0,
+            field_priorities: BTreeMap::new(),
             env: Vec::new(),
             patches: Vec::new(),
             allow_unfree: false,
         }
+    }
+
+    fn field_priority(&self, field: &str) -> i32 {
+        self.field_priorities
+            .get(field)
+            .copied()
+            .unwrap_or(self.priority)
     }
 
     pub fn policy_fingerprint(&self, overlay: &OverlaySet) -> String {
@@ -112,7 +374,7 @@ impl PackageOverride {
         let mut env = self.env.clone();
         env.sort();
         format!(
-            "workspace.overlay.{}:{}:{}:{}:{}:{}:{}:{}",
+            "workspace.overlay.{}:{}:{}:{}:{}:{}:{}:{}:{}",
             overlay.name,
             self.package,
             provider,
@@ -128,7 +390,8 @@ impl PackageOverride {
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<_>>()
                 .join("+"),
-            self.patches.join("+")
+            format!("{:?}", self.patches),
+            format!("{:?}", self.field_priorities)
         )
     }
 }
@@ -143,14 +406,39 @@ pub struct PatchApplication {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverlayError {
     Malformed(String),
+    Conflict {
+        package: String,
+        field: String,
+        priority: i32,
+        left_overlay: String,
+        right_overlay: String,
+        left: String,
+        right: String,
+    },
     IO(String),
     Patch(String),
 }
 
 impl OverlayError {
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> String {
         match self {
-            OverlayError::Malformed(s) | OverlayError::IO(s) | OverlayError::Patch(s) => s,
+            OverlayError::Malformed(s) | OverlayError::IO(s) | OverlayError::Patch(s) => s.clone(),
+            OverlayError::Conflict {
+                package,
+                field,
+                priority,
+                left_overlay,
+                right_overlay,
+                left,
+                right,
+            } => {
+                // Keep the conflict fully source-backed: the two overlay names
+                // identify the declarations, while the values and tier make
+                // the failed precedence decision inspectable.
+                format!(
+                    "package `{package}` has conflicting `{field}` at priority {priority}: `{left}` from overlay `{left_overlay}` vs `{right}` from overlay `{right_overlay}`"
+                )
+            }
         }
     }
 }
@@ -189,6 +477,15 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
         policy.overlays.push(parsed);
         pos = at + Syntax::WORKSPACE_OVERLAY.len() + rest.len() - after_name.len() + 1 + consumed;
     }
+    let mut packages = BTreeSet::new();
+    for overlay in &policy.overlays {
+        for package in &overlay.packages {
+            packages.insert(package.package.clone());
+        }
+    }
+    for package in packages {
+        policy.resolve_package_override_checked(&package)?;
+    }
     Ok(policy)
 }
 
@@ -207,12 +504,12 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
             continue;
         }
         if let Some(pkg) = parse_package_override_line(line)? {
-            merge_package_override(&mut overlay.packages, pkg);
+            merge_package_override(&mut overlay.packages, pkg)?;
         }
     }
     if let Some(overrides) = named_record(body, "overrides")? {
         for package in parse_keyed_overrides(&overrides)? {
-            merge_package_override(&mut overlay.packages, package);
+            merge_package_override(&mut overlay.packages, package)?;
         }
     }
     Ok(overlay)
@@ -295,16 +592,47 @@ fn parse_keyed_override_record(
                 let (source, priority) = parse_priority_value(value)?;
                 result.source = Some(source);
                 result.priority = result.priority.max(priority);
+                result.field_priorities.insert("source".to_string(), priority);
             }
             "version" => {
                 let (version, priority) = parse_priority_value(value)?;
                 result.version = Some(version);
                 result.priority = result.priority.max(priority);
+                result.field_priorities.insert("version".to_string(), priority);
             }
-            "flags" => result.flags = parse_flag_record(value)?,
-            "env" => result.env = parse_env_record(value)?,
-            "patches" => result.patches = parse_patch_list(value)?,
-            "allowUnfree" => result.allow_unfree = parse_bool(value)?,
+            "flags" => {
+                let (flags, priority) = parse_priority_flag_record(value)?;
+                result.flags = flags;
+                result.priority = result.priority.max(priority);
+                result.field_priorities.insert("flags".to_string(), priority);
+            }
+            "env" => {
+                let (env, priority) = parse_priority_env_record(value)?;
+                result.env = env;
+                result.priority = result.priority.max(priority);
+                let fields = result
+                    .env
+                    .iter()
+                    .map(|(key, _)| format!("env.{key}"))
+                    .collect::<Vec<_>>();
+                for field in fields {
+                    result.field_priorities.insert(field, priority);
+                }
+            }
+            "patches" => {
+                let (patches, priority) = parse_priority_patch_list(value)?;
+                result.patches = patches;
+                result.priority = result.priority.max(priority);
+                result.field_priorities.insert("patches".to_string(), priority);
+            }
+            "allowUnfree" => {
+                let (allow, priority) = parse_priority_bool(value)?;
+                result.allow_unfree = allow;
+                result.priority = result.priority.max(priority);
+                result
+                    .field_priorities
+                    .insert("allowUnfree".to_string(), priority);
+            }
             other => {
                 return Err(OverlayError::Malformed(format!(
                     "unknown package override field `{other}`"
@@ -316,10 +644,15 @@ fn parse_keyed_override_record(
 }
 
 fn parse_priority_value(raw: &str) -> Result<(String, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((unquote(&raw), priority))
+}
+
+fn priority_payload(raw: &str) -> Result<(String, i32), OverlayError> {
     let raw = raw.trim().trim_end_matches(',');
     for (wrapper, priority) in [("Force(", 100), ("Default(", -100)] {
         if let Some(inner) = raw.strip_prefix(wrapper).and_then(|v| v.strip_suffix(')')) {
-            return Ok((unquote(inner), priority));
+            return Ok((inner.trim().to_string(), priority));
         }
     }
     if let Some(inner) = raw
@@ -332,17 +665,42 @@ fn parse_priority_value(raw: &str) -> Result<(String, i32), OverlayError> {
             let parts = top_level_commas(inner);
             if parts.len() < 2 {
                 return Err(OverlayError::Malformed(
-                    "`Priority(n)` override needs `n: value`".to_string(),
+                    "Priority(n) override needs n: value".to_string(),
                 ));
             }
             (parts[0].trim().to_string(), parts[1..].join(",").trim().to_string())
         };
         let priority = weight.parse::<i32>().map_err(|_| {
-            OverlayError::Malformed("`Priority(n)` needs an integer weight".to_string())
+            OverlayError::Malformed("Priority(n) needs an integer weight".to_string())
         })?;
-        return Ok((unquote(&value), priority));
+        return Ok((value, priority));
     }
-    Ok((unquote(raw), 0))
+    Ok((raw.to_string(), 0))
+}
+
+fn parse_priority_bool(raw: &str) -> Result<(bool, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((parse_bool(&raw)?, priority))
+}
+
+fn parse_priority_flag_record(raw: &str) -> Result<(Vec<String>, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((parse_flag_record(&raw)?, priority))
+}
+
+fn parse_priority_string_list(raw: &str) -> Result<(Vec<String>, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((parse_string_list(&raw)?, priority))
+}
+
+fn parse_priority_env_record(raw: &str) -> Result<(Vec<(String, String)>, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((parse_env_record(&raw)?, priority))
+}
+
+fn parse_priority_patch_list(raw: &str) -> Result<(Vec<String>, i32), OverlayError> {
+    let (raw, priority) = priority_payload(raw)?;
+    Ok((parse_patch_list(&raw)?, priority))
 }
 
 fn parse_flag_record(raw: &str) -> Result<Vec<String>, OverlayError> {
@@ -480,20 +838,50 @@ fn parse_package_override_line(line: &str) -> Result<Option<PackageOverride>, Ov
         ));
     };
     match field {
-        "patches" => pkg.patches = parse_patch_list(op_value.1)?,
-        "flags" => pkg.flags = parse_string_list(op_value.1)?,
-        "env" => pkg.env = parse_env_record(op_value.1)?,
+        "patches" => {
+            let (patches, priority) = parse_priority_patch_list(op_value.1)?;
+            pkg.patches = patches;
+            pkg.priority = pkg.priority.max(priority);
+            pkg.field_priorities.insert("patches".to_string(), priority);
+        }
+        "flags" => {
+            let (flags, priority) = parse_priority_string_list(op_value.1)?;
+            pkg.flags = flags;
+            pkg.priority = pkg.priority.max(priority);
+            pkg.field_priorities.insert("flags".to_string(), priority);
+        }
+        "env" => {
+            let (env, priority) = parse_priority_env_record(op_value.1)?;
+            pkg.env = env;
+            pkg.priority = pkg.priority.max(priority);
+            let fields = pkg
+                .env
+                .iter()
+                .map(|(key, _)| format!("env.{key}"))
+                .collect::<Vec<_>>();
+            for field in fields {
+                pkg.field_priorities.insert(field, priority);
+            }
+        }
         "version" => {
             let (version, priority) = parse_priority_value(op_value.1)?;
             pkg.version = Some(version);
-            pkg.priority = priority;
+            pkg.priority = pkg.priority.max(priority);
+            pkg.field_priorities.insert("version".to_string(), priority);
         }
         "source" => {
             let (source, priority) = parse_priority_value(op_value.1)?;
             pkg.source = Some(source);
-            pkg.priority = priority;
+            pkg.priority = pkg.priority.max(priority);
+            pkg.field_priorities.insert("source".to_string(), priority);
         }
-        "allowUnfree" => pkg.allow_unfree = parse_bool(op_value.1)?,
+        "allowUnfree" => {
+            let (allow, priority) = parse_priority_bool(op_value.1)?;
+            pkg.allow_unfree = allow;
+            pkg.priority = pkg.priority.max(priority);
+            pkg.field_priorities
+                .insert("allowUnfree".to_string(), priority);
+        }
         other => {
             return Err(OverlayError::Malformed(format!(
                 "unknown package override field `{other}`"
@@ -761,41 +1149,167 @@ fn split_top_level_colon(value: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn merge_package_override(packages: &mut Vec<PackageOverride>, incoming: PackageOverride) {
+fn merge_package_override(
+    packages: &mut Vec<PackageOverride>,
+    incoming: PackageOverride,
+) -> Result<(), OverlayError> {
     if let Some(existing) = packages.iter_mut().find(|p| p.package == incoming.package) {
-        if incoming.priority >= existing.priority && incoming.source.is_some() {
-            existing.source = incoming.source;
-        }
-        if incoming.priority >= existing.priority && incoming.version.is_some() {
-            existing.version = incoming.version;
-        }
-        existing.flags.extend(incoming.flags);
-        for (key, value) in incoming.env {
-            if let Some(existing_value) = existing.env.iter_mut().find(|(k, _)| k == &key) {
-                if incoming.priority >= existing.priority {
-                    existing_value.1 = value;
+        merge_package_scalar(existing, &incoming, "source")?;
+        merge_package_scalar(existing, &incoming, "version")?;
+        existing.flags.extend(incoming.flags.iter().cloned());
+        for (key, value) in &incoming.env {
+            let field = format!("env.{key}");
+            let incoming_priority = incoming.field_priority(&field);
+            let existing_priority = existing.field_priority(&field);
+            if let Some(index) = existing.env.iter().position(|(k, _)| k == key) {
+                let existing_value = existing.env[index].1.clone();
+                if existing_value == *value {
+                    existing
+                        .field_priorities
+                        .insert(field, existing_priority.max(incoming_priority));
+                } else if incoming_priority > existing_priority {
+                    existing.env[index].1 = value.clone();
+                    existing
+                        .field_priorities
+                        .insert(field, incoming_priority);
+                } else if incoming_priority == existing_priority {
+                    return Err(OverlayError::Conflict {
+                        package: existing.package.clone(),
+                        field,
+                        priority: incoming_priority,
+                        left_overlay: "same overlay".to_string(),
+                        right_overlay: "same overlay".to_string(),
+                        left: existing_value,
+                        right: value.clone(),
+                    });
                 }
             } else {
-                existing.env.push((key, value));
+                existing.env.push((key.clone(), value.clone()));
+                existing.field_priorities.insert(field, incoming_priority);
             }
         }
-        existing.patches.extend(incoming.patches);
+        existing.patches.extend(incoming.patches.iter().cloned());
         existing.allow_unfree |= incoming.allow_unfree;
         existing.priority = existing.priority.max(incoming.priority);
+        for (field, priority) in incoming.field_priorities {
+            existing
+                .field_priorities
+                .entry(field)
+                .and_modify(|current| *current = (*current).max(priority))
+                .or_insert(priority);
+        }
         existing.flags.sort();
         existing.flags.dedup();
         existing.env.sort();
-        existing.patches.sort();
-        existing.patches.dedup();
     } else {
         let mut incoming = incoming;
         incoming.flags.sort();
         incoming.flags.dedup();
         incoming.env.sort();
-        incoming.patches.sort();
-        incoming.patches.dedup();
         packages.push(incoming);
     }
+    Ok(())
+}
+
+fn merge_package_scalar(
+    existing: &mut PackageOverride,
+    incoming: &PackageOverride,
+    field: &str,
+) -> Result<(), OverlayError> {
+    let incoming_value = match field {
+        "source" => incoming.source.as_ref(),
+        "version" => incoming.version.as_ref(),
+        _ => None,
+    };
+    let Some(incoming_value) = incoming_value else {
+        return Ok(());
+    };
+    let incoming_priority = incoming.field_priority(field);
+    let existing_priority = existing.field_priority(field);
+    let existing_value = match field {
+        "source" => existing.source.clone(),
+        "version" => existing.version.clone(),
+        _ => None,
+    };
+    match existing_value {
+        None => {
+            match field {
+                "source" => existing.source = Some(incoming_value.clone()),
+                "version" => existing.version = Some(incoming_value.clone()),
+                _ => {}
+            }
+            existing
+                .field_priorities
+                .insert(field.to_string(), incoming_priority);
+        }
+        Some(existing_value) if existing_value == *incoming_value => {
+            existing
+                .field_priorities
+                .insert(field.to_string(), existing_priority.max(incoming_priority));
+        }
+        Some(existing_value) if incoming_priority > existing_priority => {
+            match field {
+                "source" => existing.source = Some(incoming_value.clone()),
+                "version" => existing.version = Some(incoming_value.clone()),
+                _ => {}
+            }
+            existing
+                .field_priorities
+                .insert(field.to_string(), incoming_priority);
+        }
+        Some(existing_value) if incoming_priority == existing_priority => {
+            return Err(OverlayError::Conflict {
+                package: existing.package.clone(),
+                field: field.to_string(),
+                priority: incoming_priority,
+                left_overlay: "same overlay".to_string(),
+                right_overlay: "same overlay".to_string(),
+                left: existing_value,
+                right: incoming_value.clone(),
+            });
+        }
+        Some(_) => {}
+    }
+    Ok(())
+}
+
+fn scalar_override_wins(
+    winners: &BTreeMap<String, (i32, usize)>,
+    field: &str,
+    priority: i32,
+    order: usize,
+    current: Option<&str>,
+    incoming: &str,
+    package: &str,
+    overlays: &[OverlaySet],
+) -> Result<bool, OverlayError> {
+    let Some((previous_priority, previous_order)) = winners.get(field) else {
+        return Ok(true);
+    };
+    if priority > *previous_priority {
+        return Ok(true);
+    }
+    if priority < *previous_priority {
+        return Ok(false);
+    }
+    if current == Some(incoming) {
+        return Ok(false);
+    }
+    Err(OverlayError::Conflict {
+        package: package.to_string(),
+        field: field.to_string(),
+        priority,
+        left_overlay: overlays
+            .get(*previous_order)
+            .map(|overlay| overlay.name.clone())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        right_overlay: overlays
+            .get(order)
+            .map(|overlay| overlay.name.clone())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        left: current.unwrap_or("<missing>").to_string(),
+        right: incoming.to_string(),
+    })
 }
 
 fn valid_env_name(name: &str) -> bool {
@@ -1042,6 +1556,32 @@ module workspace {
     }
 
     #[test]
+    fn patches_keep_append_order_and_duplicates_in_identity() {
+        let policy = parse_workspace_policy(
+            r#"
+module workspace {
+    overlay ordered {
+        package("app").patches += [patch("b.patch")]
+        package("app").patches += [patch("a.patch"), patch("b.patch")]
+    }
+}
+"#,
+        )
+        .unwrap();
+        let package = policy.package_override("ordered", "app").unwrap();
+        assert_eq!(
+            package.patches,
+            vec!["b.patch", "a.patch", "b.patch"]
+        );
+        let mut reversed = package.clone();
+        reversed.patches.reverse();
+        assert_ne!(
+            package.policy_fingerprint(policy.overlay("ordered").unwrap()),
+            reversed.policy_fingerprint(policy.overlay("ordered").unwrap())
+        );
+    }
+
+    #[test]
     fn strips_overlay_policy_before_workspace_eval() {
         let src = r#"
 module workspace {
@@ -1086,6 +1626,83 @@ module workspace {
         );
         assert_eq!(app.flags, vec!["lto"]);
         assert_eq!(app.priority, 10);
+    }
+
+    #[test]
+    fn field_priority_does_not_bleed_between_package_facts() {
+        let policy = parse_workspace_policy(
+            r#"
+module workspace {
+    overlay dev {
+        package("app").version: Force("2")
+        package("app").source: "local"
+    }
+}
+"#,
+        )
+        .unwrap();
+        let app = policy.resolve_package_override_checked("app").unwrap().unwrap();
+        assert_eq!(app.version.as_deref(), Some("2"));
+        assert_eq!(app.source.as_deref(), Some("local"));
+        assert_eq!(app.field_priorities["version"], 100);
+        assert_eq!(app.field_priorities["source"], 0);
+    }
+
+    #[test]
+    fn equal_priority_scalar_conflicts_keep_both_overlay_origins() {
+        let error = parse_workspace_policy(
+            r#"
+module workspace {
+    overlay base { package("app").version: "1" }
+    overlay local { package("app").version: "2" }
+}
+"#,
+        )
+        .unwrap_err();
+        let message = error.message();
+        assert!(message.contains("base"));
+        assert!(message.contains("local"));
+        assert!(message.contains("version"));
+    }
+
+    #[test]
+    fn resolves_overlays_by_priority_then_declaration_order_with_provenance() {
+        let policy = parse_workspace_policy(
+            r#"
+module workspace {
+    overlay base {
+        package("app").version: Priority(10: "1")
+        package("app").env += .{ CC: "gcc" }
+        package("app").patches += [patch("base.patch")]
+    }
+    overlay local {
+        package("app").version: "2"
+        package("app").env += .{ CC: "clang", RUST_LOG: "debug" }
+        package("app").patches += [patch("local.patch")]
+    }
+}
+"#,
+        )
+        .unwrap();
+        let app = policy.resolve_package_override("app").unwrap();
+        assert_eq!(app.version.as_deref(), Some("1"));
+        assert_eq!(
+            app.env,
+            vec![
+                ("CC".into(), "gcc".into()),
+                ("RUST_LOG".into(), "debug".into()),
+            ]
+        );
+        assert_eq!(app.patches, vec!["base.patch", "local.patch"]);
+        assert_eq!(app.provenance.len(), 7);
+        assert!(app
+            .provenance
+            .iter()
+            .any(|fact| fact.overlay == "base" && fact.field == "version"));
+        assert!(app
+            .provenance
+            .iter()
+            .any(|fact| fact.overlay == "local" && fact.field == "env.CC"));
     }
 
     #[test]

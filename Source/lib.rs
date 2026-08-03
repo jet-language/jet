@@ -393,7 +393,18 @@ fn compile_workspace_build_opts(
     };
 
     for member in members {
-        let entry = workspace_member_entry(workspace_root, &member.path);
+        let entry = match workspace_member_entry(workspace_root, &member.path) {
+            Ok(entry) => entry,
+            Err(error) => {
+                return Err(vec![Diagnostic::error(
+                    "E3501",
+                    format!("workspace member `{}` has an invalid typed output", member.name),
+                    error,
+                    "repair the member's typed Package output before building the workspace".to_string(),
+                    None,
+                )]);
+            }
+        };
         if !entry.is_file() {
             return Err(vec![Diagnostic::error(
                 "E3501",
@@ -627,23 +638,26 @@ fn absolute_source_path(file: &str) -> std::path::PathBuf {
     }
 }
 
-fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::PathBuf {
+fn workspace_member_entry(
+    root: &std::path::Path,
+    member: &str,
+) -> Result<std::path::PathBuf, String> {
     let member_root = root.join(member);
-    if let Some(entry) = package_output_entry(&member_root) {
-        return entry;
+    if let Some(entry) = package_output_entry(&member_root)? {
+        return Ok(entry);
     }
     for candidate in [
         member_root.join(Syntax::DEFAULT_ENTRY_FILE),
         member_root.join("src").join(Syntax::DEFAULT_ENTRY_FILE),
     ] {
         if candidate.is_file() {
-            return candidate;
+            return Ok(candidate);
         }
     }
     if let Some(Ok(manifest)) = PackageManifest::PackManifest::load(&member_root) {
         let candidate = member_root.join(format!("{}.{}", manifest.package.name, Syntax::FILE_EXT));
         if candidate.is_file() {
-            return candidate;
+            return Ok(candidate);
         }
     }
     let package_manifest = member_root.join(Syntax::PAYLOAD_FILE);
@@ -652,7 +666,7 @@ fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::Pa
             // A package may own build authority without a runtime entry file.
             // Pass the manifest through the normal Driver path so its selected
             // build function is checked and run with the package root context.
-            return package_manifest;
+            return Ok(package_manifest);
         }
     }
     for candidate in [
@@ -660,19 +674,25 @@ fn workspace_member_entry(root: &std::path::Path, member: &str) -> std::path::Pa
         member_root.join(Syntax::LEGACY_ENTRY_FILE),
     ] {
         if candidate.is_file() {
-            return candidate;
+            return Ok(candidate);
         }
     }
-    member_root.join(Syntax::DEFAULT_ENTRY_FILE)
+    Ok(member_root.join(Syntax::DEFAULT_ENTRY_FILE))
 }
 
-fn package_output_entry(root: &std::path::Path) -> Option<std::path::PathBuf> {
-    let package = Package::PackageFacts::load(root)?.ok()?;
-    let output = package.select_output("run", None, None).ok()?;
-    package.entry_path(root, output).or_else(|| {
-        let candidate = root.join(format!("{}.{}", output.name, Syntax::FILE_EXT));
-        candidate.is_file().then_some(candidate)
-    })
+fn package_output_entry(root: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
+    let Some(package) = Package::PackageFacts::load(root) else {
+        return Ok(None);
+    };
+    let package = package.map_err(|error| {
+        let source = if root.join(Syntax::PACKAGE_FILE).is_file() {
+            root.join(Syntax::PACKAGE_FILE)
+        } else {
+            root.join(Syntax::PAYLOAD_FILE)
+        };
+        format!("typed Package `{}` is invalid: {error}", source.display())
+    })?;
+    package.resolve_run_entry(root)
 }
 
 fn read_real_generated_file(

@@ -47,6 +47,20 @@ pub struct OutputFact {
     pub name: String,
     pub entry: Option<String>,
     pub fields: BTreeMap<String, String>,
+    /// The checked output payload. `fields` remains the compatibility view;
+    /// Canvas and other structured consumers must use this value so arrays,
+    /// objects, booleans, and numbers are not flattened into strings.
+    pub payload: OutputPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputPayload {
+    Null,
+    Bool(bool),
+    Number(String),
+    String(String),
+    Array(Vec<OutputPayload>),
+    Object(BTreeMap<String, OutputPayload>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -88,6 +102,9 @@ pub struct PackageFacts {
     /// `configs: [...]` list can refer to either inline or file-backed Configs.
     pub inline_configs: BTreeMap<String, ConfigFacts>,
     pub members: Vec<MemberRef>,
+    /// Every successful contributor to a field, in declaration/composition
+    /// order. The fact values remain the authority; this is their audit view.
+    pub provenance: BTreeMap<String, Vec<String>>,
     pub origin: String,
 }
 
@@ -115,6 +132,7 @@ pub enum ComposeError {
         right: String,
     },
     UnknownDefault { intent: String, output: String },
+    UnknownIntent { intent: String },
 }
 
 impl fmt::Display for ComposeError {
@@ -135,6 +153,9 @@ impl fmt::Display for ComposeError {
             ),
             Self::UnknownDefault { intent, output } => {
                 write!(f, "default `{intent}` names unknown output `{output}`")
+            }
+            Self::UnknownIntent { intent } => {
+                write!(f, "unknown Output intent `{intent}`")
             }
         }
     }
@@ -175,13 +196,26 @@ impl std::error::Error for PackageParseError {}
 impl PackageFacts {
     /// Parse the canonical `package.jet` root shape.
     pub fn parse(text: &str, origin: impl Into<String>) -> Result<Self, PackageParseError> {
+        let facts = Self::parse_uncomposed(text, origin)?;
+        facts
+            .validate_defaults()
+            .map_err(|error| PackageParseError::Composition(error.to_string()))?;
+        Ok(facts)
+    }
+
+    /// Parse the root's own declarations without validating references that
+    /// may be supplied by a later file-backed Config.  `load` is the complete
+    /// path; this split keeps member identity checks structural while letting
+    /// the package loader compose every declared Config before validating
+    /// defaults.
+    pub fn parse_uncomposed(
+        text: &str,
+        origin: impl Into<String>,
+    ) -> Result<Self, PackageParseError> {
         let facts = parse_common(text, origin.into(), false)?;
         if facts.name.is_empty() {
             return Err(PackageParseError::MissingName);
         }
-        facts
-            .validate_defaults()
-            .map_err(|error| PackageParseError::Composition(error.to_string()))?;
         Ok(facts)
     }
 
@@ -190,9 +224,21 @@ impl PackageFacts {
         let canonical = dir.join("package.jet");
         let legacy = dir.join("pkg.jet");
         let path = if canonical.is_file() { canonical } else { legacy };
-        let text = std::fs::read_to_string(&path).ok()?;
-        Some(Self::parse(&text, path.display().to_string()).and_then(|mut facts| {
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if path.is_file() => {
+                return Some(Err(PackageParseError::Composition(format!(
+                    "couldn't read Package `{}`: {error}",
+                    path.display()
+                ))))
+            }
+            Err(_) => return None,
+        };
+        Some(Self::parse_uncomposed(&text, path.display().to_string()).and_then(|mut facts| {
             facts.compose_configs(dir)?;
+            facts
+                .validate_defaults()
+                .map_err(|error| PackageParseError::Composition(error.to_string()))?;
             facts.validate_members_in(dir)?;
             Ok(facts)
         }))
@@ -263,38 +309,42 @@ impl PackageFacts {
     where
         I: IntoIterator<Item = ConfigFacts>,
     {
+        let mut candidate = self.clone();
         for config in configs {
-            merge_common(
-                self,
-                config.version,
-                config.source,
-                config.deps,
-                config.services,
-                config.outputs,
-                config.environments,
-                config.defaults,
-                &config.origin,
-            )?;
+            merge_config(&mut candidate, &config)?;
         }
-        self.validate_defaults()?;
+        candidate.validate_defaults()?;
+        *self = candidate;
         Ok(())
+    }
+
+    /// Return the ordered sources that contributed to one typed field.
+    pub fn field_provenance(&self, field: &str) -> &[String] {
+        self.provenance
+            .get(field)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn validate_defaults(&self) -> Result<(), ComposeError> {
         for (intent, output) in &self.defaults {
+            validate_intent(intent)?;
             let Some(fact) = self.outputs.get(output) else {
                 return Err(ComposeError::UnknownDefault {
                     intent: intent.clone(),
                     output: output.clone(),
                 });
             };
-            if matches!(intent.as_str(), "run" | "dev") && !fact.kind.is_runnable() {
+            if !intent_accepts_kind(intent, fact.kind) {
                 return Err(ComposeError::Conflict {
                     field: format!("defaults.{intent}"),
                     left_origin: self.origin.clone(),
                     right_origin: self.origin.clone(),
                     left: output.clone(),
-                    right: "default must select an Executable or Service output".to_string(),
+                    right: format!(
+                        "default must select a {} output",
+                        intent_kind_description(intent)
+                    ),
                 });
             }
         }
@@ -310,31 +360,38 @@ impl PackageFacts {
         legacy: Option<&str>,
     ) -> Result<&OutputFact, ComposeError> {
         self.validate_defaults()?;
+        validate_intent(intent)?;
         let selected = explicit
             .map(str::to_string)
-            .or_else(|| legacy.map(str::to_string))
-            .or_else(|| {
-                let mut compatible = self
-                    .outputs
-                    .iter()
-                    .filter(|(_, output)| match intent {
-                        "run" | "dev" => output.kind.is_runnable(),
-                        "test" => output.kind == PackageOutputKind::Check,
-                        _ => true,
-                    })
-                    .map(|(name, _)| name.clone())
-                    .collect::<Vec<_>>();
-                (compatible.len() == 1).then(|| compatible.pop().unwrap())
-            })
-            .or_else(|| self.defaults.get(intent).cloned());
-        let Some(selected) = selected else {
-            return Err(ComposeError::Conflict {
-                field: format!("outputs.{intent}"),
-                left_origin: self.origin.clone(),
-                right_origin: self.origin.clone(),
-                left: "none".to_string(),
-                right: "no compatible output was selected".to_string(),
-            });
+            .or_else(|| legacy.map(str::to_string));
+        let selected = if let Some(selected) = selected {
+            selected
+        } else {
+            let mut compatible = self
+                .outputs
+                .iter()
+                .filter(|(_, output)| intent_accepts_kind(intent, output.kind))
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            compatible.sort();
+            if compatible.len() == 1 {
+                compatible.pop().unwrap()
+            } else if let Some(default) = self.defaults.get(intent) {
+                default.clone()
+            } else {
+                let candidates = if compatible.is_empty() {
+                    "none".to_string()
+                } else {
+                    compatible.join(", ")
+                };
+                return Err(ComposeError::Conflict {
+                    field: format!("outputs.{intent}"),
+                    left_origin: self.origin.clone(),
+                    right_origin: self.origin.clone(),
+                    left: candidates,
+                    right: "no unambiguous compatible output was selected".to_string(),
+                });
+            }
         };
         let Some(output) = self.outputs.get(&selected) else {
             return Err(ComposeError::UnknownDefault {
@@ -342,16 +399,61 @@ impl PackageFacts {
                 output: selected,
             });
         };
-        if matches!(intent, "run" | "dev") && !output.kind.is_runnable() {
+        if !intent_accepts_kind(intent, output.kind) {
             return Err(ComposeError::Conflict {
                 field: format!("outputs.{intent}"),
                 left_origin: self.origin.clone(),
                 right_origin: self.origin.clone(),
                 left: output.name.clone(),
-                right: "selected output is not runnable".to_string(),
+                right: format!(
+                    "selected output is incompatible with the {} intent",
+                    intent_kind_description(intent)
+                ),
             });
         }
         Ok(output)
+    }
+
+    /// Resolve the selected runnable output without allowing the migration
+    /// filename convention to hide a broken typed declaration.
+    pub fn resolve_run_entry(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        self.validate_defaults()
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        if let Some(entry) = self.legacy_run_entry(root) {
+            return Ok(Some(entry));
+        }
+        if !self
+            .outputs
+            .values()
+            .any(|output| intent_accepts_kind("run", output.kind))
+        {
+            return Ok(None);
+        }
+        let output = self
+            .select_output("run", None, None)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let Some(entry) = self.entry_path(root, output) else {
+            return Err(format!(
+                "{}: typed output `{}` has no unique source entry for `{}`",
+                self.origin,
+                output.name,
+                output.entry.as_deref().unwrap_or("<missing>")
+            ));
+        };
+        Ok(Some(entry))
+    }
+
+    fn legacy_run_entry(&self, root: &std::path::Path) -> Option<std::path::PathBuf> {
+        let matches = self
+            .source_files(root)
+            .into_iter()
+            .filter(|path| path.parent() == Some(root))
+            .filter(|path| file_has_top_level_function(path, "run"))
+            .collect::<Vec<_>>();
+        (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
     }
 
     /// Resolve a runnable Output's checked-reference spelling to a source
@@ -365,16 +467,63 @@ impl PackageFacts {
         output: &OutputFact,
     ) -> Option<std::path::PathBuf> {
         let entry = output.entry.as_deref()?;
-        let name = entry.rsplit('.').next().unwrap_or(entry);
-        if !is_identifier(name) {
+        let parts = entry.split('.').collect::<Vec<_>>();
+        if (parts.len() != 1 && parts.len() != 2)
+            || parts.iter().any(|part| !is_identifier(part))
+        {
             return None;
         }
+        let files = self.source_files(root);
+        if parts.len() == 1 {
+            let matches = files
+                .into_iter()
+                .filter(|path| path.parent() == Some(root))
+                .filter(|path| file_has_top_level_function(path, parts[0]))
+                .collect::<Vec<_>>();
+            return (matches.len() == 1).then(|| matches.into_iter().next().unwrap());
+        }
+        let sources = parse_sources(&files)?;
+        let mut targets = sources
+            .iter()
+            .filter(|source| source.path.parent() == Some(root))
+            .flat_map(|source| imported_module_targets(root, source, parts[0], &sources))
+            .collect::<Vec<_>>();
+        targets.sort();
+        targets.dedup();
+        let matches = if targets.len() == 1 {
+            sources
+                .iter()
+                .filter(|source| source.path == targets[0])
+                .filter(|source| {
+                    unique_top_level_function(&source.program, parts[1])
+                        .is_some_and(|function| function.is_pub)
+                })
+                .map(|source| source.path.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+    }
+
+    fn source_files(&self, root: &std::path::Path) -> Vec<std::path::PathBuf> {
         let mut files = Vec::new();
         collect_jet_files(root, &mut files);
+        files.retain(|path| {
+            let reserved = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "package.jet" || name == "pkg.jet");
+            let config = self.configs.iter().any(|name| {
+                let candidate = root.join(name);
+                path == &candidate
+                    || (candidate.extension().is_none()
+                        && path == &candidate.with_extension("jet"))
+            });
+            !reserved && !config
+        });
         files.sort();
         files
-            .into_iter()
-            .find(|path| file_has_top_level_function(path, name))
     }
 
     pub fn validate_members(&self) -> Result<(), ComposeError> {
@@ -411,6 +560,8 @@ impl PackageFacts {
                 dir.display()
             ))
         })?;
+        let mut physical = Vec::new();
+        let mut names = Vec::new();
         for member in &self.members {
             let relative = match member {
                 MemberRef::Path(relative) | MemberRef::Find(relative) => relative,
@@ -426,13 +577,129 @@ impl PackageFacts {
                     dir.display()
                 )));
             }
-            if matches!(member, MemberRef::Find(_)) && !path.is_dir() {
+            if path == root {
                 return Err(PackageParseError::Composition(format!(
-                    "member discovery reference `{relative}` is not a directory"
+                    "member reference `{relative}` resolves to its Package root"
                 )));
+            }
+            let candidates = if matches!(member, MemberRef::Find(_)) {
+                let entries = std::fs::read_dir(&path).map_err(|error| {
+                    PackageParseError::Composition(format!(
+                        "couldn't scan member discovery directory `{relative}`: {error}"
+                    ))
+                })?;
+                let mut children = Vec::new();
+                for entry in entries {
+                    let entry = entry.map_err(|error| {
+                        PackageParseError::Composition(format!(
+                            "couldn't read member discovery directory `{relative}`: {error}"
+                        ))
+                    })?;
+                    let child = entry.path();
+                    let file_type = entry.file_type().map_err(|error| {
+                        PackageParseError::Composition(format!(
+                            "couldn't inspect discovered member `{}`: {error}",
+                            child.display()
+                        ))
+                    })?;
+                    if !(file_type.is_dir() || (file_type.is_symlink() && child.is_dir())) {
+                        continue;
+                    }
+                    if package_manifest_path(&child).is_some() {
+                        children.push(child);
+                    }
+                }
+                children.sort();
+                children
+            } else {
+                vec![path]
+            };
+            for candidate in candidates {
+                let candidate = candidate.canonicalize().map_err(|error| {
+                    PackageParseError::Composition(format!(
+                        "couldn't resolve member Package `{}`: {error}",
+                        candidate.display()
+                    ))
+                })?;
+                if !candidate.starts_with(&root) || candidate == root {
+                    return Err(PackageParseError::Composition(format!(
+                        "member reference `{relative}` resolves outside its Package root"
+                    )));
+                }
+                if physical.iter().any(|existing| existing == &candidate) {
+                    return Err(PackageParseError::Composition(format!(
+                        "member reference `{relative}` has the same physical identity as another member"
+                    )));
+                }
+                let (name, nested) = package_member_identity(&candidate)?;
+                if nested {
+                    return Err(PackageParseError::Composition(format!(
+                        "member Package `{relative}` declares members"
+                    )));
+                }
+                if names.iter().any(|existing| existing == &name) {
+                    return Err(PackageParseError::Composition(format!(
+                        "member Package name `{name}` is declared more than once"
+                    )));
+                }
+                physical.push(candidate);
+                names.push(name);
             }
         }
         Ok(())
+    }
+}
+
+fn intent_accepts_kind(intent: &str, kind: PackageOutputKind) -> bool {
+    match intent {
+        "run" => matches!(kind, PackageOutputKind::Executable | PackageOutputKind::Service),
+        "test" | "check" => kind == PackageOutputKind::Check,
+        "dev" | "enter" => kind == PackageOutputKind::Environment,
+        "publish" => matches!(
+            kind,
+            PackageOutputKind::Library
+                | PackageOutputKind::Executable
+                | PackageOutputKind::Service
+        ),
+        "deploy" | "fleet" => kind == PackageOutputKind::Fleet,
+        "activate" | "activation" => {
+            matches!(kind, PackageOutputKind::System | PackageOutputKind::Fleet)
+        }
+        _ => false,
+    }
+}
+
+fn intent_kind_description(intent: &str) -> &'static str {
+    match intent {
+        "run" => "Executable or Service",
+        "test" | "check" => "Check",
+        "dev" | "enter" => "Environment",
+        "publish" => "Library, Executable, or Service",
+        "deploy" | "fleet" => "Fleet",
+        "activate" | "activation" => "System or Fleet",
+        _ => "a compatible",
+    }
+}
+
+fn validate_intent(intent: &str) -> Result<(), ComposeError> {
+    if matches!(
+        intent,
+        "run"
+            | "test"
+            | "check"
+            | "dev"
+            | "enter"
+            | "publish"
+            | "deploy"
+            | "fleet"
+            | "activate"
+            | "activation"
+    ) {
+        Ok(())
+    } else {
+        Err(ComposeError::UnknownIntent {
+            intent: intent.to_string(),
+        })
     }
 }
 
@@ -459,6 +726,54 @@ impl ConfigFacts {
     }
 }
 
+fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let canonical = dir.join("package.jet");
+    if canonical.is_file() {
+        Some(canonical)
+    } else {
+        let legacy = dir.join("pkg.jet");
+        legacy.is_file().then_some(legacy)
+    }
+}
+
+fn legacy_package_name(text: &str, dir: &std::path::Path) -> String {
+    text.lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix("name:")?;
+            let value = rest.trim().trim_end_matches(',').trim().trim_matches('"');
+            (!value.is_empty() && !value.contains('{')).then(|| value.to_string())
+        })
+        .or_else(|| dir.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+fn package_member_identity(
+    dir: &std::path::Path,
+) -> Result<(String, bool), PackageParseError> {
+    let Some(manifest) = package_manifest_path(dir) else {
+        return Err(PackageParseError::Composition(format!(
+            "member directory `{}` is not a Package directory",
+            dir.display()
+        )));
+    };
+    let text = std::fs::read_to_string(&manifest).map_err(|error| {
+        PackageParseError::Composition(format!(
+            "couldn't read member Package `{}`: {error}",
+            manifest.display()
+        ))
+    })?;
+    if manifest.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
+        let facts = PackageFacts::parse_uncomposed(&text, manifest.display().to_string())?;
+        Ok((facts.name, !facts.members.is_empty()))
+    } else {
+        Ok((
+            legacy_package_name(&text, dir),
+            text.lines()
+                .any(|line| line.trim_start().starts_with("members:")),
+        ))
+    }
+}
+
 fn parse_common(
     text: &str,
     origin: String,
@@ -468,25 +783,14 @@ fn parse_common(
         origin,
         ..PackageFacts::default()
     };
+    let mut inline = Vec::new();
     let mut seen = BTreeMap::<String, String>::new();
     for entry in top_level_entries(&strip_comments(text)) {
         if !config {
             if let Some((name, _)) = config_wrapper(&entry)? {
                 let contribution_origin = format!("{}::{name}", facts.origin);
                 let contribution = ConfigFacts::parse(&entry, contribution_origin)?;
-                merge_common(
-                    &mut facts,
-                    contribution.version.clone(),
-                    contribution.source.clone(),
-                    contribution.deps.clone(),
-                    contribution.services.clone(),
-                    contribution.outputs.clone(),
-                    contribution.environments.clone(),
-                    contribution.defaults.clone(),
-                    &contribution.origin,
-                )
-                .map_err(|error| PackageParseError::Composition(error.to_string()))?;
-                facts.inline_configs.insert(name, contribution);
+                inline.push((name, contribution));
                 continue;
             }
         }
@@ -509,6 +813,14 @@ fn parse_common(
                     "output `{field}` is declared more than once"
                 )));
             }
+            let origin = facts.origin.clone();
+            let output = facts.outputs.get(&field).cloned().expect("inserted output");
+            record_output_provenance(
+                &mut facts.provenance,
+                &format!("outputs.{field}"),
+                &origin,
+                &output,
+            );
             continue;
         }
         match field.as_str() {
@@ -536,89 +848,585 @@ fn parse_common(
             "defaults" => facts.defaults = parse_string_map("defaults", &value)?,
             "members" if config => return Err(PackageParseError::ConfigMembers),
             "members" => facts.members = parse_members(&value)?,
+            "configs" if config => {
+                return Err(PackageParseError::UnknownField(field.clone()))
+            }
             "configs" => facts.configs = parse_list(&value),
             "description" | "license" | "edition" | "repository" => {}
             other => return Err(PackageParseError::UnknownField(other.to_string())),
         }
+        let origin = facts.origin.clone();
+        record_declared_provenance(&mut facts, &field, &origin);
+    }
+    for (name, contribution) in inline {
+        merge_config(&mut facts, &contribution)
+            .map_err(|error| PackageParseError::Composition(error.to_string()))?;
+        facts.inline_configs.insert(name, contribution);
     }
     Ok(facts)
 }
 
-fn merge_common(
-    root: &mut PackageFacts,
-    version: Option<String>,
-    source: Option<String>,
-    deps: BTreeMap<String, String>,
-    services: BTreeMap<String, ServiceFact>,
-    outputs: BTreeMap<String, OutputFact>,
-    environments: BTreeMap<String, EnvironmentFact>,
-    defaults: BTreeMap<String, String>,
-    origin: &str,
-) -> Result<(), ComposeError> {
-    merge_optional("version", &mut root.version, version, &root.origin, origin)?;
-    merge_optional("source", &mut root.source, source, &root.origin, origin)?;
-    merge_map("deps", &mut root.deps, deps, &root.origin, origin)?;
-    merge_map("services", &mut root.services, services, &root.origin, origin)?;
-    merge_map("outputs", &mut root.outputs, outputs, &root.origin, origin)?;
-    merge_map(
-        "environments",
-        &mut root.environments,
-        environments,
-        &root.origin,
-        origin,
+fn merge_config(root: &mut PackageFacts, config: &ConfigFacts) -> Result<(), ComposeError> {
+    let fallback = root.origin.clone();
+    merge_optional_field(
+        &mut root.version,
+        config.version.as_ref(),
+        "version",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
     )?;
-    merge_map("defaults", &mut root.defaults, defaults, &root.origin, origin)
+    merge_optional_field(
+        &mut root.source,
+        config.source.as_ref(),
+        "source",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )?;
+    merge_string_map(
+        &mut root.deps,
+        &config.deps,
+        "deps",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )?;
+    merge_services(
+        &mut root.services,
+        &config.services,
+        "services",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )?;
+    merge_outputs(
+        &mut root.outputs,
+        &config.outputs,
+        "outputs",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )?;
+    merge_environments(
+        &mut root.environments,
+        &config.environments,
+        "environments",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )?;
+    merge_string_map(
+        &mut root.defaults,
+        &config.defaults,
+        "defaults",
+        &fallback,
+        &config.origin,
+        &mut root.provenance,
+    )
 }
 
-fn merge_optional(
-    field: &str,
+fn record_declared_provenance(facts: &mut PackageFacts, field: &str, origin: &str) {
+    record_provenance(&mut facts.provenance, field, origin);
+    match field {
+        "services" => {
+            for (key, service) in &facts.services {
+                record_service_provenance(
+                    &mut facts.provenance,
+                    &format!("services.{key}"),
+                    origin,
+                    service,
+                );
+            }
+        }
+        "outputs" => {
+            for (key, output) in &facts.outputs {
+                record_output_provenance(
+                    &mut facts.provenance,
+                    &format!("outputs.{key}"),
+                    origin,
+                    output,
+                );
+            }
+        }
+        "environments" => {
+            for (key, environment) in &facts.environments {
+                record_environment_provenance(
+                    &mut facts.provenance,
+                    &format!("environments.{key}"),
+                    origin,
+                    environment,
+                );
+            }
+        }
+        _ => {
+            let keys = match field {
+                "deps" => facts.deps.keys().cloned().collect::<Vec<_>>(),
+                "defaults" => facts.defaults.keys().cloned().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            for key in keys {
+                record_provenance(&mut facts.provenance, &format!("{field}.{key}"), origin);
+            }
+        }
+    }
+}
+
+fn merge_optional_field(
     current: &mut Option<String>,
-    incoming: Option<String>,
-    left_origin: &str,
-    right_origin: &str,
+    incoming: Option<&String>,
+    field: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), ComposeError> {
     let Some(incoming) = incoming else { return Ok(()) };
+    let left_origin = provenance_origin(provenance, field, fallback);
     match current {
-        None => *current = Some(incoming),
-        Some(existing) if existing == &incoming => {}
+        None => *current = Some(incoming.clone()),
+        Some(existing) if existing == incoming => {}
         Some(existing) => {
             return Err(ComposeError::Conflict {
                 field: field.to_string(),
-                left_origin: left_origin.to_string(),
-                right_origin: right_origin.to_string(),
+                left_origin,
+                right_origin: origin.to_string(),
                 left: existing.clone(),
-                right: incoming,
+                right: incoming.clone(),
             })
+        }
+    }
+    record_provenance(provenance, field, origin);
+    Ok(())
+}
+
+fn merge_string_map(
+    current: &mut BTreeMap<String, String>,
+    incoming: &BTreeMap<String, String>,
+    field: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let path = format!("{field}.{key}");
+        let left_origin = provenance_origin(provenance, &path, fallback);
+        match current.get(key) {
+            None => {
+                current.insert(key.clone(), value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(existing) => {
+                return Err(ComposeError::Conflict {
+                    field: path,
+                    left_origin,
+                    right_origin: origin.to_string(),
+                    left: existing.clone(),
+                    right: value.clone(),
+                })
+            }
+        }
+        record_provenance(provenance, &format!("{field}.{key}"), origin);
+    }
+    Ok(())
+}
+
+fn merge_services(
+    current: &mut BTreeMap<String, ServiceFact>,
+    incoming: &BTreeMap<String, ServiceFact>,
+    field: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let path = format!("{field}.{key}");
+        if let Some(existing) = current.get(key) {
+            let mut merged = existing.clone();
+            merge_service_fact(&mut merged, value, &path, fallback, origin, provenance)?;
+            current.insert(key.clone(), merged);
+        } else {
+            current.insert(key.clone(), value.clone());
+            record_service_provenance(provenance, &path, origin, value);
         }
     }
     Ok(())
 }
 
-fn merge_map<T: PartialEq + Clone + fmt::Debug>(
+fn merge_service_fact(
+    current: &mut ServiceFact,
+    incoming: &ServiceFact,
+    path: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    merge_string_fields(
+        &mut current.fields,
+        &incoming.fields,
+        path,
+        fallback,
+        origin,
+        provenance,
+    )?;
+    if incoming.fields.contains_key("enable") {
+        current.enable = incoming.enable;
+    }
+    if incoming.fields.contains_key("ports") {
+        current.ports = incoming.ports.clone();
+    }
+    if incoming.fields.contains_key("ready") {
+        current.ready = incoming.ready.clone();
+    }
+    record_provenance(provenance, path, origin);
+    Ok(())
+}
+
+fn merge_outputs(
+    current: &mut BTreeMap<String, OutputFact>,
+    incoming: &BTreeMap<String, OutputFact>,
     field: &str,
-    current: &mut BTreeMap<String, T>,
-    incoming: BTreeMap<String, T>,
-    left_origin: &str,
-    right_origin: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), ComposeError> {
     for (key, value) in incoming {
-        match current.get(&key) {
+        let path = format!("{field}.{key}");
+        let Some(existing) = current.get(key) else {
+            current.insert(key.clone(), value.clone());
+            record_output_provenance(provenance, &path, origin, value);
+            continue;
+        };
+        if existing.kind != value.kind {
+            return Err(ComposeError::Conflict {
+                field: format!("{path}.kind"),
+                left_origin: provenance_origin(
+                    provenance,
+                    &format!("{path}.kind"),
+                    fallback,
+                ),
+                right_origin: origin.to_string(),
+                left: format!("{:?}", existing.kind),
+                right: format!("{:?}", value.kind),
+            });
+        }
+        let mut merged = existing.clone();
+        merge_output_fields(
+            &mut merged.fields,
+            &value.fields,
+            &path,
+            fallback,
+            origin,
+            provenance,
+        )?;
+        merge_output_payload(
+            &mut merged.payload,
+            &value.payload,
+            &path,
+            fallback,
+            origin,
+            provenance,
+        )?;
+        merged.name = merged
+            .fields
+            .get("name")
+            .map(|value| scalar(value))
+            .unwrap_or_else(|| key.clone());
+        merged.entry = merged.fields.get("entry").map(|value| scalar(value));
+        current.insert(key.clone(), merged);
+        record_provenance(provenance, &path, origin);
+    }
+    Ok(())
+}
+
+fn merge_output_fields(
+    current: &mut BTreeMap<String, String>,
+    incoming: &BTreeMap<String, String>,
+    path: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let field = format!("{path}.{key}");
+        let left_origin = provenance_origin(provenance, &field, fallback);
+        match current.get(key) {
             None => {
-                current.insert(key, value);
+                current.insert(key.clone(), value.clone());
             }
-            Some(existing) if existing == &value => {}
+            Some(existing) if existing == value => {}
+            Some(existing) if output_structured_field(key) => {}
             Some(existing) => {
                 return Err(ComposeError::Conflict {
-                    field: format!("{field}.{key}"),
-                    left_origin: left_origin.to_string(),
-                    right_origin: right_origin.to_string(),
-                    left: format!("{existing:?}"),
-                    right: format!("{value:?}"),
+                    field,
+                    left_origin,
+                    right_origin: origin.to_string(),
+                    left: existing.clone(),
+                    right: value.clone(),
                 })
             }
         }
+        record_provenance(provenance, &format!("{path}.{key}"), origin);
     }
     Ok(())
+}
+
+fn output_structured_field(field: &str) -> bool {
+    matches!(
+        field,
+        "modules"
+            | "tools"
+            | "services"
+            | "secrets"
+            | "from"
+            | "kind"
+            | "environment"
+            | "members"
+            | "packages"
+            | "options"
+            | "hosts"
+    )
+}
+
+fn merge_output_payload(
+    current: &mut OutputPayload,
+    incoming: &OutputPayload,
+    path: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    match (current, incoming) {
+        (OutputPayload::Object(current), OutputPayload::Object(incoming)) => {
+            for (key, value) in incoming {
+                let field = format!("{path}.{key}");
+                match current.get_mut(key) {
+                    None => {
+                        current.insert(key.clone(), value.clone());
+                    }
+                    Some(existing) => {
+                        merge_output_payload(existing, value, &field, fallback, origin, provenance)?;
+                    }
+                }
+                record_provenance(provenance, &field, origin);
+            }
+            Ok(())
+        }
+        (OutputPayload::Array(current), OutputPayload::Array(incoming)) => {
+            for value in incoming {
+                if !current.iter().any(|existing| existing == value) {
+                    current.push(value.clone());
+                }
+            }
+            record_provenance(provenance, path, origin);
+            Ok(())
+        }
+        (current, incoming) if current == incoming => {
+            record_provenance(provenance, path, origin);
+            Ok(())
+        }
+        (current, incoming) => Err(ComposeError::Conflict {
+            field: path.to_string(),
+            left_origin: provenance_origin(provenance, path, fallback),
+            right_origin: origin.to_string(),
+            left: format!("{current:?}"),
+            right: format!("{incoming:?}"),
+        }),
+    }
+}
+
+fn merge_environments(
+    current: &mut BTreeMap<String, EnvironmentFact>,
+    incoming: &BTreeMap<String, EnvironmentFact>,
+    field: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let path = format!("{field}.{key}");
+        let Some(existing) = current.get(key) else {
+            current.insert(key.clone(), value.clone());
+            record_environment_provenance(provenance, &path, origin, value);
+            continue;
+        };
+        let mut merged = existing.clone();
+        let scalar_fields = value
+            .fields
+            .iter()
+            .filter(|(name, _)| !matches!(name.as_str(), "name" | "tools" | "services" | "secrets"))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<BTreeMap<_, _>>();
+        merge_string_fields(
+            &mut merged.fields,
+            &scalar_fields,
+            &path,
+            fallback,
+            origin,
+            provenance,
+        )?;
+        if let Some(name) = value.fields.get("name") {
+            let mut names = BTreeMap::new();
+            names.insert("name".to_string(), name.clone());
+            merge_string_fields(&mut merged.fields, &names, &path, fallback, origin, provenance)?;
+        }
+        merge_string_list_field(
+            &mut merged.tools,
+            &value.tools,
+            &format!("{path}.tools"),
+            origin,
+            provenance,
+        );
+        merge_string_map(
+            &mut merged.secrets,
+            &value.secrets,
+            &format!("{path}.secrets"),
+            fallback,
+            origin,
+            provenance,
+        )?;
+        merge_services(
+            &mut merged.services,
+            &value.services,
+            &format!("{path}.services"),
+            fallback,
+            origin,
+            provenance,
+        )?;
+        merged.name = merged
+            .fields
+            .get("name")
+            .map(|value| scalar(value))
+            .unwrap_or_else(|| key.clone());
+        current.insert(key.clone(), merged);
+        record_provenance(provenance, &path, origin);
+    }
+    Ok(())
+}
+
+fn merge_string_fields(
+    current: &mut BTreeMap<String, String>,
+    incoming: &BTreeMap<String, String>,
+    path: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let field = format!("{path}.{key}");
+        let left_origin = provenance_origin(provenance, &field, fallback);
+        match current.get(key) {
+            None => {
+                current.insert(key.clone(), value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(existing) => {
+                return Err(ComposeError::Conflict {
+                    field,
+                    left_origin,
+                    right_origin: origin.to_string(),
+                    left: existing.clone(),
+                    right: value.clone(),
+                })
+            }
+        }
+        record_provenance(provenance, &format!("{path}.{key}"), origin);
+    }
+    Ok(())
+}
+
+fn merge_string_list_field(
+    current: &mut Vec<String>,
+    incoming: &[String],
+    field: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) {
+    for value in incoming {
+        if !current.iter().any(|existing| existing == value) {
+            current.push(value.clone());
+        }
+    }
+    current.sort();
+    record_provenance(provenance, field, origin);
+}
+
+fn record_service_provenance(
+    provenance: &mut BTreeMap<String, Vec<String>>,
+    path: &str,
+    origin: &str,
+    service: &ServiceFact,
+) {
+    record_provenance(provenance, path, origin);
+    for field in service.fields.keys() {
+        record_provenance(provenance, &format!("{path}.{field}"), origin);
+    }
+}
+
+fn record_output_provenance(
+    provenance: &mut BTreeMap<String, Vec<String>>,
+    path: &str,
+    origin: &str,
+    output: &OutputFact,
+) {
+    record_provenance(provenance, path, origin);
+    record_provenance(provenance, &format!("{path}.kind"), origin);
+    record_provenance(provenance, &format!("{path}.name"), origin);
+    for field in output.fields.keys() {
+        record_provenance(provenance, &format!("{path}.{field}"), origin);
+    }
+    record_payload_provenance(provenance, path, origin, &output.payload);
+}
+
+fn record_payload_provenance(
+    provenance: &mut BTreeMap<String, Vec<String>>,
+    path: &str,
+    origin: &str,
+    payload: &OutputPayload,
+) {
+    if let OutputPayload::Object(fields) = payload {
+        for (field, value) in fields {
+            let path = format!("{path}.{field}");
+            record_provenance(provenance, &path, origin);
+            record_payload_provenance(provenance, &path, origin, value);
+        }
+    }
+}
+
+fn record_environment_provenance(
+    provenance: &mut BTreeMap<String, Vec<String>>,
+    path: &str,
+    origin: &str,
+    environment: &EnvironmentFact,
+) {
+    record_provenance(provenance, path, origin);
+    for field in environment.fields.keys() {
+        record_provenance(provenance, &format!("{path}.{field}"), origin);
+    }
+    for (name, service) in &environment.services {
+        record_service_provenance(provenance, &format!("{path}.services.{name}"), origin, service);
+    }
+    for name in environment.secrets.keys() {
+        record_provenance(provenance, &format!("{path}.secrets.{name}"), origin);
+    }
+}
+
+fn record_provenance(provenance: &mut BTreeMap<String, Vec<String>>, field: &str, origin: &str) {
+    let origins = provenance.entry(field.to_string()).or_default();
+    if !origins.iter().any(|existing| existing == origin) {
+        origins.push(origin.to_string());
+    }
+}
+
+fn provenance_origin(
+    provenance: &BTreeMap<String, Vec<String>>,
+    field: &str,
+    fallback: &str,
+) -> String {
+    provenance
+        .get(field)
+        .and_then(|origins| origins.last())
+        .cloned()
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn parse_outputs(value: &str) -> Result<BTreeMap<String, OutputFact>, PackageParseError> {
@@ -643,7 +1451,14 @@ fn parse_output_value(key: &str, raw: &str) -> Result<OutputFact, PackageParseEr
         .trim_start_matches('.')
         .trim_end_matches('.');
     let kind = PackageOutputKind::parse(kind_text)?;
-    let fields = named_entries_checked(record_body(raw, "output")?, &format!("outputs.{key}"))?
+    let raw_fields = named_entries_checked(record_body(raw, "output")?, &format!("outputs.{key}"))?;
+    let payload = OutputPayload::Object(
+        raw_fields
+            .iter()
+            .map(|(field, value)| Ok((field.clone(), parse_output_payload(value)?)))
+            .collect::<Result<BTreeMap<_, _>, PackageParseError>>()?,
+    );
+    let fields = raw_fields
         .into_iter()
         .map(|(field, value)| {
             if !output_field_allowed(kind, &field) {
@@ -676,7 +1491,50 @@ fn parse_output_value(key: &str, raw: &str) -> Result<OutputFact, PackageParseEr
         name,
         entry,
         fields,
+        payload,
     })
+}
+
+fn parse_output_payload(value: &str) -> Result<OutputPayload, PackageParseError> {
+    let value = value.trim().trim_end_matches(',').trim();
+    if value.is_empty() {
+        return Ok(OutputPayload::Null);
+    }
+    if value == "true" {
+        return Ok(OutputPayload::Bool(true));
+    }
+    if value == "false" {
+        return Ok(OutputPayload::Bool(false));
+    }
+    if value == "null" {
+        return Ok(OutputPayload::Null);
+    }
+    if value.starts_with('"') && value.ends_with('"') {
+        return Ok(OutputPayload::String(scalar(value)));
+    }
+    if value.starts_with('[') && value.ends_with(']') {
+        let body = &value[1..value.len() - 1];
+        return Ok(OutputPayload::Array(
+            top_level_entries(body)
+                .into_iter()
+                .map(|item| parse_output_payload(&item))
+                .collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
+    if value.starts_with('{') || value.starts_with(".{") {
+        let body = record_body(value, "output payload")?;
+        let entries = named_entries_checked(body, "output payload")?;
+        return Ok(OutputPayload::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| Ok((key.trim_matches('"').to_string(), parse_output_payload(&value)?)))
+                .collect::<Result<BTreeMap<_, _>, PackageParseError>>()?,
+        ));
+    }
+    if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
+        return Ok(OutputPayload::Number(value.to_string()));
+    }
+    Ok(OutputPayload::String(scalar(value)))
 }
 
 fn parse_environments(
@@ -1099,6 +1957,99 @@ fn collect_jet_files(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>
     }
 }
 
+struct ParsedSource {
+    path: std::path::PathBuf,
+    program: crate::AST::Program,
+}
+
+fn parse_sources(files: &[std::path::PathBuf]) -> Option<Vec<ParsedSource>> {
+    files
+        .iter()
+        .map(|path| {
+            let source = std::fs::read_to_string(path).ok()?;
+            let (tokens, lex_diags) = crate::Lexer::lex(&source);
+            if !lex_diags.is_empty() {
+                return None;
+            }
+            Some(ParsedSource {
+                path: path.clone(),
+                program: crate::Parser::parse(&tokens).ok()?,
+            })
+        })
+        .collect()
+}
+
+fn unique_top_level_function<'a>(
+    program: &'a crate::AST::Program,
+    wanted: &str,
+) -> Option<&'a crate::AST::Func> {
+    let mut found = None;
+    for item in &program.items {
+        let crate::AST::Item::Func(function) = item else {
+            continue;
+        };
+        if function.name != wanted {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(function);
+    }
+    found
+}
+
+fn imported_module_targets(
+    root: &std::path::Path,
+    source: &ParsedSource,
+    wanted: &str,
+    sources: &[ParsedSource],
+) -> Vec<std::path::PathBuf> {
+    let mut targets = Vec::new();
+    for import in &source.program.imports {
+        if import.import_alias() != wanted
+            || matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. })
+        {
+            continue;
+        }
+        for candidate in import_target_paths(root, &source.path, &import.kind) {
+            if sources.iter().any(|other| other.path == candidate) {
+                targets.push(candidate);
+            }
+        }
+    }
+    targets
+}
+
+fn import_target_paths(
+    root: &std::path::Path,
+    importer: &std::path::Path,
+    kind: &crate::AST::ImportKind,
+) -> Vec<std::path::PathBuf> {
+    let base = match kind {
+        crate::AST::ImportKind::File(path, _) => importer
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(path),
+        crate::AST::ImportKind::Module(name, _) => name.split('.').fold(
+            root.to_path_buf(),
+            |mut path, component| {
+                path.push(component);
+                path
+            },
+        ),
+        crate::AST::ImportKind::Unqualified { .. } => return Vec::new(),
+    };
+    let mut paths = vec![base.clone()];
+    if base.extension().and_then(|ext| ext.to_str()) != Some("jet") {
+        paths.push(base.with_extension("jet"));
+    }
+    paths.push(base.join("module.jet"));
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 fn file_has_top_level_function(path: &std::path::Path, wanted: &str) -> bool {
     let Ok(source) = std::fs::read_to_string(path) else { return false };
     let mut depth = 0i32;
@@ -1243,6 +2194,26 @@ defaults: .{ run: app, test: check }
     }
 
     #[test]
+    fn output_payload_keeps_json_shapes() {
+        let facts = PackageFacts::parse(
+            r#"
+name: "demo"
+outputs: .{
+    app: .Environment.{ name: "dev", tools: ["a", "b"], services: .{ db: .{ enable: true, ports: [5432] } }, secrets: .{ token: "x" } }
+}
+"#,
+            "package.jet",
+        )
+        .unwrap();
+        let OutputPayload::Object(payload) = &facts.outputs["app"].payload else {
+            panic!("output payload must remain an object");
+        };
+        assert!(matches!(payload["tools"], OutputPayload::Array(_)));
+        assert!(matches!(payload["services"], OutputPayload::Object(_)));
+        assert!(matches!(payload["secrets"], OutputPayload::Object(_)));
+    }
+
+    #[test]
     fn inline_and_file_configs_compose_once_and_keep_identity() {
         let dir = temp_dir("configs");
         std::fs::write(
@@ -1250,16 +2221,16 @@ defaults: .{ run: app, test: check }
             r#"
 name: "demo"
 configs: [dev, "release.jet"]
+defaults: .{ run: app }
 dev :: Config.{
     version: "1"
-    outputs: .{ app: .Executable.{ entry: run } }
 }
 "#,
         )
         .unwrap();
         std::fs::write(
             dir.join("release.jet"),
-            r#"pub release :: Config.{ defaults: .{ run: app } }"#,
+            r#"pub release :: Config.{ outputs: .{ app: .Executable.{ entry: run } } }"#,
         )
         .unwrap();
         let facts = PackageFacts::load(&dir).unwrap().unwrap();
@@ -1292,6 +2263,41 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         .unwrap();
         let output = facts.outputs.get("app").unwrap();
         assert_eq!(facts.entry_path(&dir, output), Some(dir.join("main.jet")));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn legacy_run_precedes_a_sole_typed_output() {
+        let dir = temp_dir("legacy-run");
+        std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
+        std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: serve } }"#,
+            "package.jet",
+        )
+        .unwrap();
+        assert_eq!(
+            facts.resolve_run_entry(&dir).unwrap(),
+            Some(dir.join("main.jet"))
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn typed_entry_ambiguity_reports_package_origin() {
+        let dir = temp_dir("entry-ambiguous");
+        std::fs::write(dir.join("one.jet"), "fn run() { print(1) }\n").unwrap();
+        std::fs::write(dir.join("two.jet"), "fn run() { print(2) }\n").unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: run } }"#,
+            "package.jet",
+        )
+        .unwrap();
+        let error = facts.resolve_run_entry(&dir).unwrap_err();
+        assert!(error.contains("package.jet"));
+        assert!(error.contains("no unique source entry"));
         std::fs::remove_dir_all(dir).ok();
     }
 }
