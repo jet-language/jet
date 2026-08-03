@@ -2486,6 +2486,65 @@ mod tests {
     }
 
     #[test]
+    fn ephemeral_port_stays_reserved_until_service_spawn() {
+        let reservation = allocate_ports(&[0]).expect("ephemeral port allocation");
+        let port = reservation.ports[0];
+        assert_ne!(port, 0);
+        assert!(
+            TcpListener::bind(("127.0.0.1", port)).is_err(),
+            "the parent reservation must prevent a competing bind"
+        );
+        drop(reservation);
+        TcpListener::bind(("127.0.0.1", port))
+            .expect("the reservation must release before the child is spawned");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn service_spawn_exports_allocated_port_and_socket_activation_paths() {
+        let dir = PathBuf::from("/tmp").join(format!(
+            "jpk-service-activation-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let mut service = plan(
+            "fixture",
+            "printf '%s\\n%s\\n' \"$JETPACK_SERVICE_PORT\" \"$JETPACK_SERVICE_SOCKET_0\" > activation; sleep 30",
+        );
+        service.ports = vec![0];
+        service.sockets = vec!["runtime/service.sock".to_string()];
+        up_one(&dir, &env(), &service).expect("service with allocated resources starts");
+
+        let activation = service_dir(&dir, "fixture").join("data/activation");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !activation.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let lines = fs::read_to_string(&activation)
+            .expect("the child must receive the activation environment")
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].parse::<u16>().unwrap_or(0) > 0);
+        assert_eq!(lines[1], dir.join("runtime/service.sock").display().to_string());
+        assert!(
+            fs::read_to_string(ports_path(&service_dir(&dir, "fixture")))
+                .unwrap()
+                .trim()
+                .parse::<u16>()
+                .unwrap_or(0)
+                > 0
+        );
+
+        down_one(&dir, &service).expect("service stops cleanly");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn service_probe_requires_and_waits_for_declared_ready() {
         let dir = scratch("probe-ready");
         let p = plan("fixture", "sleep 30");

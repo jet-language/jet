@@ -172,15 +172,13 @@ impl OverlayPolicy {
                     .iter()
                     .find(|(name, _)| name == key)
                     .map(|(_, value)| value.as_str());
-                if scalar_override_wins(
+                if keyed_override_wins(
                     &winners,
                     &field,
                     priority,
                     order,
                     current,
                     value,
-                    package,
-                    &self.overlays,
                 )? {
                     if let Some(existing) = resolved.env.iter_mut().find(|(name, _)| name == key) {
                         existing.1 = value.clone();
@@ -1173,15 +1171,13 @@ fn merge_package_override(
                         .field_priorities
                         .insert(field, incoming_priority);
                 } else if incoming_priority == existing_priority {
-                    return Err(OverlayError::Conflict {
-                        package: existing.package.clone(),
-                        field,
-                        priority: incoming_priority,
-                        left_overlay: "same overlay".to_string(),
-                        right_overlay: "same overlay".to_string(),
-                        left: existing_value,
-                        right: value.clone(),
-                    });
+                    // Within one overlay, declaration order is the final
+                    // tie-breaker for keyed environment facts. Equal scalar
+                    // declarations still fail closed below.
+                    existing.env[index].1 = value.clone();
+                    existing
+                        .field_priorities
+                        .insert(field, incoming_priority);
                 }
             } else {
                 existing.env.push((key.clone(), value.clone()));
@@ -1310,6 +1306,20 @@ fn scalar_override_wins(
         left: current.unwrap_or("<missing>").to_string(),
         right: incoming.to_string(),
     })
+}
+
+fn keyed_override_wins(
+    winners: &BTreeMap<String, (i32, usize)>,
+    field: &str,
+    priority: i32,
+    _order: usize,
+    _current: Option<&str>,
+    _incoming: &str,
+) -> Result<bool, OverlayError> {
+    let Some((previous_priority, _previous_order)) = winners.get(field) else {
+        return Ok(true);
+    };
+    Ok(priority > *previous_priority)
 }
 
 fn valid_env_name(name: &str) -> bool {
@@ -1562,7 +1572,7 @@ module workspace {
 module workspace {
     overlay ordered {
         package("app").patches += [patch("b.patch")]
-        package("app").patches += [patch("a.patch"), patch("b.patch")]
+        package("app").patches += [patch("a.patch"), patch("c.patch")]
     }
 }
 "#,
@@ -1571,7 +1581,7 @@ module workspace {
         let package = policy.package_override("ordered", "app").unwrap();
         assert_eq!(
             package.patches,
-            vec!["b.patch", "a.patch", "b.patch"]
+            vec!["b.patch", "a.patch", "c.patch"]
         );
         let mut reversed = package.clone();
         reversed.patches.reverse();

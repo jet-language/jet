@@ -52,7 +52,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
                 return None;
             }
             let physical = workspace_root.join(relative).canonicalize().ok()?;
-            if !physical.starts_with(&root) || physical == root {
+            if !physical.starts_with(&root) {
                 return None;
             }
             if physical.to_string_lossy() != member.canonical_path {

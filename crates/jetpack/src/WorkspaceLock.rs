@@ -160,6 +160,29 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_with_workspace_root_member() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-root-member-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
+        let plan = WorkspacePlan {
+            members: vec![member("root", ".")],
+            ..Default::default()
+        };
+        write(&tmp, &plan);
+        let loaded = load(&tmp).expect("lock reload must preserve a root member");
+        assert_eq!(loaded.members.len(), 1);
+        assert_eq!(loaded.members[0].name, "root");
+        assert_eq!(loaded.members[0].path, ".");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn load_reads_workspace_members_from_unified_lock() {
         let tmp = std::env::temp_dir().join(format!(
             "wlock-parse-{}",
