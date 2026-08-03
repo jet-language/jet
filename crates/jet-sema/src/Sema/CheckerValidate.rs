@@ -18,12 +18,10 @@
 //!      pure calls" over the whole synthesized body for free, no separate
 //!      purity pass needed.
 //!
-//! Card #506 slice 1 scope: the in-body block + `Type.validate(value)`
-//! standalone entry point. `decode<T>()` auto-run and `Validate.over(s)`
-//! are NOT wired in this slice — see the card log / session report for the
-//! exact gate (the Decode trait's single-`DecodeError` contract vs.
-//! `[FieldError]` accumulation needs an owner-facing design call before
-//! `decode<T>()` can safely change what it returns on failure).
+//! The in-body block + `Type.validate(value)` standalone entry point are
+//! wired. `decode<T>()` auto-run and `Validate.over(s)` remain held at the
+//! owner gate recorded as `D-VALIDATE-DECODE1`: the Decode trait returns one
+//! `DecodeError`, while validation accumulates `[FieldError]` values.
 
 use super::*;
 use crate::AST::{

@@ -757,8 +757,8 @@
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
         // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
         // `edit_txn` — the mutation is DEFERRED, not applied now. Every deferred
-        // edit across every touched handle is buffered on the current thread's
-        // transaction, then applied together at the block's commit under all the
+        // edit across every touched handle is buffered on the explicit guard,
+        // then applied together at the block's commit under all the
         // handles' write locks held at once, in a canonical (pointer) order that
         // cannot deadlock. Either every handle's change lands or none does, and no
         // task ever observes an intermediate state. `f` runs against a fresh
@@ -766,14 +766,14 @@
         // 100` composes correctly with a concurrent transfer. The result is void
         // by construction — the write hasn't happened yet — which sema enforces
         // (E0750). Codegen is dumb (I3): the whole strategy is this runtime.
-        pub fn edit_txn<F>(&self, f: F)
+        pub fn edit_txn<F>(&self, stm: &mut super::jet_stm::Guard, f: F)
         where
             F: FnOnce(&mut T) + 'static,
             T: 'static,
         {
             let cell = self.0.clone();
             let protocol = cell.protocol.clone();
-            super::jet_stm::record_edit(
+            stm.record_edit(
                 protocol,
                 Box::new(move || {
                     // jet:shared-guard-internal-begin

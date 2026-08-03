@@ -54,7 +54,8 @@
     // named separately because a `validate { }` block's failures are always
     // reported as a LIST (every failing rule at once), never a single
     // fail-fast error. `Type.validate(value)`, `Validate.over(s).finish()`,
-    // and the `decode<T>()` auto-run all build this type.
+    // and a future `decode<T>()` auto-run build this type after the
+    // DecodeError/FieldError composition is owner-ratified.
     #[derive(Clone, Debug, PartialEq)]
     pub struct FieldError {
         pub path: String,
@@ -196,4 +197,3 @@
             }
         }
     }
-

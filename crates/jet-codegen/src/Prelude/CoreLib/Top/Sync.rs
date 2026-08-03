@@ -507,8 +507,18 @@ where
 }
 
 fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, String> {
-    if table.trim().is_empty()
-        || expression.trim().is_empty()
+    let table = table.trim().to_string();
+    let expression = expression.trim().to_string();
+    let valid_table = table
+        .chars()
+        .enumerate()
+        .all(|(index, ch)| {
+            (index == 0 && (ch.is_ascii_alphabetic() || ch == '_'))
+                || (index > 0 && (ch.is_ascii_alphanumeric() || ch == '_'))
+        });
+    if table.is_empty()
+        || !valid_table
+        || expression.is_empty()
         || table.len() > MAX_SYNC_TEXT
         || expression.len() > MAX_SYNC_TEXT
         || table.chars().any(char::is_control)
@@ -1189,10 +1199,54 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetSyncDocument {
+    representation: String,
+}
+
+impl JetSyncDocument {
+    fn parse(value: String) -> Option<Self> {
+        let representation = value.trim().to_string();
+        if representation.is_empty()
+            || representation.len() > MAX_SYNC_DOCUMENT
+            || representation.chars().any(char::is_control)
+            || ![
+                "SyncText(",
+                "SyncMap(",
+                "SyncList(",
+                "PNCounter(",
+                "LWWMap(",
+                "GSet(",
+            ]
+            .iter()
+            .any(|prefix| representation.starts_with(prefix))
+        {
+            return None;
+        }
+        Some(Self { representation })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct JetSyncReceipt {
+    session_id: String,
+    generation: u64,
+    document: JetSyncDocument,
+}
+
+impl JetSyncReceipt {
+    fn show(&self) -> String {
+        format!(
+            "SyncOver(session={}, generation={}, doc={})",
+            self.session_id, self.generation, self.document.representation
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 struct JetSyncSessionState {
     generation: u64,
-    document: String,
+    document: JetSyncDocument,
 }
 
 static JET_SYNC_SESSIONS: std::sync::OnceLock<
@@ -1204,12 +1258,11 @@ fn jet_sync_sessions(
     JET_SYNC_SESSIONS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
 }
 
-/// Publish a document onto the named live-sync session. The registry is the
-/// shared runtime adapter for AOT and CTFE: it gives `app.sync` a real,
-/// serialized session state instead of returning a display-only string. The
-/// document remains opaque here because typed CRDT values own their merge law;
-/// this boundary only records the latest merged representation and a monotonic
-/// receipt generation.
+/// Publish a canonical CRDT document onto the named sync session. The registry
+/// is the shared runtime adapter for AOT and CTFE. Duplicate delivery is
+/// idempotent: it returns the existing receipt instead of advancing the
+/// generation. The String return is only the fixed Core compatibility boundary;
+/// the session state and receipt are typed here.
 fn jet_sync_publish(session_id: String, doc_show: String) -> String {
     if session_id.trim().is_empty()
         || session_id.len() > MAX_SYNC_SESSION
@@ -1217,9 +1270,9 @@ fn jet_sync_publish(session_id: String, doc_show: String) -> String {
     {
         return "SyncError(invalid session)".to_string();
     }
-    if doc_show.len() > MAX_SYNC_DOCUMENT || doc_show.chars().any(char::is_control) {
-        return "SyncError(document exceeds sync limit)".to_string();
-    }
+    let Some(document) = JetSyncDocument::parse(doc_show) else {
+        return "SyncError(document is not a canonical CRDT value)".to_string();
+    };
     let mut sessions = match jet_sync_sessions().lock() {
         Ok(sessions) => sessions,
         Err(_) => return "SyncError(session registry is unavailable)".to_string(),
@@ -1231,14 +1284,20 @@ fn jet_sync_publish(session_id: String, doc_show: String) -> String {
         .entry(session_id.clone())
         .or_insert_with(|| JetSyncSessionState {
             generation: 0,
-            document: String::new(),
+            document: document.clone(),
         });
-    state.generation = state.generation.saturating_add(1);
-    state.document = doc_show.clone();
-    format!(
-        "SyncOver(session={session_id}, generation={}, doc={})",
-        state.generation, state.document
-    )
+    if state.document != document {
+        state.generation = state.generation.saturating_add(1);
+        state.document = document;
+    } else if state.generation == 0 {
+        state.generation = 1;
+    }
+    JetSyncReceipt {
+        session_id,
+        generation: state.generation,
+        document: state.document.clone(),
+    }
+    .show()
 }
 
 fn jet_app_sync_over(session_id: String, doc_show: String) -> String {

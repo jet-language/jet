@@ -4,6 +4,7 @@ use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
+include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
 fn session_to_ct(s: &JetAuthSession) -> CtValue {

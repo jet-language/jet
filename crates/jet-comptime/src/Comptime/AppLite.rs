@@ -10,10 +10,13 @@ fn live_to_ct(q: &JetLiveQuery) -> CtValue {
     CtValue::Struct {
         type_name: "LiveQuery".to_string(),
         fields: vec![
-            ("id".to_string(), CtValue::Str(q.id.clone())),
-            ("footprint".to_string(), CtValue::Str(q.footprint.clone())),
+            ("id".to_string(), CtValue::Int(q.id.min(i64::MAX as u64) as i64)),
+            ("footprint".to_string(), CtValue::Str(q.footprint.display())),
             ("value".to_string(), CtValue::Str(q.value.clone())),
-            ("generation".to_string(), CtValue::Int(q.generation)),
+            (
+                "generation".to_string(),
+                CtValue::Int(q.generation.min(i64::MAX as u64) as i64),
+            ),
             ("active".to_string(), CtValue::Bool(q.active)),
         ],
     }
@@ -35,25 +38,27 @@ fn ct_to_live(v: &CtValue, span: Span) -> Result<JetLiveQuery, Diagnostic> {
     };
     Ok(JetLiveQuery {
         id: match field("id")? {
-            CtValue::Str(s) => s.clone(),
+            CtValue::Int(n) if *n >= 0 => *n as u64,
             _ => return Err(unsupported("id", span)),
         },
         footprint: match field("footprint")? {
-            CtValue::Str(s) => s.clone(),
+            CtValue::Str(s) => JetLiveFootprint::parse(s)
+                .ok_or_else(|| unsupported("footprint", span))?,
             _ => return Err(unsupported("footprint", span)),
         },
         value: match field("value")? {
             CtValue::Str(s) => s.clone(),
-            _ => String::new(),
+            _ => return Err(unsupported("value", span)),
         },
         generation: match field("generation")? {
-            CtValue::Int(n) => *n,
-            _ => 1,
+            CtValue::Int(n) if *n >= 0 => *n as u64,
+            _ => return Err(unsupported("generation", span)),
         },
         active: match field("active")? {
             CtValue::Bool(b) => *b,
-            _ => true,
+            _ => return Err(unsupported("active", span)),
         },
+        dirty: false,
     })
 }
 

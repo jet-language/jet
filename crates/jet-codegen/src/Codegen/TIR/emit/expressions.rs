@@ -145,6 +145,13 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .map(|a| emit_tir_expr(a, cx))
                 .collect::<Vec<_>>()
                 .join(", ");
+            if method == "edit_txn" {
+                return format!(
+                    "({}).edit_txn(&mut __jet_stm, {})",
+                    emit_tir_expr(recv, cx),
+                    arg_str
+                );
+            }
             if matches!(&recv.ty, Type::Shared(_))
                 && matches!(method.as_str(), "guard_read" | "guard_edit")
             {

@@ -116,12 +116,13 @@ mod jet_txn {
 // `#Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
 //   { let mut tx = jet_transaction();
 //     let __jet_stm = jet_stm::begin();
-//     from.edit_txn(move |b| …); to.edit_txn(move |b| …);
+//     from.edit_txn(&mut __jet_stm, move |b| …);
+//     to.edit_txn(&mut __jet_stm, move |b| …);
 //     __jet_stm.commit(); tx.commit(); }
 //
-// Each `edit_txn` DEFERS its mutation onto the current thread's transaction
-// instead of taking a lock now. `begin()` pushes a fresh transaction; `commit()`
-// applies every deferred edit at once: it sorts the touched handles into a
+// Each `edit_txn` DEFERS its mutation onto the explicit transaction guard
+// instead of taking a lock now. `begin()` creates a fresh transaction;
+// `commit()` applies every deferred edit at once: it sorts the touched handles into a
 // canonical order by their `Arc` pointer, takes ALL their write locks (held
 // simultaneously via a recursive fold), runs each handle's buffered mutations
 // against a fresh `&mut T` under that lock, then releases. Because the locks are
@@ -136,14 +137,7 @@ mod jet_txn {
 // dumb runtime (I3). E0746 keeps rejecting irreversible effects inside, so a
 // deferred, all-or-nothing commit is always safe.
 mod jet_stm {
-    use std::cell::RefCell;
     use std::sync::Arc;
-
-    thread_local! {
-        // A stack, so nested `#Transact` blocks each own their own deferred set;
-        // an `edit_txn` always attaches to the innermost open transaction.
-        static STACK: RefCell<Vec<Txn>> = const { RefCell::new(Vec::new()) };
-    }
 
     struct Txn {
         parts: Vec<Participant>,
@@ -158,29 +152,24 @@ mod jet_stm {
         deltas: Vec<Box<dyn FnOnce()>>,
     }
 
-    /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the innermost
-    /// open transaction; the actual write happens at `commit()`.
-    pub(crate) fn record_edit(
+    /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the explicit
+    /// guard; the actual write happens at `commit()`.
+    fn record_edit(
+        txn: &mut Txn,
         protocol: Arc<crate::JetSharedProtocol>,
         delta: Box<dyn FnOnce()>,
     ) {
         let addr = Arc::as_ptr(&protocol) as *const () as usize;
-        STACK.with(|s| {
-            let mut stack = s.borrow_mut();
-            let txn = stack
-                .last_mut()
-                .expect("edit_txn called outside a #Transact block (compiler invariant)");
-            for p in txn.parts.iter_mut() {
-                if p.addr == addr {
-                    p.deltas.push(delta);
-                    return;
-                }
+        for p in txn.parts.iter_mut() {
+            if p.addr == addr {
+                p.deltas.push(delta);
+                return;
             }
-            txn.parts.push(Participant {
-                protocol,
-                addr,
-                deltas: vec![delta],
-            });
+        }
+        txn.parts.push(Participant {
+            protocol,
+            addr,
+            deltas: vec![delta],
         });
     }
 
@@ -188,32 +177,40 @@ mod jet_stm {
     /// without `commit()` (a `?`-failure / early return) discards every deferred
     /// edit — the all-or-nothing guarantee.
     pub(crate) struct Guard {
+        txn: Option<Txn>,
         committed: bool,
     }
 
     pub(crate) fn begin() -> Guard {
-        STACK.with(|s| s.borrow_mut().push(Txn { parts: Vec::new() }));
-        Guard { committed: false }
+        Guard {
+            txn: Some(Txn { parts: Vec::new() }),
+            committed: false,
+        }
     }
 
     impl Guard {
+        pub(crate) fn record_edit(
+            &mut self,
+            protocol: Arc<crate::JetSharedProtocol>,
+            delta: Box<dyn FnOnce()>,
+        ) {
+            let txn = self
+                .txn
+                .as_mut()
+                .expect("edit_txn called after #Transact commit (compiler invariant)");
+            record_edit(txn, protocol, delta);
+        }
+
         pub(crate) fn commit(mut self) {
             self.committed = true;
-            let txn = STACK
-                .with(|s| s.borrow_mut().pop())
-                .expect("jet_stm::commit with no open transaction (compiler invariant)");
-            apply(txn.parts);
+            if let Some(txn) = self.txn.take() {
+                apply(txn.parts);
+            }
         }
     }
 
     impl Drop for Guard {
-        fn drop(&mut self) {
-            if !self.committed {
-                STACK.with(|s| {
-                    s.borrow_mut().pop();
-                });
-            }
-        }
+        fn drop(&mut self) { self.txn.take(); }
     }
 
     // The shared Prelude protocol takes every touched handle's write lock in
