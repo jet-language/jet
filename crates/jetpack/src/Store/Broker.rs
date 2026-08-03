@@ -88,11 +88,11 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
 /// resident daemon. Systemd starts the one-request service only on demand.
 pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     let base = roots.root.join(SHARED_DIR);
-    ensure_real_dir(&base)?;
+    ensure_private_dir(&base)?;
     let shared_root = base.join("root");
-    ensure_real_dir(&shared_root)?;
+    ensure_private_dir(&shared_root)?;
     let trust_dir = base.join("trust");
-    ensure_real_dir(&trust_dir)?;
+    ensure_private_dir(&trust_dir)?;
     let trust_key = trust_dir.join("hangar.key");
     let writer_token = trust_dir.join("writer.token");
     ensure_secret(&trust_key, b"shared-store trust key", roots)?;
@@ -208,7 +208,15 @@ pub fn promote_shared_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<boo
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
-        let mut stream = UnixStream::connect(&config.socket)?;
+        let mut stream = match UnixStream::connect(&config.socket) {
+            Ok(stream) => stream,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) => return Ok(false),
+            Err(error) => return Err(error),
+        };
         write_request(&mut stream, &token, &archive)?;
         read_response(&mut stream)
     }
@@ -363,12 +371,53 @@ fn ensure_real_dir(path: &Path) -> io::Result<()> {
     }
 }
 
+fn ensure_private_dir(path: &Path) -> io::Result<()> {
+    let existed = fs::symlink_metadata(path).is_ok();
+    ensure_real_dir(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            if existed {
+                return Err(invalid("shared-store directory has insecure permissions"));
+            }
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(())
+}
+
+fn require_private_mode(path: &Path, label: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::symlink_metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(invalid(&format!("{label} has insecure permissions")));
+        }
+    }
+    let _ = (path, label);
+    Ok(())
+}
+
+fn set_private_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
 fn ensure_secret(path: &Path, label: &[u8], roots: &Roots) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             Err(invalid("shared-store secret is not a regular file"))
         }
         Ok(_) => {
+            require_private_mode(path, "shared-store secret")?;
             let secret = fs::read(path)?;
             if secret.len() < 32 {
                 Err(invalid("shared-store secret is too short"))
@@ -379,6 +428,9 @@ fn ensure_secret(path: &Path, label: &[u8], roots: &Roots) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut secret = entropy(roots, label);
             let result = atomic_write(path, &secret);
+            if result.is_ok() {
+                set_private_mode(path)?;
+            }
             for byte in &mut secret {
                 *byte = 0;
             }
@@ -393,6 +445,7 @@ fn read_secret(path: &Path, label: &str) -> io::Result<Vec<u8>> {
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(invalid(&format!("{label} is not a regular file")));
     }
+    require_private_mode(path, label)?;
     let secret = fs::read(path)?;
     if secret.len() < 32 {
         return Err(invalid(&format!("{label} is too short")));
@@ -440,10 +493,14 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         std::process::id()
     ));
     let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&partial)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&partial)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&partial, path)

@@ -29,6 +29,10 @@ facts fail before realization. A Config cannot declare `members`.
 
 `jet registry publish` commits the immutable sparse index line and the matching
 source tree under `artifacts/<name>/<version>` in one registry transaction.
+The same commit carries signed per-package sparse metadata, an append-only
+transparency log, and a signed checkpoint. The registry publisher key is
+host-pinned under the Jet trust directory; fetch refuses a registry view whose
+metadata is not signed by that pin or whose checkpoint rolls back or forks.
 The source tree hash is checked before the index changes. `jet fetch` selects
 the highest non-yanked version that satisfies the declared requirement, checks
 the publisher signature and source hash, then records the registry, exact

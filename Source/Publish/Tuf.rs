@@ -61,6 +61,8 @@ pub fn refresh_registry_metadata(
     repo: &Path,
     registry_name: &str,
 ) -> Result<RegistryMetadataFiles, Diagnostic> {
+    let root_key = crate::Publish::read_registry_root_key(registry_name)
+        .map_err(|error| metadata_diagnostic(&error))?;
     let grouped = all_index_entries(repo).map_err(|error| metadata_diagnostic(&error))?;
     if grouped.is_empty() {
         return Err(metadata_diagnostic(&io::Error::new(
@@ -95,11 +97,11 @@ pub fn refresh_registry_metadata(
     validate_log(&records).map_err(|error| metadata_diagnostic(&error))?;
     write_log(repo, &records).map_err(|error| metadata_diagnostic(&error))?;
 
-    let checkpoint = write_checkpoint(repo, registry_name, &records)
+    let checkpoint = write_checkpoint(repo, registry_name, &root_key, &records)
         .map_err(|error| metadata_diagnostic(&error))?;
     let mut paths = vec![transparency_log_path(repo), checkpoint_path(repo)];
     for (name, entries) in grouped {
-        let metadata = write_sparse_metadata(repo, registry_name, &name, &entries, &checkpoint)
+        let metadata = write_sparse_metadata(repo, registry_name, &root_key, &name, &entries, &checkpoint)
             .map_err(|error| metadata_diagnostic(&error))?;
         paths.push(metadata);
     }
@@ -117,9 +119,17 @@ pub fn verify_registry_package(
     name: &str,
 ) -> Result<Vec<IndexEntry>, Diagnostic> {
     let metadata = read_sparse_metadata(repo, name).map_err(|error| metadata_diagnostic(&error))?;
+    let root_key = crate::Publish::read_registry_root_key(registry_name)
+        .map_err(|error| metadata_diagnostic(&error))?;
+    if metadata.public_key != root_key {
+        return Err(metadata_diagnostic(&io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "registry sparse metadata is signed by an unpinned root key",
+        )));
+    }
     verify_sparse_metadata(&metadata).map_err(|error| metadata_diagnostic(&error))?;
     let checkpoint = read_checkpoint(repo).map_err(|error| metadata_diagnostic(&error))?;
-    verify_checkpoint(repo, registry_name, &checkpoint)
+    verify_checkpoint(repo, registry_name, &root_key, &checkpoint)
         .map_err(|error| metadata_diagnostic(&error))?;
     if metadata.checkpoint != checkpoint.root {
         return Err(metadata_diagnostic(&io::Error::new(
@@ -146,6 +156,8 @@ pub fn verify_registry_package(
             "sparse package metadata has no witnessed log inclusion",
         )));
     }
+    accept_checkpoint(registry_name, &checkpoint)
+        .map_err(|error| metadata_diagnostic(&error))?;
     Ok(metadata.entries)
 }
 
@@ -183,18 +195,13 @@ fn all_index_entries(repo: &Path) -> io::Result<BTreeMap<String, Vec<IndexEntry>
 fn write_sparse_metadata(
     repo: &Path,
     registry_name: &str,
+    root_key: &str,
     name: &str,
     entries: &[IndexEntry],
     checkpoint: &str,
 ) -> io::Result<PathBuf> {
-    let (seed, public) = crate::Publish::Sign::key_paths(registry_name);
-    let public_key = std::fs::read_to_string(&public)
-        .map_err(|error| invalid(&format!("registry metadata public key unavailable: {error}")))?
-        .trim()
-        .to_string();
-    if public_key.is_empty() {
-        return Err(invalid("registry metadata public key is empty"));
-    }
+    let (seed, _public) = crate::Publish::Sign::key_paths(registry_name);
+    let public_key = root_key.to_string();
     let mut entries = entries.to_vec();
     validate_entries(name, &mut entries)?;
     let unsigned = sparse_unsigned(name, &entries, checkpoint, &public_key);
@@ -379,17 +386,19 @@ fn write_log(repo: &Path, records: &[LogRecord]) -> io::Result<()> {
     atomic_write(&transparency_log_path(repo), out.as_bytes())
 }
 
-fn write_checkpoint(repo: &Path, registry_name: &str, records: &[LogRecord]) -> io::Result<String> {
+fn write_checkpoint(
+    repo: &Path,
+    registry_name: &str,
+    root_key: &str,
+    records: &[LogRecord],
+) -> io::Result<String> {
     let root = records
         .last()
         .map(|record| record.leaf.clone())
         .unwrap_or_else(empty_log_root);
     let sequence = records.last().map(|record| record.sequence).unwrap_or(0);
-    let (seed, public) = crate::Publish::Sign::key_paths(registry_name);
-    let public_key = std::fs::read_to_string(public)
-        .map_err(|error| invalid(&format!("registry checkpoint public key unavailable: {error}")))?
-        .trim()
-        .to_string();
+    let (seed, _) = crate::Publish::Sign::key_paths(registry_name);
+    let public_key = root_key.to_string();
     let unsigned = checkpoint_unsigned(sequence, &root, &public_key);
     let signature = sign_payload(&seed, &unsigned)?;
     let mut out = unsigned;
@@ -425,7 +434,12 @@ fn read_checkpoint(repo: &Path) -> io::Result<Checkpoint> {
     })
 }
 
-fn verify_checkpoint(repo: &Path, _registry_name: &str, checkpoint: &Checkpoint) -> io::Result<()> {
+fn verify_checkpoint(
+    repo: &Path,
+    _registry_name: &str,
+    root_key: &str,
+    checkpoint: &Checkpoint,
+) -> io::Result<()> {
     let records = read_log(repo)?;
     let expected_root = records
         .last()
@@ -435,9 +449,7 @@ fn verify_checkpoint(repo: &Path, _registry_name: &str, checkpoint: &Checkpoint)
     if checkpoint.root != expected_root || checkpoint.sequence != expected_sequence {
         return Err(invalid("registry checkpoint disagrees with its transparency log"));
     }
-    if checkpoint.public_key.len() != 64
-        || !checkpoint.public_key.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
+    if checkpoint.public_key != root_key {
         return Err(invalid("registry checkpoint has an invalid public key"));
     }
     verify_payload(
@@ -451,6 +463,46 @@ fn checkpoint_contains_entry(repo: &Path, expected: &IndexEntry) -> bool {
     read_log(repo)
         .map(|records| records.iter().any(|record| record.entry == *expected))
         .unwrap_or(false)
+}
+
+fn accept_checkpoint(registry_name: &str, checkpoint: &Checkpoint) -> io::Result<()> {
+    let path = crate::Publish::registry_checkpoint_path(registry_name);
+    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid("accepted registry checkpoint is not a regular file"));
+        }
+        let text = read_bounded(&path, 1024)?;
+        let mut lines = text.lines();
+        let sequence = lines
+            .next()
+            .ok_or_else(|| invalid("accepted registry checkpoint is malformed"))?
+            .parse::<u64>()
+            .map_err(|_| invalid("accepted registry checkpoint sequence is invalid"))?;
+        let root = lines
+            .next()
+            .ok_or_else(|| invalid("accepted registry checkpoint is missing its root"))?;
+        if sequence > checkpoint.sequence || (sequence == checkpoint.sequence && root != checkpoint.root)
+        {
+            return Err(invalid("registry checkpoint rolled back or forked"));
+        }
+        if sequence == checkpoint.sequence {
+            return Ok(());
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("accepted registry checkpoint has no parent"))?;
+    if let Ok(metadata) = std::fs::symlink_metadata(parent) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid("accepted registry checkpoint parent is not a directory"));
+        }
+    } else {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_write(
+        &path,
+        format!("{}\n{}\n", checkpoint.sequence, checkpoint.root).as_bytes(),
+    )
 }
 
 fn log_record_unsigned(sequence: u64, operation: &str, entry: &IndexEntry, previous: &str) -> String {
@@ -512,6 +564,10 @@ fn validate_entries(name: &str, entries: &mut Vec<IndexEntry>) -> io::Result<()>
 fn sparse_metadata_path(repo: &Path, name: &str) -> io::Result<PathBuf> {
     let index = Index::index_entry_path(repo, name)?;
     Ok(repo.join("metadata").join(format!("{}.json", index.file_stem().and_then(|v| v.to_str()).unwrap_or(name))))
+}
+
+pub fn registry_package_metadata_path(repo: &Path, name: &str) -> io::Result<PathBuf> {
+    sparse_metadata_path(repo, name)
 }
 
 fn transparency_log_path(repo: &Path) -> PathBuf {

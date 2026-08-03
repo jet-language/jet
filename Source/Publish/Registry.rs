@@ -90,6 +90,98 @@ pub fn resolve_publish_registry() -> RegistryConfig {
     }
 }
 
+/// Host-pinned root key location for a registry. The registry name is hashed
+/// before it becomes a path component, so repository or environment input can
+/// never escape the host trust directory.
+pub fn registry_root_key_path(registry_name: &str) -> PathBuf {
+    let base = Sign::keys_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join("registry-roots")
+        .join(format!("{}.pub", SHA256::sha256_hex(registry_name.as_bytes())))
+}
+
+pub fn registry_checkpoint_path(registry_name: &str) -> PathBuf {
+    let base = Sign::keys_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join("registry-checkpoints")
+        .join(format!("{}.state", SHA256::sha256_hex(registry_name.as_bytes())))
+}
+
+/// Establish or verify the host-pinned TUF root key used by sparse metadata.
+/// Publication may establish the pin from the local registry signing key;
+/// resolution never accepts a key from the repository as a first trust input.
+pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Result<PathBuf> {
+    if public_key.len() != 64 || !public_key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry root key is not a 32-byte hexadecimal public key",
+        ));
+    }
+    let path = registry_root_key_path(registry_name);
+    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry root key is not a regular file",
+            ));
+        }
+        let existing = std::fs::read_to_string(&path)?;
+        if existing.trim() != public_key {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "registry root key pin changed",
+            ));
+        }
+        return Ok(path);
+    }
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "registry root key has no parent")
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    use std::io::Write;
+    file.write_all(public_key.as_bytes())?;
+    file.write_all(b"\n")?;
+    file.sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(path)
+}
+
+pub fn read_registry_root_key(registry_name: &str) -> io::Result<String> {
+    let path = registry_root_key_path(registry_name);
+    let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("registry root key is not installed at {}: {error}", path.display()),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry root key is not a regular file",
+        ));
+    }
+    let key = std::fs::read_to_string(&path)?.trim().to_string();
+    if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry root key is malformed",
+        ));
+    }
+    Ok(key)
+}
+
 /// Local clone-cache path for a registry's git index:
 /// `<JET_REGISTRY_CACHE_DIR|~/.jet/registry-index>/<registry-name>`.
 pub fn index_repo_path(registry: &RegistryConfig) -> PathBuf {
@@ -209,6 +301,17 @@ pub fn push_index(
     paths: &[PathBuf],
     expected: Option<&IndexEntry>,
 ) -> Result<(), Diagnostic> {
+    push_index_inner(registry, repo, message, paths, expected, true)
+}
+
+fn push_index_inner(
+    registry: &RegistryConfig,
+    repo: &Path,
+    message: &str,
+    paths: &[PathBuf],
+    expected: Option<&IndexEntry>,
+    recover_race: bool,
+) -> Result<(), Diagnostic> {
     let run = |args: &[&str]| Command::new("git").args(args).current_dir(repo).output();
     // A scratch clone may carry no user identity; set one so `commit` works.
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
@@ -306,6 +409,9 @@ pub fn push_index(
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
         if !rebase.status.success() {
             let _ = run(&["rebase", "--abort"]);
+            if recover_race {
+                return rebuild_publication_after_race(registry, repo, message, paths, expected);
+            }
             return Err(e1235(
                 &registry.url,
                 "concurrent registry publication changed an immutable version",
@@ -321,6 +427,67 @@ pub fn push_index(
         }
     }
     Ok(())
+}
+
+fn rebuild_publication_after_race(
+    registry: &RegistryConfig,
+    stale_repo: &Path,
+    message: &str,
+    _paths: &[PathBuf],
+    expected: Option<&IndexEntry>,
+) -> Result<(), Diagnostic> {
+    let expected = expected.ok_or_else(|| {
+        e1235(
+            &registry.url,
+            "concurrent publication cannot be rebuilt without an immutable entry",
+        )
+    })?;
+    let checkout = prepare_publish_checkout(registry)?;
+    let repo = checkout.path();
+    let index = Index::index_entry_path(repo, &expected.name)
+        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+    if expected.yanked {
+        match Index::mark_yanked(repo, &expected.name, &expected.version) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(e1235(
+                    &registry.url,
+                    "concurrent yank lost its immutable registry entry",
+                ));
+            }
+            Err(error) => return Err(e1235(&registry.url, &error.to_string())),
+        }
+    } else {
+        Index::write_index_entry(repo, expected)
+            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        let source = artifact_path(stale_repo, &expected.name, &expected.version)
+            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        if !source.is_dir() {
+            return Err(e1235(
+                &registry.url,
+                "concurrent publication lost its staged source artifact",
+            ));
+        }
+        publish_artifact(
+            repo,
+            &source,
+            &expected.name,
+            &expected.version,
+            &expected.content_hash,
+        )
+        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+    }
+    let metadata = crate::Publish::refresh_registry_metadata(repo, &registry.name)
+        .map_err(|diagnostic| e1235(&registry.url, &diagnostic.what))?;
+    let mut paths = vec![index];
+    if !expected.yanked {
+        paths.push(
+            artifact_path(repo, &expected.name, &expected.version)
+                .map_err(|error| e1235(&registry.url, &error.to_string()))?,
+        );
+    }
+    paths.extend(metadata.paths);
+    push_index_inner(registry, repo, message, &paths, Some(expected), false)
 }
 
 fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bool {
@@ -355,11 +522,32 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         },
         Err(_) => return false,
     };
-    Command::new("git")
+    if !Command::new("git")
         .args(["cat-file", "-e", &format!("{remote}:{artifact}")])
         .current_dir(repo)
         .output()
         .is_ok_and(|output| output.status.success())
+    {
+        return false;
+    }
+    let package_metadata = match crate::Publish::registry_package_metadata_path(repo, &expected.name) {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+    let log = repo.join("transparency").join("log");
+    let checkpoint = repo.join("transparency").join("checkpoint");
+    [package_metadata, log, checkpoint].iter().all(|path| {
+        path.strip_prefix(repo)
+            .ok()
+            .map(|relative| relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
+            .is_some_and(|relative| {
+                Command::new("git")
+                    .args(["cat-file", "-e", &format!("{remote}:{relative}")])
+                    .current_dir(repo)
+                    .output()
+                    .is_ok_and(|output| output.status.success())
+            })
+    })
 }
 
 /// D-VERSION1=A: the version already sits in the index and is not yanked —

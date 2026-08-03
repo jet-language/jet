@@ -190,6 +190,17 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     } else {
         None
     };
+    let registry_public = match jet::Publish::Sign::read_public_key(&registry.name) {
+        Some(public) => public,
+        None => {
+            eprintln!("error: registry signing key has no public-key file");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public) {
+        eprintln!("error: registry root-key pin failed: {error}");
+        exit(ExitCodes::USER_ERROR);
+    }
 
     println!("publishing `{}` v{} ...", name, version);
 
@@ -894,6 +905,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     // in the registry index — the line is never deleted, so the version number
     // stays taken (immutable) but drops out of new resolution.
     let registry = jet::Publish::resolve_publish_registry();
+    if let Err(error) = jet::Publish::read_registry_root_key(&registry.name) {
+        eprintln!("error: registry root-key pin is unavailable: {error}");
+        exit(ExitCodes::USER_ERROR);
+    }
     let checkout = match jet::Publish::prepare_publish_checkout(&registry) {
         Ok(checkout) => checkout,
         Err(diagnostic) => {
