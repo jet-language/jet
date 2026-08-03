@@ -564,13 +564,14 @@ fn missing_integration_grant(
     facts.integration_facts.task_facts.iter().find_map(|task| {
         task.grants.iter().find_map(|grant| {
             let subject = format!("{}:{grant}", task.integration.as_str());
-            records.iter().any(|record| {
+            (!records.iter().any(|record| {
                 matches!(
                     record,
                     TrustRecord::Grant(stored)
                         if stored.authority == AUTH_INTEGRATION && stored.subject == subject
                 )
-            }).then_some(subject)
+            }))
+            .then_some(subject)
         })
     })
 }
