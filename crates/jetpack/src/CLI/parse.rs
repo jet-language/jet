@@ -1,7 +1,8 @@
 use super::add_remove_push_image::{cmd_add, cmd_image, cmd_push, cmd_remove};
 use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
 use super::cmd_doctor;
-use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
+use super::package_hangar_vendor::{cmd_audit, cmd_cache, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
+use super::shared_store::cmd_shared_store;
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
@@ -83,6 +84,22 @@ pub(super) struct Flags {
     pub(super) browser_version: Option<String>,
     /// D-BROWSER-AUTO1=A (#1187): optional BiDi `--protocol` pin.
     pub(super) browser_protocol: Option<String>,
+    /// D-CLI-HANGAR1=B: archive destination for Hangar export/sign/copy.
+    pub(super) archive_to: Option<PathBuf>,
+    /// D-CLI-HANGAR1=B: archive signer key path or named local key.
+    pub(super) archive_key: Option<String>,
+    /// D-CLI-HANGAR1=B: signed archive used by Hangar repair.
+    pub(super) archive_from: Option<PathBuf>,
+    /// D-CLI-HANGAR1=B: export only the selected object, not its closure.
+    pub(super) archive_no_deps: bool,
+    /// Explicit expert escape hatch for a local unsigned archive.
+    pub(super) archive_allow_unsigned: bool,
+    /// D-JPK-CACHECONFIG1=D: host-owned cache role selected for cache actions.
+    pub(super) cache_role: Option<String>,
+    /// D-JPK-CACHECONFIG1=D: typed credential-provider label, never a secret.
+    pub(super) cache_credential: Option<String>,
+    /// D-JPK-CACHEAUTH1: separate cache write grant.
+    pub(super) cache_write: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -128,6 +145,14 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         browser_binary: None,
         browser_version: None,
         browser_protocol: None,
+        archive_to: None,
+        archive_key: None,
+        archive_from: None,
+        archive_no_deps: false,
+        archive_allow_unsigned: false,
+        cache_role: None,
+        cache_credential: None,
+        cache_write: false,
         os_name: None,
         os_manual: None,
         os_disk: None,
@@ -275,6 +300,45 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                     flags.browser_protocol = Some(protocol.clone());
                 }
             }
+            "--to" => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.archive_to = Some(PathBuf::from(path));
+                }
+            }
+            "--key" => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.archive_key = Some(path.clone());
+                }
+            }
+            "--from" => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.archive_from = Some(PathBuf::from(path));
+                }
+            }
+            "--no-deps" => flags.archive_no_deps = true,
+            "--allow-unsigned" => flags.archive_allow_unsigned = true,
+            "--write" => flags.cache_write = true,
+            "--role" => {
+                i += 1;
+                if let Some(role) = args.get(i) {
+                    flags.cache_role = Some(role.clone());
+                }
+            }
+            a if a.starts_with("--role=") => {
+                flags.cache_role = Some(a.trim_start_matches("--role=").to_string());
+            }
+            "--credential" => {
+                i += 1;
+                if let Some(provider) = args.get(i) {
+                    flags.cache_credential = Some(provider.clone());
+                }
+            }
+            a if a.starts_with("--credential=") => {
+                flags.cache_credential = Some(a.trim_start_matches("--credential=").to_string());
+            }
             _ => positional.push(a.clone()),
         }
         i += 1;
@@ -337,6 +401,8 @@ pub fn main(args: Vec<String>) -> i32 {
         "test" => cmd_test(&theme, &parsed),
         "list" => cmd_list(&theme),
         "hangar" => cmd_hangar(&theme, &parsed),
+        "cache" => cmd_cache(&theme, &parsed),
+        "shared-store" => cmd_shared_store(&theme, &parsed),
         "vendor" => cmd_vendor(&theme, &parsed),
         "audit" => cmd_audit(&theme),
         "clean" => cmd_clean(&theme, &parsed),

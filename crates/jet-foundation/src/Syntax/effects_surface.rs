@@ -415,6 +415,8 @@ pub const JETPACK_VERBS: &[&str] = &[
     "test",
     "list",
     "hangar",
+    "cache",
+    "shared-store",
     "vendor",
     "audit",
     "clean",

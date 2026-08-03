@@ -42,6 +42,25 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} test  [-p <member>…]           (workspace) realize/test selected members
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
+  {bin} hangar export <entry> --to <archive.hangar>
+                                      export one signed closure archive
+  {bin} hangar import <archive.hangar> verify + import a signed archive
+  {bin} hangar dump <entry>            stream the same archive format
+  {bin} hangar restore                 restore an archive from stdin
+  {bin} hangar copy <entry> --to <root> copy through export/import
+  {bin} hangar sign <entry-or-archive> sign an object or archive
+  {bin} hangar repair <entry> --from <archive.hangar>
+                                      quarantine and repair a corrupt object
+  {bin} cache bind <role> <mirror>...  bind ordered host-owned cache mirrors
+  {bin} cache list                     list host-owned cache roles
+  {bin} cache publish <entry> --role <role> --yes
+                                      publish a signed NAR to a write-granted mirror
+  {bin} cache verify <entry> --role <role>
+                                      verify the first trusted cache hit
+  {bin} cache substitute <entry> --role <role> --to <dir> --yes
+                                      restore a verified NAR into a new directory
+  {bin} shared-store install         install the optional shared Hangar broker
+  {bin} shared-store status          show shared-store broker configuration
   {bin} vendor [<dir>]                 write vendored + hash-pinned sources
   {bin} audit                          read build provenance (runs nothing)
   {bin} clean                          collect stale hangar objects + optimize
@@ -75,7 +94,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} services health [<name>]       one-shot readiness check
   {bin} services logs <name>           print a service's captured stdout/stderr
   {bin} image <name>                   build a declared `.Oci` image into a native OCI layout
-  {bin} image <name> --push <ref>      (gated on TLS support, E1268 — not yet)
+  {bin} image <name> --push <ref>      copy a local file:// OCI layout; remote refs fail E1268
 
 {trust}
   {bin} trust list                    show package/build/env/service/image/fleet/jetos grants
@@ -112,7 +131,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --affected-since <ref>               (build/test/run) members changed since git ref + dependents
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
-  --push <ref>                         (image) push after building — gated on TLS, E1268
+  --push <ref>                         (image) copy a local file:// OCI layout; remote refs fail E1268
   --name <name>                        (os switch) override generation name
   --manual <path>                      (os init/image) record manual disk path
   --disk <path>                        (os vm prove) target qcow2/raw disk image
@@ -120,6 +139,11 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --serve <addr>                       (jetos studio) run local projection service
   --host <host>                        (os import/studio) select system host
   --as <name>                          (tool install) project bin under a different name
+  --to <path>                          (hangar archive) archive/output destination
+  --from <path>                        (hangar repair) signed recovery archive
+  --key <path-or-name>                 (hangar archive) signer key
+  --no-deps                            (hangar export/dump) select one object
+  --allow-unsigned                     (hangar import/restore) explicit local escape hatch
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),
@@ -145,6 +169,8 @@ mod tests {
     #[test]
     fn doctor_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
+        assert!(Syntax::JETPACK_VERBS.contains(&"cache"));
+        assert!(Syntax::JETPACK_VERBS.contains(&"shared-store"));
         assert!(usage_with_color(false).contains("jetpack doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
     }

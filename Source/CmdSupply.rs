@@ -1,7 +1,7 @@
 //! publish / vendor / audit / sbom / yank supply-chain subcommand handlers (E2-M8).
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
 use jet::ExitCodes;
@@ -34,6 +34,62 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
         None
     } else {
         Some(dirty)
+    }
+}
+
+/// Run the same project test command that a package author runs locally.
+/// Publishing must not turn successful semantic checking into a fake test
+/// result: the generated test harnesses must compile and execute before the
+/// immutable registry mutation below.
+fn run_publish_tests(root: &Path, entry: &Path) -> bool {
+    if !entry.is_file() {
+        eprintln!(
+            "  tests: failed — no project entry `{}` was found",
+            entry.display()
+        );
+        return false;
+    }
+
+    let jet_bin = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("  tests: failed — couldn't locate the running Jet executable: {error}");
+            return false;
+        }
+    };
+
+    let entry_arg = entry.to_string_lossy().into_owned();
+    let output = match Command::new(jet_bin)
+        .args(["test", entry_arg.as_str()])
+        .current_dir(root)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("  tests: failed — couldn't start `jet test`: {error}");
+            return false;
+        }
+    };
+
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if output.status.success() {
+        println!("  tests: ok");
+        true
+    } else {
+        eprintln!(
+            "  tests: failed (`jet test` exited with {})",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "a signal".to_string())
+        );
+        false
     }
 }
 
@@ -120,11 +176,10 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         }
     }
 
-    // D-CRYPTO-KEYGEN-DIAG1/E1292: discover first-publish entropy failure
-    // before progress output, snapshots, registry cloning, or index mutation.
-    // Existing keys and --no-sign never enter key generation.
+    // Registry metadata is always signed. `--no-sign` only disables the
+    // optional author signature on the package entry.
     let registry = jet::Publish::resolve_publish_registry();
-    let generated_key = if !no_sign && !jet::Publish::Sign::key_exists(&registry.name) {
+    let generated_key = if !jet::Publish::Sign::key_exists(&registry.name) {
         match jet::Publish::Sign::keygen(&registry.name, false) {
             Ok(generated) => Some(generated),
             Err(diagnostic) => {
@@ -170,16 +225,17 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             true
         }
     } else {
-        println!("  build: no entry file found — skipping");
-        true
+        eprintln!(
+            "  build: failed — no project entry `{}` was found",
+            entry_path.display()
+        );
+        false
     };
 
-    // Pre-publish gate step 2: tests (stub — `jet test` compiles and runs).
-    // Full test gate would spawn `jet test` as a subprocess; in v1 we check sema
-    // since test compilation is wired through the same front end.
+    // Pre-publish gate step 2: run the project's real test command before any
+    // immutable registry index mutation.
     println!("[2/3] checking tests ...");
-    let tests_ok = true; // sema is the test — compilation above already validated
-    println!("  tests: ok (sema-clean; integration tests run via `jet test`)");
+    let tests_ok = run_publish_tests(&root, &entry_path);
 
     // Pre-publish gate step 3: SemVer API diff.
     println!("[3/3] checking public API ...");
@@ -307,7 +363,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // sparse index, append the version line, commit, push.
     println!("publishing to registry index `{}` ...", registry.url);
 
-    let repo = match jet::Publish::ensure_index_clone(&registry) {
+    let source_repo = match jet::Publish::ensure_index_clone(&registry) {
         Ok(r) => r,
         Err(d) => {
             eprint!(
@@ -321,7 +377,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // Version immutability (D-VERSION1): refuse to overwrite a published,
     // non-yanked version. This is the enforcement point the decision promised
     // but couldn't land without a real push target.
-    match jet::Publish::find_published(&repo, name, version) {
+    match jet::Publish::find_published(&source_repo, name, version) {
         Ok(Some(existing)) if !existing.yanked => {
             eprint!(
                 "{}",
@@ -344,6 +400,36 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     }
 
     let (content_hash, fingerprint) = publish_index_hashes(&root, name);
+
+    let checkout = match jet::Publish::prepare_publish_checkout(&registry) {
+        Ok(checkout) => checkout,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let repo = checkout.path();
+
+    // The source artifact and its index line are one registry transaction.
+    // Stage and hash the artifact before touching metadata so a fresh machine
+    // can consume the same source bytes rather than an index-only promise.
+    if let Err(error) = jet::Publish::publish_artifact(
+        repo,
+        &root,
+        name,
+        version,
+        &content_hash,
+    ) {
+        let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
 
     // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
     // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
@@ -374,7 +460,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             }
         };
         // TOFU: record the public key only if this package has none pinned yet.
-        let entries = match jet::Publish::Index::read_entries(&repo, name) {
+        let entries = match jet::Publish::Index::read_entries(repo, name) {
             Ok(entries) => entries,
             Err(error) => {
                 let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
@@ -404,13 +490,38 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         public_key,
         signature,
     };
-    if let Err(e) = jet::Publish::Index::write_index_entry(&repo, &entry) {
+    if let Err(e) = jet::Publish::Index::write_index_entry(repo, &entry) {
         eprintln!("error: couldn't write the registry index entry: {}", e);
         exit(ExitCodes::USER_ERROR);
     }
-    if let Err(d) =
-        jet::Publish::push_index(&registry, &repo, &format!("publish {} {}", name, version))
-    {
+    let artifact = jet::Publish::Registry::artifact_path(repo, name, version)
+        .unwrap_or_else(|error| {
+            eprintln!("error: invalid registry artifact path: {error}");
+            exit(ExitCodes::USER_ERROR);
+        });
+    let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
+        eprintln!("error: invalid registry index path: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
+        Ok(metadata) => metadata,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let mut publish_paths = vec![artifact, index];
+    publish_paths.extend(metadata.paths);
+    if let Err(d) = jet::Publish::push_index(
+        &registry,
+        repo,
+        &format!("publish {} {}", name, version),
+        &publish_paths,
+        Some(&entry),
+    ) {
         eprint!(
             "{}",
             jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
@@ -433,10 +544,12 @@ fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) 
             .find(|p| p.name == name || matches!(p.source, jet::Lock::LockSource::Root))
         {
             if !pkg.fingerprint.is_empty() {
-                return (
-                    pkg.content_hash.clone().unwrap_or_default(),
-                    pkg.fingerprint.clone(),
-                );
+                let content_hash = pkg
+                    .content_hash
+                    .clone()
+                    .filter(|hash| !hash.is_empty())
+                    .unwrap_or_else(|| jet::SHA256::tree_hash(root));
+                return (content_hash, pkg.fingerprint.clone());
             }
         }
     }
@@ -603,8 +716,17 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         }
     };
 
-    // Load advisory DB.
-    let db_text = if let Some(path) = db_path {
+    // Load the explicitly selected local database, the environment-selected
+    // local database, or the project-local default. No network lookup happens
+    // in an audit command.
+    let configured_path = db_path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("JET_ADVISORY_DB").map(PathBuf::from))
+        .or_else(|| {
+            let path = root.join(".jet").join("advisories.db");
+            path.is_file().then_some(path)
+        });
+    let db_text = if let Some(path) = configured_path.as_deref() {
         match fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
@@ -613,17 +735,20 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
             }
         }
     } else {
-        // No built-in advisory DB in v1 (hosted later). Print a note.
         String::new()
     };
 
     let advisories = match jet::Publish::parse_advisory_db(&db_text) {
         Ok(advisories) => advisories,
         Err(diagnostic) => {
+            let advisory_source = configured_path.as_deref().map_or_else(
+                || "advisory database".to_string(),
+                |path| path.display().to_string(),
+            );
             eprint!(
                 "{}",
                 jet::render_diagnostics(
-                    db_path.unwrap_or("advisory database"),
+                    &advisory_source,
                     &db_text,
                     &[diagnostic]
                 )
@@ -632,11 +757,11 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         }
     };
 
-    if advisories.is_empty() && db_path.is_none() {
+    if advisories.is_empty() && configured_path.is_none() {
         println!(
             "audit: no advisory database configured.\n\
-             pass --advisory-db <path> to check against a local database.\n\
-             (A hosted database is planned for a future release.)"
+             pass --advisory-db <path>, set JET_ADVISORY_DB, or add `.jet/advisories.db`\n\
+             to check against a local database."
         );
         exit(ExitCodes::OK);
     }
@@ -769,18 +894,18 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     // in the registry index — the line is never deleted, so the version number
     // stays taken (immutable) but drops out of new resolution.
     let registry = jet::Publish::resolve_publish_registry();
-    let repo = match jet::Publish::ensure_index_clone(&registry) {
-        Ok(r) => r,
-        Err(d) => {
+    let checkout = match jet::Publish::prepare_publish_checkout(&registry) {
+        Ok(checkout) => checkout,
+        Err(diagnostic) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
     };
-
-    match jet::Publish::Index::mark_yanked(&repo, name, version) {
+    let repo = checkout.path();
+    match jet::Publish::Index::mark_yanked(repo, name, version) {
         Ok(true) => {}
         Ok(false) => {
             eprintln!(
@@ -798,9 +923,40 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         }
     }
 
-    if let Err(d) =
-        jet::Publish::push_index(&registry, &repo, &format!("yank {} {}", name, version))
-    {
+    let entry = match jet::Publish::Index::find_entry(repo, name, version) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => {
+            eprintln!("error: yanked registry entry disappeared during publication");
+            exit(ExitCodes::USER_ERROR);
+        }
+        Err(error) => {
+            eprintln!("error: couldn't read the yanked registry entry: {error}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
+        eprintln!("error: invalid registry index path: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
+        Ok(metadata) => metadata,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let mut yank_paths = vec![index];
+    yank_paths.extend(metadata.paths);
+    if let Err(d) = jet::Publish::push_index(
+        &registry,
+        repo,
+        &format!("yank {} {}", name, version),
+        &yank_paths,
+        Some(&entry),
+    ) {
         eprint!(
             "{}",
             jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])

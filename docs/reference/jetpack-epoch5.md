@@ -25,6 +25,24 @@ members: find("./packages")
 `Config` files add typed facts to the Package. Equal facts merge. Conflicting
 facts fail before realization. A Config cannot declare `members`.
 
+## Registry delivery and provider facts
+
+`jet registry publish` commits the immutable sparse index line and the matching
+source tree under `artifacts/<name>/<version>` in one registry transaction.
+The source tree hash is checked before the index changes. `jet fetch` selects
+the highest non-yanked version that satisfies the declared requirement, checks
+the publisher signature and source hash, then records the registry, exact
+reference, source authority, and Hangar output in `.jet/lock`. Locked fetches
+use only the local registry clone and fail if its artifact is missing.
+
+Provider importers lower Jet registry, npm, Cargo, PyPI, SwiftPM, Maven,
+NuGet, Conan, vcpkg, Homebrew, GitHub, and binary metadata into one fact
+report. Unsupported, ambiguous, or missing identity facts remain explicit loss
+records; they do not become invented defaults. Core, Nix, local path, Jet
+registry, and verified binary paths expose byte/lock capabilities. The foreign
+ecosystem importers expose metadata facts until a dedicated verified transport
+adapter exists; they do not claim network fetch or offline substitution.
+
 ## Workspace membership
 
 The root `workspace.jet` file can use an explicit list or `find`.
@@ -84,6 +102,81 @@ module env.dev {
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
 
+## Hangar external roots
+
+The Hangar keeps automatic roots for packages, profiles, processes, builds,
+toolchains, Systems, and Generations. Use a manual external root only when an
+external consumer needs to retain an existing closure. The command never
+realizes or downloads the reference.
+
+```text
+jet hangar register-external-root backup-sdk ripgrep#2.0.17@nixpkgs \
+    --expires-in 12w --yes
+jet hangar list-external-roots
+jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
+```
+
+Each root has a compare-and-swap etag. A changed root is not overwritten or
+removed without the current etag. A changed root is not overwritten or removed
+after a stale etag. Inspect the current root, then retry with the current
+`--if-etag` value only when that state is intended. Expiry ends retention; it
+does not delete the Hangar object.
+
+## Signed Hangar archives
+
+Hangar export, import, dump, restore, copy, sign, verify, and repair use one
+canonical archive format. An archive contains the selected output closure and
+portable package records. Export sorts records and signs the exact bytes with
+the user-owned Hangar trust key at `$JETPACK_ROOT/trust/hangar.key` (or the
+path passed to `--key`). Import authenticates and re-hashes every object in a private staging
+directory before it changes the closure database. Existing objects are reused
+only when their digest matches.
+
+```text
+jet hangar export app --to app.hangar
+jet hangar verify app.hangar
+jet hangar import app.hangar
+jet hangar repair app --from app.hangar
+```
+
+Unsigned archives are refused by default. `--allow-unsigned` is an explicit
+local migration escape and never becomes the default. Remote `ssh://` and
+`https://` copy destinations fail with a transport error; Jet does not claim
+to have transferred bytes when no verified transport is configured.
+
+## Host-owned binary caches
+
+Workspace policy may request cache roles. The host binds those roles to an
+ordered mirror list; endpoints and credentials do not come from a repository,
+flag, or environment variable. Local paths and `file://` mirrors use the
+signed NAR path. Other endpoint families report their missing adapter instead
+of pretending to transfer bytes.
+
+```text
+jet cache bind public file:///srv/jet-cache --credential keychain:jet/public --yes
+jet cache bind release /srv/jet-release --write --yes
+jet cache list
+jet cache publish app --role release --yes
+jet cache verify app --role public
+jet cache substitute app --role public --to /tmp/app-output --yes
+```
+
+The first mirror with a valid signature, NAR digest, and decoded output hash
+wins. Publishing requires the separate binding write grant. A substitution
+never overwrites an existing destination.
+
+Binary-cache substitution uses the canonical NAR codec. NAR bytes are hashed
+before admission, and a local `narinfo` must carry a matching signed hash,
+size, reference set, and store identity. Substitution stages the decoded tree
+and refuses conflicting existing objects. A missing or corrupt mirror falls
+back to source realization; it never installs an unsigned or replayed result.
+
+`jet shared-store install` creates the optional user-owned shared Hangar
+configuration and socket-activation units. The broker accepts one
+writer-token-authenticated, signed Hangar archive per request. It never
+receives source or build commands. If the socket is absent, realization stays
+on the ordinary per-user Hangar path.
+
 ## Services
 
 Services run as direct argument vectors. Readiness is separate from process
@@ -112,7 +205,9 @@ stops dependent services before their dependencies.
 
 Foreign flakes and flake-parts modules feed the same graph as native sources.
 Exact input revisions, `follows` edges, output mappings, provenance, and
-declarative flake-parts modules round-trip through `.jet/lock`.
+declarative flake-parts modules round-trip through `.jet/lock`. Loaded locks
+also record each imported module's content fingerprint, so editing a module
+invalidates the graph before bridge output is reused.
 
 ```nix
 {
@@ -143,3 +238,13 @@ Successful outputs publish atomically and failed stages are removed.
 
 Environment images project the same package and service facts into OCI
 metadata. Secret values and dotenv contents do not enter the image projection.
+
+## First-party integrations
+
+Environment modules may import typed first-party integrations such as
+`env.platform.android()`, `env.platform.apple()`,
+`env.security.certificates([...])`, `env.network.hosts({...})`, and
+`env.agent.codex(...)`. Each import lowers into the same package, file, secret,
+host-check, provider, and grant facts used by the rest of Jetpack. SDK imports
+carry deterministic safe defaults and preserve expert options in the plan.
+Secret values are never stored in the plan or its fingerprint.

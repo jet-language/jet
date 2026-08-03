@@ -14,6 +14,7 @@ mod run_enter_dev;
 mod services_secrets_config;
 mod trust_env_build;
 mod package_hangar_vendor;
+mod shared_store;
 mod update_search_info;
 mod add_remove_push_image;
 mod bridge_os_studio;
