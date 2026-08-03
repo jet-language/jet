@@ -323,15 +323,6 @@ fn validate_member_path(
             span,
         ));
     }
-    if real == root {
-        return Err(Diagnostic::error(
-            "E1324",
-            format!("workspace member `{rel_path}` resolves to the workspace root"),
-            "a workspace member is a child Package identity; the workspace root cannot be its own member".to_string(),
-            "remove the root path from `members:` and list child Package directories instead".to_string(),
-            span,
-        ));
-    }
     for member in members {
         let existing = std::fs::canonicalize(base_dir.join(&member.path)).map_err(|error| {
             Diagnostic::error(
@@ -785,16 +776,17 @@ module workspace {
     }
 
     #[test]
-    fn member_cannot_be_the_workspace_root() {
+    fn member_can_be_the_workspace_root() {
         let tmp = tempdir("member-root");
         std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
-        let error = evaluate(
+        let plan = evaluate(
             "module workspace { members: [\".\"] }\n",
             &tmp,
         )
-        .expect_err("the workspace root is not a child member");
-        assert_eq!(error.code, "E1324");
-        assert!(error.span.is_some());
+        .expect("the workspace root may be an explicit member");
+        assert_eq!(plan.members.len(), 1);
+        assert_eq!(plan.members[0].path, ".");
+        assert_eq!(plan.members[0].name, "root");
         std::fs::remove_dir_all(tmp).ok();
     }
 
