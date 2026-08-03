@@ -1,8 +1,8 @@
 // ── D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443) ─────────────
 // One Core compute family. `Tensor` owns ranked multidimensional storage on the
-// CPU backend; views retain the backing allocation and its strides. Mutable
-// access requires the sema-proved exclusive ViewMut path; shared writes fail
-// closed instead of copying or pretending to update an alias.
+// explicit CPU-oracle capability; views retain the backing allocation and its
+// strides. Mutable access requires the sema-proved exclusive ViewMut path;
+// shared writes fail closed instead of copying or pretending to update an alias.
 // Engines only marshal into these Prelude symbols (I9).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +12,42 @@ enum JetComputeDevice {
 }
 
 const MAX_TENSOR_ELEMENTS: usize = 16 * 1024 * 1024;
+const CPU_ORACLE_BACKEND: &str = "cpu-oracle";
+const CPU_ORACLE_VERSION: &str = "builtin";
+const CPU_ORACLE_CACHE: &str = "none";
+const CPU_ORACLE_F64_PROFILE: &str = "F64Strict+Reproducible";
+const CPU_ORACLE_F32_PROFILE: &str = "F32Strict+Reproducible";
+const CPU_ORACLE_F64_CAPABILITIES: &[&str] = &[
+    "ranked-storage",
+    "strided-view",
+    "checked-bounds",
+    "reproducible-reduction",
+    "differential-oracle",
+];
+const CPU_ORACLE_F32_CAPABILITIES: &[&str] = &[
+    "ranked-storage",
+    "strided-view",
+    "checked-bounds",
+    "f32-arithmetic",
+    "blocked-matmul",
+    "differential-oracle",
+];
+
+fn jet_compute_registered_capabilities(profile: &str) -> Option<&'static [&'static str]> {
+    match profile {
+        CPU_ORACLE_F64_PROFILE => Some(CPU_ORACLE_F64_CAPABILITIES),
+        CPU_ORACLE_F32_PROFILE => Some(CPU_ORACLE_F32_CAPABILITIES),
+        _ => None,
+    }
+}
+
+fn jet_compute_capabilities_match(actual: &[String], expected: &[&str]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| actual == expected)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetComputePlacementReceipt {
@@ -293,21 +329,29 @@ fn jet_compute_validate_placement(
     device: JetComputeDevice,
     receipt: &JetComputePlacementReceipt,
 ) -> Result<(), JetComputeError> {
-    if device == JetComputeDevice::Auto || receipt.selected == JetComputeDevice::Auto {
-        return Err(JetComputeError::Device(
-            "Tensor placement must name a concrete selected backend".to_string(),
+    if device == JetComputeDevice::Auto
+        || receipt.requested == JetComputeDevice::Auto
+        || receipt.selected == JetComputeDevice::Auto
+    {
+        return Err(JetComputeError::Unsupported(
+            "Auto placement requires a registered production backend; the CPU oracle is not a fallback"
+                .to_string(),
         ));
     }
+    let Some(expected_capabilities) = jet_compute_registered_capabilities(&receipt.profile) else {
+        return Err(JetComputeError::Unsupported(format!(
+            "compute profile `{}` is not registered by a backend capability",
+            receipt.profile
+        )));
+    };
     if device != receipt.selected
-        || receipt.backend != "cpu"
-        || receipt.version != "builtin"
-        || receipt.cache != "builtin"
-        || receipt.profile.is_empty()
+        || receipt.requested != receipt.selected
+        || receipt.backend != CPU_ORACLE_BACKEND
+        || receipt.version != CPU_ORACLE_VERSION
+        || receipt.cache != CPU_ORACLE_CACHE
         || receipt.reason.is_empty()
-        || !receipt
-            .capabilities
-            .iter()
-            .any(|capability| capability == "checked-bounds")
+        || receipt.reason.chars().any(char::is_control)
+        || !jet_compute_capabilities_match(&receipt.capabilities, expected_capabilities)
     {
         return Err(JetComputeError::Device(
             "Tensor placement receipt does not match a registered backend capability".to_string(),
@@ -362,29 +406,32 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
     Ok(())
 }
 
-fn jet_compute_place(requested: JetComputeDevice) -> JetComputePlacementReceipt {
-    // The only compiled backend in this slice is the checked CPU backend. Auto
-    // resolves to it as a capability decision, not as a fallback receipt.
+fn jet_compute_place(
+    requested: JetComputeDevice,
+) -> Result<JetComputePlacementReceipt, JetComputeError> {
+    // The only registered capability in this slice is an explicit CPU oracle.
+    // Auto must not turn that oracle into a hidden production fallback.
+    if requested == JetComputeDevice::Auto {
+        return Err(JetComputeError::Unsupported(
+            "Auto placement has no registered production backend; CPU oracle selection requires an explicit CPU pin"
+                .to_string(),
+        ));
+    }
+    let capabilities = CPU_ORACLE_F64_CAPABILITIES
+        .iter()
+        .map(|capability| (*capability).to_string())
+        .collect();
     let selected = JetComputeDevice::Cpu;
-    let reason = match requested {
-        JetComputeDevice::Auto => "policy=Auto; capability=cpu.checked".to_string(),
-        JetComputeDevice::Cpu => "policy=explicit; capability=cpu.checked".to_string(),
-    };
-    JetComputePlacementReceipt {
+    Ok(JetComputePlacementReceipt {
         requested,
         selected,
-        backend: "cpu".to_string(),
-        version: "builtin".to_string(),
-        profile: "F64Strict+Reproducible".to_string(),
-        cache: "builtin".to_string(),
-        capabilities: vec![
-            "ranked-storage".to_string(),
-            "strided-view".to_string(),
-            "checked-bounds".to_string(),
-            "reproducible-reduction".to_string(),
-        ],
-        reason,
-    }
+        backend: CPU_ORACLE_BACKEND.to_string(),
+        version: CPU_ORACLE_VERSION.to_string(),
+        profile: CPU_ORACLE_F64_PROFILE.to_string(),
+        cache: CPU_ORACLE_CACHE.to_string(),
+        capabilities,
+        reason: "policy=explicit; capability=cpu-oracle.f64".to_string(),
+    })
 }
 
 fn jet_compute_inherit_placement(mut tensor: JetTensor, source: &JetTensor) -> JetTensor {
@@ -406,7 +453,7 @@ fn jet_compute_tensor_from_shape(
     }
     let strides = jet_compute_row_major_strides(&shape)?;
     let n = jet_compute_storage_len(&shape)?;
-    let receipt = jet_compute_place(requested);
+    let receipt = jet_compute_place(requested)?;
     Ok(JetTensor {
         shape,
         strides,
@@ -418,15 +465,15 @@ fn jet_compute_tensor_from_shape(
 }
 
 fn jet_compute_zeros(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice::Auto)
+    jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice::Cpu)
 }
 
 fn jet_compute_ones(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice::Auto)
+    jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice::Cpu)
 }
 
 fn jet_compute_full(shape: &Vec<i64>, value: f64) -> Result<JetTensor, JetComputeError> {
-    jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice::Auto)
+    jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice::Cpu)
 }
 
 fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError> {
@@ -441,7 +488,7 @@ fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError
     let shape = vec![len];
     let strides = jet_compute_row_major_strides(&shape)?;
     let storage_len = jet_compute_storage_len(&shape)?;
-    let receipt = jet_compute_place(JetComputeDevice::Auto);
+    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
     Ok(JetTensor {
         shape,
         strides,
@@ -790,7 +837,7 @@ fn jet_compute_matrix(rows: i64, cols: i64, fill: f64) -> Result<JetTensor, JetC
             "Matrix rows and cols must be non-negative".to_string(),
         ));
     }
-    jet_compute_tensor_from_shape(vec![rows, cols], fill, JetComputeDevice::Auto)
+    jet_compute_tensor_from_shape(vec![rows, cols], fill, JetComputeDevice::Cpu)
 }
 
 /// Vec alias: rank-1 Tensor sharing the same storage law (D-COMPUTE-TYPE1).
@@ -800,7 +847,7 @@ fn jet_compute_vec(len: i64, fill: f64) -> Result<JetTensor, JetComputeError> {
             "Vec length must be non-negative".to_string(),
         ));
     }
-    jet_compute_tensor_from_shape(vec![len], fill, JetComputeDevice::Auto)
+    jet_compute_tensor_from_shape(vec![len], fill, JetComputeDevice::Cpu)
 }
 
 fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
@@ -824,7 +871,7 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
             k, k2
         )));
     }
-    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Auto)?;
+    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Cpu)?;
     for i in 0..m {
         for j in 0..n {
             let mut sum = 0.0;
@@ -857,12 +904,7 @@ fn jet_compute_on_device(
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let receipt = jet_compute_place(device);
-    if receipt.selected != JetComputeDevice::Cpu {
-        return Err(JetComputeError::Device(
-            "only the CPU oracle is shipped in this Core compute slice".to_string(),
-        ));
-    }
+    let receipt = jet_compute_place(device)?;
     Ok(JetTensor {
         shape: tensor.shape.clone(),
         strides: tensor.strides.clone(),
@@ -945,7 +987,7 @@ fn jet_compute_materialize_broadcast(
     // Empty output has no source element to read.  This also makes shapes such
     // as [0, 3] broadcast-safe instead of indexing an empty backing vector.
     if n == 0 {
-        let receipt = jet_compute_place(JetComputeDevice::Auto);
+        let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
         return Ok(JetTensor {
             shape: shape.to_vec(),
             strides,
@@ -978,7 +1020,7 @@ fn jet_compute_materialize_broadcast(
             .collect::<Vec<_>>();
         data.push(jet_compute_get(tensor, &source_coords)?);
     }
-    let receipt = jet_compute_place(JetComputeDevice::Auto);
+    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
     Ok(JetTensor {
         shape: shape.to_vec(),
         strides,
@@ -1050,7 +1092,7 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
     if out_shape.is_empty() {
         out_shape.push(1);
     }
-    let mut out = jet_compute_tensor_from_shape(out_shape.clone(), 0.0, JetComputeDevice::Auto)?;
+    let mut out = jet_compute_tensor_from_shape(out_shape.clone(), 0.0, JetComputeDevice::Cpu)?;
     let axis_len = tensor.shape[axis];
     let out_n = jet_compute_numel(&out_shape)?;
     for flat in 0..out_n {
@@ -1093,7 +1135,7 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
             "unsupported unary compute operation `{op}`"
         )));
     }
-    let receipt = jet_compute_place(JetComputeDevice::Auto);
+    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
     let values = jet_compute_tensor_values(tensor);
     let mut data = Vec::with_capacity(values.len());
     for value in values {
@@ -1155,7 +1197,7 @@ fn jet_compute_binary(
             "unsupported binary compute operation `{op}`"
         )));
     }
-    let receipt = jet_compute_place(JetComputeDevice::Auto);
+    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
     let left_values = jet_compute_tensor_values(&left);
     let right_values = jet_compute_tensor_values(&right);
     let mut data = Vec::with_capacity(left_values.len());
@@ -1202,7 +1244,7 @@ fn jet_compute_eye(n: i64) -> Result<JetTensor, JetComputeError> {
             "eye size must be non-negative".to_string(),
         ));
     }
-    let mut out = jet_compute_tensor_from_shape(vec![n, n], 0.0, JetComputeDevice::Auto)?;
+    let mut out = jet_compute_tensor_from_shape(vec![n, n], 0.0, JetComputeDevice::Cpu)?;
     for i in 0..n {
         jet_compute_set(&mut out, &vec![i, i], 1.0)?;
     }
@@ -1345,7 +1387,7 @@ fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     let mut out = jet_compute_tensor_from_shape(
         vec![tensor.shape[0], tensor.shape[1]],
         0.0,
-        JetComputeDevice::Auto,
+        JetComputeDevice::Cpu,
     )?;
     for i in 0..n {
         for j in 0..n {
@@ -1448,7 +1490,7 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
     } else {
         vec![a.shape[0], b.shape[1]]
     };
-    let mut out = jet_compute_tensor_from_shape(output_shape, 0.0, JetComputeDevice::Auto)?;
+    let mut out = jet_compute_tensor_from_shape(output_shape, 0.0, JetComputeDevice::Cpu)?;
     for row in 0..n {
         for col in 0..rhs_cols {
             let index = if b.shape.len() == 1 {
@@ -1479,7 +1521,7 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     let mut out = jet_compute_tensor_from_shape(
         vec![output_len],
         0.0,
-        JetComputeDevice::Auto,
+        JetComputeDevice::Cpu,
     )?;
     if n == 0 {
         return Ok(out);
@@ -1667,11 +1709,11 @@ fn jet_compute_kernel_bounds_ok(
 /// The safe Prelude cannot mint one from a reason string and an arity: those
 /// values do not prove address spaces, read/write sets, effects, or barriers.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetRawKernelContract;
+enum JetRawKernelContract {}
 
 impl JetShow for JetRawKernelContract {
     fn jet_show(&self) -> String {
-        "RawKernelContract(provider-issued opaque proof)".to_string()
+        match *self {}
     }
 }
 
@@ -1753,7 +1795,7 @@ fn jet_compute_reduce_to_shape(
     let mut out = jet_compute_tensor_from_shape(
         target_shape.to_vec(),
         0.0,
-        JetComputeDevice::Auto,
+        JetComputeDevice::Cpu,
     )?;
     let rank_delta = tensor.shape.len() - target_shape.len();
     let values = jet_compute_tensor_values(tensor);
@@ -2347,7 +2389,7 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
         )));
     }
     const TILE: i64 = 8;
-    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Auto)?;
+    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Cpu)?;
     let mut i0 = 0i64;
     while i0 < m {
         let i1 = (i0 + TILE).min(m);
@@ -2390,14 +2432,11 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
         }
         i0 = i1;
     }
-    out.last_placement.profile = "F32Strict+Reproducible".to_string();
-    out.last_placement.capabilities = vec![
-        "ranked-storage".to_string(),
-        "strided-view".to_string(),
-        "checked-bounds".to_string(),
-        "f32-arithmetic".to_string(),
-        "blocked-matmul".to_string(),
-    ];
+    out.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+    out.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+        .iter()
+        .map(|capability| (*capability).to_string())
+        .collect();
     out.last_placement.reason = format!(
         "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered"
     );
@@ -2405,7 +2444,13 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
 }
 
 fn jet_compute_profile_f32_strict() -> String {
-    "backend=cpu;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;cache=builtin".to_string()
+    format!(
+        "backend={};version={};profile={};algorithm=blocked-matmul;tile=8;cache={}",
+        CPU_ORACLE_BACKEND,
+        CPU_ORACLE_VERSION,
+        CPU_ORACLE_F32_PROFILE,
+        CPU_ORACLE_CACHE,
+    )
 }
 
 fn jet_compute_profile_show() -> String {

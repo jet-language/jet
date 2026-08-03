@@ -3093,10 +3093,10 @@ the capability. Cleanup stays on `Close` via `close(...)`.
 D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
 ranked Tensor operation family. Tensor views retain the owner allocation and
 strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
-`Auto` selects the compiled CPU backend because its checked capability is
-present. The placement receipt records backend, version, profile, cache, and
-capabilities. A same-backend transfer is a recorded zero-byte no-op, not a
-fabricated copy or fallback.
+This slice registers one explicit `cpu-oracle` capability. Its receipt records
+backend, version, profile, cache, and closed capabilities. `Auto` does not use
+that oracle as a hidden production fallback. It returns typed
+`ComputeError::Unsupported` until a provider registers a production backend.
 
 ```jet
 use core.compute as compute
@@ -3130,7 +3130,9 @@ fn run() {
 
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
-symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
+symbols (I9). No accelerator provider is registered in this slice. Missing
+provider capability returns typed `ComputeError::Unsupported`; no engine
+substitutes the CPU oracle.
 
 Tensor serialization is the canonical wire `shape=axis,...;data=value,...`.
 The serializer uses shortest round-tripping finite f64 text. The decoder
@@ -3152,17 +3154,19 @@ shapes are checked, broadcast gradients reduce to the input shape, and
 `value_and_grad_mul` rejects non-scalar outputs. Gradient receipts inherit the
 primal placement and profile.
 
-`D-COMPUTE-BACKEND1=D`: the built-in CPU backend publishes a stable backend,
-version, precision/determinism profile, cache identity, and capability list in
-placement receipts. The blocked f32 tiled path records its actual arithmetic
-and reduction algorithm; unsupported raw/provider capabilities fail before
-launch.
+`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` publishes a stable backend,
+version, profile, cache identity, and closed capability list in placement
+receipts. General operations report their actual `F64Strict+Reproducible`
+profile; the tiled path reports real `F32Strict+Reproducible` arithmetic and
+ordered reduction. The ratified production profile and provider capabilities
+remain gated, and unsupported requests fail before launch.
 
-The legacy `raw_kernel_contract(reason, arity)` entry point fails closed:
-reason and arity cannot prove address spaces, read/write sets, effects, races,
-or barriers. A provider-issued typed `#Unsafe` boundary proof is required
-before raw code can be launched; no ambient descriptor or display label can
-stand in for that proof.
+`D-COMPUTE-RAWBOUNDARY1` is open. The legacy
+`raw_kernel_contract(reason, arity)` entry point fails closed: reason and arity
+cannot prove address spaces, read/write sets, effects, races, or barriers.
+`RawKernelContract` has no ambient constructor or empty wire value. A
+provider-issued typed `#Unsafe` boundary proof is required before raw code can
+be launched; no descriptor or display label can stand in for that proof.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).

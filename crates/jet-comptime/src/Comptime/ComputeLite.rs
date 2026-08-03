@@ -126,7 +126,7 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
         _ => return Err(unsupported("placement reason", span)),
     };
-    Ok(JetComputePlacementReceipt {
+    let receipt = JetComputePlacementReceipt {
         requested,
         selected,
         backend: text("backend")?,
@@ -135,7 +135,10 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
         cache: text("cache")?,
         capabilities,
         reason,
-    })
+    };
+    jet_compute_validate_placement(receipt.selected, &receipt)
+        .map_err(|error| unsupported(&format!("ComputePlacement metadata: {}", error.jet_show()), span))?;
+    Ok(receipt)
 }
 
 fn transfer_to_ct(transfer: &JetComputeTransferReceipt) -> CtValue {
@@ -180,13 +183,6 @@ fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferRecei
         bytes,
         fallback,
     })
-}
-
-fn raw_kernel_to_ct(_contract: &JetRawKernelContract) -> CtValue {
-    CtValue::Struct {
-        type_name: "RawKernelContract".to_string(),
-        fields: Vec::new(),
-    }
 }
 
 fn ct_to_raw_kernel_contract(
@@ -805,7 +801,7 @@ pub fn apply(
             };
             Ok(
                 match jet_compute_raw_kernel_contract(reason, as_int(one(1)?, span)?) {
-                    Ok(contract) => CtValue::ResOk(Box::new(raw_kernel_to_ct(&contract))),
+                    Ok(contract) => match contract {},
                     Err(e) => err_compute(e),
                 },
             )
