@@ -9811,7 +9811,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? [FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return .Ok(Email.{addr: s})
@@ -9849,7 +9849,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? [FieldError] {
         value := tree.field("address") ?? DataTree.Text("")
         return .Ok(Email.{ addr: value.text() ?? "" })
     }
@@ -10150,15 +10150,61 @@ struct Strict { name: String }
 
 fn run() {
     result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
-    if result == .Err(e) {
-        print(e.path)
-        print(e.reason)
+    if result == .Err(errors) {
+        loop error; errors {
+            print(error.path)
+            print(error.reason)
+        }
     }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "struct_deny", src, &[], None);
     assert_eq!(code, 0, "generated strict codec failed: {stderr}");
     assert_eq!(stdout, "extra\nE2412: unknown field `extra`\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn generated_struct_decode_accumulates_nested_errors_and_validation() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_decode_errors_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+#Codable
+struct Inner { left: Int  right: Bool }
+
+#Codable
+struct Outer { inner: Inner  count: Int }
+
+#Codable
+struct Account {
+    email: String
+    age: Int
+
+    validate {
+        check(email.contains("@"), at: email, "email")
+        check(age >= 18, at: age, "age")
+    }
+}
+
+fn run() {
+    malformed := json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}")
+    if malformed == .Err(errors) {
+        print(errors.len())
+        loop error; errors { print(error.path) }
+    }
+    invalid := json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}")
+    if invalid == .Err(errors) {
+        print(errors.len())
+        loop error; errors { print(error.path) }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_decode_errors", src, &[], None);
+    assert_eq!(code, 0, "generated decoder accumulation failed: {stderr}");
+    assert_eq!(stdout, "3\ninner.left\ninner.right\ncount\n2\nemail\nage\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

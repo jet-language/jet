@@ -392,9 +392,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LOGTRACE1=A: structured logging values.
         "LogField" => Some("LogField"),
         "LogSpan" => Some("LogSpan"),
-        // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
+        // D-SERDE2 / D-VALIDATE-DECODE1: the value tree and accumulated typed
+        // decode errors live in jet_std.
         "DataTree" => Some("DataTree"),
-        "DecodeError" => Some("DecodeError"),
         // D-VALIDATE1: the accumulated validation error lives in jet_std too.
         "FieldError" => Some("FieldError"),
         "EncodingLimits" => Some("EncodingLimits"),

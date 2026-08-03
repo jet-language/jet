@@ -238,24 +238,18 @@ fn datatree_int_result(recv: &CtValue) -> CtValue {
     };
     match result {
         Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
-            type_name: "DecodeError".to_string(),
-            fields: vec![
-                ("path".to_string(), CtValue::Str(String::new())),
-                ("reason".to_string(), CtValue::Str(reason)),
-            ],
-        })),
+        Err(reason) => CtValue::ResErr(Box::new(decode_error(String::new(), reason))),
     }
 }
 
 fn decode_error(path: String, reason: String) -> CtValue {
-    CtValue::Struct {
-        type_name: "DecodeError".to_string(),
+    CtValue::List(vec![CtValue::Struct {
+        type_name: "FieldError".to_string(),
         fields: vec![
             ("path".to_string(), CtValue::Str(path)),
             ("reason".to_string(), CtValue::Str(reason)),
         ],
-    }
+    }])
 }
 
 fn datatree_payload<'a>(recv: &'a CtValue, variant: &str) -> Option<&'a CtValue> {

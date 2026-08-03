@@ -86,7 +86,7 @@ pub(crate) fn enc_row_target_rust(ret_ty: &Type, cx: &Cx) -> String {
 }
 /// D-MIGRATE3=A: the Rust type a typed `decode_traced<T>` constructs — same
 /// target as [`enc_target_rust`], one layer deeper through the resolved
-/// `Result<DecodeResult<T | [T]>, DecodeError>` return type.
+/// `Result<DecodeResult<T | [T]>, [FieldError]>` return type.
 pub(crate) fn enc_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
     if let Type::Result { ok, .. } = ret_ty {
         if let Type::Apply { args, .. } = &**ok {

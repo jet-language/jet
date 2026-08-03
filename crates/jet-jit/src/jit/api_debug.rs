@@ -444,6 +444,10 @@ fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
         | TExprKind::Deref(inner)
         | TExprKind::RawOf(inner)
         | TExprKind::LayoutLit { inner } => collect_expr_ops(inner, out),
+        TExprKind::DecodeUnder { segment, inner } => {
+            collect_expr_ops(segment, out);
+            collect_expr_ops(inner, out);
+        }
         TExprKind::DistinctCtor { arg, .. } => collect_expr_ops(arg, out),
         TExprKind::Unary { operand, .. } => collect_expr_ops(operand, out),
         TExprKind::Binary { lhs, rhs, .. } | TExprKind::LayoutCompare { lhs, rhs, .. } => {
@@ -623,6 +627,7 @@ pub fn jit_expr_tag(expr: &TExpr) -> &'static str {
         TExprKind::Local(_) => "Local",
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Index { .. } => "Index",
+        TExprKind::DecodeUnder { .. } => "DecodeUnder",
         _ => "Other",
     }
 }

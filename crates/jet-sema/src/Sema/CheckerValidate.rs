@@ -19,9 +19,8 @@
 //!      purity pass needed.
 //!
 //! The in-body block + `Type.validate(value)` standalone entry point are
-//! wired. `decode<T>()` auto-run and `Validate.over(s)` remain held at the
-//! owner gate recorded as `D-VALIDATE-DECODE1`: the Decode trait returns one
-//! `DecodeError`, while validation accumulates `[FieldError]` values.
+//! wired. Typed decoding and validation share the owner-ratified accumulated
+//! `[FieldError]` result contract.
 
 use super::*;
 use crate::AST::{

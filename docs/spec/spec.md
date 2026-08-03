@@ -757,7 +757,7 @@ impl Circle {
   D-AUTODERIVE-SYNTAX1=D). Other explicit derives are `#Comparable`, `#Codable`,
   `#Encode`, `#Decode`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
-  and `Decode.decode(tree: DataTree) => Self ? DecodeError` are ordinary Jet
+  and `Decode.decode(tree: DataTree) => Self ? [FieldError]` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
   Built-in derives generate Jet source fragments beside the marked type, then
@@ -767,17 +767,17 @@ impl Circle {
 - **Accumulated validation (D-VALIDATE1, card #506):** a `validate { … }`
   section in a struct body declares rules as `check(cond, at: field, "msg")`
   statements; `field` is a bare sibling-field reference (D-FIELDPOL1). Every
-  failing `check` accumulates into `[FieldError]` (`{ path, reason }`, the
-  `DecodeError` shape) instead of failing fast. Sema requires each rule
+  failing `check` accumulates into `[FieldError]` (`{ path, reason }`) instead
+  of failing fast. Sema requires each rule
   statement be exactly this shape (E0353), `at:` to name a real field
   (E0354), and purity-checks the whole synthesized function (S60/E3401) —
   a rule may reference only sibling fields and pure calls. `Type.validate(value)`
-  runs the block standalone, returning `value ? [FieldError]`. Shipped this
-  slice: the in-body block + `Type.validate(value)`. Not yet wired:
-  `decode<T>()` auto-run and the `Validate.over(s)` use-site escape for rules
-  needing outside context — both need a design call on how `[FieldError]`
-  composes with the existing single-`DecodeError` `Decode` trait contract
-  before they can land without a breaking change.
+  runs the block standalone, returning `value ? [FieldError]`. Derived struct
+  decoders now pass a successfully shaped value through that validator, so
+  shape and rule failures share one list. Hand-written codecs still opt into
+  validation explicitly. The `Validate.over(s)` use-site escape for rules
+  needing outside context remains a separate framework slice. The contract
+  ruling is recorded as `D-VALIDATE-DECODE1=B`.
 - **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
   erased dataflow fact and its policy. `deny` is required and nonempty; `from`
   is optional. Direct `#Name` tags attach to values, fields, parameters, and

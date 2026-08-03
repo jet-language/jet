@@ -6,6 +6,7 @@ use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
     alloc_method_return, args_spec_method_return, binary_reader_method_return, is_allocator_type,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
+    decode_error_ty,
     devserver_method_return, webapp_method_return, db_value_method_return, expiring_method_return,
     email_method_return, encoding_handle_method_return, file_handle_method_return, http_type_method_return, is_db_value_type_name,
     is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
@@ -718,6 +719,32 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                     return Some(json_ty());
+                }
+                // D-VALIDATE-DECODE1=B: one shared transform frames every
+                // error in a child Result while preserving its success type.
+                // Generated codecs use this for the field/index boundary;
+                // it is an error-list helper, not another decode API.
+                if type_name == "FieldError" && method == "under" {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity("FieldError.under", 2, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("FieldError.under", 0, &Type::String, &mut args[0]);
+                    let result_ty = self.infer(&mut args[1].expr)?;
+                    if !matches!(&result_ty, Type::Result { err, .. } if **err == decode_error_ty()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0905",
+                            "`FieldError.under` expects a result with `[FieldError]` errors".to_string(),
+                            "the framing helper preserves the child result and prefixes every accumulated decode failure".to_string(),
+                            "pass a typed decode/accessor result, such as `tree.field(\"name\")?.decode<T>()`".to_string(),
+                            Some(args[1].expr.span()),
+                        ));
+                    }
+                    *resolved_ret_out = Some(result_ty.clone());
+                    return Some(result_ty);
                 }
                 if self.lookup(type_name).is_none()
                     && type_name == crate::Syntax::EXPIRING_VALUE_TYPE
@@ -1610,7 +1637,7 @@ impl<'a> Checker<'a> {
                 }
                 let ret = Type::Result {
                     ok: Box::new(target),
-                    err: Box::new(Type::Named("DecodeError".to_string())),
+                    err: Box::new(decode_error_ty()),
                 };
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);

@@ -1867,8 +1867,8 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
-| `json<T>(text)` | `[T] ? DecodeError` | Typed rows from a JSON array of objects |
+| `csv<T>(text)` | `[T] ? [FieldError]` | Header-mapped typed CSV rows |
+| `json<T>(text)` | `[T] ? [FieldError]` | Typed rows from a JSON array of objects |
 | `csv_reader<T>(file, limits)` / `json_reader<T>(file, limits)` | `DataStream<T> ? DataError` | Bounded pull over `core.encoding` readers |
 | `DataLimits.safe()` | `DataLimits` | Default group/sort/join/output ceilings + `EncodingLimits.safe()` |
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
@@ -2026,12 +2026,13 @@ fn run() {
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
-**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? DecodeError` for
-json/toml/yaml, and `[T] ? DecodeError` for csv (one struct per row, columns mapped
+**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? [FieldError]` for
+json/toml/yaml, and `[T] ? [FieldError]` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
 cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no
-target stays the lenient dynamic `JSON` (above). `DecodeError` carries a field `path`
-and a `reason`; compose it with `??`.
+target stays the lenient dynamic `JSON` (above). Decode failures carry an
+accumulated `[FieldError]` list; each item has a `path` and a `reason`.
+Compose it with `??`.
 
 ```jet
 raw :: "item,qty\npen,3\nink,5"
@@ -2041,9 +2042,10 @@ print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}
 
 **Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
 protocol as built-in derives. Write `impl T.Encode` with `encode(self) =>
-DataTree` and `impl T.Decode` with `decode(tree: DataTree) => T ? DecodeError`.
-Tree accessors add their field/index path and return `DecodeError`, so `?`
-chains without manual mapping. `tree.decode<T>()` dispatches any subtree
+DataTree` and `impl T.Decode` with `decode(tree: DataTree) => T ? [FieldError]`.
+`.field` and `.at` add their field/index path; scalar accessors leave the path
+empty and a containing decoder frames them with `FieldError.under`. All return
+`[FieldError]`, so `?` chains without manual mapping. `tree.decode<T>()` dispatches any subtree
 through `T`'s ordinary `Decode` implementation, including primitives, user
 types, lists, options, and string-keyed maps. A derived parent therefore
 composes with a hand-written field codec; generated and hand-written paths are
@@ -2051,8 +2053,8 @@ one mechanism.
 
 ```jet
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? DecodeError {
-        address := tree.text()?
+    fn decode(tree: DataTree) => Email ? [FieldError] {
+        address := FieldError.under("address", tree.text())?
         return Ok(Email.{ address })
     }
 }
@@ -2063,7 +2065,7 @@ items := tree.field("items")?.decode<[LineItem]>()?
 **Traced decode — was this migrated?** (D-MIGRATE3=A, D-MIGRATE4=A):
 `decode_traced<T>(text)` sits beside `decode<T>` on every codec
 (json/csv/toml/yaml share the decode machinery) and returns
-`DecodeResult<T> ? DecodeError` — `{ value: T, migration: MigrationStatus }`.
+`DecodeResult<T> ? [FieldError]` — `{ value: T, migration: MigrationStatus }`.
 `MigrationStatus` carries `.migrated: Bool`, `.from` (the source shape's
 version label, `"v1"` = oldest), and `.steps` (one entry per migration step
 applied, `"v1->v2"` style). `decode` itself is untouched — same call, same
@@ -2111,12 +2113,12 @@ errs :: Signup.validate(bad_signup) // Signup ? [FieldError]
 
 `Type.validate(value)` runs the block standalone, returning `value ?
 [FieldError]` — `FieldError` carries `.path`/`.reason`, the same shape as
-`DecodeError`. Rule expressions are purity-checked (S60/E3401): a `check`'s
+typed decode failures. Rule expressions are purity-checked (S60/E3401): a `check`'s
 condition and message may reference only the struct's own fields and pure
-calls, never Net/DB/IO. Card #506 slice 1 ships the block and
-`Type.validate(value)`; `decode<T>()` auto-run and the `Validate.over(s)`
-use-site escape (for rules needing outside context, like a database lookup)
-are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
+calls, never Net/DB/IO. Derived decoders invoke this validator after shape
+decoding; hand codecs opt in explicitly. The `Validate.over(s)` use-site
+escape (for rules needing outside context, like a database lookup) remains
+follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
 
 **Field attributes** (D-SERDE5):
 
@@ -2155,7 +2157,7 @@ bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
 The expert hand-impl path is live: `impl T.Encode { fn encode(self) => DataTree
-{ … } }` and `impl T.Decode { fn decode(tree: DataTree) => T ? DecodeError {
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) => T ? [FieldError] {
 … } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---

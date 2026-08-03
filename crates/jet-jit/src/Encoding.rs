@@ -388,9 +388,11 @@ fn result_err_decode(path: &str, reason: &str) -> i64 {
         let error = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_string(error, 0, path);
         let _ = rt.heap.record_set_string(error, 1, reason);
+        let errors = rt.heap.alloc_empty_list();
+        let _ = rt.heap.list_push_int(errors, error);
         rt.results.push(super::JitResultValue {
             ok: false,
-            bits: error as u64,
+            bits: errors as u64,
         });
         rt.results.len() as i64
     })
@@ -1671,7 +1673,7 @@ extern "C" fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 
     jet_jit_cbor_parse_impl(bytes, Some(options), true)
 }
 
-/// Project `Result<T, DecodeError>` to `Result<T, CBORError>` after typed decode.
+/// Project `Result<T, [FieldError]>` to `Result<T, CBORError>` after typed decode.
 extern "C" fn jet_jit_cbor_project_decode_error(result: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(value) = result
@@ -1683,11 +1685,22 @@ extern "C" fn jet_jit_cbor_project_decode_error(result: i64) -> i64 {
         if value.ok {
             return result;
         }
-        let decode_error = value.bits as i64;
-        let path_id = rt.heap.record_get_string(decode_error, 0).unwrap_or(0);
-        let reason_id = rt.heap.record_get_string(decode_error, 1).unwrap_or(0);
-        let path = rt.heap.clone_string(path_id).unwrap_or_default();
-        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let errors = value.bits as i64;
+        let len = rt.heap.list_len(errors).unwrap_or(0);
+        let mut path = String::new();
+        let mut reasons = Vec::new();
+        for i in 0..len {
+            let error = rt.heap.list_get_int(errors, i).unwrap_or(0);
+            let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
+            let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
+            if path.is_empty() {
+                path = rt.heap.clone_string(path_id).unwrap_or_default();
+            }
+            if let Some(reason) = rt.heap.clone_string(reason_id) {
+                reasons.push(reason);
+            }
+        }
+        let reason = reasons.join("; ");
         let path = if path.is_empty() {
             "$".to_string()
         } else {
@@ -1922,27 +1935,78 @@ extern "C" fn jet_jit_decode_error_under(result: i64, index: i64) -> i64 {
         if value.ok {
             return result;
         }
-        let error = value.bits as i64;
-        let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
-        let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
-        let path = rt.heap.clone_string(path_id).unwrap_or_default();
-        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
         let segment = format!("[{index}]");
-        let path = if path.is_empty() {
-            segment
-        } else if path.starts_with('[') {
-            format!("{segment}{path}")
-        } else {
-            format!("{segment}.{path}")
-        };
-        let path = rt.heap.alloc_string(path);
-        let reason = rt.heap.alloc_string(reason);
-        let framed = rt.heap.alloc_record(2);
-        let _ = rt.heap.record_set_string(framed, 0, path);
-        let _ = rt.heap.record_set_string(framed, 1, reason);
+        let errors = value.bits as i64;
+        let framed_errors = rt.heap.alloc_empty_list();
+        let len = rt.heap.list_len(errors).unwrap_or(0);
+        for i in 0..len {
+            let error = rt.heap.list_get_int(errors, i).unwrap_or(0);
+            let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
+            let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
+            let path = rt.heap.clone_string(path_id).unwrap_or_default();
+            let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+            let path = if path.is_empty() {
+                segment.clone()
+            } else if path.starts_with('[') {
+                format!("{segment}{path}")
+            } else {
+                format!("{segment}.{path}")
+            };
+            let path = rt.heap.alloc_string(path);
+            let reason = rt.heap.alloc_string(reason);
+            let framed = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_string(framed, 0, path);
+            let _ = rt.heap.record_set_string(framed, 1, reason);
+            let _ = rt.heap.list_push_int(framed_errors, framed);
+        }
         rt.results.push(super::JitResultValue {
             ok: false,
-            bits: framed as u64,
+            bits: framed_errors as u64,
+        });
+        rt.results.len() as i64
+    })
+}
+
+/// Prefix every member of a resident `Result<T, [FieldError]>` error list
+/// with an arbitrary field segment. Success values pass through unchanged.
+extern "C" fn jet_jit_decode_error_under_segment(result: i64, segment: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(value) = result
+            .checked_sub(1)
+            .and_then(|result_index| rt.results.get(result_index as usize))
+        else {
+            return result;
+        };
+        if value.ok {
+            return result;
+        }
+        let segment = rt.heap.clone_string(segment).unwrap_or_default();
+        let errors = value.bits as i64;
+        let framed_errors = rt.heap.alloc_empty_list();
+        let len = rt.heap.list_len(errors).unwrap_or(0);
+        for i in 0..len {
+            let error = rt.heap.list_get_int(errors, i).unwrap_or(0);
+            let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
+            let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
+            let path = rt.heap.clone_string(path_id).unwrap_or_default();
+            let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+            let path = if path.is_empty() {
+                segment.clone()
+            } else if path.starts_with('[') {
+                format!("{segment}{path}")
+            } else {
+                format!("{segment}.{path}")
+            };
+            let path = rt.heap.alloc_string(path);
+            let reason = rt.heap.alloc_string(reason);
+            let framed = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_string(framed, 0, path);
+            let _ = rt.heap.record_set_string(framed, 1, reason);
+            let _ = rt.heap.list_push_int(framed_errors, framed);
+        }
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: framed_errors as u64,
         });
         rt.results.len() as i64
     })
@@ -2055,18 +2119,24 @@ extern "C" fn jet_jit_encoding_error_show(handle: i64) -> i64 {
     text
 }
 
-/// Mirror `jet_std::DecodeError::jet_show` for resident `print(error)`.
+/// Mirror `jet_std::FieldError` list rendering for resident `print(errors)`.
 extern "C" fn jet_jit_decode_error_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let path_id = rt.heap.record_get_string(handle, 0).unwrap_or(0);
-        let reason_id = rt.heap.record_get_string(handle, 1).unwrap_or(0);
-        let path = rt.heap.clone_string(path_id).unwrap_or_default();
-        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
-        let shown = if path.is_empty() {
-            reason
-        } else {
-            format!("at `{path}`: {reason}")
-        };
+        let mut shown = Vec::new();
+        let len = rt.heap.list_len(handle).unwrap_or(0);
+        for i in 0..len {
+            let error = rt.heap.list_get_int(handle, i).unwrap_or(0);
+            let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
+            let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
+            let path = rt.heap.clone_string(path_id).unwrap_or_default();
+            let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+            shown.push(if path.is_empty() {
+                reason
+            } else {
+                format!("at `{path}`: {reason}")
+            });
+        }
+        let shown = format!("[{}]", shown.join(", "));
         rt.heap.alloc_string(shown)
     })
 }
@@ -2129,6 +2199,7 @@ pub(crate) struct EncodingHostFns {
     pub decode_fixed_len: cranelift_module::FuncId,
     pub datatree_decode_list_error: cranelift_module::FuncId,
     pub decode_error_under: cranelift_module::FuncId,
+    pub decode_error_under_segment: cranelift_module::FuncId,
     pub datatree_text: cranelift_module::FuncId,
     pub datatree_bool: cranelift_module::FuncId,
     pub datatree_float: cranelift_module::FuncId,
@@ -2234,6 +2305,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol(
         "jet_jit_decode_error_under",
         jet_jit_decode_error_under as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_error_under_segment",
+        jet_jit_decode_error_under_segment as *const u8,
     );
     builder.symbol("jet_jit_datatree_text", jet_jit_datatree_text as *const u8);
     builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
@@ -2612,6 +2687,10 @@ pub(crate) fn declare_encoding_host_fns(
             &sig_unary,
         )?,
         decode_error_under: import("jet_jit_decode_error_under", &sig_binary)?,
+        decode_error_under_segment: import(
+            "jet_jit_decode_error_under_segment",
+            &sig_binary,
+        )?,
         datatree_text: import("jet_jit_datatree_text", &sig_unary)?,
         datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
         datatree_float: import("jet_jit_datatree_float", &sig_unary)?,

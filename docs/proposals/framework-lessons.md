@@ -40,8 +40,10 @@ claim that the open transport and validation boundaries are complete.
   query graph, rerun callback, and browser `core.ws` transport remain open.
 - D-SCHEDULE1 shares parser and sema resolution, but its service-runtime and
   jetos timer consumers remain open.
-- D-VALIDATE1 has in-body accumulation and `Type.validate`. Automatic decode
-  validation and `Validate.over` await ballot `D-VALIDATE-DECODE1`.
+- D-VALIDATE1 has in-body accumulation and `Type.validate`. Derived struct
+  decode now runs the same validator after shape decoding. Hand codecs still
+  opt in explicitly, and `Validate.over` remains open after ballot
+  `D-VALIDATE-DECODE1` ratified the shared `[FieldError]` contract.
 
 ## Verification checkpoint
 

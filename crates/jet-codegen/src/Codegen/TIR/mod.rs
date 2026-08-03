@@ -573,6 +573,10 @@ fn collect_serde_codec_demands(
                     _ => {}
                 }
             }
+            TExprKind::DecodeUnder { segment, inner } => {
+                walk_expr(segment, demands);
+                walk_expr(inner, demands);
+            }
             TExprKind::CoreCall {
                 module,
                 method,
@@ -1723,7 +1727,7 @@ pub struct TWebParamReconstruction {
 
 /// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method
 /// bridges to. `Encode` → `jet_encode(&self) -> jet_std::DataTree`; `Decode` →
-/// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, DecodeError>`.
+/// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SerdeCodec {
     Encode,
@@ -1757,7 +1761,7 @@ pub enum TFuncKind {
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
         /// with Jet-facing signatures, but the Rust `user_Encode`/`user_Decode`
         /// traits declare `jet_encode(&self) -> DataTree` /
-        /// `jet_decode(tree: &DataTree) -> Result<Self, DecodeError>`. This bridges
+        /// `jet_decode(tree: &DataTree) -> Result<Self, [FieldError]>`. This bridges
         /// the name + signature internally (I2: a sema-accepted hand impl must
         /// produce Rust rustc accepts). `None` for every ordinary trait method.
         serde: Option<SerdeCodec>,
@@ -3122,6 +3126,13 @@ pub enum TExprKind {
         owner_type: Option<Type>,
         method: TMethodRef,
         args: Vec<TCallArg>,
+    },
+    /// D-VALIDATE-DECODE1=B: prefix every error in a typed child result while
+    /// preserving its success value. The segment and result are already
+    /// lowered; every execution tier applies the same list transform.
+    DecodeUnder {
+        segment: Box<TExpr>,
+        inner: Box<TExpr>,
     },
     /// c109 Phase 9: a built-in collection/string method (`emit_builtin_method`).
     /// The receiver-type dispatch (`expr_jet_ty(receiver)` → Map/List/String) is

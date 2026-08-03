@@ -904,6 +904,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             format!("{}::{}({})", owner, method.rust(), arg_str)
         }
+        // D-VALIDATE-DECODE1=B: preserve a child Result's success value and
+        // frame every accumulated FieldError at the generated boundary.
+        TExprKind::DecodeUnder { segment, inner } => format!(
+            "jet_std::FieldError::under(&({}), {})",
+            emit_tir_expr(segment, cx),
+            emit_tir_expr(inner, cx)
+        ),
         // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
         // branch was resolved into `op` at lowering; emit only formats, reproducing
         // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
@@ -1585,7 +1592,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             | "TerminalSize"
                             | "TerminalPolicy"
                             | "AsyncPolicy"
-                            | "DecodeError"
                             | "FieldError"
                             | "CBOROptions"
                             | "CBORError"

@@ -1648,22 +1648,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            // D-SERDE2 / D-SERDE14=A: the public DecodeError dot constructor is a
-            // core struct literal with plain fields and a jet_std Rust head.
-            if type_name == "DecodeError" {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
             // D-ENCSTREAM-SURFACE1=A: shared encoding value constructors.
             if matches!(
                 type_name.as_str(),

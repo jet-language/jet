@@ -1089,6 +1089,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 TIR::TTryConvert::None | TIR::TTryConvert::Typed(_)
             ) && resident_safe_expr(inner, callees)
         }
+        TExprKind::DecodeUnder { segment, inner } => {
+            resident_safe_expr(segment, callees) && resident_safe_expr(inner, callees)
+        }
         TExprKind::Absent => true,
         TExprKind::DistinctCtor { arg, base, .. } => {
             jit_value_type(base) && resident_safe_expr(arg, callees)

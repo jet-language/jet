@@ -5,8 +5,8 @@
 //! (`Codegen/Items.rs::emit_struct_serde` / `emit_migration_chain_walker`)
 //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
-//! and the `DecodeError{path,reason}` / `MigrationStatus{migrated,from,steps}`
-//! shapes `jet_std` defines.
+//! and the `[FieldError]` / `MigrationStatus{migrated,from,steps}` shapes
+//! `jet_std` defines.
 //!
 //! Operates directly on the `JSON`-tagged `CtValue` tree `JSONInterp`/
 //! `EncodingLite` already build for every codec (json/csv/toml/yaml) — its
@@ -24,35 +24,49 @@ use super::Interpreter::Interp;
 use super::JSONInterp::{json_payload, json_variant};
 use super::Value::CtValue;
 
-// ── DecodeError / MigrationStatus / DecodeResult CtValue shapes ────────────
+// ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
-    CtValue::Struct {
-        type_name: "DecodeError".to_string(),
+    CtValue::List(vec![CtValue::Struct {
+        type_name: "FieldError".to_string(),
         fields: vec![
             ("path".to_string(), CtValue::Str(String::new())),
             ("reason".to_string(), CtValue::Str(reason.into())),
         ],
-    }
+    }])
 }
 
-/// Mirrors `jet_std::DecodeError::under` — prefix a child error's path with
+/// Mirrors `jet_std::FieldError::under` — prefix every child error's path with
 /// the field/index segment it occurred under.
 pub(super) fn decode_error_under(seg: &str, e: CtValue) -> CtValue {
     match e {
-        CtValue::Struct { type_name, mut fields } => {
-            if let Some((_, CtValue::Str(path))) = fields.iter_mut().find(|(n, _)| n == "path") {
-                *path = if path.is_empty() {
-                    seg.to_string()
-                } else if path.starts_with('[') {
-                    format!("{}{}", seg, path)
-                } else {
-                    format!("{}.{}", seg, path)
-                };
-            }
-            CtValue::Struct { type_name, fields }
-        }
-        other => other,
+        CtValue::List(errors) => CtValue::List(
+            errors
+                .into_iter()
+                .map(|error| match error {
+                    CtValue::Struct { fields, .. } => {
+                        let mut fields = fields;
+                        if let Some((_, CtValue::Str(path))) =
+                            fields.iter_mut().find(|(n, _)| n == "path")
+                        {
+                            *path = if path.is_empty() {
+                                seg.to_string()
+                            } else if path.starts_with('[') {
+                                format!("{}{}", seg, path)
+                            } else {
+                                format!("{}.{}", seg, path)
+                            };
+                        }
+                        CtValue::Struct {
+                            type_name: "FieldError".to_string(),
+                            fields,
+                        }
+                    }
+                    other => other,
+                })
+                .collect(),
+        ),
+        other => decode_error(other.jet_show()),
     }
 }
 

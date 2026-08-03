@@ -251,39 +251,85 @@ fn datatree_variant(value: &CtValue) -> Option<(&str, Option<&CtValue>)> {
 }
 
 fn decode_error(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
-    CtValue::Struct {
-        type_name: "DecodeError".to_string(),
+    CtValue::List(vec![CtValue::Struct {
+        type_name: "FieldError".to_string(),
         fields: vec![
             ("path".to_string(), CtValue::Str(path.into())),
             ("reason".to_string(), CtValue::Str(reason.into())),
         ],
-    }
+    }])
 }
 
 fn decode_error_fields(error: &CtValue) -> (String, String) {
-    let CtValue::Struct { fields, .. } = error else {
-        return (String::new(), error.jet_show());
+    let entries = match error {
+        CtValue::List(entries) => entries,
+        _ => return (String::new(), error.jet_show()),
     };
-    let text = |name: &str| {
-        fields.iter().find_map(|(field, value)| {
-            (field == name).then_some(value).and_then(|value| match value {
-                CtValue::Str(value) => Some(value.clone()),
-                _ => None,
+    let mut path = String::new();
+    let mut reasons = Vec::new();
+    for entry in entries {
+        let CtValue::Struct { fields, .. } = entry else { continue };
+        let text = |name: &str| {
+            fields.iter().find_map(|(field, value)| {
+                (field == name).then_some(value).and_then(|value| match value {
+                    CtValue::Str(value) => Some(value.clone()),
+                    _ => None,
+                })
             })
-        })
-    };
-    (text("path").unwrap_or_default(), text("reason").unwrap_or_default())
+        };
+        if path.is_empty() {
+            path = text("path").unwrap_or_default();
+        }
+        if let Some(reason) = text("reason") {
+            reasons.push(reason);
+        }
+    }
+    if reasons.is_empty() {
+        (path, error.jet_show())
+    } else {
+        (path, reasons.join("; "))
+    }
 }
 
 fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
-    let (path, reason) = decode_error_fields(&error);
-    decode_error(
-        if path.is_empty() {
-            segment.to_string()
-        } else {
-            format!("{segment}{path}")
-        },
-        reason,
+    let CtValue::List(entries) = error else {
+        return decode_error(segment, error.jet_show());
+    };
+    CtValue::List(
+        entries
+            .into_iter()
+            .map(|entry| {
+                let CtValue::Struct { fields, .. } = entry else {
+                    return entry;
+                };
+                let text = |name: &str| {
+                    fields.iter().find_map(|(field, value)| {
+                        (field == name).then_some(value).and_then(|value| match value {
+                            CtValue::Str(value) => Some(value.clone()),
+                            _ => None,
+                        })
+                    })
+                };
+                let path = text("path").unwrap_or_default();
+                let reason = text("reason").unwrap_or_default();
+                CtValue::Struct {
+                    type_name: "FieldError".to_string(),
+                    fields: vec![
+                        (
+                            "path".to_string(),
+                            CtValue::Str(if path.is_empty() {
+                                segment.to_string()
+                            } else if path.starts_with('[') {
+                                format!("{segment}{path}")
+                            } else {
+                                format!("{segment}.{path}")
+                            }),
+                        ),
+                        ("reason".to_string(), CtValue::Str(reason)),
+                    ],
+                }
+            })
+            .collect(),
     )
 }
 
@@ -4079,6 +4125,19 @@ impl<'a> EvalCtx<'a> {
                 }
                 self.call_callable(&callable, argv)
             }
+            TExprKind::DecodeUnder { segment, inner } => {
+                let segment = match self.eval_expr(segment, scope)? {
+                    CtValue::Str(value) => value,
+                    other => other.jet_show(),
+                };
+                let result = self.eval_expr(inner, scope)?;
+                match result {
+                    CtValue::ResErr(error) => Ok(CtValue::ResErr(Box::new(
+                        decode_error_under(&segment, *error),
+                    ))),
+                    other => Ok(other),
+                }
+            }
             TExprKind::StaticCall {
                 owner,
                 owner_type,
@@ -4987,8 +5046,14 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
         let _ = scope;
-        if let CtValue::Struct { type_name, fields } = v {
-            if type_name == "DecodeError" {
+        if let CtValue::List(entries) = v {
+            let mut rendered = Vec::new();
+            for entry in entries {
+                let CtValue::Struct { type_name, fields } = entry else { break };
+                if type_name != "FieldError" {
+                    rendered.clear();
+                    break;
+                }
                 let string_field = |name: &str| {
                     fields.iter().find_map(|(field, value)| {
                         (field == name).then_some(value).and_then(|value| match value {
@@ -4999,11 +5064,14 @@ impl<'a> EvalCtx<'a> {
                 };
                 let path = string_field("path").unwrap_or_default();
                 let reason = string_field("reason").unwrap_or_default();
-                return Ok(if path.is_empty() {
+                rendered.push(if path.is_empty() {
                     reason.to_string()
                 } else {
                     format!("at `{path}`: {reason}")
                 });
+            }
+            if !rendered.is_empty() {
+                return Ok(format!("[{}]", rendered.join(", ")));
             }
         }
         if let Some(text) = crate::Comptime::display_core_pure_value(v) {

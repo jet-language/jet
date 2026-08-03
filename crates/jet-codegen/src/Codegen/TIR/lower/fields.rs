@@ -187,7 +187,6 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "GameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
-        "DecodeError" => matches!(member, "path" | "reason"),
         "FieldError" => matches!(member, "path" | "reason"),
         "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
         "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
@@ -327,9 +326,6 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "pid" | "port" => Some(Type::Int),
             _ => None,
         };
-    }
-    if name == "DecodeError" && !cx.struct_fields.contains_key(name) {
-        return matches!(field, "path" | "reason").then_some(Type::String);
     }
     if name == "FieldError" && !cx.struct_fields.contains_key(name) {
         return matches!(field, "path" | "reason").then_some(Type::String);

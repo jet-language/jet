@@ -718,15 +718,15 @@ where
     fn jet_show(&self) -> String { jet_sync_list_show_generic(self) }
 }
 
-fn jet_sync_decode_error(message: impl Into<String>) -> jet_std::DecodeError {
-    jet_std::DecodeError::new(message)
+fn jet_sync_decode_error(message: impl Into<String>) -> Vec<jet_std::FieldError> {
+    jet_std::FieldError::one(message)
 }
 
 fn jet_sync_object<'a>(
     tree: &'a jet_std::DataTree,
     expected: &[&str],
     label: &str,
-) -> Result<&'a Vec<(String, jet_std::DataTree)>, jet_std::DecodeError> {
+) -> Result<&'a Vec<(String, jet_std::DataTree)>, Vec<jet_std::FieldError>> {
     let jet_std::DataTree::Object(fields) = tree else {
         return Err(jet_sync_decode_error(format!("{label} must be an object")));
     };
@@ -745,7 +745,7 @@ fn jet_sync_object_field<'a>(
     fields: &'a [(String, jet_std::DataTree)],
     name: &str,
     label: &str,
-) -> Result<&'a jet_std::DataTree, jet_std::DecodeError> {
+) -> Result<&'a jet_std::DataTree, Vec<jet_std::FieldError>> {
     fields
         .iter()
         .find(|(key, _)| key == name)
@@ -756,7 +756,7 @@ fn jet_sync_object_field<'a>(
 fn jet_sync_decode_string(
     tree: &jet_std::DataTree,
     label: &str,
-) -> Result<String, jet_std::DecodeError> {
+) -> Result<String, Vec<jet_std::FieldError>> {
     match tree {
         jet_std::DataTree::Text(value) => Ok(value.clone()),
         other => Err(jet_sync_decode_error(format!(
@@ -769,7 +769,7 @@ fn jet_sync_decode_string(
 fn jet_sync_decode_u64(
     tree: &jet_std::DataTree,
     label: &str,
-) -> Result<u64, jet_std::DecodeError> {
+) -> Result<u64, Vec<jet_std::FieldError>> {
     let value = match tree {
         jet_std::DataTree::Text(value) => value.clone(),
         jet_std::DataTree::Int(value) if *value >= 0 => value.to_string(),
@@ -791,7 +791,7 @@ fn jet_sync_decode_u64(
 fn jet_sync_decode_array<'a>(
     tree: &'a jet_std::DataTree,
     label: &str,
-) -> Result<&'a Vec<jet_std::DataTree>, jet_std::DecodeError> {
+) -> Result<&'a Vec<jet_std::DataTree>, Vec<jet_std::FieldError>> {
     match tree {
         jet_std::DataTree::Array(values) => Ok(values),
         other => Err(jet_sync_decode_error(format!(
@@ -824,7 +824,7 @@ impl user_Encode for JetSyncText {
 }
 
 impl user_Decode for JetSyncText {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["replicas"], "SyncText")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "replicas", "SyncText")?,
@@ -884,7 +884,7 @@ impl user_Encode for JetSyncCounter {
 }
 
 impl user_Decode for JetSyncCounter {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["counts"], "SyncCounter")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "counts", "SyncCounter")?,
@@ -949,7 +949,7 @@ impl user_Encode for JetSyncMap {
 }
 
 impl user_Decode for JetSyncMap {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "entries", "SyncMap")?,
@@ -1020,7 +1020,7 @@ impl user_Encode for JetSyncList {
 }
 
 impl user_Decode for JetSyncList {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "items", "SyncList")?,
@@ -1087,7 +1087,7 @@ where
     K: user_Decode + user_Encode,
     V: user_Decode + user_Encode,
 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "entries", "SyncMap")?,
@@ -1162,7 +1162,7 @@ impl<T> user_Decode for JetSyncListGeneric<T>
 where
     T: user_Decode + user_Encode,
 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "items", "SyncList")?,

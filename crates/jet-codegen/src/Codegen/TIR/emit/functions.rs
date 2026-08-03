@@ -357,7 +357,7 @@ pub(crate) fn emit_tir_trait_method(
     // bridged to the Rust `user_Encode`/`user_Decode` trait's method name + signature.
     // The user wrote the verbs `encode`/`decode` with Jet-facing signatures; the trait
     // declares `jet_encode(&self) -> jet_std::DataTree` /
-    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>`.
+    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>`.
     if let Some(codec) = serde {
         emit_tir_serde_method(tir, codec, cx, out);
         return;
@@ -449,8 +449,8 @@ pub(crate) fn emit_tir_trait_method(
 /// - `Encode`: `fn jet_encode(&self) -> jet_std::DataTree { <body> }`. The user wrote
 ///   `fn encode(self) => Data`; bare `self` already lowers to `&self` and `Data` to
 ///   `jet_std::DataTree`, so only the method NAME is bridged.
-/// - `Decode`: `fn jet_decode(<tree>: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>`.
-///   The user wrote a STATIC `fn decode(tree: Data) => T ? DecodeError`; the by-value
+/// - `Decode`: `fn jet_decode(<tree>: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>`.
+///   The user wrote a STATIC `fn decode(tree: Data) => T ? [FieldError]`; the by-value
 ///   `Data` param becomes a borrow with an owned clone re-bound at the head (`let <tree> =
 ///   <tree>.clone();`), so the body reads an owned `Data` local exactly as written.
 pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out: &mut String) {
@@ -480,7 +480,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
                 .unwrap_or_else(|| "tree".to_string());
             let ret = match &tir.ret {
                 Some(t) => rust_return_type(cx, t),
-                None => "Result<Self, jet_std::DecodeError>".to_string(),
+                None => "Result<Self, Vec<jet_std::FieldError>>".to_string(),
             };
             out.push_str(&format!(
                 "{pad}fn jet_decode({tree}: &jet_std::DataTree) -> {ret} {{\n"

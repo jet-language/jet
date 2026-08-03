@@ -15,31 +15,54 @@
         Object(Vec<(String, DataTree)>),
     }
 
-    // D-SERDE2 = A: the decode-side error carries a field path (`order.items[2]`)
-    // and a plain reason. Encode is infallible, so no `EncodeError` is minted (I8).
+    // D-VALIDATE-DECODE1=B (ratified 2026-08-03): every typed decoder returns
+    // the same accumulated field-error list. Structural failures use the empty
+    // path; callers add their field/index segment with `under`. There is no
+    // second decode error envelope.
     #[derive(Clone, Debug, PartialEq)]
-    pub struct DecodeError {
+    pub struct FieldError {
         pub path: String,
         pub reason: String,
     }
 
-    impl DecodeError {
-        pub fn new(reason: impl Into<String>) -> DecodeError {
-            DecodeError {
+    impl FieldError {
+        pub fn one(reason: impl Into<String>) -> Vec<FieldError> {
+            vec![FieldError {
                 path: String::new(),
                 reason: reason.into(),
-            }
+            }]
         }
-        // Prefix a child error with the field/index segment it occurred under.
-        pub fn under(seg: &str, mut e: DecodeError) -> DecodeError {
-            e.path = if e.path.is_empty() {
-                seg.to_string()
-            } else if e.path.starts_with('[') {
-                format!("{}{}", seg, e.path)
-            } else {
-                format!("{}.{}", seg, e.path)
-            };
-            e
+
+        pub fn at(path: impl Into<String>, reason: impl Into<String>) -> Vec<FieldError> {
+            vec![FieldError {
+                path: path.into(),
+                reason: reason.into(),
+            }]
+        }
+
+        // Prefix every failure from a child decode. Keeping this operation on
+        // the canonical error type makes nested records, lists, and maps
+        // preserve all failures instead of collapsing to the first one.
+        pub fn under_errors(seg: &str, errors: Vec<FieldError>) -> Vec<FieldError> {
+            errors
+                .into_iter()
+                .map(|mut error| {
+                    error.path = if error.path.is_empty() {
+                        seg.to_string()
+                    } else if error.path.starts_with('[') {
+                        format!("{}{}", seg, error.path)
+                    } else {
+                        format!("{}.{}", seg, error.path)
+                    };
+                    error
+                })
+                .collect()
+        }
+
+        // The Jet-facing transform keeps a child Result intact on success and
+        // frames every member of its accumulated error list on failure.
+        pub fn under<T>(seg: &str, result: Result<T, Vec<FieldError>>) -> Result<T, Vec<FieldError>> {
+            result.map_err(|errors| Self::under_errors(seg, errors))
         }
     }
 
@@ -47,19 +70,6 @@
         fn jet_show(&self) -> String {
             render_datatree_json(self, false, 0)
         }
-    }
-
-    // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated-validation
-    // error — same shape as `DecodeError` (a field path plus a plain reason),
-    // named separately because a `validate { }` block's failures are always
-    // reported as a LIST (every failing rule at once), never a single
-    // fail-fast error. `Type.validate(value)`, `Validate.over(s).finish()`,
-    // and a future `decode<T>()` auto-run build this type after the
-    // DecodeError/FieldError composition is owner-ratified.
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct FieldError {
-        pub path: String,
-        pub reason: String,
     }
 
     // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
@@ -108,29 +118,25 @@
     }
 
     // D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on DataTree. Each
-    // read returns `Result<T, DecodeError>` so a `?` chain composes cleanly inside
-    // a hand `decode`. `.field`/`.at` auto-fill `DecodeError.path` with the segment
-    // they read (the field name, or `[index]`); the scalar readers leave `path`
-    // empty (they read a leaf that has no name of its own — an enclosing `.field`
-    // frames it via `DecodeError::under` when the caller propagates).
+    // read returns `Result<T, [FieldError]>` so a `?` chain composes cleanly
+    // inside a hand `decode`. `.field`/`.at` auto-fill the path with the
+    // segment they read; scalar readers leave it empty, so a containing
+    // field/list/map decoder frames the child result with `FieldError.under`.
     impl DataTree {
-        pub fn field(&self, name: &str) -> Result<DataTree, DecodeError> {
+        pub fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>> {
             match self {
                 DataTree::Object(pairs) => pairs
                     .iter()
                     .find(|(k, _)| k == name)
                     .map(|(_, v)| v.clone())
-                    .ok_or_else(|| DecodeError {
-                        path: name.to_string(),
-                        reason: format!("field `{}` not found", name),
-                    }),
-                _ => Err(DecodeError {
-                    path: name.to_string(),
-                    reason: format!("expected object, got {}", render_datatree_json(self, false, 0)),
-                }),
+                    .ok_or_else(|| FieldError::at(name, format!("field `{}` not found", name))),
+                _ => Err(FieldError::at(
+                    name,
+                    format!("expected object, got {}", render_datatree_json(self, false, 0)),
+                )),
             }
         }
-        pub fn at(&self, i: i64) -> Result<DataTree, DecodeError> {
+        pub fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>> {
             match self {
                 DataTree::Array(items) => {
                     let idx = if i < 0 {
@@ -138,49 +144,49 @@
                     } else {
                         i as usize
                     };
-                    items.get(idx).cloned().ok_or_else(|| DecodeError {
-                        path: format!("[{}]", i),
-                        reason: format!("index {} out of bounds (len {})", i, items.len()),
-                    })
+                    items.get(idx).cloned().ok_or_else(|| FieldError::at(
+                        format!("[{}]", i),
+                        format!("index {} out of bounds (len {})", i, items.len()),
+                    ))
                 }
-                _ => Err(DecodeError {
-                    path: format!("[{}]", i),
-                    reason: format!("expected array, got {}", render_datatree_json(self, false, 0)),
-                }),
+                _ => Err(FieldError::at(
+                    format!("[{}]", i),
+                    format!("expected array, got {}", render_datatree_json(self, false, 0)),
+                )),
             }
         }
-        pub fn int(&self) -> Result<i64, DecodeError> {
+        pub fn int(&self) -> Result<i64, Vec<FieldError>> {
             match self {
                 DataTree::Int(n) => Ok(*n),
-                _ => Err(DecodeError::new(format!(
+                _ => Err(FieldError::one(format!(
                     "expected int, got {}",
                     render_datatree_json(self, false, 0)
                 ))),
             }
         }
-        pub fn text(&self) -> Result<String, DecodeError> {
+        pub fn text(&self) -> Result<String, Vec<FieldError>> {
             match self {
                 DataTree::Text(s) => Ok(s.clone()),
-                _ => Err(DecodeError::new(format!(
+                _ => Err(FieldError::one(format!(
                     "expected text, got {}",
                     render_datatree_json(self, false, 0)
                 ))),
             }
         }
-        pub fn bool(&self) -> Result<bool, DecodeError> {
+        pub fn bool(&self) -> Result<bool, Vec<FieldError>> {
             match self {
                 DataTree::Bool(b) => Ok(*b),
-                _ => Err(DecodeError::new(format!(
+                _ => Err(FieldError::one(format!(
                     "expected bool, got {}",
                     render_datatree_json(self, false, 0)
                 ))),
             }
         }
-        pub fn float(&self) -> Result<f64, DecodeError> {
+        pub fn float(&self) -> Result<f64, Vec<FieldError>> {
             match self {
                 DataTree::Float(f) => Ok(*f),
                 DataTree::Int(n) => Ok(*n as f64),
-                _ => Err(DecodeError::new(format!(
+                _ => Err(FieldError::one(format!(
                     "expected float, got {}",
                     render_datatree_json(self, false, 0)
                 ))),
@@ -188,7 +194,7 @@
         }
     }
 
-    impl super::JetShow for DecodeError {
+    impl super::JetShow for FieldError {
         fn jet_show(&self) -> String {
             if self.path.is_empty() {
                 self.reason.clone()

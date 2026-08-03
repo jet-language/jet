@@ -445,8 +445,8 @@ fn jet_data_svg_escape(s: &str) -> String {
 // D-MIGRATE3=A: traced sibling of `jet_enc_csv_decode` — see json's for the shape.
 fn jet_enc_csv_decode_traced<T: user_Decode>(
     text: &String,
-) -> Result<jet_std::DecodeResult<Vec<T>>, jet_std::DecodeError> {
-    let rows = jet_ring_csv_parse(text).map_err(jet_std::DecodeError::new)?;
+) -> Result<jet_std::DecodeResult<Vec<T>>, Vec<jet_std::FieldError>> {
+    let rows = jet_ring_csv_parse(text).map_err(jet_std::FieldError::one)?;
     let mut it = rows.into_iter();
     let Some(header) = it.next() else {
         return Ok(jet_std::DecodeResult {
@@ -470,7 +470,7 @@ fn jet_enc_csv_decode_traced<T: user_Decode>(
             .collect();
         let tree = jet_std::DataTree::Object(obj);
         let (v, m) = T::jet_decode_traced(&tree)
-            .map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?;
+            .map_err(|e| jet_std::FieldError::under_errors(&format!("row {}", i + 1), e))?;
         if m.migrated && !migration.migrated {
             migration = m;
         }
@@ -534,9 +534,9 @@ fn jet_std_toml_render(d: &jet_std::DataTree) -> String {
     jet_std::toml::render(d)
 }
 
-fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::toml::parse_to_tree(text).map_err(|e| {
-        jet_std::DecodeError::new(format!("invalid TOML (line {}): {}", e.line, e.message))
+        jet_std::FieldError::one(format!("invalid TOML (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
     Ok(T::jet_decode_traced(&tree)?.0)
@@ -545,9 +545,9 @@ fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::Deco
 // D-MIGRATE3=A: traced sibling of `jet_enc_toml_decode` — see json's for the shape.
 fn jet_enc_toml_decode_traced<T: user_Decode>(
     text: &String,
-) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
+) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
     let tree = jet_std::toml::parse_to_tree(text).map_err(|e| {
-        jet_std::DecodeError::new(format!("invalid TOML (line {}): {}", e.line, e.message))
+        jet_std::FieldError::one(format!("invalid TOML (line {}): {}", e.line, e.message))
     })?;
     let (value, migration) = T::jet_decode_traced(&tree)?;
     Ok(jet_std::DecodeResult { value, migration })
@@ -567,9 +567,9 @@ fn jet_std_yaml_render(d: &jet_std::DataTree) -> String {
     jet_std::yaml::render(d)
 }
 
-fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::yaml::parse_to_tree(text).map_err(|e| {
-        jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message))
+        jet_std::FieldError::one(format!("invalid YAML (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
     Ok(T::jet_decode_traced(&tree)?.0)
@@ -578,9 +578,9 @@ fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::Deco
 // D-MIGRATE3=A: traced sibling of `jet_enc_yaml_decode` — see json's for the shape.
 fn jet_enc_yaml_decode_traced<T: user_Decode>(
     text: &String,
-) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
+) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
     let tree = jet_std::yaml::parse_to_tree(text).map_err(|e| {
-        jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message))
+        jet_std::FieldError::one(format!("invalid YAML (line {}): {}", e.line, e.message))
     })?;
     let (value, migration) = T::jet_decode_traced(&tree)?;
     Ok(jet_std::DecodeResult { value, migration })

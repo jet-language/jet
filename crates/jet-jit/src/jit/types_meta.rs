@@ -888,7 +888,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         ],
         "CBORError" => &["kind", "byte_offset", "path", "reason"],
         // D-VALIDATE1 / D-SERDE2 — path+reason records.
-        "FieldError" | "DecodeError" => &["path", "reason"],
+        "FieldError" => &["path", "reason"],
         // D-MIGRATE3=A.
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
@@ -1055,7 +1055,7 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "path" | "reason" => Some(Type::String),
             _ => None,
         },
-        "FieldError" | "DecodeError" => match field {
+        "FieldError" => match field {
             "path" | "reason" => Some(Type::String),
             _ => None,
         },

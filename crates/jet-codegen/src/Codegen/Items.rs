@@ -448,7 +448,7 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     }
     if dec {
         out.push_str(&format!(
-            "impl user_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        let __xs: Vec<user_{name}> = <Vec<user_{name}> as user_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n"
+            "impl user_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let __xs: Vec<user_{name}> = <Vec<user_{name}> as user_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n"
         ));
     }
 }
@@ -1074,7 +1074,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         }
         if decode_unions.contains(&name) {
             out.push_str(&format!(
-                "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        match __t {{\n"
+                "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        match __t {{\n"
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
@@ -1087,7 +1087,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 ));
             }
             out.push_str(
-                "            _ => Err(jet_std::DecodeError::new(\"no matching union member\")),\n        }\n    }\n}\n\n",
+                "            _ => Err(jet_std::FieldError::one(\"no matching union member\")),\n        }\n    }\n}\n\n",
             );
         }
     }
@@ -1560,7 +1560,7 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
     ));
-    out.push_str("    fn jet_decode_traced(__t: &jet_std::DataTree) -> Result<(Self, jet_std::MigrationStatus), jet_std::DecodeError> {\n");
+    out.push_str("    fn jet_decode_traced(__t: &jet_std::DataTree) -> Result<(Self, jet_std::MigrationStatus), Vec<jet_std::FieldError>> {\n");
     out.push_str("        let __err = match Self::jet_decode(__t) {\n");
     out.push_str("            Ok(__v) => return Ok((__v, jet_std::MigrationStatus::fresh())),\n");
     out.push_str("            Err(__e) => __e,\n");
@@ -1623,7 +1623,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
             s.name
         ));
         out.push_str(&format!(
-            "fn jet_migrate_step_{}_{}(__pairs: &mut Vec<(String, jet_std::DataTree)>) -> Result<(), jet_std::DecodeError> {{\n",
+            "fn jet_migrate_step_{}_{}(__pairs: &mut Vec<(String, jet_std::DataTree)>) -> Result<(), Vec<jet_std::FieldError>> {{\n",
             s.name,
             idx + 1
         ));
@@ -1672,7 +1672,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                         None => crate::Sema::error_conv_fn_name(&from_ty.name(), &to_ty.name()),
                     };
                     out.push_str(&format!(
-                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as user_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::DecodeError::under({key:?}, __e))?;\n            __p.1 = user_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
+                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as user_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::FieldError::under_errors({key:?}, __e))?;\n            __p.1 = user_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
                     ));
                 }
             }
@@ -2178,7 +2178,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         ));
         if let Some((lo, hi, _)) = d.range {
             out.push_str(&format!(
-                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{\n        let __value = <{base} as crate::user_Decode>::jet_decode(__t)?;\n        if __value < ({lo} as {base}) || __value > ({hi} as {base}) {{\n            return Err(crate::jet_std::DecodeError::new(\"expected {n} within {lo}..{hi}\"));\n        }}\n        Ok(user_{n}(__value))\n    }}\n}}\n\n",
+                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{\n        let __value = <{base} as crate::user_Decode>::jet_decode(__t)?;\n        if __value < ({lo} as {base}) || __value > ({hi} as {base}) {{\n            return Err(crate::jet_std::FieldError::one(\"expected {n} within {lo}..{hi}\"));\n        }}\n        Ok(user_{n}(__value))\n    }}\n}}\n\n",
                 n = d.name,
                 base = base_rust,
                 lo = lo,
@@ -2186,7 +2186,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             ));
         } else {
             out.push_str(&format!(
-                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
+                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, Vec<crate::jet_std::FieldError>> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
                 n = d.name,
                 base = base_rust
             ));

@@ -1,7 +1,7 @@
 //! D-DATAFLOW1=A: `core.data` on the canonical TIR evaluator (#777/#778 deopt).
 //!
 //! Default `jet run` deopts data-heavy `run` bodies to this path. Keep values,
-//! ordering, and typed `DataError` / `DecodeError` results aligned with AOT.
+//! ordering, and typed `DataError` / `[FieldError]` results aligned with AOT.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -119,13 +119,13 @@ fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
 }
 
 fn decode_error(reason: impl Into<String>) -> CtValue {
-    CtValue::Struct {
-        type_name: "DecodeError".to_string(),
+    CtValue::List(vec![CtValue::Struct {
+        type_name: "FieldError".to_string(),
         fields: vec![
             ("path".to_string(), CtValue::Str(String::new())),
             ("reason".to_string(), CtValue::Str(reason.into())),
         ],
-    }
+    }])
 }
 
 fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {

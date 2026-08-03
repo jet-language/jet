@@ -476,10 +476,10 @@ impl Token.Encode {
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) => Token ? DecodeError {
+    fn decode(tree: DataTree) => Token ? [FieldError] {
         value :: tree.text()?
         if value != "wire" {
-            return Err(DecodeError.{ path: "", reason: "bad token" })
+            return Err([FieldError.{ path: "", reason: "bad token" }])
         }
         return Ok(Token.{ raw: "decoded" })
     }
@@ -959,7 +959,7 @@ fn run() {
     assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
-        "7\nexpected int, got 7.0\nexpected int, got \"7\"\n"
+        "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
     );
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::ResidentJit);
@@ -1013,7 +1013,7 @@ fn run() {
     assert_eq!(aot.exit, 0, "DataTree Int deopt AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
-        "7\nexpected int, got 7.0\nexpected int, got \"7\"\n"
+        "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
     );
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::DeoptInterp);

@@ -2558,8 +2558,8 @@ field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
 binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
-(`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `DecodeError
-{ path, reason }`; encode infallible. Field markers (`#` plane):
+(`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
+values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
 `#Rename("x")`, `#Skip`, `#Default`/`#Default(expr)`, `#Flatten`,
 `#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
 externally tagged default, single-value variants bare; `#Discriminant("type")`
@@ -2570,10 +2570,11 @@ keys ignored by default;
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
 
-**D-SERDE2 = A** *(ratified 2026-07-11, card #131)*: the hand-writable codec
+**D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
+D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
 `encode(self) => DataTree` and `decode(tree: DataTree) => Result<T,
-DecodeError>` to own its wire form (e.g. a validated newtype serializing as a
+[FieldError]>` to own its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that *emit that same Jet source* and re-enter
 lexer/parser/sema (R11, D-CTCODEGEN1) — no compiler-synthesized Rust, no R11
@@ -2583,9 +2584,10 @@ previously referenced entry-file-local paths).
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
 #131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
 spelling becomes a teaching error pointing at `DataTree` (no alias,
-I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ? DecodeError`
-everywhere, with the accessor auto-filling `path` from where it read, so `?`
-chains inside a hand `decode` with no mapping ceremony; hand-built object
+I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ? [FieldError]`
+everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
+accessors leave it empty and a containing decoder uses `FieldError.under`, so
+`?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
 insertion-ordered, and the pair-list form is not accepted.
 
@@ -3096,7 +3098,9 @@ alias, or priority rule.
 
 **D-TASK-PAUSE-TIER1=E — wait-point pause; optional strong mode** *(ratified 2026-07-31, card #1359)*: default pause is cooperative wait-points on every engine. Experts may pass `mode: .CheckLoops` for strong pause. Trace `paused=`/`cancel=` text comes from one Prelude formatter (`jet_task_control_trace`).
 
-**D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (the DecodeError path shape). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `#Pre`/`#Post` stay call-site contracts, outside the validation story.
+**D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (`{ path, reason }`). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `#Pre`/`#Post` stay call-site contracts, outside the validation story.
+
+**D-VALIDATE-DECODE1=B — one accumulated typed-decode error contract** *(ratified 2026-08-03, owner ballot; cards #1158/#1161)*: every `Decode` implementation and every format adapter returns `Result<T, [FieldError]>`. A `FieldError` is `{ path, reason }`; nested decoders prefix every error in the list with their field or index segment. This is the same list used by `validate` blocks. The retired single `DecodeError` envelope has no alias, bridge, fallback, compatibility flag, or second decoder API. XML/CBOR/native adapters may project the list into their format-specific error type only at that boundary; typed Jet callers always receive `[FieldError]`.
 
 **D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
 2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle

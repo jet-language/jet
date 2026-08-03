@@ -1420,7 +1420,7 @@ impl TraitRegistry {
             "Date",
             "DateTime",
             "Decimal",
-            "DecodeError",
+            "FieldError",
             "DirEntry",
             "DNSSrv",
             "Duration",
@@ -1977,9 +1977,9 @@ impl TraitRegistry {
     /// codegen bridges it to `jet_encode`/`jet_decode`.
     ///
     ///   `Encode`:  `fn encode(self) => Data`         (one `self` param, returns `Data`)
-    ///   `Decode`:  `fn decode(tree: Data) => T ? DecodeError`
+    ///   `Decode`:  `fn decode(tree: Data) => T ? [FieldError]`
     ///              (static — no `self`; one `Data` param; returns the owning type or
-    ///               `DecodeError`)
+    ///               `[FieldError]`)
     fn check_serde_impl_methods(
         &self,
         type_name: &str,
@@ -2008,14 +2008,14 @@ impl TraitRegistry {
                     && non_self.is_empty()
                     && m.return_type.as_ref().is_some_and(is_data)
             } else {
-                // `decode(tree: Data) => T ? DecodeError`: static, one `Data` param,
-                // returns the owning type (or `Self`) or `DecodeError`.
+                // `decode(tree: Data) => T ? [FieldError]`: static, one `Data` param,
+                // returns the owning type (or `Self`) or the canonical error list.
                 let ret_ok = matches!(
                     &m.return_type,
                     Some(Type::Result { ok, err })
                         if (matches!(ok.as_ref(), Type::Named(n) if n == type_name || n == "Self")
                             || matches!(ok.as_ref(), Type::Apply { name, .. } if name == type_name))
-                            && matches!(err.as_ref(), Type::Named(n) if n == "DecodeError")
+                            && matches!(err.as_ref(), Type::List(inner) if matches!(inner.as_ref(), Type::Named(n) if n == "FieldError"))
                 );
                 !has_self && non_self.len() == 1 && is_data(&non_self[0].ty) && ret_ok
             };

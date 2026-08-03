@@ -71,13 +71,14 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
         }
         if dec {
             source.push_str(&format!("impl {}.Decode {{\n", s.name));
-            source.push_str(&format!("fn decode{params}(tree: DataTree) => {target} ? DecodeError {{\n"));
+            source.push_str(&format!("fn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n"));
             let deny_unknown = s.serde_markers.iter().any(|m|
                 m.name == crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS
             );
             let has_flatten = s.fields.iter().any(|f|
                 f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
             );
+            source.push_str("__errors := []\n");
             if deny_unknown && !has_flatten {
                 let keys = s.fields.iter()
                     .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
@@ -85,29 +86,105 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
                     .collect::<Vec<_>>()
                     .join(", ");
                 source.push_str(&format!(
-                    "if (~tree) == .Object(entries) {{ loop key, value; entries {{ if ![{keys}].contains(key) {{ return Err(DecodeError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
+                    "if (~tree) == .Object(entries) {{ loop key, value; entries {{ if ![{keys}].contains(key) {{ __errors.push(FieldError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
                 ));
             }
-            source.push_str(&format!("return Ok({target}.{{\n"));
+            let mut field_values = Vec::new();
+            let mut decoded_results = Vec::new();
+            let mut required_presence = Vec::new();
             for f in s.fields.iter().filter(|f| f.computed.is_none()) {
                 let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP) {
                     serde_source_default(f).unwrap_or_else(|| serde_source_zero(&f.ty))
                 } else if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
-                    format!("tree.decode<{}>()?", serde_type_source(&f.ty))
+                    let result = format!("__decode_{}", f.name);
+                    let value = format!("__decoded_value_{}", decoded_results.len());
+                    source.push_str(&format!(
+                        "{result} := tree.decode<{}>()\n",
+                        serde_type_source(&f.ty)
+                    ));
+                    decoded_results.push((result, value.clone(), None, None));
+                    value
                 } else {
                     let key = serde_source_field_key(&s.serde_markers, f);
+                    let required = !matches!(f.ty, Type::Option(_)) && serde_source_default(f).is_none();
+                    let missing_var = if required {
+                        let var = format!("__missing_required_{}", decoded_results.len());
+                        source.push_str(&format!("{var} := false\n"));
+                        required_presence.push((var.clone(), key.clone()));
+                        Some(var)
+                    } else {
+                        None
+                    };
                     let subtree = if matches!(f.ty, Type::Option(_)) {
                         format!("(tree.field({key:?}) ?? DataTree.Null)")
                     } else if let Some(default) = serde_source_default(f) {
                         format!("(tree.field({key:?}) ?? {default}.encode())")
                     } else {
-                        format!("(tree.field({key:?})?)")
+                        // Keep a missing required field in the same accumulated
+                        // list as wrong-typed siblings. The null sentinel is
+                        // decoded below and framed at this field boundary.
+                        format!("(tree.field({key:?}) ?? DataTree.Null)")
                     };
-                    format!("{subtree}.decode<{}>()?", serde_type_source(&f.ty))
+                    let result = format!("__decode_{}", f.name);
+                    let value_var = format!("__decoded_value_{}", decoded_results.len());
+                    source.push_str(&format!(
+                        "{result} := FieldError.under({key:?}, {subtree}.decode<{}>())\n",
+                        serde_type_source(&f.ty)
+                    ));
+                    decoded_results.push((result, value_var.clone(), missing_var, Some(key)));
+                    value_var
                 };
-                source.push_str(&format!("{}: {},\n", f.name, value));
+                field_values.push(format!("{}: {}", f.name, value));
             }
-            source.push_str("})\n}\n}\n");
+            if !required_presence.is_empty() {
+                source.push_str("if (~tree) == .Object(__presence_entries) {\n");
+                for (missing_var, _) in &required_presence {
+                    source.push_str(&format!("{missing_var} = true\n"));
+                }
+                source.push_str("loop __presence_key, __presence_value; __presence_entries {\n");
+                for (missing_var, key) in &required_presence {
+                    source.push_str(&format!(
+                        "if __presence_key == {key:?} {{ {missing_var} = false }}\n"
+                    ));
+                }
+                source.push_str("}\n}\n");
+            }
+            for (index, (result, _, missing_var, key)) in decoded_results.iter().enumerate() {
+                source.push_str(&format!(
+                    "if {result} == .Err(__field_errors_{index}) {{ {} }}\n",
+                    if let (Some(missing_var), Some(key)) = (missing_var, key) {
+                        format!(
+                            "if {missing_var} {{ __errors.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else {{ loop __field_error_{index}; __field_errors_{index} {{ __errors.push(__field_error_{index}) }} }}"
+                        )
+                    } else {
+                        format!("loop __field_error_{index}; __field_errors_{index} {{ __errors.push(__field_error_{index}) }}")
+                    }
+                ));
+            }
+            source.push_str("if __errors.is_empty() {\n");
+            for (index, (result, _, _, _)) in decoded_results.iter().enumerate() {
+                source.push_str(&format!(
+                    "if {result} == .Ok(__decoded_value_{index}) {{\n"
+                ));
+            }
+            source.push_str(&format!(
+                "decoded :: {target}.{{ {} }}\n",
+                field_values.join(", ")
+            ));
+            if s.validate_block.is_empty() {
+                source.push_str("return Ok(decoded)\n");
+            } else {
+                // D-VALIDATE1 / D-VALIDATE-DECODE1: a successfully shaped
+                // value enters the same synthesized validator. Its list is
+                // returned unchanged, so shape and rule failures share one
+                // typed error contract.
+                source.push_str(&format!("return {target}.validate(decoded)\n"));
+            }
+            for _ in &decoded_results {
+                source.push_str("}\n");
+            }
+            source.push_str("}\nreturn Err(__errors)\n");
+            source.push_str("}\n}\n");
         }
         let trigger_span = s.derives.iter()
             .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
@@ -192,7 +269,7 @@ fn expand_builtin_enum_serde(
         source.push_str("}\n}\n}\n");
     }
     if dec {
-        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? DecodeError {{\n", e.name));
+        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n", e.name));
         if untagged {
             for v in &e.variants {
                 source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
@@ -206,9 +283,14 @@ fn expand_builtin_enum_serde(
                 } else {
                     "tree"
                 };
+                let single_segment = if matches!(v.payload, crate::AST::VariantPayload::Single(..)) {
+                    Some("value")
+                } else {
+                    None
+                };
                 source.push_str(&format!(
                     "if tag_value == {wire:?} {{ {} }}\n",
-                    serde_enum_decode_return(&target, v, payload_source)
+                    serde_enum_decode_return(&target, v, payload_source, single_segment)
                 ));
             }
         } else {
@@ -228,10 +310,10 @@ fn expand_builtin_enum_serde(
                         match &v.payload {
                             crate::AST::VariantPayload::Single(t, _) => {
                                 let decoded = format!("decoded_{variant_index}");
-                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == .Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
+                                object_arms.push_str(&format!("{decoded} := FieldError.under({wire:?}, {candidate}.decode<{}>())\nif {decoded} == .Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
                             }
                             crate::AST::VariantPayload::Named(_) => {
-                                object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate)));
+                                object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate, None)));
                             }
                             crate::AST::VariantPayload::Unit => {}
                         }
@@ -240,7 +322,7 @@ fn expand_builtin_enum_serde(
             }
             source.push_str(&object_arms);
         }
-        source.push_str("return Err(DecodeError.{ path: \"\", reason: \"no matching enum variant\" })\n}\n}\n");
+        source.push_str("return Err([FieldError.{ path: \"\", reason: \"no matching enum variant\" }])\n}\n}\n");
     }
     let trigger_span = e.derives.iter()
         .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
@@ -374,15 +456,79 @@ fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
 }
 
 fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
-    if guarded { format!("if {src}.decode<{}>() == .Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
-    else { serde_enum_decode_return(target, v, src) }
+    if guarded { format!("if {src}.decode<{}>() == .Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src, None)) }
+    else { serde_enum_decode_return(target, v, src, None) }
 }
 
-fn serde_enum_decode_return(target: &str, v: &crate::AST::Variant, src: &str) -> String {
-    let cons = serde_enum_decode_constructor(target, v, src);
-    if matches!(v.payload, crate::AST::VariantPayload::Named(_)) {
-        format!("decoded_variant: {target} := {cons}\nreturn Ok(decoded_variant)")
+fn serde_enum_decode_return(
+    target: &str,
+    v: &crate::AST::Variant,
+    src: &str,
+    single_segment: Option<&str>,
+) -> String {
+    if let crate::AST::VariantPayload::Named(fields) = &v.payload {
+        let errors = format!("__enum_{}_errors", v.name);
+        let mut results = Vec::new();
+        let mut values = Vec::new();
+        let mut required_presence = Vec::new();
+        let mut out = format!("{errors} := []\n");
+        for (index, field) in fields.iter().enumerate() {
+            let result = format!("__enum_{}_decode_{}", v.name, field.name);
+            let value = format!("__enum_{}_value_{}", v.name, field.name);
+            let missing = format!("__enum_{}_missing_{}", v.name, index);
+            out.push_str(&format!("{missing} := false\n"));
+            out.push_str(&format!(
+                "{result} := FieldError.under({:?}, ((~{src}).field({:?}) ?? DataTree.Null).decode<{}>())\n",
+                field.name,
+                field.name,
+                serde_type_source(&field.ty),
+            ));
+            results.push(result);
+            values.push((field.name.clone(), value));
+            required_presence.push((missing, field.name.clone()));
+        }
+        out.push_str(&format!("if (~{src}) == .Object(__enum_{}_presence) {{\n", v.name));
+        for (missing, _) in &required_presence {
+            out.push_str(&format!("{missing} = true\n"));
+        }
+        out.push_str("loop __enum_presence_key, __enum_presence_value; __enum_");
+        out.push_str(&format!("{}_presence {{\n", v.name));
+        for (missing, key) in &required_presence {
+            out.push_str(&format!(
+                "if __enum_presence_key == {key:?} {{ {missing} = false }}\n"
+            ));
+        }
+        out.push_str("}\n}\n");
+        for (index, result) in results.iter().enumerate() {
+            let (missing, key) = &required_presence[index];
+            out.push_str(&format!(
+                "if {result} == .Err(__enum_{}_errors_{index}) {{ if {missing} {{ {errors}.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else {{ loop __enum_{}_error_{index}; __enum_{}_errors_{index} {{ {errors}.push(__enum_{}_error_{index}) }} }} }}\n",
+                v.name, v.name, v.name, v.name,
+            ));
+        }
+        out.push_str(&format!("if {errors}.is_empty() {{\n"));
+        for (index, result) in results.iter().enumerate() {
+            out.push_str(&format!(
+                "if {result} == .Ok(__enum_{}_value_{}) {{\n",
+                v.name, fields[index].name,
+            ));
+        }
+        let fields = values
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "decoded_variant: {target} := .{}.{{ {} }}\nreturn Ok(decoded_variant)\n",
+            v.name, fields,
+        ));
+        for _ in &results {
+            out.push_str("}\n");
+        }
+        out.push_str("}\n");
+        out
     } else {
+        let cons = serde_enum_decode_constructor(target, v, src, single_segment);
         format!("return Ok({cons})")
     }
 }
@@ -395,11 +541,22 @@ fn serde_enum_payload_type(v: &crate::AST::Variant) -> String {
     }
 }
 
-fn serde_enum_decode_constructor(target: &str, v: &crate::AST::Variant, src: &str) -> String {
+fn serde_enum_decode_constructor(
+    target: &str,
+    v: &crate::AST::Variant,
+    src: &str,
+    single_segment: Option<&str>,
+) -> String {
     match &v.payload {
         crate::AST::VariantPayload::Unit => format!("{target}.{}", v.name),
-        crate::AST::VariantPayload::Single(t, _) => format!("{target}.{}({src}.decode<{}>()?)", v.name, serde_type_source(t)),
-        crate::AST::VariantPayload::Named(fs) => format!(".{}.{{ {} }}", v.name, fs.iter().map(|f| format!("{}: ((~{src}).field({:?})?).decode<{}>()?", f.name, f.name, serde_type_source(&f.ty))).collect::<Vec<_>>().join(", ")),
+        crate::AST::VariantPayload::Single(t, _) => {
+            let decoded = format!("{src}.decode<{}>()?", serde_type_source(t));
+            let framed = single_segment
+                .map(|segment| format!("FieldError.under({segment:?}, {decoded})?"))
+                .unwrap_or(decoded);
+            format!("{target}.{}({framed})", v.name)
+        }
+        crate::AST::VariantPayload::Named(_) => unreachable!("named enum payloads are lowered as statements"),
     }
 }
 

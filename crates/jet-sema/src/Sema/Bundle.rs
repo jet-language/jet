@@ -2614,7 +2614,7 @@ fn check_bundle_opts_for_output_inner(
         used_core.insert("core.mem::pool_shared".to_string());
     }
     // D-VALIDATE1 (card #506): a `validate { … }` block synthesizes
-    // `Type.validate(value)`, which returns `jet_std::FieldError` — same
+    // `Type.validate(value)`, which returns `[jet_std::FieldError]` — same
     // forced-insert shape as D-CLIFLAG1/D-MEM1 S6 above, since declaring the
     // block needs no `use core.X` import to reach `CORELIB_PRELUDE`.
     if bundle.modules.iter().any(|m| {

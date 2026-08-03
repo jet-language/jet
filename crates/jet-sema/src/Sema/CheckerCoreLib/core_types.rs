@@ -74,14 +74,14 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
 
-/// D-SERDE2: the typed-decode error (`{ path, reason }`). Flows as the error arm
-/// of `decode<T>` results; the user composes it with `??` and rarely names it.
+/// D-VALIDATE-DECODE1=B: typed decode returns the accumulated validation list.
+/// Structural and validation failures share the one `[FieldError]` contract.
 pub(crate) fn decode_error_ty() -> Type {
-    Type::Named("DecodeError".to_string())
+    Type::List(Box::new(field_error_ty()))
 }
 
-/// D-VALIDATE1: the accumulated validation error (`{ path, reason }`, same
-/// shape as `DecodeError`). `validate { }` blocks / `Type.validate(value)` /
+/// D-VALIDATE1: one accumulated validation error (`{ path, reason }`).
+/// `validate { }` blocks / `Type.validate(value)` /
 /// `Validate.over(s)` always report failures as `[FieldError]`.
 pub(crate) fn field_error_ty() -> Type {
     Type::Named("FieldError".to_string())
@@ -228,8 +228,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Value" | "Field"
         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
         | "Key"
-        // D-SERDE2: the format-agnostic value tree + typed-decode error.
-        | "DataTree" | "DecodeError"
+        // D-SERDE2 / D-VALIDATE-DECODE1: the format-agnostic value tree.
+        | "DataTree"
         // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated
         // validation error a `validate { }` block / `Type.validate(value)` /
         // `Validate.over(s)` build up.
@@ -800,14 +800,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    // D-SERDE2: DecodeError exposes the field path and a plain reason.
-    if type_name == "DecodeError" {
-        return match field {
-            "path" | "reason" => Some(Type::String),
-            _ => None,
-        };
-    }
-    // D-VALIDATE1: FieldError mirrors DecodeError's shape exactly.
+    // D-VALIDATE1 / D-VALIDATE-DECODE1: FieldError carries one path/reason.
     if type_name == "FieldError" {
         return match field {
             "path" | "reason" => Some(Type::String),
@@ -1667,17 +1660,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("capacity".to_string(), Type::Int),
             ("overflow".to_string(), Type::Named("Overflow".to_string())),
         ]),
-        // D-SERDE2 / D-SERDE14=A: a hand `decode` builds its own rejection with
-        // `DecodeError.{ path: …, reason: … }` and returns it via `Err(…)`. Both
-        // fields are `String`; `path` is the wire location (e.g. `""` for a
-        // whole-value reject, `"email"` for a field). Registering it here is what
-        // makes the dot-ctor legal (it was E0119 before this decision).
-        "DecodeError" => Some(vec![
-            ("path".to_string(), str_ty.clone()),
-            ("reason".to_string(), str_ty.clone()),
-        ]),
-        // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — registering it
-        // here is what makes the dot-ctor legal, same as `DecodeError` above.
+        // D-VALIDATE1 / D-VALIDATE-DECODE1: `FieldError.{ path: …, reason: … }`.
         "FieldError" => Some(vec![
             ("path".to_string(), str_ty.clone()),
             ("reason".to_string(), str_ty),

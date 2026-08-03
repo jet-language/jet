@@ -12794,6 +12794,16 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
+            TExprKind::DecodeUnder { segment, inner } => {
+                let result = self.lower_expr(inner)?;
+                let segment = self.lower_expr(segment)?;
+                let host = self.module.declare_func_in_func(
+                    self.host.encoding.decode_error_under_segment,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[result, segment]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TExprKind::StaticCall {
                 owner,
                 owner_type,
@@ -14317,7 +14327,7 @@ impl LowerCtx<'_, '_> {
             _ => {
                 let ok = Self::result_ok_ty_recover(scrutinee)
                     .ok_or_else(|| "jit result enum match on non-Result".to_string())?;
-                (ok, Type::Named("DecodeError".to_string()))
+                (ok, Type::List(Box::new(Type::Named("FieldError".to_string()))))
             }
         };
         let handle = self.lower_expr(scrutinee)?;
@@ -19865,6 +19875,21 @@ impl LowerCtx<'_, '_> {
                     }
                     return Ok(());
                 }
+                if matches!(
+                    &print_ty,
+                    Type::List(inner) if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
+                ) {
+                    let show_ref = self
+                        .module
+                        .declare_func_in_func(self.host.encoding.decode_error_show, self.b.func);
+                    let call = self.b.ins().call(show_ref, &[val]);
+                    let shown = self.b.inst_results(call)[0];
+                    let print_ref = self
+                        .module
+                        .declare_func_in_func(self.host.print_str, self.b.func);
+                    self.b.ins().call(print_ref, &[shown]);
+                    return Ok(());
+                }
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
                 if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
                     let kind = match elem {
@@ -19968,18 +19993,6 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.print_str, self.b.func);
                         self.b.ins().call(print_ref, &[s]);
-                        return Ok(());
-                    }
-                    Type::Named(n) if n == "DecodeError" => {
-                        let show_ref = self
-                            .module
-                            .declare_func_in_func(self.host.encoding.decode_error_show, self.b.func);
-                        let call = self.b.ins().call(show_ref, &[val]);
-                        let shown = self.b.inst_results(call)[0];
-                        let print_ref = self
-                            .module
-                            .declare_func_in_func(self.host.print_str, self.b.func);
-                        self.b.ins().call(print_ref, &[shown]);
                         return Ok(());
                     }
                     _ => {
@@ -21926,7 +21939,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "cause",
         ],
         "CBORError" => &["kind", "byte_offset", "path", "reason"],
-        "FieldError" | "DecodeError" => &["path", "reason"],
+        "FieldError" => &["path", "reason"],
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
         "TextWidth" => &["ambiguous", "controls"],

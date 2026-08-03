@@ -27,17 +27,15 @@ trait user_Encode {
 trait user_Decode: Sized {
     fn jet_decode_traced(
         _tree: &JetDataTreeStub,
-    ) -> Result<(Self, ()), jet_std::DecodeError>;
+    ) -> Result<(Self, ()), Vec<jet_std::FieldError>>;
 }
 fn jet_enc_json_to_string<T: user_Encode>(v: &T) -> String {
     let _ = v.jet_encode();
     String::new()
 }
-fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let _ = text;
-    Err(jet_std::DecodeError::new(
-        "decode unsupported in jit net host".into(),
-    ))
+    Err(jet_std::FieldError::one("decode unsupported in jit net host"))
 }
 struct JetFileReader {
     inner: std::io::BufReader<std::fs::File>,
@@ -187,13 +185,37 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct DecodeError {
-        pub message: String,
+    pub struct FieldError {
+        pub path: String,
+        pub reason: String,
     }
 
-    impl DecodeError {
-        pub fn new(message: String) -> Self {
-            Self { message }
+    impl FieldError {
+        pub fn one(reason: impl Into<String>) -> Vec<FieldError> {
+            vec![FieldError {
+                path: String::new(),
+                reason: reason.into(),
+            }]
+        }
+
+        pub fn under_errors(seg: &str, errors: Vec<FieldError>) -> Vec<FieldError> {
+            errors
+                .into_iter()
+                .map(|mut error| {
+                    error.path = if error.path.is_empty() {
+                        seg.to_string()
+                    } else if error.path.starts_with('[') {
+                        format!("{}{}", seg, error.path)
+                    } else {
+                        format!("{}.{}", seg, error.path)
+                    };
+                    error
+                })
+                .collect()
+        }
+
+        pub fn under<T>(seg: &str, result: Result<T, Vec<FieldError>>) -> Result<T, Vec<FieldError>> {
+            result.map_err(|errors| Self::under_errors(seg, errors))
         }
     }
 

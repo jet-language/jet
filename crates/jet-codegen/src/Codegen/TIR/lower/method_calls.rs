@@ -231,7 +231,7 @@ fn lower_datatree_decode_node(
     TExpr {
         ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
             ok: Box::new(target.clone()),
-            err: Box::new(Type::Named("DecodeError".to_string())),
+            err: Box::new(Type::List(Box::new(Type::Named("FieldError".to_string())))),
         }),
         kind: TExprKind::HandleMethod {
             recv: Box::new(recv),
@@ -3669,6 +3669,20 @@ pub(crate) fn lower_method_call(
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+        // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
+        // one field/index boundary before applying `?`. Keep this as a TIR
+        // node so AOT, JIT, and interpreter use one implementation.
+        if type_name == "FieldError" && method == "under" && args.len() == 2 {
+            let segment = lower_one_call_arg(&args[0], None, env, cx).value;
+            let inner = lower_expr(&args[1].expr, cx, env);
+            return TExpr {
+                ty: resolved_ret.cloned().unwrap_or_else(|| inner.ty.clone()),
+                kind: TExprKind::DecodeUnder {
+                    segment: Box::new(segment),
+                    inner: Box::new(inner),
+                },
+            };
+        }
         if matches!(type_name.as_str(),
             "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName"
             | "HTTPHeaderValue" | "HTTPHeaders" | "HTTPBody")

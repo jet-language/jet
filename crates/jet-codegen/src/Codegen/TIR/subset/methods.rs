@@ -1216,6 +1216,11 @@ pub(crate) fn static_method_call_in_subset(
     if locals.contains(type_name) {
         return false;
     }
+    if type_name == "FieldError" && method == "under" && args.len() == 2 {
+        return args.iter().all(|arg| {
+            arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals)
+        });
+    }
     if matches!(
         (type_name, method, args.len()),
         ("Clock", "new", 1) | ("Clock", "system", 0)

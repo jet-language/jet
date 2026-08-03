@@ -8511,7 +8511,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? [FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email.{addr: s})

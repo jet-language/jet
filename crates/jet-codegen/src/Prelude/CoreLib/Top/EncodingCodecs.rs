@@ -322,14 +322,31 @@ fn jet_std_xml_content(element: &jet_std::DataTree) -> Result<Vec<jet_std::DataT
         .map_err(jet_xml_error)
 }
 
-fn jet_xml_decode_error(error: jet_std::DecodeError) -> jet_std::XMLError {
+fn jet_xml_decode_error(errors: Vec<jet_std::FieldError>) -> jet_std::XMLError {
+    let path = errors
+        .first()
+        .map(|error| error.path.as_str())
+        .filter(|path| !path.is_empty())
+        .unwrap_or("$")
+        .to_string();
+    let reason = errors
+        .iter()
+        .map(|error| {
+            if error.path.is_empty() {
+                error.reason.clone()
+            } else {
+                format!("at `{}`: {}", error.path, error.reason)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
     jet_std::XMLError {
         kind: jet_std::XMLReason::Shape,
         byte_offset: None,
         line: None,
         column: None,
-        path: if error.path.is_empty() { "$".to_string() } else { error.path },
-        reason: error.reason,
+        path,
+        reason,
     }
 }
 
@@ -342,7 +359,9 @@ fn jet_enc_xml_decode_projected<T: user_Decode>(projected: &jet_std::DataTree) -
                     entries.iter().find(|(key, _)| key == "$text")
                 {
                     return T::jet_decode(&jet_std::DataTree::Text(text.clone())).map_err(|secondary| {
-                        if secondary.path.is_empty() && !primary.path.is_empty() {
+                        if secondary.first().is_some_and(|error| error.path.is_empty())
+                            && primary.first().is_some_and(|error| !error.path.is_empty())
+                        {
                             jet_xml_decode_error(primary)
                         } else {
                             jet_xml_decode_error(secondary)
@@ -646,13 +665,23 @@ fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROp
     let mut i=0usize; let mut items=0i64; let mut budget=JetCBORAllocBudget::new(options.max_bytes);
     let tree=jet_cbor_decode_val(bytes,&mut i,&options,&mut budget,0,&mut items,"$",true)?;
     if i!=bytes.len(){return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData,i,"$","trailing CBOR data after root value"));}
-    T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|mut error| {
-        if error.path.is_empty() { error.path.push('$'); } else { error.path.insert(0, '$'); }
+    T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|errors| {
+        let path = errors
+            .first()
+            .map(|error| error.path.as_str())
+            .filter(|path| !path.is_empty())
+            .map(|path| format!("${path}"))
+            .unwrap_or_else(|| "$".to_string());
+        let reason = errors
+            .iter()
+            .map(|error| error.reason.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
         jet_std::CBORError {
             kind: jet_std::CBORErrorKind::TypeMismatch,
             byte_offset: 0,
-            path: error.path,
-            reason: error.reason,
+            path,
+            reason,
         }
     })
 }
