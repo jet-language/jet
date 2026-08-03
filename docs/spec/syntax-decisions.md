@@ -3995,11 +3995,25 @@ family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
 syntax is OCI-only: `from: packages.<name>` (a package this project's `pkg.jet`
 declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
 [KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
-`files: [String]`, and `base: oci("<ref>")` (captured but not yet realized; no
-native registry-pull client exists). `jet image <name>` builds a deterministic
-OCI layout (`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an
-uncompressed tar layer. `--push` is honestly gated on TLS (E1268), never a fake
-push.
+`files: [String]`, and `base: oci("<ref>")`. A local `file://` OCI layout is
+validated and its layers are preserved before Jet appends the new deterministic
+layer. `jet image <name>` builds a deterministic OCI layout
+(`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an uncompressed tar
+layer. Remote base pulls and pushes remain E1268 until a verified registry
+transport is configured; Jet never silently builds from scratch or claims a
+remote transfer.
+
+**D-ENV-INTEGRATIONS1=A**: first-party environment integrations are typed
+imports in the existing module `imports:` field. The closed v1 names are
+`env.platform.android()`, `env.platform.apple()`,
+`env.security.certificates(...)`, `env.network.hosts(...)`,
+`env.agent.codex(...)`, `env.editor.vscode(...)`,
+`env.cloud.credentials(...)`, and `env.security.vault(...)`. Each lowers into
+the existing package, file, task, provider, host-check, secret, and grant
+facts. Safe presets are deterministic; expert arguments preserve exact SDK,
+target, path, license, certificate, host, tool, and policy facts. Secret values
+are names-only in plans and receipts. There is no integration-owned resolver,
+lock, effect, or activation engine.
 
 ### jetos Runtime Slice
 

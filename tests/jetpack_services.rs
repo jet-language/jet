@@ -11,6 +11,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 mod common;
 use common::jetpack_bin;
@@ -249,4 +250,130 @@ fn services_up_unrecognized_field_is_e1262() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E1262"), "stderr: {stderr}");
+}
+
+/// A directory watch is recursive and uses the same supervisor as an
+/// unexpected process exit. The real CLI path must restart the child after a
+/// nested source-file change and leave the new child running.
+#[test]
+fn services_watch_restarts_after_nested_file_change() {
+    let proj = Scratch::new("watch-nested");
+    let root = Scratch::new("watch-nested-root");
+    let home = Scratch::new("watch-nested-home");
+    fs::create_dir_all(proj.path.join("src/nested")).unwrap();
+    fs::write(proj.path.join("src/nested/input"), "one\n").unwrap();
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sh", "-c", "echo started >> restart-count; sleep 30"], watch: ["src"] }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+
+    let count = proj
+        .path
+        .join(".jet/services/fixture/data/restart-count");
+    wait_for_file_lines(&count, 1);
+    fs::write(proj.path.join("src/nested/input"), "two with a changed length\n").unwrap();
+    wait_for_file_lines(&count, 2);
+
+    let health = jetpack()
+        .args(["services", "health", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+    let down = jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+}
+
+/// Exhausting an explicit restart budget is a terminal state, not a stale
+/// PID that later commands could mistake for a live service.
+#[test]
+fn services_restart_exhaustion_cleans_state() {
+    let proj = Scratch::new("restart-exhaustion");
+    let root = Scratch::new("restart-exhaustion-root");
+    let home = Scratch::new("restart-exhaustion-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sh", "-c", "exit 7"], restart: .OnFailure.{ max: 1, backoff_ms: 1 } }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    let pid = proj.path.join(".jet/services/fixture/pid");
+    wait_for_missing(&pid);
+    assert!(
+        proj.path.join(".jet/services/fixture/supervisor.error").is_file(),
+        "restart exhaustion must leave a supervisor error"
+    );
+    let health = jetpack()
+        .args(["services", "health", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(!health.status.success());
+    jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .ok();
+    assert!(!proj.path.join(".jet/services/fixture/.stopping").exists());
+}
+
+fn wait_for_file_lines(path: &std::path::Path, minimum: usize) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let lines = fs::read_to_string(path)
+            .map(|text| text.lines().count())
+            .unwrap_or(0);
+        if lines >= minimum {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {} lines in {}",
+            minimum,
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_for_missing(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {} to disappear",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

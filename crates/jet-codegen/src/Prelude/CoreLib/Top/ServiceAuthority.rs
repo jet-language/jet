@@ -4,6 +4,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SERVICE_AUTH_MAX_STORE: usize = 4096;
@@ -47,6 +48,16 @@ pub enum JetServiceError {
     NotStarted(String),
     Policy(String),
     Unavailable(String),
+    /// The authority is not reachable in this process/partition. Durable
+    /// receipts remain the only retry path; no ambient reconnect is attempted.
+    Partitioned(String),
+    /// The endpoint was issued by another tree/authority or its proof no
+    /// longer validates.
+    Revoked(String),
+    /// The endpoint generation is no longer the active routing generation.
+    Stale(String),
+    /// A bounded directory/retention window has elapsed.
+    Expired(String),
 }
 
 #[derive(Clone, Debug)]
@@ -125,7 +136,45 @@ fn service_authority_validate_text(
 }
 
 fn service_authority_validate_runtime(runtime: &JetServiceRuntime) -> Result<(), JetServiceError> {
-    service_authority_validate_text(&runtime.store, "service store", SERVICE_AUTH_MAX_STORE, false)
+    service_authority_validate_text(&runtime.store, "service store", SERVICE_AUTH_MAX_STORE, false)?;
+    service_authority_validate_store_path(&runtime.store)
+}
+
+fn service_authority_validate_store_path(store: &str) -> Result<(), JetServiceError> {
+    let path = Path::new(store);
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_file() => {
+            return Err(JetServiceError::Policy(
+                "service authority store must be a regular file, not a symlink".to_string(),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(service_authority_error(format!(
+                "could not inspect service authority store: {error}"
+            )))
+        }
+    }
+    let mut parent = path.parent();
+    while let Some(directory) = parent {
+        match std::fs::symlink_metadata(directory) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(JetServiceError::Policy(
+                    "service authority store parent must be a real directory".to_string(),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(service_authority_error(format!(
+                    "could not inspect service store parent: {error}"
+                )))
+            }
+        }
+        parent = directory.parent();
+    }
+    Ok(())
 }
 
 fn service_authority_validate_endpoint(
@@ -191,10 +240,10 @@ pub fn jet_services_authority_update(
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
     let state = registry.get_mut(&key).ok_or_else(|| {
-        JetServiceError::Unavailable("service endpoint authority is not registered".to_string())
+        JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
     })?;
     if state.tree != endpoint.tree || state.worker != endpoint.worker {
-        return Err(JetServiceError::Unavailable(
+        return Err(JetServiceError::Revoked(
             "service endpoint authority does not match its tree".to_string(),
         ));
     }
@@ -213,9 +262,15 @@ fn service_authority_current_endpoint(
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
     let state = registry.get(&key).ok_or_else(|| {
-        JetServiceError::Unavailable("service endpoint authority is not registered".to_string())
+        JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
     })?;
-    if state.tree != tree || !state.started {
+    if state.tree != tree {
+        return Err(JetServiceError::Revoked(format!(
+            "service endpoint authority belongs to tree `{}`",
+            state.tree
+        )));
+    }
+    if !state.started {
         return Err(JetServiceError::NotStarted(format!(
             "service worker `{worker}` is not running"
         )));
@@ -237,12 +292,18 @@ pub fn jet_services_authority_validate(
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
     let state = registry.get(&key).ok_or_else(|| {
-        JetServiceError::Unavailable("service endpoint authority is not registered".to_string())
+        JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
     })?;
-    if state.tree != endpoint.tree || state.generation != endpoint.generation {
-        return Err(JetServiceError::Unavailable(
-            "service endpoint is stale or belongs to another tree".to_string(),
+    if state.tree != endpoint.tree {
+        return Err(JetServiceError::Revoked(
+            "service endpoint belongs to another tree".to_string(),
         ));
+    }
+    if state.generation != endpoint.generation {
+        return Err(JetServiceError::Stale(format!(
+            "service endpoint generation {} is not current (current generation {})",
+            endpoint.generation, state.generation
+        )));
     }
     if !state.started {
         return Err(JetServiceError::NotStarted(format!(
@@ -297,6 +358,51 @@ pub fn jet_services_authority_take_pending(
     let queue = pending.entry(key).or_default();
     let count = queue.len().min(capacity as usize);
     Ok(queue.drain(..count).collect())
+}
+
+/// Put undelivered authority records back at the head of the queue after a
+/// mailbox boundary rejects a batch.  Delivery is at-least-once: a record
+/// already handed to the worker remains eligible for retry if its durable
+/// delivery marker could not be written.
+pub fn jet_services_authority_requeue_pending(
+    endpoint: &JetServiceEndpoint,
+    entries: Vec<(String, String, String)>,
+) -> Result<(), JetServiceError> {
+    jet_services_authority_validate(endpoint)?;
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let mut pending = service_pending_registry()
+        .lock()
+        .map_err(|_| service_authority_error("service pending registry lock is poisoned"))?;
+    let queue = pending.entry(key).or_default();
+    if queue.len().saturating_add(entries.len()) > SERVICE_AUTH_MAX_PENDING {
+        return Err(JetServiceError::Full(
+            "service authority pending delivery queue is full".to_string(),
+        ));
+    }
+    for (id, message, store) in &entries {
+        service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+        service_authority_validate_text(
+            message,
+            "service message",
+            SERVICE_AUTH_MAX_MESSAGE,
+            true,
+        )?;
+        service_authority_validate_text(store, "service store", SERVICE_AUTH_MAX_STORE, false)?;
+    }
+    let mut restored = Vec::with_capacity(entries.len() + queue.len());
+    for entry in entries {
+        if !queue.iter().any(|queued| queued == &entry)
+            && !restored.iter().any(|queued| queued == &entry)
+        {
+            restored.push(entry);
+        }
+    }
+    restored.append(queue);
+    *queue = restored;
+    Ok(())
 }
 
 /// Record that a pending receipt reached the worker mailbox. This is separate
@@ -414,6 +520,7 @@ fn service_authority_parse_record(line: &str) -> Result<(char, Vec<String>), Jet
 fn service_authority_read(
     runtime: &JetServiceRuntime,
 ) -> Result<Vec<(char, Vec<String>)>, JetServiceError> {
+    service_authority_validate_store_path(&runtime.store)?;
     let mut file = match OpenOptions::new().read(true).open(&runtime.store) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -459,10 +566,16 @@ fn service_authority_append(
     op: char,
     fields: &[String],
 ) -> Result<(), JetServiceError> {
+    service_authority_validate_store_path(&runtime.store)?;
     let record = service_authority_record(op, fields);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
         .open(&runtime.store)
         .map_err(|error| service_authority_error(format!("could not open service store: {error}")))?;
     let current_size = file
@@ -487,7 +600,11 @@ fn service_authority_append(
 }
 
 fn service_authority_id(endpoint: &JetServiceEndpoint, message: &str, key: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    // Receipt IDs cross process boundaries and are persisted in the authority
+    // log. Use the shared Core SHA-256 primitive with length-framed fields so
+    // distinct endpoint/message/key tuples cannot alias through concatenation
+    // or a small 64-bit hash.
+    let mut input = Vec::new();
     let generation = endpoint.generation.to_string();
     for field in [
         endpoint.authority.as_bytes(),
@@ -497,14 +614,17 @@ fn service_authority_id(endpoint: &JetServiceEndpoint, message: &str, key: &str)
         message.as_bytes(),
         key.as_bytes(),
     ] {
-        for byte in field {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
+        input.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        input.extend_from_slice(field);
     }
-    format!("svc-{hash:016x}")
+    let digest = jet_sha256_raw(&input);
+    format!(
+        "svc-{}",
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    )
 }
 
 fn service_authority_entries(

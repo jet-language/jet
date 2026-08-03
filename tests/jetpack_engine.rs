@@ -1668,6 +1668,113 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
     );
 }
 
+#[test]
+fn bridge_flake_commits_transitive_locked_registry_facts_without_nix() {
+    let dir = Scratch::new("bridge-locked-flake");
+    fs::write(
+        dir.join("flake.nix"),
+        r#"{
+  inputs.tools.url = "github:example/tools?rev=0123456789abcdef0123456789abcdef01234567";
+  devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; };
+}
+"#,
+    )
+    .unwrap();
+    let flake_lock = r#"{
+  "nodes": {
+    "root": { "inputs": { "tools": "tools" } },
+    "tools": {
+      "inputs": { "nixpkgs": "nixpkgs" },
+      "locked": { "owner": "example", "repo": "tools", "rev": "0123456789abcdef0123456789abcdef01234567", "type": "github" },
+      "original": { "owner": "example", "repo": "tools", "type": "github" }
+    },
+    "nixpkgs": {
+      "locked": { "owner": "NixOS", "repo": "nixpkgs", "rev": "89abcdef0123456789abcdef0123456789abcdef", "type": "github" },
+      "original": { "id": "nixpkgs", "type": "indirect" }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
+"#;
+    fs::write(dir.join("flake.lock"), flake_lock).unwrap();
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let semantic = fs::read_to_string(dir.join(".jet/lock")).unwrap();
+    let lock = jetpack::SemanticLock::parse(&semantic);
+    let edge = lock
+        .records
+        .iter()
+        .find(|record| record.identity.key == "flake-lock-node:tools")
+        .expect("tools lock node record");
+    assert_eq!(
+        edge.identity.exact,
+        r#"{"inputs":[{"name":"nixpkgs","target":"nixpkgs"}],"locked":{"owner":"example","repo":"tools","rev":"0123456789abcdef0123456789abcdef01234567","type":"github"},"name":"tools","original":{"owner":"example","repo":"tools","type":"github"}}"#
+    );
+    let registry = lock
+        .records
+        .iter()
+        .find(|record| record.identity.key == "flake-registry:nixpkgs")
+        .expect("nixpkgs registry record");
+    assert_eq!(
+        registry.identity.exact,
+        r#"{"alias":"nixpkgs","locked":{"owner":"NixOS","repo":"nixpkgs","rev":"89abcdef0123456789abcdef0123456789abcdef","type":"github"},"node":"nixpkgs","original":{"id":"nixpkgs","type":"indirect"}}"#
+    );
+
+    let replay = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(
+        replay.status.code(),
+        Some(0),
+        "replay stderr: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(replay.stdout, output.stdout);
+    assert_eq!(fs::read_to_string(dir.join(".jet/lock")).unwrap(), semantic);
+
+    let wrong_lock = flake_lock.replace(
+        "\"original\": { \"owner\": \"example\", \"repo\": \"tools\", \"type\": \"github\" }",
+        "\"original\": { \"owner\": \"wrong\", \"repo\": \"repo\", \"type\": \"github\" }",
+    );
+    fs::remove_file(dir.join(".jet/lock")).unwrap();
+    fs::write(dir.join("flake.lock"), wrong_lock).unwrap();
+    let failure = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let failure_stderr = String::from_utf8(failure.stderr).unwrap();
+    assert_eq!(failure.status.code(), Some(1), "{failure_stderr}");
+    let failure_line = failure_stderr
+        .lines()
+        .find(|line| line.contains("different source URL or indirect alias"))
+        .unwrap_or_default();
+    assert_eq!(
+        failure_line,
+        "    flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias",
+        "{failure_stderr}"
+    );
+}
+
 
 #[test]
 fn bridge_flake_rejects_dynamic_native_evaluator_input() {

@@ -82,6 +82,20 @@ impl FilePlan {
             || self.state_before != self.state_after
     }
 
+    /// Hash the exact source bytes captured by plan(). apply() consumes this
+    /// same snapshot, so trust cannot approve a path while a different file
+    /// is applied later.
+    pub fn source_snapshot_hash(&self) -> String {
+        let mut canonical = b"jet-managed-source-snapshot-v1\n".to_vec();
+        for file in &self.files {
+            canonical.extend_from_slice(file.declaration.destination.as_bytes());
+            canonical.push(0);
+            canonical.extend_from_slice(&(file.bytes.len() as u64).to_le_bytes());
+            canonical.extend_from_slice(&file.bytes);
+        }
+        crate::SHA256::sha256_hex(&canonical)
+    }
+
     pub fn apply(&self) -> Result<FileSyncReport, String> {
         apply_plan(self)
     }

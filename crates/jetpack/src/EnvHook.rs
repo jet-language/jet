@@ -15,6 +15,7 @@
 
 use crate::Shell::ShellKind;
 use crate::Syntax;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Hash every input that can change the checked activation plan. The prompt
@@ -25,11 +26,18 @@ pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> O
     let env_path = root.join(Syntax::ENV_FILE);
     let source = std::fs::read_to_string(&env_path).ok()?;
     let mut entries = Vec::<(String, Vec<u8>)>::new();
-    collect_definition_files(root, root, &mut entries);
-
     if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env(&source, root) {
+        for relative in &plan.source_files {
+            add_input(root, relative, "source", &mut entries);
+        }
         for dotenv in &plan.lifecycle.dotenv {
             add_input(root, &dotenv.file, "dotenv", &mut entries);
+        }
+        if let jet_env_model::ModuleEval::ReloadPolicy::Watch { paths, .. } = &plan.lifecycle.reload
+        {
+            for path in paths {
+                add_input(root, path, "reload-watch", &mut entries);
+            }
         }
         for file in &plan.files {
             if let Some(relative) = &file.source {
@@ -68,6 +76,11 @@ pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> O
                 .join("\n")
                 .into_bytes(),
         ));
+    } else {
+        // Keep malformed/legacy files observable without allowing an
+        // unrelated `.jet` file to become part of a valid environment graph.
+        // The activation path still rejects the malformed plan below.
+        collect_definition_files(root, root, &mut entries);
     }
     for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet", "jetpack.toml"] {
         add_input(root, relative, "project", &mut entries);
@@ -153,9 +166,100 @@ fn add_input(root: &Path, relative: &str, kind: &str, entries: &mut Vec<(String,
         return;
     }
     let path = root.join(path);
-    match std::fs::read(&path) {
-        Ok(bytes) => entries.push((format!("{kind}:{relative}"), bytes)),
-        Err(_) => entries.push((format!("{kind}:missing:{relative}"), Vec::new())),
+    let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut visited = BTreeSet::new();
+    add_input_path(
+        &root_real,
+        &path,
+        relative,
+        kind,
+        entries,
+        &mut visited,
+    );
+}
+
+fn add_input_path(
+    root: &Path,
+    path: &Path,
+    relative: &str,
+    kind: &str,
+    entries: &mut Vec<(String, Vec<u8>)>,
+    visited: &mut BTreeSet<PathBuf>,
+) {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        entries.push((format!("{kind}:missing:{relative}"), Vec::new()));
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        let target = match std::fs::canonicalize(path) {
+            Ok(target) if target.starts_with(root) => target,
+            Ok(target) => {
+                entries.push((
+                    format!("{kind}:unsafe-link:{relative}"),
+                    target.to_string_lossy().as_bytes().to_vec(),
+                ));
+                return;
+            }
+            Err(_) => {
+                entries.push((format!("{kind}:unsafe-link:{relative}"), Vec::new()));
+                return;
+            }
+        };
+        entries.push((
+            format!("{kind}:link:{relative}"),
+            target.to_string_lossy().as_bytes().to_vec(),
+        ));
+        add_input_path(root, &target, relative, kind, entries, visited);
+        return;
+    }
+    if let Ok(real) = path.canonicalize() {
+        if !real.starts_with(root) {
+            entries.push((
+                format!("{kind}:unsafe:{relative}"),
+                real.to_string_lossy().as_bytes().to_vec(),
+            ));
+            return;
+        }
+        if !visited.insert(real) {
+            entries.push((format!("{kind}:cycle:{relative}"), Vec::new()));
+            return;
+        }
+    }
+    if metadata.is_dir() {
+        entries.push((
+            format!("{kind}:directory:{relative}"),
+            format!(
+                "readonly={};modified={:?}",
+                metadata.permissions().readonly(),
+                metadata.modified().ok()
+            )
+            .into_bytes(),
+        ));
+        let Ok(read_dir) = std::fs::read_dir(&path) else {
+            entries.push((format!("{kind}:unreadable:{relative}"), Vec::new()));
+            return;
+        };
+        let mut children = read_dir.filter_map(Result::ok).collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            let name = child.file_name().to_string_lossy().into_owned();
+            let child_relative = if relative.is_empty() || relative == "." {
+                name
+            } else {
+                format!("{relative}/{name}")
+            };
+            add_input_path(root, &path.join(&name), &child_relative, kind, entries, visited);
+        }
+    } else if metadata.is_file() {
+        match std::fs::read(path) {
+            Ok(bytes) => entries.push((format!("{kind}:file:{relative}"), bytes)),
+            Err(_) => entries.push((format!("{kind}:unreadable:{relative}"), Vec::new())),
+        }
+    } else {
+        entries.push((
+            format!("{kind}:special:{relative}"),
+            format!("file-type={:?}", metadata.file_type()).into_bytes(),
+        ));
     }
 }
 
@@ -163,15 +267,29 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
     let Ok(read_dir) = std::fs::read_dir(current) else {
         return;
     };
-    let mut paths = read_dir.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+    let mut paths = read_dir.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>();
     paths.sort();
     for path in paths {
         if path.file_name().is_some_and(|name| name == ".jet") {
             continue;
         }
-        if path.is_dir() {
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            if path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT) {
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                add_input(root, &relative, "source", entries);
+            }
+        } else if metadata.is_dir() {
             collect_definition_files(root, &path, entries);
-        } else if path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT) {
+        } else if metadata.is_file()
+            && path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT)
+        {
             let relative = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
@@ -265,7 +383,8 @@ pub fn render_hook(kind: ShellKind) -> String {
 }
 
 /// Render the statements that load an env into the current shell.
-pub fn render_activate(kind: ShellKind, act: &Activation) -> String {
+pub fn render_activate(kind: ShellKind, act: &Activation) -> Result<String, String> {
+    validate_activation(act)?;
     let old = Syntax::ENV_HOOK_OLD_PATH_VAR;
     let marker = Syntax::JETPACK_ENV_MARKER;
     let refs = Syntax::JETPACK_REF_VAR;
@@ -273,7 +392,7 @@ pub fn render_activate(kind: ShellKind, act: &Activation) -> String {
     let hash = Syntax::ENV_HOOK_ACTIVE_HASH_VAR;
     let vars = render_vars(kind, &act.vars);
     let unset = render_unset(kind, &act.unset);
-    match kind {
+    Ok(match kind {
         ShellKind::Bash | ShellKind::Zsh => format!(
             "export {old}={base}\n\
              export PATH={path}\n\
@@ -306,7 +425,7 @@ pub fn render_activate(kind: ShellKind, act: &Activation) -> String {
             vars = vars,
             unset = unset,
         ),
-    }
+    })
 }
 
 /// Render the statements that unload the active env, restoring `base_path`
@@ -360,6 +479,15 @@ fn render_unset(kind: ShellKind, names: &[String]) -> String {
             ShellKind::Fish => format!("set -e {name}\n"),
         })
         .collect()
+}
+
+fn validate_activation(act: &Activation) -> Result<(), String> {
+    for name in act.vars.keys().chain(act.unset.iter()) {
+        if !jet_env_model::ModuleEval::valid_env_name(name) {
+            return Err(format!("activation variable '{name}' is not a valid environment name"));
+        }
+    }
+    Ok(())
 }
 
 /// POSIX single-quote (bash/zsh): wrap in `'…'`, closing/escaping/reopening for
@@ -444,14 +572,14 @@ mod tests {
 
     #[test]
     fn activate_exports_path_markers_and_saves_old_path() {
-        let bash = render_activate(ShellKind::Bash, &act());
+        let bash = render_activate(ShellKind::Bash, &act()).unwrap();
         assert!(bash.contains("export JETPACK_ENV_OLD_PATH='/usr/bin:/bin'"));
         assert!(bash.contains("export PATH='/nix/store/pkg/bin:/usr/bin:/bin'"));
         assert!(bash.contains("export JETPACK_ENV=1"));
         assert!(bash.contains("export JETPACK_ENV_DIR='/home/dev/router'"));
         assert!(bash.contains("export JETPACK_REF='ripgrep@nixpkgs jq@nixpkgs'"));
 
-        let fish = render_activate(ShellKind::Fish, &act());
+        let fish = render_activate(ShellKind::Fish, &act()).unwrap();
         assert!(fish.contains("set -gx PATH (string split : '/nix/store/pkg/bin:/usr/bin:/bin')"));
         assert!(fish.contains("set -gx JETPACK_ENV_DIR '/home/dev/router'"));
     }
@@ -474,5 +602,37 @@ mod tests {
         assert_eq!(sh_quote("a'b"), "'a'\\''b'");
         assert_eq!(fish_quote("a'b"), "'a\\'b'");
         assert_eq!(fish_quote("a\\b"), "'a\\\\b'");
+    }
+
+    #[test]
+    fn definition_fingerprint_tracks_explicit_reload_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-watch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(Syntax::ENV_FILE),
+            "module env.dev { reload: Reload.{ watch: [\"tracked.txt\"], debounce: 250 } }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        let first = definition_fingerprint(&root, None).unwrap();
+        std::fs::write(root.join("untracked.txt"), "one\n").unwrap();
+        assert_eq!(definition_fingerprint(&root, None), Some(first.clone()));
+        std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
+        assert_ne!(definition_fingerprint(&root, None), Some(first));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn activation_rejects_shell_tokens_at_render_boundary() {
+        let mut activation = act();
+        activation.unset.push("BAD; echo injected".to_string());
+        assert!(render_activate(ShellKind::Bash, &activation).is_err());
     }
 }

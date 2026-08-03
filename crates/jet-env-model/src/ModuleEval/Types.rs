@@ -8,7 +8,8 @@ use super::super::Merge::{self, EntryContribution};
 use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 use super::Environment::{
-    EnvironmentLifecycle, LanguagePack, LanguageSpec, ProfileSpec, ResolvedProfile,
+    EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion, LanguagePack,
+    LanguageProjection, LanguageSpec, ProfileSpec, ResolvedProfile,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +77,10 @@ pub struct EvaluatedModule {
     pub languages: Vec<LanguageSpec>,
     /// D-ENV-FILES1: managed environment-file declarations.
     pub files: Vec<super::Environment::ManagedFile>,
+    /// D-ENV-INTEGRATIONS1: typed first-party integrations imported by this
+    /// module and lowered into ordinary environment facts.
+    pub integrations: Vec<EnvironmentIntegration>,
+    pub environment_names: Vec<String>,
 }
 
 /// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
@@ -136,7 +141,7 @@ pub struct ServicePlan {
 /// here — there is no downstream Nix-option consumer the way jetos services
 /// have (Phase D), so an unrecognized `extra` key is a supervision-time
 /// error (E1262), not silently-forwarded metadata.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DevServicePlan {
     /// The service name (the map key), e.g. `redis`.
     pub name: String,
@@ -267,10 +272,8 @@ pub struct ImagePlan {
     /// the tar layer is byte-identical regardless of declaration order.
     pub files: Vec<String>,
     /// `Oci` only: `base: oci("<ref>")` — a base-image escape hatch (D-JPK-
-    /// IMAGE1 option A). Captured but not yet realized: building from a base
-    /// needs a native registry-pull client, which doesn't exist yet, so `jet
-    /// image` reports this honestly rather than silently building from
-    /// scratch instead.
+    /// IMAGE1 option A). Local `file://` layouts are admitted by digest; remote
+    /// refs stay explicit until a verified registry transport is configured.
     pub base: Option<String>,
     /// D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
     /// default for an environment image.
@@ -352,6 +355,9 @@ pub struct VmTestPlan {
 #[derive(Debug)]
 pub struct EnvPlan {
     pub table: SourceTable,
+    /// The source files that contributed to this graph, relative to the
+    /// environment root and in deterministic discovery order.
+    pub source_files: Vec<String>,
     pub package_refs: Vec<String>,
     /// U20 adapter packages declared in `packages:`. Kept separate from refs
     /// because they have inline build identity and no provider selector.
@@ -386,18 +392,36 @@ pub struct EnvPlan {
     pub languages: Vec<LanguageSpec>,
     /// The profile selected by the evaluator/runtime, if one was requested.
     pub selected_profile: Option<ResolvedProfile>,
+    /// One evaluator-owned expansion shared by realization and trust. The
+    /// `language_packs` field remains as a compatibility view for existing
+    /// environment consumers; it is populated from this expansion.
+    pub language_expansion: LanguageExpansion,
     /// Expanded language packs, kept in the plan for disclosure and hashing.
     pub language_packs: Vec<LanguagePack>,
+    /// Exact typed language projection, including included/omitted tools and
+    /// changed selection facts. Consumers must use this instead of reparsing
+    /// the source or reconstructing pack defaults.
+    pub language_projections: Vec<LanguageProjection>,
     /// Managed environment-file declarations before `jet env sync` applies them.
     pub files: Vec<super::Environment::ManagedFile>,
+    /// D-ENV-INTEGRATIONS1: typed integrations before host realization.
+    pub integrations: Vec<EnvironmentIntegration>,
+    pub integration_facts: IntegrationFactProjection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnvironmentFacts {
+    pub environment_names: Vec<String>,
+    pub source_files: Vec<String>,
+    pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,
     pub profiles: Vec<ProfileSpec>,
     pub languages: Vec<LanguageSpec>,
     pub selected_profile: Option<ResolvedProfile>,
+    pub language_expansion: LanguageExpansion,
     pub language_packs: Vec<LanguagePack>,
+    pub language_projections: Vec<LanguageProjection>,
     pub files: Vec<super::Environment::ManagedFile>,
+    pub integrations: Vec<EnvironmentIntegration>,
+    pub integration_facts: IntegrationFactProjection,
 }

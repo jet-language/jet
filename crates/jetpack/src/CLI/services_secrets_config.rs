@@ -851,8 +851,14 @@ pub(super) fn find_jet_binary() -> String {
 /// Project entry for bare `jetpack dev`, matching `jet`'s run-first convention.
 /// Kept local because jetpack and jet are separate binaries (D-JPK-DISPATCH1).
 pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
-    if let Some(entry) = package_output_entry(project_dir) {
-        return entry;
+    match package_output_entry(project_dir) {
+        Ok(Some(entry)) => return entry,
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("error: {error}");
+            eprintln!(" fix: repair the typed Package output or point at a `.jet` file directly");
+            std::process::exit(2);
+        }
     }
     let default = project_dir.join(Syntax::DEFAULT_ENTRY_FILE);
     if default.is_file() {
@@ -885,13 +891,19 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
 /// D-ENV-PACKAGE1 / #1003: a canonical Package output is the first entry
 /// selection rule. Legacy `run.jet` remains the fallback for projects that do
 /// not declare a typed Package output.
-fn package_output_entry(project_dir: &Path) -> Option<PathBuf> {
-    let package = jet_pkg_model::Package::PackageFacts::load(project_dir)?.ok()?;
-    let output = package.select_output("run", None, None).ok()?;
-    package.entry_path(project_dir, output).or_else(|| {
-        let candidate = project_dir.join(format!("{}.{}", output.name, Syntax::FILE_EXT));
-        candidate.is_file().then_some(candidate)
-    })
+fn package_output_entry(project_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(package) = jet_pkg_model::Package::PackageFacts::load(project_dir) else {
+        return Ok(None);
+    };
+    let package = package.map_err(|error| {
+        let source = if project_dir.join(Syntax::PACKAGE_FILE).is_file() {
+            project_dir.join(Syntax::PACKAGE_FILE)
+        } else {
+            project_dir.join(Syntax::PAYLOAD_FILE)
+        };
+        format!("typed Package `{}` is invalid: {error}", source.display())
+    })?;
+    package.resolve_run_entry(project_dir)
 }
 
 /// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's

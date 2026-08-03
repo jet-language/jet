@@ -578,7 +578,7 @@ renumbered, and no new `W` code may be allocated.
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
 | E0968 | jetpack | a module `sources:` entry isn't a `target@provider` ref or bare path (D-JPK-REF1/U6/U8) |
-| E0969 | jetpack | an `imports:` directive isn't `find("<dir>")` with a literal path (U4) |
+| E0969 | jetpack | an `imports:` discovery directive isn't `find("<dir>")` with a literal path (U4) |
 | E0970 | jetpack | `imports: find("<dir>")` points at a directory that doesn't exist (U4) |
 | E0971 | jetpack | a discovered module has its own `imports:` (liftability law, U4) |
 | E0972 | jetpack | unknown field on a frozen `System`, active `Image`, or dev `Service` record (D-JETOS-FREEZE1, D-JPK-IMAGE1, D-JPK-SERVICE1) |
@@ -629,6 +629,7 @@ renumbered, and no new `W` code may be allocated.
 | E1332 | sema | one named environment profile is composed with conflicting definitions (D-ENV-PROFILE1) |
 | E1333 | sema | a dotenv declaration has an unsafe path or invalid allowlist/secret shape (D-ENV-LIFECYCLE2) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
+| E1335 | sema/jetpack | a first-party environment integration has conflicting facts or an invalid host projection (D-ENV-INTEGRATIONS1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -656,7 +657,7 @@ renumbered, and no new `W` code may be allocated.
 | E1203 | jet   | `git` not installed (M12.1) |
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
-| E1207 | jet   | registry dependency not yet supported (M12.2) |
+| E1207 | jet   | registry dependency cannot be resolved or its source artifact failed verification |
 | E1208 | jet   | toolchain `jet:` field in `pkg.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 | E1210 | jet   | unknown or reserved target in `packages:` block (D-TGT1/D-TGT2) |
@@ -714,7 +715,7 @@ renumbered, and no new `W` code may be allocated.
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
 | E1266 | jet   | an `Image`'s `kind:` isn't active `.Oci`, or disagrees with what `from:` names (D-JPK-IMAGE1, D-JETOS-FREEZE1) |
 | E1267 | jet   | an `.Oci` image's `from: packages.<name>` doesn't name an `executable`-kind package (U14, D-JPK-IMAGE1) |
-| E1268 | jetpack | `jet image <name> --push` — gated on TLS support for registry pushes, which doesn't exist yet (U14, D-JPK-IMAGE1) |
+| E1268 | jetpack | remote OCI base or push needs a verified registry transport; local `file://` layouts are supported (U14, D-JPK-IMAGE1) |
 | E1269 | jet   | an `.Oci` image field (`kind`/`expose`/`env_vars`/`files`/`base`) isn't shaped the way D-JPK-IMAGE1 spells it (U14) |
 | E1270 | jetpack | an ad-hoc adapter declaration/source/recipe is not shaped or realizable (U20, D-JPK-ADAPTER1) |
 | E1271 | jetpack | a channel source ref (`#latest`/`#main`/`#vN.x`) is not locked, or cannot be resolved during `jetpack update` (U21, D-JPK-CHANNEL1) |
@@ -900,6 +901,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1332 | profile definitions conflict | Composition cannot silently choose one profile's packages or variables over another's. | Merge equal facts or give the profiles different names. |
 | E1333 | a dotenv declaration is invalid | Dotenv is part of the typed lifecycle plan. Paths stay inside the project, and expert allowlists make secret handling explicit. | Use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
+| E1335 | an environment integration has conflicting facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies for one integration. | Merge the declarations or select a target and policy supported by the integration. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -965,7 +967,7 @@ CLI.
 | E0966 | A module contribution's value isn't a struct literal of its namespace's type. | `env.dev: Env { … }` ties a namespace to its matching type so the merge engine knows what it's combining. | Wrap the value in the matching type, e.g. `Env { … }`. |
 | E0967 | Two modules contributed irreconcilable values to the same source name or scalar setting. | §6: sources merge by name (refs must agree) and scalar settings merge to one value; without a priority marker, differing contributions can't be reconciled automatically. | Make every contribution agree, or remove the conflicting one. |
 | E0968 | A `sources:` entry's value isn't a `target@provider` ref or bare path. | D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare. | Write `default: owner/repo/rev@github`, `default: channel@nixpkgs`, or a bare local path. |
-| E0969 | An `imports:` directive isn't `find("<dir>")` with a single literal path. | Imports auto-discover a directory of modules (U4); the only directive is `find` with one string-literal path, so a non-`find` call or an interpolated/missing argument can't be walked. | Write `imports: find("./modules")`. |
+| E0969 | An `imports:` discovery directive isn't `find("<dir>")` with a single literal path. | Imports auto-discover a directory of modules (U4); discovery uses one literal `find` path, while recognized first-party integrations use their typed calls. | Write `imports: find("./modules")`, or use a recognized typed integration call. |
 | E0970 | `imports: find("<dir>")` points at a directory that doesn't exist. | `find` walks that directory for `.jet` modules (U4); it must exist relative to the file that declares it, or there is nothing to discover. | Create the directory, or fix the path so it points at your modules folder. |
 | E0971 | A module discovered by `find(…)` has its own `imports:`. | The liftability law (U4): modules contribute to the merged whole, they never import each other — nesting `find` would make composition explode and break "drop a file in." | Remove the `imports:` from the discovered module; declare all `find(…)` directives in the top-level env.jet. |
 | E0972 | A `System` / `Image` / `Service` record has a field it doesn't define. | These records have decision-owned field sets (D-JETOS-FREEZE1, D-JPK-IMAGE1, D-JPK-SERVICE1); an unknown field is usually a typo or a value that belongs elsewhere. | Remove the field, or use one of the known fields named in the error. |
@@ -1192,8 +1194,12 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E3620 | replay schema version is incompatible | The `.jetproof-replay` schema major/minor is unsupported by this `jet prove`. | Recapture with a compatible toolchain, or upgrade Jet. |
 | E3621 | replay semantic identity does not match | Source, toolchain, or adapter identity in the artifact does not match the current target. | Recapture against this exact revision. |
 | E3622 | replay artifact is corrupt | Magic, header, frame hash, or footer verification failed. | Pass an intact `.jetproof-replay` path. |
+| E3623 | replay diverged from captured authority | The next recorded authority, consumed-record count, or captured run outcome does not match the current producer run. | Recapture with `--capture`, then replay the same target identity. |
+| E3624 | replay target cardinality is not one | Capture or replay selected zero or multiple runnable target members. | Select one runnable file or package target. |
+| E3625 | replay capture cannot model `{operation}` | The reachable operation has no bounded replay adapter, including opaque, native, task, or unsupported effect boundaries. | Route the operation through a supported deterministic capability, or remove it from the captured target. |
+| E3626 | replay capture lacks `{effect}` authority | The operation's existing lexical or invocation authority is missing; capture never grants it implicitly. | Add the exact existing authority or change the target before capture. |
 | E3627 | replay capture refused sensitive data | Safe capture refuses reachable Rand/IO/Net; sensitive capture needs TTY consent. | Use `--capture` for Time-only, or run `--capture-sensitive` interactively. |
-| E3628 | replay diverged from captured authority | Captured Time/IO roots could not be installed or disagreed with the live run. | Recapture with `--capture`, then replay the same identity. |
+| E3628 | replay capture exceeded its artifact limit | The replay contained no usable authority or exceeded the bounded frame/payload/record budget. | Reduce the captured target or recapture a bounded artifact. |
 | E3629 | replay artifact could not be finalized | Destination path, rename, or durability checks refused the write. | Fix the path and retry; differing existing bytes are never overwritten. |
 | E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() => …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() => … )` or `reactive.effect(() => { … })`. |
 | E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() => { … })`. |
@@ -1737,7 +1743,7 @@ front-end `.jet` diagnostics).
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `pkg.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package. |
-| E1268 | `` `jet image <name>` can't push to `<ref>` yet. `` | D-JPK-IMAGE1: `--push` speaks the registry protocol, which needs TLS support jetpack doesn't have yet. `jet image` builds the OCI layout natively either way; it just never fakes the push. | Build without `--push`, then push the OCI layout with another tool for now; `--push` will work once TLS lands. |
+| E1268 | `` `jet image <name>` cannot use remote OCI reference `<ref>`. `` | D-JPK-IMAGE1: local OCI layouts are copied only after digest validation; remote registry transport is a separate trust boundary and is never faked. | Use `--push file:///path/to/layout`, or configure a verified registry transport. |
 | E1269 | `` `<field>` isn't shaped like <expected>. `` | D-JPK-IMAGE1: an `.Oci` image's `kind`/`expose`/`env_vars`/`files`/`base` fields each have one fixed shape (a bare leading-dot value, a list of ports, a string-keyed map, a list of paths, `oci("<ref>")`) — `Image` is a closed record, so a misshapen recognized field is rejected rather than silently ignored. | Rewrite the field to match its documented shape. |
 | E1270 | Adapter package could not be realized. | `Pkg.adapt(...)` turns source bytes into a normal package, so its string-valued `source:` must be a ref such as `"./vendor/tool"` and its recipe must be one of the supported U20 recipes (`Recipe.copy()` or `Recipe.prebuilt(bin:, as:)`). | Check the `Pkg.adapt(...)` source and recipe. |
 | E1271 | Source channel `{name}` is not locked / could not be resolved. | D-JPK-CHANNEL1 keeps tracking intent (`#latest`, `#main`, `#vN.x`) beside an exact lock entry. Build/run/env never re-resolve channels, and CI/offline may not invent a fresh exact source. | Run `jetpack update {name}` with network or fixture metadata, then commit `.jet/lock`. |
