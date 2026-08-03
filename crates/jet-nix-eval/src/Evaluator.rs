@@ -1637,7 +1637,7 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
 
 fn package_name(raw: &str) -> Result<String, Error> {
     let name = raw
-        .rsplit(|character| matches!(character, '.' | '/'))
+        .rsplit(['.', '/'])
         .next()
         .unwrap_or(raw);
     if name.is_empty() || name.len() > MAX_PACKAGE_NAME_BYTES {
@@ -1924,12 +1924,12 @@ fn derivation_from_value(value: Value, strict: bool) -> Result<Value, Error> {
 }
 
 fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<DerivationEvaluation, Error> {
-    let name = required_string_field(&fields, "name")?;
+    let name = required_string_field(fields, "name")?;
     validate_derivation_name(&name)?;
-    let system = required_string_field(&fields, "system")?;
-    let builder = required_string_field(&fields, "builder")?;
+    let system = required_string_field(fields, "system")?;
+    let builder = required_string_field(fields, "builder")?;
     let mut input_sources = Vec::new();
-    let args = match field_value(&fields, "args")? {
+    let args = match field_value(fields, "args")? {
         Some(Value::List(values)) => {
             if values.len() > MAX_DERIVATION_ARGS {
                 return Err(Error::ResourceLimit(format!(
@@ -1955,7 +1955,7 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         None => Vec::new(),
     };
 
-    let output_names = match field_value(&fields, "outputs")? {
+    let output_names = match field_value(fields, "outputs")? {
         Some(Value::List(values)) => values
             .into_iter()
             .map(|value| string_for_derivation(value.force()?))
@@ -1974,9 +1974,9 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         ));
     }
 
-    let output_hash = optional_string_field(&fields, "outputHash")?;
-    let output_hash_algo = optional_string_field(&fields, "outputHashAlgo")?;
-    let output_hash_mode = optional_string_field(&fields, "outputHashMode")?;
+    let output_hash = optional_string_field(fields, "outputHash")?;
+    let output_hash_algo = optional_string_field(fields, "outputHashAlgo")?;
+    let output_hash_mode = optional_string_field(fields, "outputHashMode")?;
     let (method_algo, hash_hex) = match output_hash {
         Some(hash) => {
             let algo = output_hash_algo
@@ -2017,7 +2017,7 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         "outputHashMode",
         "__ignoreNulls",
     ];
-    let ignore_nulls = matches!(field_value(&fields, "__ignoreNulls")?, Some(Value::Bool(true)));
+    let ignore_nulls = matches!(field_value(fields, "__ignoreNulls")?, Some(Value::Bool(true)));
     for (field, thunk) in fields {
         if ignored.contains(&field.as_str()) {
             continue;
@@ -2355,7 +2355,7 @@ fn apply_partial(
                 });
             };
             attr_field(&fields, &name)
-                .ok_or_else(|| Error::Missing(name))?
+                .ok_or(Error::Missing(name))?
                 .force()
         }
         NativeOperation::HasAttr => {
