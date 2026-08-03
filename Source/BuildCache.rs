@@ -25,10 +25,12 @@ pub fn cache_dir() -> PathBuf {
 /// D-BUILDPROFILE1: different profiles produce different binaries and must
 /// not share cache entries.
 pub fn cache_key(source: &str, profile_tag: &str) -> String {
-    let mut data = Vec::with_capacity(source.len() + profile_tag.len() + 1);
-    data.extend_from_slice(source.as_bytes());
-    data.push(0);
-    data.extend_from_slice(profile_tag.as_bytes());
+    let mut data = Vec::with_capacity(source.len() + profile_tag.len() + 32);
+    data.extend_from_slice(b"jet-build-cache-v2");
+    for value in [source.as_bytes(), profile_tag.as_bytes()] {
+        data.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        data.extend_from_slice(value);
+    }
     sha256_hex(&data)
 }
 
@@ -66,42 +68,41 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
     fs::copy(&src, dest).is_ok()
 }
 
-/// Store a freshly built binary in the cache (best-effort).
+/// Store a freshly built binary in the cache.
 ///
 /// Atomic: the binary is copied to a per-process temp file first, then renamed
 /// into place. A concurrent `try_copy_cached` reader therefore never observes a
 /// half-written `bin`. Two processes storing the *same* key are storing the
 /// same content by construction (the key is content-addressed), so a
 /// last-writer-wins rename is safe.
-pub fn store_cached(key: &str, bin: &Path) {
+pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
     let dir = cache_dir().join(key);
-    if fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    let digest = match fs::read(bin) {
-        Ok(bytes) => sha256_hex(&bytes),
-        Err(_) => return,
-    };
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
+    let bytes = fs::read(bin)
+        .map_err(|error| format!("could not read {}: {error}", bin.display()))?;
+    let digest = sha256_hex(&bytes);
     let dest = dir.join("bin");
     let tmp = dir.join(format!("bin.tmp.{}", std::process::id()));
-    if fs::copy(bin, &tmp).is_err() {
+    if let Err(error) = fs::copy(bin, &tmp) {
         let _ = fs::remove_file(&tmp);
-        return;
+        return Err(format!("could not stage {}: {error}", bin.display()));
     }
-    if fs::rename(&tmp, &dest).is_err() {
+    if let Err(error) = fs::rename(&tmp, &dest) {
         let _ = fs::remove_file(&tmp);
-        return;
+        return Err(format!("could not publish {}: {error}", dest.display()));
     }
     let digest_path = cached_digest(key);
     let digest_tmp = dir.join(format!("bin.sha256.tmp.{}", std::process::id()));
-    if fs::write(&digest_tmp, format!("{digest}\n")).is_err() {
+    if let Err(error) = fs::write(&digest_tmp, format!("{digest}\n")) {
         let _ = fs::remove_file(&digest_tmp);
-        return;
+        return Err(format!("could not write {}: {error}", digest_path.display()));
     }
-    if fs::rename(&digest_tmp, &digest_path).is_err() {
+    if let Err(error) = fs::rename(&digest_tmp, &digest_path) {
         let _ = fs::remove_file(&digest_tmp);
-        return;
+        return Err(format!("could not publish {}: {error}", digest_path.display()));
     }
+    Ok(())
 }
 
 #[cfg(test)]

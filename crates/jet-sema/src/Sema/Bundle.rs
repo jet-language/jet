@@ -27,8 +27,8 @@ use Outputs::{
 #[allow(unused_imports)]
 pub(crate) use Validation::{
     check_func_body_bundle, check_module_bodies, collect_core_expr, collect_core_lvalue,
-    collect_core_stmts, collect_used_core, fn_types_compatible, func_sig_to_fn_type,
-    register_func_item,
+    collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
+    func_sig_to_fn_type, register_func_item,
 };
 use Validation::{
     apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
@@ -2633,6 +2633,9 @@ fn check_bundle_opts_for_output_inner(
     }) {
         used_core.insert("core.email::Limits.safe".to_string());
     }
+    // D-CORE-SOURCE-AUTHORITY1=A: late sema-generated helpers join the same
+    // source-owned package and audited ABI closure as explicit calls.
+    expand_core_reachable_closure(&mut used_core);
     bundle.used_core = used_core;
     bundle.ffi_callback_fns = ffi_callback_fns;
     diags.extend(super::MemoryFacts::annotate_scoped_gc_promotions(bundle));

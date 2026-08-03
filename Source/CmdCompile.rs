@@ -2154,7 +2154,7 @@ fn native_cache_salt(
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"jet-native-cache-salt-v3");
+    bytes.extend_from_slice(b"jet-native-cache-salt-v4");
     for value in [
         toolchain,
         dependency_fingerprint,
@@ -2171,7 +2171,7 @@ fn native_cache_salt(
     jet::SHA256::sha256_hex(&bytes)
 }
 
-const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v3";
+const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v4";
 
 fn command_identity(program: &str, args: &[&str]) -> String {
     match Command::new(program).args(args).output() {
@@ -3152,7 +3152,11 @@ pub(crate) fn build(
     // a copy that a racing process may have already overwritten on the shared
     // display path (Tower #85 §0). `store_cached` is itself write-tmp-then-rename.
     if let Some(key) = cache_key {
-        jet::BuildCache::store_cached(&key, &tmp_bin);
+        if let Err(error) = jet::BuildCache::store_cached(&key, &tmp_bin) {
+            let _ = fs::remove_dir_all(&work);
+            eprintln!("error: couldn't store build cache artifact: {error}");
+            exit(ExitCodes::USER_ERROR);
+        }
         step("cache store -> saved binary for next time".to_string());
     }
     // Then publish the private binary onto the shared, human-readable display

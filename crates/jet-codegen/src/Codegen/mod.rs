@@ -328,12 +328,12 @@ fn jet_cov_dump() {
     }
 }
 "#;
-/// R10 / #437 / #1133: Core templates are pay-for-what-you-call.
+/// R10 / #437 / #1133: Core runtime emission is pay-for-what-you-call.
 ///
 /// The JetStd brace chain (`mod jet_std {` … closing `}` in YAML.rs) must stay
-/// contiguous — those files are one module body. Optional Top-level fragments
-/// and satellite mods are selected from `bundle.used_core` so a `core.files`
-/// caller never drags Browser/HTTPServer/Game into generated source.
+/// contiguous — those files are one audited compiler/runtime kernel. Optional
+/// fragments are selected from `bundle.used_core`. Package-owned Core source is
+/// emitted by its package bridge and never falls back to this path.
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
@@ -352,6 +352,96 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
 ];
 
+const CORE_SOURCE_CLOSURE_SCHEMA: &[u8] = b"jet-core-source-closure-v1";
+const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
+const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
+
+// The package boundary is part of the compiler's identity. Keep the source,
+// package metadata, and locked dependency graph in one content-addressed
+// record so a changed package cannot reuse an older native artifact.
+const CORE_ARCHIVE_SOURCE_PARTS: &[(&str, &str)] = &[
+    (
+        "module",
+        include_str!("../../../../corelib/core.archive/pkgs/archive/archive.jet"),
+    ),
+    (
+        "package",
+        include_str!("../../../../corelib/core.archive/pkgs/archive/package.jet"),
+    ),
+    (
+        "manifest",
+        include_str!("../../../../corelib/core.archive/pkgs/archive/Cargo.toml"),
+    ),
+    (
+        "lock",
+        include_str!("../../../../corelib/core.archive/pkgs/archive/Cargo.lock"),
+    ),
+    (
+        "abi",
+        include_str!("../../../../corelib/core.archive/pkgs/archive/src/lib.rs"),
+    ),
+];
+
+fn is_internal_core_usage(usage: &str) -> bool {
+    usage.starts_with(CORE_SOURCE_MARKER_PREFIX)
+        || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
+}
+
+fn is_archive_core_usage(usage: &str) -> bool {
+    let usage = usage
+        .strip_prefix(CORE_SOURCE_MARKER_PREFIX)
+        .unwrap_or(usage);
+    usage == "core.archive" || usage.starts_with("core.archive::")
+}
+
+fn core_needs_embedded_runtime(used_core: &std::collections::HashSet<String>) -> bool {
+    used_core
+        .iter()
+        .any(|usage| !is_internal_core_usage(usage) && !is_archive_core_usage(usage))
+}
+
+fn append_identity_field(bytes: &mut Vec<u8>, value: &[u8]) {
+    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(value);
+}
+
+fn core_source_closure_fingerprint(
+    used_core: &std::collections::HashSet<String>,
+) -> String {
+    let mut usages: Vec<&str> = used_core.iter().map(String::as_str).collect();
+    usages.sort_unstable();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(CORE_SOURCE_CLOSURE_SCHEMA);
+    for usage in usages {
+        append_identity_field(&mut bytes, usage.as_bytes());
+    }
+    if used_core.iter().any(|usage| is_archive_core_usage(usage)) {
+        for (label, source) in CORE_ARCHIVE_SOURCE_PARTS {
+            append_identity_field(&mut bytes, label.as_bytes());
+            append_identity_field(&mut bytes, source.as_bytes());
+        }
+    }
+    crate::SHA256::sha256_hex(&bytes)
+}
+
+fn corelib_emission_identity(
+    body: &str,
+    used_core: &std::collections::HashSet<String>,
+) -> String {
+    let source = core_source_closure_fingerprint(used_core);
+    let closure = crate::SHA256::sha256_hex(body.as_bytes());
+    let mut identity = Vec::new();
+    identity.extend_from_slice(CORE_SOURCE_CLOSURE_SCHEMA);
+    append_identity_field(&mut identity, source.as_bytes());
+    append_identity_field(&mut identity, closure.as_bytes());
+    append_identity_field(&mut identity, body.len().to_string().as_bytes());
+    let fingerprint = crate::SHA256::sha256_hex(&identity);
+    format!(
+        "/* jet-corelib-r10 source={source} closure={closure} len={} fp={fingerprint} */",
+        body.len()
+    )
+}
+
 fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str]) -> bool {
     used.iter().any(|usage| {
         prefixes.iter().any(|prefix| {
@@ -363,28 +453,29 @@ fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str
 }
 
 fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
-    // R10 / #1133: record emission identity beside the templates so cache
-    // keys and audits can see which Top-module set was selected.
+    // A package-owned Core module is provided by its package bridge. Emitting
+    // no compiler fragment here prevents an older template from becoming a
+    // fallback implementation when the package source is present.
+    if !core_needs_embedded_runtime(used_core) {
+        return;
+    }
     let mut body = String::new();
     push_corelib_prelude_body(&mut body, used_core);
-    let hash = crate::SHA256::sha256_hex(body.as_bytes());
-    out.push_str(&format!(
-        "/* jet-corelib-r10 len={} fp={hash} */\n",
-        body.len()
-    ));
+    out.push_str(&corelib_emission_identity(&body, used_core));
+    out.push('\n');
     out.push_str(&body);
 }
 
-/// R10 / #1133: content identity of the Core templates a program will link.
+/// R10 / #1133: content identity of the semantic Core closure and emitted
+/// compiler/runtime fragments a program will link.
 pub fn corelib_emission_fingerprint(
     used_core: &std::collections::HashSet<String>,
 ) -> String {
-    let mut out = String::new();
-    push_corelib_prelude(&mut out, used_core);
-    out.lines()
-        .next()
-        .unwrap_or("/* jet-corelib-r10 missing */")
-        .to_string()
+    let mut body = String::new();
+    if core_needs_embedded_runtime(used_core) {
+        push_corelib_prelude_body(&mut body, used_core);
+    }
+    corelib_emission_identity(&body, used_core)
 }
 
 fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::HashSet<String>) {
@@ -478,7 +569,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.encoding.hex",
             "core.compress.gzip",
             "core.compress.zstd",
-            "core.archive",
             "core.binary",
         ],
     ) || needs_xml
@@ -2549,7 +2639,7 @@ pub fn emit_bundle_dbg(
     push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
-    if !bundle.used_core.is_empty() {
+    if core_needs_embedded_runtime(&bundle.used_core) {
         push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
@@ -2732,7 +2822,7 @@ pub fn emit_bundle_tests_cov(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if !bundle.used_core.is_empty() {
+    if core_needs_embedded_runtime(&bundle.used_core) {
         push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
@@ -2933,7 +3023,7 @@ pub fn emit_bundle_fuzz(
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
     out.push_str(PROP_PRELUDE);
-    if !bundle.used_core.is_empty() {
+    if core_needs_embedded_runtime(&bundle.used_core) {
         push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
@@ -3187,7 +3277,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if !bundle.used_core.is_empty() {
+    if core_needs_embedded_runtime(&bundle.used_core) {
         push_corelib_prelude(&mut out, &bundle.used_core);
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);

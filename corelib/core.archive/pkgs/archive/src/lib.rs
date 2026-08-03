@@ -9,6 +9,10 @@
 
 use std::io::{Read, Write};
 
+/// ABI version for the package-owned archive kernel. The Jet module source and
+/// this implementation are one cache identity; neither is a compiler template.
+pub const JET_CORE_ARCHIVE_ABI_VERSION: &str = "core.archive.abi.v1";
+
 pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
     use zip::write::{FileOptions, ZipWriter};
     let mut buf = Vec::new();
@@ -16,9 +20,15 @@ pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
         let cursor = std::io::Cursor::new(&mut buf);
         let mut writer = ZipWriter::new(cursor);
         let options: FileOptions<()> = FileOptions::default();
-        let _ = writer.start_file(name, options);
-        let _ = writer.write_all(data);
-        let _ = writer.finish();
+        if writer.start_file(name, options).is_err() {
+            return Vec::new();
+        }
+        if writer.write_all(data).is_err() {
+            return Vec::new();
+        }
+        if writer.finish().is_err() {
+            return Vec::new();
+        }
     }
     buf
 }
@@ -38,7 +48,9 @@ pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
         Err(_) => return Vec::new(),
     };
     let mut out = Vec::new();
-    let _ = file.read_to_end(&mut out);
+    if file.read_to_end(&mut out).is_err() {
+        return Vec::new();
+    }
     out
 }
 
@@ -51,15 +63,22 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     let Ok(iter) = archive.entries() else {
         return entries;
     };
-    for entry in iter.flatten() {
-        let mut entry = entry;
-        let name = entry
+    for entry in iter {
+        let Ok(mut entry) = entry else {
+            return Vec::new();
+        };
+        let name = match entry
             .path()
             .ok()
             .and_then(|path| path.to_str().map(str::to_string))
-            .unwrap_or_default();
+        {
+            Some(name) => name,
+            None => return Vec::new(),
+        };
         let mut buf = Vec::new();
-        let _ = entry.read_to_end(&mut buf);
+        if entry.read_to_end(&mut buf).is_err() {
+            return Vec::new();
+        }
         entries.push((name, buf));
     }
     entries
@@ -74,9 +93,16 @@ fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
             header.set_size(data.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            let _ = archive.append_data(&mut header, name, data.as_slice());
+            if archive
+                .append_data(&mut header, name, data.as_slice())
+                .is_err()
+            {
+                return Vec::new();
+            }
         }
-        let _ = archive.finish();
+        if archive.finish().is_err() {
+            return Vec::new();
+        }
     }
     buf
 }

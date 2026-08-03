@@ -359,6 +359,49 @@ fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule
     })
 }
 
+pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
+pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
+
+fn is_core_closure_marker(usage: &str) -> bool {
+    usage.starts_with(CORE_SOURCE_MARKER_PREFIX)
+        || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
+}
+
+/// Attach the semantic Core source and intrinsic closure to the direct helper
+/// set. These entries are compiler metadata, not user-callable helpers: codegen
+/// uses them to select the owning package or audited ABI kernel, and the cache
+/// salts them into the artifact identity.
+pub(crate) fn expand_core_reachable_closure(used: &mut HashSet<String>) {
+    let direct: Vec<String> = used
+        .iter()
+        .filter(|usage| !is_core_closure_marker(usage))
+        .cloned()
+        .collect();
+    for usage in direct {
+        let (module, helper) = usage
+            .split_once("::")
+            .map_or((usage.as_str(), None), |(module, helper)| {
+                (module, Some(helper))
+            });
+        used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{module}"));
+        if helper.is_some_and(|helper| !helper.is_empty()) {
+            used.insert(format!("{CORE_SOURCE_MARKER_PREFIX}{usage}"));
+        }
+
+        let intrinsic = if module == "core.archive" {
+            "archive.abi"
+        } else {
+            module
+        };
+        used.insert(format!("{CORE_INTRINSIC_MARKER_PREFIX}{intrinsic}"));
+        if let Some(helper) = helper.filter(|helper| !helper.is_empty()) {
+            used.insert(format!(
+                "{CORE_INTRINSIC_MARKER_PREFIX}{intrinsic}::{helper}"
+            ));
+        }
+    }
+}
+
 pub(crate) fn collect_used_core(
     bundle: &ProgramBundle,
     states: &[ModuleState],
@@ -426,6 +469,7 @@ pub(crate) fn collect_used_core(
             }
         }
     }
+    expand_core_reachable_closure(&mut used);
     (used, spans, ffi_cb)
 }
 
@@ -454,6 +498,9 @@ pub(super) fn apply_helper_layer_inference(
         .flat_map(|st| st.core_imports.iter().map(|(a, m)| (a.clone(), m.clone())))
         .collect();
     for usage in &bundle.used_core {
+        if is_core_closure_marker(usage) {
+            continue;
+        }
         let Some(mod_layer) = crate::Syntax::core_usage_layer(usage) else {
             continue;
         };
