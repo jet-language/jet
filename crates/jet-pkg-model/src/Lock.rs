@@ -9,6 +9,7 @@ use crate::Manifest::{DepSpec, GitSelector, Manifest};
 use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::Path;
 
 // ComptimeInput struct lives in AST for cross-seam sharing; re-export here.
@@ -176,6 +177,8 @@ pub struct LockFile {
 pub struct LockedWorkspaceMember {
     pub name: String,
     pub path: String,
+    pub source_digest: String,
+    pub canonical_path: String,
 }
 
 // ──────────────────────────────────────────────
@@ -321,6 +324,14 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str("[[workspace_member]]\n");
         out.push_str(&format!("name = \"{}\"\n", escape_str(&member.name)));
         out.push_str(&format!("path = \"{}\"\n", escape_str(&member.path)));
+        out.push_str(&format!(
+            "source_digest = \"{}\"\n",
+            escape_str(&member.source_digest)
+        ));
+        out.push_str(&format!(
+            "canonical_path = \"{}\"\n",
+            escape_str(&member.canonical_path)
+        ));
     }
 
     // D-CTEFFECT1 Tier-1: embed inputs.
@@ -461,6 +472,8 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             match key {
                 "name" => wm.name = Some(val.trim_matches('"').to_string()),
                 "path" => wm.path = Some(val.trim_matches('"').to_string()),
+                "source_digest" => wm.source_digest = Some(val.trim_matches('"').to_string()),
+                "canonical_path" => wm.canonical_path = Some(val.trim_matches('"').to_string()),
                 _ => {}
             }
             continue;
@@ -604,6 +617,8 @@ impl PartialCi {
 struct PartialWorkspaceMember {
     name: Option<String>,
     path: Option<String>,
+    source_digest: Option<String>,
+    canonical_path: Option<String>,
 }
 
 impl PartialWorkspaceMember {
@@ -611,6 +626,8 @@ impl PartialWorkspaceMember {
         Some(LockedWorkspaceMember {
             name: self.name?,
             path: self.path?,
+            source_digest: self.source_digest?,
+            canonical_path: self.canonical_path?,
         })
     }
 }
@@ -896,12 +913,16 @@ pub fn record_nix_realization(
     reference: &str,
     output: &str,
     envelope: LockEnvelope,
-) {
+) -> Result<(), String> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
-        .ok()
-        .and_then(|raw| parse(&raw).ok())
-        .unwrap_or_else(|| LockFile {
+    let mut lock = match std::fs::read_to_string(&lock_path) {
+        Ok(raw) => parse(&raw).map_err(|error| {
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            )
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
@@ -910,7 +931,14 @@ pub fn record_nix_realization(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
-        });
+        },
+        Err(error) => {
+            return Err(format!(
+                "could not read project lock `{}`: {error}",
+                lock_path.display()
+            ));
+        }
+    };
     lock.version = LOCK_VERSION;
     let entry = LockedPackage {
         name: name.to_string(),
@@ -939,9 +967,63 @@ pub fn record_nix_realization(
         lock.packages.push(entry);
     }
     if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "could not create project lock directory `{}`: {error}",
+                parent.display()
+            )
+        })?;
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    write_lock_atomically(&lock_path, &write(&lock))
+}
+
+fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("project lock `{}` has no parent directory", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("project lock `{}` has no UTF-8 file name", path.display()))?;
+    let mut temporary = None;
+    for attempt in 0..32u32 {
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.partial",
+            std::process::id() + attempt
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                file.write_all(contents.as_bytes()).map_err(|error| {
+                    let _ = std::fs::remove_file(&candidate);
+                    format!("could not write temporary project lock: {error}")
+                })?;
+                file.sync_all().map_err(|error| {
+                    let _ = std::fs::remove_file(&candidate);
+                    format!("could not sync temporary project lock: {error}")
+                })?;
+                temporary = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("could not create temporary project lock: {error}"));
+            }
+        }
+    }
+    let temporary = temporary.ok_or_else(|| {
+        "could not allocate a temporary project lock path after 32 attempts".to_string()
+    })?;
+    std::fs::rename(&temporary, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        format!(
+            "could not atomically publish project lock `{}`: {error}",
+            path.display()
+        )
+    })
 }
 
 /// D-JPK-OFFLINE2=B: read the recorded Nix realization for `reference` from the

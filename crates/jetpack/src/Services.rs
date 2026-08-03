@@ -27,6 +27,12 @@ use jet_env_model::ModuleEval::{DevServicePlan, ReadyProbe, RestartPolicy, Shutd
 use super::Shell::Env as ShellEnv;
 use crate::Syntax;
 
+const MAX_SERVICE_NAME_BYTES: usize = 256;
+const MAX_SERVICE_RESTARTS: u32 = 100;
+const MAX_SERVICE_BACKOFF_MS: u64 = 60_000;
+const MAX_SERVICE_RESTART_DELAY_MS: u64 = 60_000;
+const MAX_WATCH_DEPTH: usize = 64;
+
 /// A well-known dev dependency's default package, port, start command, and
 /// readiness probe — used only when the author's `services:` entry doesn't
 /// override `run`/`ready`/`ports` itself. Seed content (U12 does not ratify
@@ -206,6 +212,10 @@ fn stopping_path(dir: &Path) -> PathBuf {
     dir.join(".stopping")
 }
 
+fn supervisor_error_path(dir: &Path) -> PathBuf {
+    dir.join("supervisor.error")
+}
+
 fn ports_path(dir: &Path) -> PathBuf {
     dir.join("ports")
 }
@@ -268,11 +278,12 @@ pub fn unknown_field(plan: &DevServicePlan) -> Option<&str> {
 /// command to run).
 fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String> {
     validate_service_name(&plan.name)?;
+    validate_restart_policy(plan)?;
     validate_ports(&plan.ports)?;
     validate_socket_names(&plan.sockets)?;
     validate_project_relative("data_dir", plan.data_dir.as_deref())?;
     for path in &plan.watch {
-        validate_project_relative("watch", Some(path))?;
+        validate_watch_path(path)?;
         ensure_project_path(project_dir, &project_dir.join(path), "watch")?;
     }
     for socket in &plan.sockets {
@@ -316,6 +327,7 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
             ))
         }
     };
+    validate_foreground_run(&run, &plan.name)?;
     let ready = plan.ready.clone().or_else(|| {
         cat.as_ref()
             .map(|c| (c.ready)(ports.first().copied().unwrap_or(c.port)))
@@ -331,6 +343,27 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
     })
 }
 
+fn validate_foreground_run(run: &[String], name: &str) -> Result<(), String> {
+    let daemonizing = run.iter().any(|argument| {
+        argument
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '-')
+            .any(|word| {
+                matches!(
+                    word.to_ascii_lowercase().as_str(),
+                    "setsid" | "nohup" | "daemonize" | "start-stop-daemon" | "disown"
+                )
+            })
+            || argument.trim() == "&"
+            || argument.trim_end().ends_with(" &")
+    });
+    if daemonizing {
+        return Err(format!(
+            "service {name} must stay in the foreground; daemonizing commands cannot be supervised"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_project_relative(field: &str, value: Option<&str>) -> Result<(), String> {
     let Some(value) = value else { return Ok(()) };
     let path = Path::new(value);
@@ -341,6 +374,23 @@ fn validate_project_relative(field: &str, value: Option<&str>) -> Result<(), Str
             .any(|component| component == std::path::Component::ParentDir)
     {
         return Err(format!("service {field} path `{value}` must stay inside the project"));
+    }
+    Ok(())
+}
+
+fn validate_watch_path(value: &str) -> Result<(), String> {
+    validate_project_relative("watch", Some(value))?;
+    let internal_state = Path::new(value)
+        .components()
+        .find(|component| *component != std::path::Component::CurDir)
+        .is_some_and(|component| {
+            component
+                == std::path::Component::Normal(std::ffi::OsStr::new(Syntax::CONFIG_DEFAULT_DIR))
+        });
+    if internal_state {
+        return Err(format!(
+            "service watch path `{value}` cannot watch Jet's internal state"
+        ));
     }
     Ok(())
 }
@@ -412,10 +462,40 @@ fn validate_service_name(name: &str) -> Result<(), String> {
     if name.is_empty()
         || name == "."
         || name == ".."
+        || name.len() > MAX_SERVICE_NAME_BYTES
+        || name.chars().any(char::is_control)
         || name.contains('/')
         || name.contains('\\')
     {
         return Err(format!("service name `{name}` is not a safe state-directory name"));
+    }
+    Ok(())
+}
+
+fn validate_restart_policy(plan: &DevServicePlan) -> Result<(), String> {
+    let Some(policy) = plan.restart.as_ref() else {
+        return Ok(());
+    };
+    let (max, backoff_ms) = match policy {
+        RestartPolicy::OnFailure {
+            max, backoff_ms, ..
+        }
+        | RestartPolicy::Always {
+            max, backoff_ms, ..
+        } => (*max, *backoff_ms),
+        RestartPolicy::Never => return Ok(()),
+    };
+    if max > MAX_SERVICE_RESTARTS {
+        return Err(format!(
+            "service `{}` restart max {} exceeds the bounded limit of {}",
+            plan.name, max, MAX_SERVICE_RESTARTS
+        ));
+    }
+    if backoff_ms > MAX_SERVICE_BACKOFF_MS {
+        return Err(format!(
+            "service `{}` restart backoff {}ms exceeds the bounded limit of {}ms",
+            plan.name, backoff_ms, MAX_SERVICE_BACKOFF_MS
+        ));
     }
     Ok(())
 }
@@ -1003,10 +1083,31 @@ struct StartedService {
     state: ProcessState,
 }
 
+const SERVICE_SUPERVISOR_ENV: &str = "JETPACK_SERVICE_SUPERVISOR";
+
 /// Start `plan` if it isn't already running (idempotent). `env` composes the
 /// same PATH the project's realized packages live on, so a catalog binary
 /// (e.g. `redis-server`) resolves without the caller needing its own shell.
 pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Result<(), String> {
+    if std::env::var_os(SERVICE_SUPERVISOR_ENV).is_some() {
+        let Some(started) = start_one(project_dir, env, plan)? else {
+            return Ok(());
+        };
+        if plan.restart.is_some() || !plan.watch.is_empty() {
+            monitor_service(
+                started,
+                project_dir.to_path_buf(),
+                restart_env(env),
+                plan.clone(),
+            );
+        } else {
+            reap_child(started.child);
+        }
+        return Ok(());
+    }
+    if plan.restart.is_some() || !plan.watch.is_empty() {
+        return spawn_service_supervisor(project_dir, env, plan);
+    }
     let Some(started) = start_one(project_dir, env, plan)? else {
         return Ok(());
     };
@@ -1019,6 +1120,46 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
         // `services up` is a supervisor hand-off. Keep the child reaped
         // without making the CLI wait for a long-lived service to exit.
         std::thread::spawn(move || reap_child(started.child));
+    }
+    Ok(())
+}
+
+fn spawn_service_supervisor(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plan: &DevServicePlan,
+) -> Result<(), String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("couldn't locate the service supervisor: {error}"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("services")
+        .arg("up")
+        .arg(&plan.name)
+        // The parent already loaded, realized, and trust-gated this exact
+        // plan. The detached child must not prompt on null stdin or replay a
+        // second trust decision before it can supervise the service.
+        .arg("--trust")
+        .arg("--no-color")
+        .current_dir(project_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    env.apply_to(&mut command);
+    command.env(SERVICE_SUPERVISOR_ENV, "1");
+    command
+        .spawn()
+        .map_err(|error| format!("couldn't hand service `{}` to its supervisor: {error}", plan.name))?;
+    let dir = service_dir(project_dir, &plan.name);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pid_path(&dir).is_file() && !supervisor_error_path(&dir).is_file() {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "service `{}` supervisor did not publish runtime state",
+                plan.name
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
     Ok(())
 }
@@ -1056,6 +1197,7 @@ fn start_one(
     let mut resolved = resolve(project_dir, plan)?;
     fs::create_dir_all(&resolved.dir).map_err(|e| e.to_string())?;
     fs::create_dir_all(&resolved.data_dir).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(supervisor_error_path(&resolved.dir));
     if let Some(state) = read_process_state(&resolved.dir)? {
         match state {
             PersistedProcessState::Verified(state) if process_matches_start(&state)? => {
@@ -1102,6 +1244,7 @@ fn start_one(
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
     env.apply_to(&mut cmd);
+    cmd.env_remove(SERVICE_SUPERVISOR_ENV);
     let base_path = std::env::var("PATH").unwrap_or_default();
     cmd.env("PATH", env.composed_path(&base_path));
     if !resolved.ports.is_empty() {
@@ -1173,12 +1316,26 @@ fn monitor_service(
         .iter()
         .map(|path| project_dir.join(path))
         .collect::<Vec<_>>();
-    let mut stamps = watch_stamps(&watched);
+    let mut stamps = match watch_stamps(&project_dir, &watched) {
+        Ok(stamps) => stamps,
+        Err(error) => {
+            finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+            return;
+        }
+    };
     let mut pending_watch: Option<(Vec<String>, Instant)> = None;
     let mut restarts = 0_u32;
     loop {
         match started.child.try_wait() {
-            Err(_) => return,
+            Err(error) => {
+                finish_supervisor(
+                    &project_dir,
+                    &plan,
+                    started.state.pid,
+                    Some(&format!("supervisor could not inspect service: {error}")),
+                );
+                return;
+            }
             Ok(None) => {}
             Ok(Some(status)) => {
                 let failed = !status.success();
@@ -1187,7 +1344,11 @@ fn monitor_service(
                     Some(RestartPolicy::OnFailure { .. }) => failed,
                     Some(RestartPolicy::Never) | None => false,
                 };
-                if !restart || restarts >= max_restarts || stopping_requested(&project_dir, &plan) {
+                let stopping = stopping_requested(&project_dir, &plan);
+                if !restart || restarts >= max_restarts || stopping {
+                    let error = (restart && !stopping && restarts >= max_restarts)
+                        .then_some("service restart limit exhausted");
+                    finish_supervisor(&project_dir, &plan, started.state.pid, error);
                     return;
                 }
                 restarts += 1;
@@ -1195,21 +1356,71 @@ fn monitor_service(
                 match start_one(&project_dir, &env, &plan) {
                     Ok(Some(next)) => {
                         started = next;
-                        stamps = watch_stamps(&watched);
+                        stamps = match watch_stamps(&project_dir, &watched) {
+                            Ok(stamps) => stamps,
+                            Err(error) => {
+                                finish_supervisor(
+                                    &project_dir,
+                                    &plan,
+                                    started.state.pid,
+                                    Some(&error),
+                                );
+                                return;
+                            }
+                        };
                     }
-                    Ok(None) | Err(_) => return,
+                    Ok(None) => {
+                        finish_supervisor(
+                            &project_dir,
+                            &plan,
+                            started.state.pid,
+                            Some("service restart did not produce a running process"),
+                        );
+                        return;
+                    }
+                    Err(error) => {
+                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        return;
+                    }
                 }
                 continue;
             }
         }
-        if !watched.is_empty()
-            && watch_changed_debounced(&watched, &mut stamps, &mut pending_watch)
-        {
-            if restarts >= max_restarts || stopping_requested(&project_dir, &plan) {
+        let watch_changed = match (!watched.is_empty()).then(|| {
+            watch_changed_debounced(&project_dir, &watched, &mut stamps, &mut pending_watch)
+        }) {
+            Some(Ok(changed)) => changed,
+            Some(Err(error)) => {
+                finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
                 return;
             }
-            if stop_process(&started.state, plan.shutdown.as_ref()).is_err() {
+            None => false,
+        };
+        if watch_changed {
+            let stopping = stopping_requested(&project_dir, &plan);
+            if restarts >= max_restarts || stopping {
+                let error = (!stopping && restarts >= max_restarts)
+                    .then_some("service watch restart limit exhausted");
+                finish_supervisor(&project_dir, &plan, started.state.pid, error);
                 return;
+            }
+            if let Err(error) = stop_process(&started.state, plan.shutdown.as_ref()) {
+                match started.child.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        return;
+                    }
+                    Err(wait_error) => {
+                        finish_supervisor(
+                            &project_dir,
+                            &plan,
+                            started.state.pid,
+                            Some(&format!("{error}; couldn't reap service: {wait_error}")),
+                        );
+                        return;
+                    }
+                }
             }
             let _ = started.child.wait();
             restarts += 1;
@@ -1217,9 +1428,32 @@ fn monitor_service(
             match start_one(&project_dir, &env, &plan) {
                 Ok(Some(next)) => {
                     started = next;
-                    stamps = watch_stamps(&watched);
+                    stamps = match watch_stamps(&project_dir, &watched) {
+                        Ok(stamps) => stamps,
+                        Err(error) => {
+                            finish_supervisor(
+                                &project_dir,
+                                &plan,
+                                started.state.pid,
+                                Some(&error),
+                            );
+                            return;
+                        }
+                    };
                 }
-                Ok(None) | Err(_) => return,
+                Ok(None) => {
+                    finish_supervisor(
+                        &project_dir,
+                        &plan,
+                        started.state.pid,
+                        Some("service watch restart did not produce a running process"),
+                    );
+                    return;
+                }
+                Err(error) => {
+                    finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                    return;
+                }
             }
             continue;
         }
@@ -1238,7 +1472,11 @@ fn restart_budget(plan: &DevServicePlan) -> (u32, u64, bool) {
             max,
             backoff_ms,
             exponential,
-        }) => (*max, *backoff_ms, *exponential),
+        }) => (
+            (*max).min(MAX_SERVICE_RESTARTS),
+            (*backoff_ms).min(MAX_SERVICE_BACKOFF_MS),
+            *exponential,
+        ),
         Some(RestartPolicy::Never) => (0, 0, false),
         None if !plan.watch.is_empty() => (3, 250, false),
         None => (0, 0, false),
@@ -1251,60 +1489,189 @@ fn restart_delay(backoff_ms: u64, exponential: bool, attempt: u32) -> Duration {
     } else {
         1
     };
-    Duration::from_millis(backoff_ms.saturating_mul(multiplier))
+    Duration::from_millis(
+        backoff_ms
+            .saturating_mul(multiplier)
+            .min(MAX_SERVICE_RESTART_DELAY_MS),
+    )
 }
 
 fn stopping_requested(project_dir: &Path, plan: &DevServicePlan) -> bool {
     service_dir(project_dir, &plan.name).join(".stopping").is_file()
 }
 
-fn watch_stamps(paths: &[PathBuf]) -> Vec<String> {
-    paths
-        .iter()
-        .map(|path| match fs::metadata(path) {
-            Ok(metadata) => format!(
-                "{}:{}",
-                metadata.len(),
-                metadata
-                    .modified()
-                    .ok()
-                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|duration| duration.as_nanos())
-                    .unwrap_or_default()
-            ),
-            Err(_) => "missing".to_string(),
+fn best_effort_kill_process_group(pid: u32) {
+    let _ = run_stop_action(pid, StopAction::Kill);
+}
+
+fn finish_supervisor(
+    project_dir: &Path,
+    plan: &DevServicePlan,
+    pid: u32,
+    error: Option<&str>,
+) {
+    // The service owns a process group whose leader was pid. Kill the group
+    // before dropping state so reparented foreground children cannot survive
+    // a restart limit, crash, or normal supervisor shutdown.
+    best_effort_kill_process_group(pid);
+    let dir = service_dir(project_dir, &plan.name);
+    let Ok(_guard) = super::RuntimePolicy::acquire_lock(
+        &super::Store::managed_dir(project_dir),
+        "services-state",
+    ) else {
+        // Never remove state without the same lock used by `up`/`down`.
+        // Keeping stale evidence is safer than racing a live supervisor or a
+        // user-issued shutdown and claiming cleanup that did not happen.
+        return;
+    };
+    if let Some(error) = error {
+        let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
+    } else {
+        let _ = fs::remove_file(supervisor_error_path(&dir));
+    }
+    let _ = fs::remove_file(pid_path(&dir));
+    let _ = fs::remove_file(ports_path(&dir));
+    let _ = fs::remove_file(stopping_path(&dir));
+}
+
+fn watch_stamps(project_dir: &Path, paths: &[PathBuf]) -> Result<Vec<String>, String> {
+    const MAX_WATCH_ENTRIES: usize = 4096;
+    let mut roots = paths.to_vec();
+    roots.sort();
+    roots.dedup();
+    let mut entries = Vec::new();
+    for path in roots {
+        collect_watch_stamps(project_dir, &path, MAX_WATCH_ENTRIES, 0, &mut entries)?;
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn collect_watch_stamps(
+    project_dir: &Path,
+    path: &Path,
+    limit: usize,
+    depth: usize,
+    entries: &mut Vec<String>,
+) -> Result<(), String> {
+    if depth > MAX_WATCH_DEPTH {
+        return Err(format!(
+            "watched tree exceeds the bounded depth of {MAX_WATCH_DEPTH}"
+        ));
+    }
+    let internal_state = path
+        .strip_prefix(project_dir)
+        .ok()
+        .and_then(|relative| {
+            relative
+                .components()
+                .find(|component| *component != std::path::Component::CurDir)
         })
-        .collect()
+        .is_some_and(|component| {
+            component
+                == std::path::Component::Normal(std::ffi::OsStr::new(Syntax::CONFIG_DEFAULT_DIR))
+        });
+    if internal_state {
+        return Ok(());
+    }
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            push_watch_stamp(entries, limit, format!("{}\tmissing", path.display()))?;
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(format!(
+                "couldn't inspect watched path `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    let kind = if metadata.file_type().is_dir() {
+        "dir"
+    } else if metadata.file_type().is_file() {
+        "file"
+    } else if metadata.file_type().is_symlink() {
+        "link"
+    } else {
+        "other"
+    };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    push_watch_stamp(
+        entries,
+        limit,
+        format!("{}\t{kind}:{}:{modified}", path.display(), metadata.len()),
+    )?;
+    if !metadata.file_type().is_dir() {
+        return Ok(());
+    }
+    let mut children = Vec::new();
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("couldn't read watched directory `{}`: {error}", path.display()))?
+    {
+        if children.len() >= limit {
+            return Err(format!(
+                "watched directory `{}` exceeds the bounded limit of {limit} entries",
+                path.display()
+            ));
+        }
+        children.push(
+            entry
+                .map(|entry| entry.path())
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    children.sort();
+    for child in children {
+        collect_watch_stamps(project_dir, &child, limit, depth + 1, entries)?;
+    }
+    Ok(())
+}
+
+fn push_watch_stamp(entries: &mut Vec<String>, limit: usize, stamp: String) -> Result<(), String> {
+    if entries.len() >= limit {
+        return Err(format!(
+            "watched tree exceeds the bounded limit of {limit} entries"
+        ));
+    }
+    entries.push(stamp);
+    Ok(())
 }
 
 fn watch_changed_debounced(
+    project_dir: &Path,
     paths: &[PathBuf],
     stamps: &mut Vec<String>,
     pending: &mut Option<(Vec<String>, Instant)>,
-) -> bool {
+) -> Result<bool, String> {
     const DEBOUNCE: Duration = Duration::from_millis(250);
-    let current = watch_stamps(paths);
+    let current = watch_stamps(project_dir, paths)?;
     if current == *stamps {
         *pending = None;
-        return false;
+        return Ok(false);
     }
     match pending {
         Some((candidate, started)) if *candidate == current => {
             if started.elapsed() < DEBOUNCE {
-                return false;
+                return Ok(false);
             }
             *stamps = current;
             *pending = None;
-            true
+            Ok(true)
         }
         Some((candidate, started)) => {
             *candidate = current;
             *started = Instant::now();
-            false
+            Ok(false)
         }
         None => {
             *pending = Some((current, Instant::now()));
-            false
+            Ok(false)
         }
     }
 }
@@ -1321,6 +1688,8 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
     let dir = service_dir(project_dir, &plan.name);
     let Some(state) = read_process_state(&dir)? else {
         let _ = fs::remove_file(ports_path(&dir));
+        let _ = fs::remove_file(stopping_path(&dir));
+        let _ = fs::remove_file(supervisor_error_path(&dir));
         return Ok(())
     };
     let PersistedProcessState::Verified(state) = state else {
@@ -1333,6 +1702,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         };
         let _ = fs::remove_file(stopping_path(&dir));
         let _ = fs::remove_file(ports_path(&dir));
+        let _ = fs::remove_file(supervisor_error_path(&dir));
         return result;
     };
     if !process_matches_start(&state)? {
@@ -1343,6 +1713,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         }
         let _ = fs::remove_file(stopping_path(&dir));
         let _ = fs::remove_file(ports_path(&dir));
+        let _ = fs::remove_file(supervisor_error_path(&dir));
         return Ok(());
     }
     fs::write(stopping_path(&dir), b"down\n")
@@ -1355,6 +1726,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
     };
     let _ = fs::remove_file(ports_path(&dir));
     let _ = fs::remove_file(stopping_path(&dir));
+    let _ = fs::remove_file(supervisor_error_path(&dir));
     result
 }
 
@@ -1490,6 +1862,9 @@ pub fn health_one_with_env(
         return Health::Disabled;
     }
     let dir = service_dir(project_dir, &plan.name);
+    if supervisor_error_path(&dir).is_file() {
+        return Health::Unhealthy;
+    }
     let Ok(Some(PersistedProcessState::Verified(state))) = read_process_state(&dir) else {
         return Health::NotRunning;
     };
@@ -1788,6 +2163,7 @@ pub fn restart_one(
     env: &ShellEnv,
     plan: &DevServicePlan,
 ) -> Result<(), String> {
+    validate_restart_policy(plan)?;
     let (max_restarts, backoff_ms, exponential) = restart_budget(plan);
     down_one(project_dir, plan)?;
     let mut last_error = String::new();
@@ -1819,17 +2195,7 @@ pub fn watch_once(
     }
     validate_service_name(&plan.name)?;
     for path in &plan.watch {
-        let path = Path::new(path);
-        if path.is_absolute()
-            || path
-                .components()
-                .any(|component| component == std::path::Component::ParentDir)
-        {
-            return Err(format!(
-                "service watch path `{}` must be project-relative and cannot contain `..`",
-                path.display()
-            ));
-        }
+        validate_watch_path(path)?;
     }
     let paths = plan
         .watch
@@ -1844,18 +2210,14 @@ pub fn watch_once(
     if let Some(parent) = state_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let current = paths
-        .iter()
-        .zip(watch_stamps(&paths))
-        .map(|(path, stamp)| format!("{}\t{stamp}", path.display()))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let current = watch_stamps(project_dir, &paths)?.join("\n");
     let previous = fs::read_to_string(&state_path).unwrap_or_default();
-    write_atomic(&state_path, current.as_bytes()).map_err(|error| error.to_string())?;
     if previous.is_empty() || previous == current {
+        write_atomic(&state_path, current.as_bytes()).map_err(|error| error.to_string())?;
         return Ok(false);
     }
     restart_one(project_dir, env, plan)?;
+    write_atomic(&state_path, current.as_bytes()).map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -1923,7 +2285,11 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
     }
     let dir = service_dir(project_dir, name);
     let mut out = String::new();
-    for (label, path) in [("stdout", stdout_path(&dir)), ("stderr", stderr_path(&dir))] {
+    for (label, path) in [
+        ("stdout", stdout_path(&dir)),
+        ("stderr", stderr_path(&dir)),
+        ("supervisor", supervisor_error_path(&dir)),
+    ] {
         let mut buf = String::new();
         if File::open(&path)
             .and_then(|mut f| f.read_to_string(&mut buf))
@@ -2065,6 +2431,38 @@ mod tests {
     }
 
     #[test]
+    fn directory_watch_snapshot_tracks_nested_files_in_sorted_order() {
+        let dir = scratch("watch-tree");
+        fs::create_dir_all(dir.join("src/nested")).unwrap();
+        fs::write(dir.join("src/main.jet"), "fn main() {}\n").unwrap();
+        fs::write(dir.join("src/nested/lib.jet"), "fn lib() {}\n").unwrap();
+
+        let first = watch_stamps(&dir, &[dir.join("src")]).unwrap();
+        assert!(first.windows(2).all(|pair| pair[0] <= pair[1]), "{first:?}");
+        assert!(first.iter().any(|stamp| stamp.contains("nested/lib.jet")));
+
+        fs::write(dir.join("src/nested/lib.jet"), "fn lib() -> Int { 42 }\n").unwrap();
+        let second = watch_stamps(&dir, &[dir.join("src")]).unwrap();
+        assert_ne!(first, second, "nested file changes must change the watch fact");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restart_exhaustion_cleans_process_state() {
+        let dir = scratch("restart-exhaustion");
+        let mut service = plan("fixture", "exit 7;");
+        service.restart = Some(RestartPolicy::OnFailure {
+            max: 1,
+            backoff_ms: 0,
+            exponential: false,
+        });
+        let started = start_one(&dir, &env(), &service).unwrap().unwrap();
+        monitor_service(started, dir.clone(), env(), service.clone());
+        assert!(read_process_state(&service_dir(&dir, "fixture")).unwrap().is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn health_gate_probes_a_tcp_port() {
         // A fixture "service": a background `nc`-free TCP listener via a tiny
         // shell loop isn't portable enough for a test fixture, so this proves
@@ -2084,6 +2482,65 @@ mod tests {
             "a port that never accepts must time out, not hang"
         );
         down_one(&dir, &unreachable).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ephemeral_port_stays_reserved_until_service_spawn() {
+        let reservation = allocate_ports(&[0]).expect("ephemeral port allocation");
+        let port = reservation.ports[0];
+        assert_ne!(port, 0);
+        assert!(
+            TcpListener::bind(("127.0.0.1", port)).is_err(),
+            "the parent reservation must prevent a competing bind"
+        );
+        drop(reservation);
+        TcpListener::bind(("127.0.0.1", port))
+            .expect("the reservation must release before the child is spawned");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn service_spawn_exports_allocated_port_and_socket_activation_paths() {
+        let dir = PathBuf::from("/tmp").join(format!(
+            "jpk-service-activation-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let mut service = plan(
+            "fixture",
+            "printf '%s\\n%s\\n' \"$JETPACK_SERVICE_PORT\" \"$JETPACK_SERVICE_SOCKET_0\" > activation; sleep 30",
+        );
+        service.ports = vec![0];
+        service.sockets = vec!["runtime/service.sock".to_string()];
+        up_one(&dir, &env(), &service).expect("service with allocated resources starts");
+
+        let activation = service_dir(&dir, "fixture").join("data/activation");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !activation.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let lines = fs::read_to_string(&activation)
+            .expect("the child must receive the activation environment")
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].parse::<u16>().unwrap_or(0) > 0);
+        assert_eq!(lines[1], dir.join("runtime/service.sock").display().to_string());
+        assert!(
+            fs::read_to_string(ports_path(&service_dir(&dir, "fixture")))
+                .unwrap()
+                .trim()
+                .parse::<u16>()
+                .unwrap_or(0)
+                > 0
+        );
+
+        down_one(&dir, &service).expect("service stops cleanly");
         fs::remove_dir_all(&dir).ok();
     }
 

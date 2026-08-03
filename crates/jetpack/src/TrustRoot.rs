@@ -1,7 +1,8 @@
 //! E4-JP6A / D-JPK-TRUSTROOT1 — trust primitives and root bootstrap.
 //!
-//! Vertical slice of the TUF-shaped registry authority substrate **before**
-//! live registry/cache wiring (that is JP6B / #434):
+//! TUF-shaped registry authority substrate. Live registry metadata and the
+//! host-owned signed-NAR cache call these primitives; full hosted TUF
+//! checkpoint exchange remains a separate transport boundary.
 //!
 //! - toolchain-pinned trusted-root bootstrap (digest pin)
 //! - offline threshold root keys + rotation/recovery drills

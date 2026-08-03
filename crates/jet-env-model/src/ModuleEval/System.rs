@@ -433,9 +433,10 @@ fn eval_files(
     Ok(out)
 }
 
-/// D-JPK-IMAGE1: `base: oci("<ref>")` — captured, not yet realized (no native
-/// registry-pull client exists yet; `jet image` gates on it honestly rather
-/// than silently building from scratch instead).
+/// D-JPK-IMAGE1: `base: oci("<ref>")` — captured as one image fact. The
+/// realization tier accepts verified local `file://` OCI layouts and reports a
+/// transport diagnostic for remote refs rather than changing the requested
+/// base or silently building from scratch.
 fn eval_base(
     expr: &Expr,
     base_dir: &Path,

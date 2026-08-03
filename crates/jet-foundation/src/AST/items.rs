@@ -234,8 +234,9 @@ pub struct ModuleDecl {
     /// U8 (unified-ecosystem §2.2): named `sources:` declared inside the module
     /// body, siblings of the contributions. Merged by key across modules (U5).
     pub sources: Vec<SourceDecl>,
-    /// U8: `imports: find("./modules")` import-tree directives, parsed as
-    /// ordinary call expressions; the `find` walk lands with U4 discovery.
+    /// U8/D-ENV-INTEGRATIONS1: `imports:` contains ordinary call expressions;
+    /// `find("./modules")` lands with U4 discovery and recognized first-party
+    /// integration calls lower into the environment fact graph.
     pub imports: Vec<Expr>,
     /// D-WORKSPACE1=B: `members: <expr>` in `module workspace { … }` — the
     /// comptime expression that yields the list of member package paths. Only

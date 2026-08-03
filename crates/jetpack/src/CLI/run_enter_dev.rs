@@ -777,21 +777,6 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
         return code;
     }
-    if let Err(code) = Trust::gate_with_environment(
-        theme,
-        &Trust::store_path(),
-        &project_dir,
-        &plan.refs,
-        &plan.table,
-        &plan.secrets,
-        &plan.environment,
-        parsed.flags.trust,
-    ) {
-        return code;
-    }
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
-        return code;
-    }
     let file_plan = match EnvFiles::plan(&project_dir, &plan.environment.files) {
         Ok(plan) => plan,
         Err(error) => {
@@ -803,6 +788,24 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
+    let source_snapshot = (!plan.environment.files.is_empty())
+        .then(|| file_plan.source_snapshot_hash());
+    if let Err(code) = Trust::gate_with_environment_and_snapshot(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        &plan.secrets,
+        &plan.environment,
+        source_snapshot.as_deref(),
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        return code;
+    }
     for action in &file_plan.actions {
         let verb = match action.kind {
             EnvFiles::FileActionKind::Create => "create",
@@ -853,6 +856,18 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .as_ref()
         .map(|profile| profile.name.as_str())
         .unwrap_or("<none>");
+    let selected_profiles = plan
+        .environment
+        .selected_profile
+        .as_ref()
+        .map(|profile| profile.selected_profiles.clone())
+        .unwrap_or_default();
+    let applied_profiles = plan
+        .environment
+        .selected_profile
+        .as_ref()
+        .map(|profile| profile.applied.clone())
+        .unwrap_or_default();
     let packages = plan
         .refs
         .iter()
@@ -924,14 +939,66 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 )
             })
             .collect::<Vec<_>>();
+        let integrations = plan
+            .environment
+            .integrations
+            .iter()
+            .map(|integration| {
+                let option_keys = integration
+                    .options
+                    .keys()
+                    .map(|key| crate::JSON::quote(key))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let packages = integration
+                    .packages
+                    .iter()
+                    .map(|value| crate::JSON::quote(value))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let files = integration
+                    .files
+                    .iter()
+                    .map(|file| crate::JSON::quote(&file.destination))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let strings = |values: &[String]| {
+                    values
+                        .iter()
+                        .map(|value| crate::JSON::quote(value))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                format!(
+                    "{{\"kind\":{},\"name\":{},\"preset\":{},\"option_keys\":[{}],\"packages\":[{}],\"files\":[{}],\"tasks\":[{}],\"providers\":[{}],\"host_checks\":[{}],\"secrets\":[{}],\"grants\":[{}],\"losses\":[{}]}}",
+                    crate::JSON::quote(integration.kind.as_str()),
+                    crate::JSON::quote(&integration.name),
+                    crate::JSON::quote(&integration.preset),
+                    option_keys,
+                    packages,
+                    files,
+                    strings(&integration.tasks),
+                    strings(&integration.providers),
+                    strings(&integration.host_checks),
+                    strings(&integration.secrets),
+                    strings(&integration.grants),
+                    strings(&integration.losses),
+                )
+            })
+            .collect::<Vec<_>>();
         println!(
-            "{{\"profile\":{},\"profiles\":[{}],\"languages\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}]}}",
+            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"sources\":[{}],\"languages\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(profile),
+            quote_list(&selected_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
+            quote_list(&applied_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
+            quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
+            quote_list(&plan.environment.source_files.iter().map(String::as_str).collect::<Vec<_>>()),
             languages.join(","),
             quote_list(&packages),
             quote_list(&files),
             dotenv.join(","),
+            integrations.join(","),
         );
         return 0;
     }
@@ -942,6 +1009,12 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .as_ref()
         .map(|profile| profile.applied.join(" -> "))
         .unwrap_or_else(|| "<none>".to_string());
+    let selected = if selected_profiles.is_empty() {
+        "<none>".to_string()
+    } else {
+        selected_profiles.join(", ")
+    };
+    theme.detail(&format!("selected profiles: {selected}"));
     theme.detail(&format!("profiles: {applied}"));
     let languages = plan
         .environment
@@ -967,6 +1040,19 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     theme.detail(&format!("languages: {}", if languages.is_empty() { "<none>".to_string() } else { languages.join(", ") }));
     theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
     theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
+    let integrations = plan
+        .environment
+        .integrations
+        .iter()
+        .map(|integration| {
+            if integration.name.is_empty() {
+                integration.kind.as_str().to_string()
+            } else {
+                format!("{} ({})", integration.name, integration.kind.as_str())
+            }
+        })
+        .collect::<Vec<_>>();
+    theme.detail(&format!("integrations: {}", if integrations.is_empty() { "<none>".to_string() } else { integrations.join(", ") }));
     0
 }
 
@@ -1103,10 +1189,16 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             &plan.secrets,
             &plan.environment,
         );
-        let sensitive =
-            Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
+        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
         let trusted = !sensitive
-            || Trust::is_env_trusted(&store, &root, &hash, &plan.refs, &plan.secrets);
+            || Trust::is_environment_trusted(
+                &store,
+                &root,
+                &hash,
+                &plan.refs,
+                &plan.secrets,
+                &plan.environment,
+            );
         if !trusted {
             if std::io::stdin().is_terminal() {
                 if Trust::gate_with_environment(
@@ -1138,6 +1230,15 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 0;
             }
         };
+        // Reconcile the source graph after realization. If a prompt races an
+        // edit, retain the prior activation and let the next prompt retry the
+        // new hash instead of emitting a plan assembled from mixed revisions.
+        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
+            .as_deref()
+            != target_hash.as_deref()
+        {
+            return 0;
+        }
         let plan_hash = target_hash.clone().unwrap_or_default();
         if run_lifecycle_hooks(
             theme,
@@ -1150,11 +1251,17 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             return 0;
         }
+        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
+            .as_deref()
+            != target_hash.as_deref()
+        {
+            return 0;
+        }
         if active_s.is_some() {
             script.push_str(&EnvHook::render_unload(kind, &base_path));
         }
         let composed_path = env.composed_path(&base_path);
-        script.push_str(&EnvHook::render_activate(
+        let activation = match EnvHook::render_activate(
             kind,
             &EnvHook::Activation {
                 base_path,
@@ -1165,7 +1272,14 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 unset: env.unset_vars.clone(),
                 plan_hash,
             },
-        ));
+        ) {
+            Ok(script) => script,
+            Err(error) => {
+                theme.detail(&format!("environment activation was rejected: {error}"));
+                return 0;
+            }
+        };
+        script.push_str(&activation);
         if watched_reload_ready {
             EnvHook::clear_watch_reload(&root);
         }
@@ -1205,9 +1319,18 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
     if ModuleEval::is_module_surface(&src) {
         return ModuleEval::evaluate_env(&src, dir)
             .map(|p| {
-                !p.package_refs.is_empty()
-                    || p.prompt.is_some()
+                !p.environment_names.is_empty()
+                    || !p.lifecycle.dotenv.is_empty()
+                    || !p.lifecycle.unset.is_empty()
+                    || !p.lifecycle.on_enter.is_empty()
+                    || !p.lifecycle.checks.is_empty()
+                    || p.lifecycle.reload_explicit
+                    || !p.profiles.is_empty()
+                    || !p.languages.is_empty()
+                    || !p.files.is_empty()
                     || !p.dev_services.is_empty()
+                    || !p.package_refs.is_empty()
+                    || p.prompt.is_some()
                     || !p.secrets.is_empty()
             })
             .unwrap_or(true);
@@ -1321,8 +1444,8 @@ fn enter_foreign_flake(
 /// touches). Realizes the project's declared env — today `load_project_plan`
 /// already merges every `env.*` contribution into one plan, which is
 /// `env(base + env.dev)` for the common case of a project that only declares
-/// `module env.dev { … }` — gates on trust, waits for services (U12 is
-/// unimplemented; see `wait_for_services_ready`), then runs the project's
+/// `module env.dev { … }` — gates on trust, waits for services through
+/// `wait_for_services_ready`, then runs the project's
 /// `fn dev()` or falls back to `fn run()` by re-invoking `jet dev <entry>`
 /// inside the composed env. Running Jet source is the compiler's job, never
 /// jetpack's (D-JPK-DISPATCH1) — this shells out to the sibling `jet` binary

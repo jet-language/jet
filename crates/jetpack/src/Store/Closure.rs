@@ -575,6 +575,84 @@ pub(crate) fn register_entry_unlocked(
     register_entry_unlocked_mode(roots, entry, None)
 }
 
+/// Register a batch of already-quarantined entries as one closure transaction.
+/// The caller owns the surrounding Hangar lock and must have made every output
+/// path live before calling this function. All graph conflicts and store proofs
+/// are checked before the single durable journal append, so a failed batch
+/// cannot leave an earlier entry committed.
+pub(crate) fn register_entries_unlocked(
+    roots: &Roots,
+    entries: &[StoreEntry],
+) -> std::io::Result<bool> {
+    if entries.is_empty() {
+        return Ok(false);
+    }
+    for entry in entries {
+        verify_registration_output(roots, entry)?;
+    }
+    let (_, graph) = migrate_closure_graph_unlocked(roots)?;
+    let mut object_map = BTreeMap::new();
+    let mut records = Vec::new();
+    let mut seen_records = BTreeSet::new();
+    for entry in entries {
+        let (objects, record) = descriptor_for_entry(roots, entry)?;
+        if !seen_records.insert(record.id.clone()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("closure batch contains duplicate record `{}`", record.id),
+            ));
+        }
+        for object in objects {
+            if let Some(existing) = graph.objects.get(&object.digest) {
+                if existing != &object {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "immutable closure object `{}` changed descriptor",
+                            object.digest
+                        ),
+                    ));
+                }
+            } else if let Some(existing) = object_map.insert(object.digest.clone(), object.clone()) {
+                if existing != object {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "closure batch gives object `{}` conflicting descriptors",
+                            object.digest
+                        ),
+                    ));
+                }
+            }
+        }
+        if graph.records.get(&record.id) != Some(&record) {
+            records.push(record);
+        }
+    }
+    if records.is_empty() && object_map.is_empty() {
+        return Ok(false);
+    }
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let transaction = JournalEntry {
+        kind: JournalKind::Delta,
+        objects: object_map.into_values().collect(),
+        records,
+        deleted_records: Vec::new(),
+    };
+    let mut candidate = graph;
+    apply_entry(&mut candidate, transaction.clone()).map_err(std::io::Error::other)?;
+    validate_graph_structure_mode(roots, &candidate, false).map_err(std::io::Error::other)?;
+    for record in &transaction.records {
+        validate_record_store_proof(roots, record, false).map_err(std::io::Error::other)?;
+    }
+    append_entry(roots, &transaction)?;
+    for record in &transaction.records {
+        let _ = materialize_package_record(roots, record);
+    }
+    let _ = compact_if_needed(roots);
+    Ok(true)
+}
+
 #[cfg(test)]
 pub(crate) fn register_entry_unlocked_with_hook(
     roots: &Roots,

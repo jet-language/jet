@@ -101,13 +101,14 @@ pub fn pinned_public_key(entries: &[IndexEntry]) -> Option<String> {
 }
 
 /// `<repo>/index/<name>/<name>.jsonl`.
-pub fn index_entry_path(repo: &Path, name: &str) -> PathBuf {
-    repo.join("index").join(name).join(format!("{name}.jsonl"))
+pub fn index_entry_path(repo: &Path, name: &str) -> io::Result<PathBuf> {
+    validate_index_component(name, "package name")?;
+    Ok(repo.join("index").join(name).join(format!("{name}.jsonl")))
 }
 
 /// Read every version line recorded for `name` (empty if the file is absent).
 pub fn read_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>> {
-    let path = index_entry_path(repo, name);
+    let path = index_entry_path(repo, name)?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -136,53 +137,189 @@ pub fn find_entry(repo: &Path, name: &str, version: &str) -> io::Result<Option<I
 
 /// Append one version line, creating `index/<name>/<name>.jsonl` if missing.
 pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
-    let path = index_entry_path(repo, &entry.name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
-    if !text.is_empty() && !text.ends_with('\n') {
+    validate_index_component(&entry.name, "package name")?;
+    validate_index_component(&entry.version, "package version")?;
+    with_index_lock(repo, &entry.name, || {
+        let path = index_entry_path(repo, &entry.name)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error),
+        };
+        for existing in text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                IndexEntry::parse_line(line).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "malformed registry index record")
+                })
+            })
+        {
+            let existing = existing?;
+            if existing.name == entry.name && existing.version == entry.version {
+                if existing == *entry {
+                    return Ok(());
+                }
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("registry version {} {} is immutable", entry.name, entry.version),
+                ));
+            }
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&entry.to_jsonl());
         text.push('\n');
-    }
-    text.push_str(&entry.to_jsonl());
-    text.push('\n');
-    std::fs::write(&path, text)
+        atomic_replace(&path, text.as_bytes())
+    })
 }
 
 /// D-VERSION1=A: flip `yanked` to `true` on the matching line **in place** —
 /// the line is rewritten, never removed. Returns `true` if a non-yanked line
 /// for `name`+`version` was found and flipped.
 pub fn mark_yanked(repo: &Path, name: &str, version: &str) -> io::Result<bool> {
-    let path = index_entry_path(repo, name);
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Ok(false);
+    validate_index_component(name, "package name")?;
+    validate_index_component(version, "package version")?;
+    with_index_lock(repo, name, || {
+        let path = index_entry_path(repo, name)?;
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let mut found = false;
+        let mut out = String::new();
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            match IndexEntry::parse_line(line) {
+                Some(mut e) if e.name == name && e.version == version && !e.yanked => {
+                    e.yanked = true;
+                    found = true;
+                    out.push_str(&e.to_jsonl());
+                }
+                Some(_) => out.push_str(line),
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "malformed registry index record",
+                    ))
+                }
+            }
+            out.push('\n');
+        }
+        if found {
+            atomic_replace(&path, out.as_bytes())?;
+        }
+        Ok(found)
+    })
+}
+
+fn validate_index_component(value: &str, label: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("registry {label} is not one safe path component"),
+        ));
+    }
+    Ok(())
+}
+
+fn with_index_lock<T>(repo: &Path, name: &str, action: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    let lock_dir = repo.join("index");
+    std::fs::create_dir_all(&lock_dir)?;
+    let lock_path = lock_dir.join(format!(".{name}.lock"));
+    let mut lock = None;
+    for _ in 0..100 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => {
+                lock = Some(file);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if let Ok(metadata) = std::fs::metadata(&lock_path) {
+                    let stale = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|modified| modified.elapsed().ok())
+                        .is_some_and(|age| age > std::time::Duration::from_secs(300));
+                    if stale {
+                        let _ = std::fs::remove_file(&lock_path);
+                        continue;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let Some(lock) = lock else {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("registry index update for `{name}` is busy"),
+        ));
     };
-    let mut found = false;
-    let mut out = String::new();
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        match IndexEntry::parse_line(line) {
-            Some(mut e) if e.name == name && e.version == version && !e.yanked => {
-                e.yanked = true;
-                found = true;
-                out.push_str(&e.to_jsonl());
-            }
-            Some(_) => out.push_str(line),
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "malformed registry index record",
-                ))
-            }
-        }
-        out.push('\n');
+    if let Err(error) = lock.sync_all() {
+        drop(lock);
+        let _ = std::fs::remove_file(&lock_path);
+        return Err(error);
     }
-    if found {
-        std::fs::write(&path, out)?;
+    let result = action();
+    drop(lock);
+    let _ = std::fs::remove_file(lock_path);
+    result
+}
+
+fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry index has no parent"))?;
+    let partial = parent.join(format!(
+        ".{}.partial-{}-{}",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("index"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0),
+    ));
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "registry index path must not be a symlink",
+            ));
+        }
     }
-    Ok(found)
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&partial, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 /// Fetch-side view: the versions of `name` that a resolver may still pick — the
@@ -354,7 +491,7 @@ mod tests {
         }
 
         let repo = scratch("malformed");
-        let path = index_entry_path(&repo, "textkit");
+        let path = index_entry_path(&repo, "textkit").unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{malformed}\n").unwrap();
         assert_eq!(

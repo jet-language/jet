@@ -18,12 +18,14 @@ pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
     )
 }
 
-/// E0969: an `imports:` directive must be `find("<dir>")` with a literal path.
+/// E0969: an `imports:` discovery directive must be `find("<dir>")` with a
+/// literal path; recognized first-party integration calls are handled before
+/// this constructor is reached.
 pub(super) fn bad_import_directive(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0969",
         "an `imports:` directive must be `find(\"<dir>\")`".to_string(),
-        "imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`".to_string(),
+        "imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls".to_string(),
         "write `imports: find(\"./modules\")`".to_string(),
         Some(span),
     )

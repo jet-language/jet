@@ -3,19 +3,23 @@
 //! the text-level Pkg-sugar parser for `packages:`), and merge the resulting
 //! contributions through the §6 engine.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::Comptime;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::AST::{ContribValue, Contribution, EnvLit, Expr, Func, Item, ModuleDecl, Namespace};
+use crate::AST::{
+    CallArg, ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl,
+    Namespace,
+};
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
 use super::Environment::{
     files_from_value, lifecycle_from_field, languages_from_value, profiles_from_value,
-    EnvironmentLifecycle, LanguageSpec, ProfileSpec,
+    qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
+    LanguageSpec, ProfileSpec,
 };
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -138,6 +142,13 @@ fn evaluate_module<'a>(
     let mut profiles = Vec::new();
     let mut languages = Vec::new();
     let mut files = Vec::new();
+    let integrations = evaluate_integration_imports(&m.imports, base_dir, funcs, globals)?;
+    let mut integration_secrets = Vec::new();
+    for integration in &integrations {
+        for secret in &integration.secrets {
+            push_unique_string(&mut integration_secrets, secret.clone());
+        }
+    }
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
@@ -197,6 +208,15 @@ fn evaluate_module<'a>(
             _ => unreachable!("contribution namespace/value shape mismatch"),
         }
     }
+    for secret in integration_secrets {
+        push_unique_string(&mut secrets, secret);
+    }
+    let environment_names = entries
+        .iter()
+        .filter_map(|((namespace, name), _)| {
+            (*namespace == Namespace::Env).then_some(name.clone())
+        })
+        .collect();
     Ok(EvaluatedModule {
         name: m.name.clone(),
         entries,
@@ -211,7 +231,313 @@ fn evaluate_module<'a>(
         profiles,
         languages,
         files,
+        integrations,
+        environment_names,
     })
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+/// Lower first-party integration imports into the same typed facts consumed by
+/// package realization, environment files, trust, and disclosure. Unknown
+/// calls remain the existing E0969 import diagnostic; there is no stringly
+/// escape hatch here.
+fn evaluate_integration_imports(
+    imports: &[Expr],
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<Vec<EnvironmentIntegration>, Diagnostic> {
+    let mut leaves = Vec::new();
+    for import in imports {
+        collect_import_leaves(import, &mut leaves);
+    }
+    let mut integrations = Vec::new();
+    for import in leaves {
+        let Some(name) = qualified_call_name(import) else {
+            continue;
+        };
+        if name == Syntax::BUILTIN_FIND {
+            continue;
+        }
+        let Some(kind) = IntegrationKind::from_call(&name) else {
+            return Err(super::Diagnostics::bad_import_directive(import.span()));
+        };
+        let (args, name_span) = match import {
+            Expr::Call(call) => (call.args.as_slice(), call.name_span),
+            Expr::MethodCall {
+                args, method_span, ..
+            } => (args.as_slice(), *method_span),
+            _ => continue,
+        };
+        let integration = evaluate_integration_call(&name, args, kind, base_dir, funcs, globals)?;
+        if let Some(existing) = integrations
+            .iter()
+            .find(|item: &&EnvironmentIntegration| item.name == integration.name)
+        {
+            if *existing != integration {
+                return Err(Diagnostic::error(
+                    "E1335",
+                    format!("integration `{}` has conflicting declarations", integration.name),
+                    "one environment graph cannot silently choose different SDK, host, credential, or grant facts".to_string(),
+                    "merge the integration options so they agree, or keep one declaration".to_string(),
+                    Some(name_span),
+                ));
+            }
+        } else {
+            integrations.push(integration);
+        }
+    }
+    Ok(integrations)
+}
+
+fn collect_import_leaves<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::ListLit(items, _) => {
+            for item in items {
+                collect_import_leaves(item, out);
+            }
+        }
+        _ => out.push(expr),
+    }
+}
+
+fn evaluate_integration_call(
+    name: &str,
+    args: &[CallArg],
+    kind: IntegrationKind,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<EnvironmentIntegration, Diagnostic> {
+    let mut integration = EnvironmentIntegration {
+        kind,
+        name: name.to_string(),
+        preset: kind.as_str().to_string(),
+        ..Default::default()
+    };
+    match kind {
+        IntegrationKind::Android => {
+            integration.options.insert("api".into(), "34".into());
+            integration.options.insert("build_tools".into(), "34.0.0".into());
+            integration.options.insert("ndk".into(), "26.3".into());
+            integration.options.insert("license".into(), "policy-required".into());
+            integration.packages = vec!["android-tools@nixpkgs".into(), "android-sdk@nixpkgs".into()];
+            integration.tasks.push("android-sdk-check".into());
+            integration.providers.push("nixpkgs".into());
+            integration.host_checks.push("target:linux-or-android".into());
+        }
+        IntegrationKind::Apple => {
+            integration.options.insert("targets".into(), "IOS".into());
+            integration.options.insert("license".into(), "policy-required".into());
+            integration.packages.push("apple-sdk@nixpkgs".into());
+            integration.tasks.push("apple-sdk-check".into());
+            integration.providers.push("nixpkgs".into());
+            integration.host_checks.push("target:darwin-or-macos".into());
+        }
+        IntegrationKind::Certificates => {
+            integration.preset = "certificate-store".into();
+            integration.tasks.push("certificate-store-check".into());
+            integration.providers.push("vault".into());
+            integration.grants.push("certificate.read".into());
+        }
+        IntegrationKind::Hosts => {
+            integration.preset = "project-hosts".into();
+            integration.tasks.push("host-binding-check".into());
+            integration.providers.push("host-binding".into());
+        }
+        IntegrationKind::CodexAgent => {
+            integration.preset = "codex".into();
+            integration.tasks.push("mcp-agent-check".into());
+            integration.providers.push("mcp".into());
+            integration.grants.push("mcp.read".into());
+        }
+        IntegrationKind::Editor => {
+            integration.preset = "vscode".into();
+            integration.packages.push("vscode@nixpkgs".into());
+            integration.providers.push("nixpkgs".into());
+        }
+        IntegrationKind::CloudCredentials => {
+            integration.preset = "cloud-credentials".into();
+            integration.tasks.push("credential-store-check".into());
+            integration.providers.push("credential-store".into());
+            integration.grants.push("credential.read".into());
+        }
+        IntegrationKind::Vault => {
+            integration.preset = "vault".into();
+            integration.tasks.push("vault-check".into());
+            integration.providers.push("vault".into());
+            integration.grants.push("vault.read".into());
+        }
+    }
+    for (index, arg) in args.iter().enumerate() {
+        let key = arg
+            .label
+            .as_ref()
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| format!("arg{index}"));
+        let value = integration_arg_value(&arg.expr, base_dir, funcs, globals)?;
+        lower_integration_arg(&mut integration, &key, &value);
+    }
+    Ok(integration)
+}
+
+fn integration_arg_value(
+    expr: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<CtValue, Diagnostic> {
+    match expr {
+        Expr::Ident(name, _) => Ok(CtValue::Str(name.clone())),
+        Expr::Field(base, member, _) => {
+            Ok(CtValue::Str(format!("{}.{}", expression_name(base), member)))
+        }
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| integration_arg_value(value, base_dir, funcs, globals))
+            .collect::<Result<Vec<_>, _>>()
+            .map(CtValue::List),
+        Expr::MapLit(values, _) => {
+            let mut lowered = BTreeMap::new();
+            for (key, value) in values {
+                let key = integration_arg_value(key, base_dir, funcs, globals)?;
+                let value = integration_arg_value(value, base_dir, funcs, globals)?;
+                let Some(key) = integration_ct_key(&key) else {
+                    return Err(Diagnostic::error(
+                        "E1335",
+                        "integration map keys must be deterministic scalar values".to_string(),
+                        "host mappings and integration selections become named graph facts; arbitrary values cannot be used as stable keys".to_string(),
+                        "use a string, integer, boolean, or character key".to_string(),
+                        Some(expr.span()),
+                    ));
+                };
+                if lowered.insert(key, value).is_some() {
+                    return Err(Diagnostic::error(
+                        "E1335",
+                        "integration map contains a duplicate key".to_string(),
+                        "one integration fact graph cannot silently choose between two values for the same host or secret name".to_string(),
+                        "remove the duplicate key or merge its values".to_string(),
+                        Some(expr.span()),
+                    ));
+                }
+            }
+            Ok(CtValue::Map(lowered))
+        }
+        _ => {
+            check_build_io(expr)?;
+            Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)
+        }
+    }
+}
+
+fn integration_ct_key(value: &CtValue) -> Option<CtKey> {
+    match value {
+        CtValue::Str(value) => Some(CtKey::Str(value.clone())),
+        CtValue::Int(value) => Some(CtKey::Int(*value)),
+        CtValue::Bool(value) => Some(CtKey::Bool(*value)),
+        CtValue::Char(value) => Some(CtKey::Char(*value)),
+        _ => None,
+    }
+}
+
+fn expression_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(name, _) => name.clone(),
+        Expr::Field(base, member, _) => format!("{}.{}", expression_name(base), member),
+        _ => expr.span().start.to_string(),
+    }
+}
+
+fn lower_integration_arg(integration: &mut EnvironmentIntegration, key: &str, value: &CtValue) {
+    let display = integration_value_text(value);
+    match integration.kind {
+        IntegrationKind::Certificates
+        | IntegrationKind::CloudCredentials
+        | IntegrationKind::Vault => {
+            let names = integration_names(value);
+            if names.is_empty() {
+                integration.losses.push(format!(
+                    "{key}: secret input must be a named reference; value was redacted"
+                ));
+            } else {
+                for name in names {
+                    push_unique_string(&mut integration.secrets, name);
+                }
+            }
+            integration
+                .options
+                .insert(key.to_string(), "<redacted-names>".into());
+        }
+        IntegrationKind::Hosts => {
+            if let CtValue::Map(entries) = value {
+                for (map_key, map_value) in entries {
+                    let CtKey::Str(host) = map_key else { continue };
+                    integration.options.insert(
+                        format!("host.{host}"),
+                        integration_value_text(map_value),
+                    );
+                }
+            } else {
+                integration.options.insert(key.to_string(), display);
+            }
+        }
+        _ => {
+            integration.options.insert(key.to_string(), display);
+        }
+    }
+}
+
+fn integration_names(value: &CtValue) -> Vec<String> {
+    match value {
+        CtValue::Str(value) => vec![value.clone()],
+        CtValue::List(values) => values.iter().flat_map(integration_names).collect(),
+        CtValue::Enum { variant, .. } => {
+            vec![variant.rsplit('.').next().unwrap_or(variant).to_string()]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn integration_value_text(value: &CtValue) -> String {
+    match value {
+        CtValue::Str(value) => value.clone(),
+        CtValue::Int(value) => value.to_string(),
+        CtValue::Bool(value) => value.to_string(),
+        CtValue::Char(value) => value.to_string(),
+        CtValue::Enum { variant, args, .. } if args.is_empty() => {
+            variant.rsplit('.').next().unwrap_or(variant).to_string()
+        }
+        CtValue::List(values) => values
+            .iter()
+            .map(integration_value_text)
+            .collect::<Vec<_>>()
+            .join(","),
+        CtValue::Map(values) => values
+            .iter()
+            .map(|(key, value)| format!("{}={}", integration_key_text(key), integration_value_text(value)))
+            .collect::<Vec<_>>()
+            .join(","),
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .map(|(name, value)| format!("{name}={}", integration_value_text(value)))
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => value.jet_show(),
+    }
+}
+
+fn integration_key_text(key: &CtKey) -> String {
+    match key {
+        CtKey::Int(value) => value.to_string(),
+        CtKey::Str(value) => value.clone(),
+        CtKey::Bool(value) => value.to_string(),
+        CtKey::Char(value) => value.to_string(),
+    }
 }
 
 fn lifecycle_merge(

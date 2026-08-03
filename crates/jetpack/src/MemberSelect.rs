@@ -501,6 +501,10 @@ mod tests {
         WorkspaceMember {
             name: name.to_string(),
             path: path.to_string(),
+            canonical_path: abs
+                .canonicalize()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
         }
     }
 

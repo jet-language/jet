@@ -19,6 +19,25 @@ Resolve guidance in this order:
 Code shows implementation state, not design authority. A newer ratified ruling beats stale code or prose. On conflict,
 follow the higher authority, record it, and stop only the affected slice. Never average contradictory rules.
 
+## Greenfield evolution
+
+Jet is greenfield until the owner explicitly declares an external compatibility baseline. Repository history creates
+no compatibility obligation.
+
+- Design and ship one canonical current form.
+- When syntax, semantics, APIs, ABIs, or formats change, migrate every in-repo consumer in one coherent change and
+  delete the replaced form.
+- Do not keep deprecated spellings, aliases, shims, fallback parsers, legacy readers, version branches,
+  compatibility flags, or parallel implementations.
+- Update source, generated artifacts, packages, schemas, snapshots, examples, tests, tools, and docs before the
+  change closes.
+- Preserve decision history in specs, ADRs, and Tower. Do not preserve retired behavior in the compiler, runtime,
+  stdlib, or tools.
+- Judge a proposal by the best final design. Internal migration work and development churn are not product
+  tradeoffs.
+- Any compatibility exception requires an owner-ratified Tower decision that names its exact scope and removal
+  condition.
+
 ## Load context by trigger
 
 Read this file, then relevant code, tests, and the current diff. Load only task-triggered references:

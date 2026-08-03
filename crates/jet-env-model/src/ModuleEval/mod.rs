@@ -38,8 +38,9 @@ pub use Types::{
 };
 pub use Environment::{
     DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookSpec, LanguageExpansion, LanguagePack,
-    LanguagePackCatalog, LanguageSpec, ManagedFile, ManagedFileError, ProfileError, ProfileSet,
-    ProfileSpec, ReloadPolicy, ResolvedProfile,
+    LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
+    EnvironmentIntegration, IntegrationKind, ProfileError, ProfileSet, ProfileSpec, ReloadPolicy,
+    ResolvedProfile, valid_env_name,
 };
 
 #[cfg(test)]
@@ -608,9 +609,71 @@ module b {
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
         assert_eq!(
             rendered,
-            "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`\n Fix: write `imports: find(\"./modules\")`\n"
+            "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls\n Fix: write `imports: find(\"./modules\")`\n"
         );
         check_diagnostic_snapshot("E0969", &rendered);
+    }
+
+    #[test]
+    fn typed_integrations_lower_to_one_environment_fact_graph() {
+        let src = r#"
+module mobile {
+    imports: [
+        env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+        env.security.certificates([dev_certificate]),
+        env.network.hosts(["api.local": "127.0.0.1"]),
+        env.agent.codex(mcp: [repo_server]),
+        env.editor.vscode()
+    ]
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.integrations.len(), 5);
+        assert!(plan
+            .package_refs
+            .iter()
+            .any(|value| value == "android-sdk@nixpkgs"));
+        let android = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Android)
+            .unwrap();
+        assert_eq!(android.options.get("api").map(String::as_str), Some("35"));
+        assert_eq!(android.options.get("build_tools").map(String::as_str), Some("35.0.0"));
+        assert!(android.tasks.iter().any(|value| value == "android-sdk-check"));
+        assert!(android.providers.iter().any(|value| value == "nixpkgs"));
+        assert!(android.validate_target("linux.x64").is_ok());
+        assert!(android.validate_target("darwin.aarch64").is_err());
+        let certs = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Certificates)
+            .unwrap();
+        assert_eq!(certs.secrets, vec!["dev_certificate"]);
+        assert_eq!(certs.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        let hosts = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Hosts)
+            .unwrap();
+        assert_eq!(hosts.options.get("host.api.local").map(String::as_str), Some("127.0.0.1"));
+        let agent = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::CodexAgent)
+            .unwrap();
+        assert!(agent.grants.iter().any(|value| value == "mcp.read"));
+    }
+
+    #[test]
+    fn conflicting_typed_integration_is_e1335() {
+        let src = r#"
+module mobile {
+    imports: [env.platform.android(api: 34), env.platform.android(api: 35)]
+}
+"#;
+        let error = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(error.code, "E1335");
     }
 
     // ── gap #5: System / Service / Image (U11–U14, U18) ──────────────────
@@ -978,8 +1041,10 @@ module image.server {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// `base: oci("<ref>")` is captured (not yet realized — no registry-pull
-    /// client exists).
+    /// `base: oci("<ref>")` is captured for plan disclosure. Realization
+    /// accepts only a local validated OCI layout; remote registry transport
+    /// fails explicitly at the image boundary until its verified adapter is
+    /// ratified and shipped.
     #[test]
     fn oci_base_is_captured() {
         let dir = oci_base_dir("base-captured");

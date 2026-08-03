@@ -239,7 +239,7 @@ fn native_devshell_keeps_unused_thunks_lazy_and_reports_forced_cycles() {
         "x86_64-linux",
     )
     .expect_err("forcing a recursive thunk must fail closed");
-    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("missing foreign flake value `unused`")));
+    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("cyclic foreign flake evaluation")));
 }
 
 #[test]

@@ -36,6 +36,7 @@ const AUTH_IMAGE: &str = "image";
 const AUTH_FLEET: &str = "fleet";
 const AUTH_JETOS: &str = "jetos";
 const AUTH_VAULT_WRITE: &str = "vault.write";
+const AUTH_INTEGRATION: &str = "integration";
 
 const AUTHORITY_KINDS: &[&str] = &[
     AUTH_PACKAGE,
@@ -46,6 +47,7 @@ const AUTHORITY_KINDS: &[&str] = &[
     AUTH_FLEET,
     AUTH_JETOS,
     AUTH_VAULT_WRITE,
+    AUTH_INTEGRATION,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,7 +122,10 @@ fn infer_authority(selector: &str) -> String {
         AUTH_JETOS
     } else if selector.starts_with("env.") {
         AUTH_ENV
-    } else if selector.contains("@ci") || selector.starts_with("cache@") {
+    } else if selector.starts_with("build-sha256:")
+        || selector.contains("@ci")
+        || selector.starts_with("cache@")
+    {
         AUTH_BUILD
     } else {
         AUTH_PACKAGE
@@ -285,14 +290,46 @@ pub fn environment_definition_hash(
             content.push_str(value);
             content.push('\n');
         }
+        if let Some(hostname) = &profile.hostname {
+            content.push_str("hostname=");
+            content.push_str(hostname);
+            content.push('\n');
+        }
+        if let Some(user) = &profile.user {
+            content.push_str("user=");
+            content.push_str(user);
+            content.push('\n');
+        }
+    }
+    content.push_str("--environment-names--\n");
+    for name in &facts.environment_names {
+        content.push_str(name);
+        content.push('\n');
     }
     if let Some(profile) = &facts.selected_profile {
         content.push_str("selected=");
         content.push_str(&profile.name);
         content.push('\n');
+        for name in &profile.selected_profiles {
+            content.push_str("selected-profile=");
+            content.push_str(name);
+            content.push('\n');
+        }
+        for applied in &profile.applied {
+            content.push_str("selected-applied=");
+            content.push_str(applied);
+            content.push('\n');
+        }
         for package in &profile.packages {
             content.push_str("selected-package=");
             content.push_str(package);
+            content.push('\n');
+        }
+        for (key, value) in &profile.variables {
+            content.push_str("selected-var=");
+            content.push_str(key);
+            content.push('=');
+            content.push_str(value);
             content.push('\n');
         }
     }
@@ -301,15 +338,15 @@ pub fn environment_definition_hash(
         content.push_str(&language.fingerprint());
         content.push('\n');
     }
+    content.push_str("--language-expansion--\n");
+    content.push_str(&facts.language_expansion.fingerprint());
+    content.push_str("--language-projections--\n");
+    for projection in &facts.language_projections {
+        content.push_str(&projection.fingerprint());
+    }
     for pack in &facts.language_packs {
         content.push_str("pack=");
-        content.push_str(&pack.name);
-        content.push('\n');
-        for package in &pack.packages {
-            content.push_str("pack-package=");
-            content.push_str(package);
-            content.push('\n');
-        }
+        content.push_str(&pack.fingerprint());
     }
     content.push_str("--files--\n");
     let mut files = facts
@@ -322,6 +359,40 @@ pub fn environment_definition_hash(
         content.push_str(&file);
         content.push('\n');
     }
+    content.push_str("--services--\n");
+    for service in &facts.dev_services {
+        content.push_str(&format!("{service:?}"));
+        content.push('\n');
+    }
+    content.push_str("--integrations--\n");
+    let mut integrations = facts
+        .integrations
+        .iter()
+        .map(|integration| integration.fingerprint())
+        .collect::<Vec<_>>();
+    integrations.sort();
+    for integration in integrations {
+        content.push_str(&integration);
+    }
+    content.push_str("--integration-facts--\n");
+    content.push_str(&facts.integration_facts.fingerprint());
+    crate::SHA256::sha256_hex(content.as_bytes())
+}
+
+pub fn environment_definition_hash_with_snapshot(
+    refs: &[RefSpec],
+    table: &SourceTable,
+    secrets: &[String],
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+    source_snapshot: Option<&str>,
+) -> String {
+    let base = environment_definition_hash(refs, table, secrets, facts);
+    let Some(source_snapshot) = source_snapshot else {
+        return base;
+    };
+    let content = format!(
+        "jet-env-definition-with-managed-source-v1\nbase={base}\nmanaged-source={source_snapshot}\n"
+    );
     crate::SHA256::sha256_hex(content.as_bytes())
 }
 
@@ -413,6 +484,96 @@ pub fn is_env_trusted(
         });
     }
     false
+}
+
+pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts) -> bool {
+    !facts.environment_names.is_empty()
+        || !facts.dev_services.is_empty()
+        || !facts.lifecycle.dotenv.is_empty()
+        || !facts.lifecycle.unset.is_empty()
+        || !facts.lifecycle.on_enter.is_empty()
+        || !facts.lifecycle.checks.is_empty()
+        || facts.lifecycle.reload_explicit
+        || !facts.profiles.is_empty()
+        || !facts.languages.is_empty()
+        || facts.selected_profile.is_some()
+        || !facts.language_packs.is_empty()
+        || !facts.files.is_empty()
+        || !facts.integration_facts.tasks.is_empty()
+        || !facts.integration_facts.task_facts.is_empty()
+        || !facts.integration_facts.providers.is_empty()
+        || !facts.integration_facts.host_checks.is_empty()
+        || !facts.integration_facts.grants.is_empty()
+        || !facts.integration_facts.losses.is_empty()
+}
+
+fn is_typed_environment_trusted(
+    store: &Path,
+    project_dir: &Path,
+    hash: &str,
+) -> bool {
+    if is_trusted(store, project_dir, hash) {
+        return true;
+    }
+    list_records(store).iter().any(|record| match record {
+        TrustRecord::Grant(grant) if grant.authority == AUTH_ENV => {
+            grant_matches_project_or_hash(grant, project_dir, hash)
+        }
+        TrustRecord::Grant(grant) if grant.authority == AUTH_BUILD => {
+            grant.subject == hash || grant.subject == format!("{HASH_PREFIX}{hash}")
+        }
+        _ => false,
+    })
+}
+
+pub fn is_environment_trusted(
+    store: &Path,
+    project_dir: &Path,
+    hash: &str,
+    refs: &[RefSpec],
+    secrets: &[String],
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> bool {
+    if !integration_grants_trusted(store, facts) {
+        return false;
+    }
+    if is_typed_environment(facts) {
+        is_typed_environment_trusted(store, project_dir, hash)
+    } else {
+        is_env_trusted(store, project_dir, hash, refs, secrets)
+    }
+}
+
+/// Integration authorities are separate from the broad environment hash.
+/// `--trust` can approve a project definition for one run, but it cannot
+/// manufacture permission to read a credential store, use MCP, or bind a
+/// host provider. The user must review and persist each closed integration
+/// grant explicitly.
+pub fn integration_grants_trusted(
+    store: &Path,
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> bool {
+    missing_integration_grant(store, facts).is_none()
+}
+
+fn missing_integration_grant(
+    store: &Path,
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> Option<String> {
+    let records = list_records(store);
+    facts.integration_facts.task_facts.iter().find_map(|task| {
+        task.grants.iter().find_map(|grant| {
+            let subject = format!("{}:{grant}", task.integration.as_str());
+            (!records.iter().any(|record| {
+                matches!(
+                    record,
+                    TrustRecord::Grant(stored)
+                        if stored.authority == AUTH_INTEGRATION && stored.subject == subject
+                )
+            }))
+            .then_some(subject)
+        })
+    })
 }
 
 fn grant_matches_project_or_hash(grant: &TrustGrant, project_dir: &Path, hash: &str) -> bool {
@@ -632,7 +793,7 @@ pub fn gate(
     bypass: bool,
 ) -> Result<(), i32> {
     let hash = env_definition_hash(refs, table, secrets);
-    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash)
+    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash, false)
 }
 
 /// Trust gate variant for a plan whose typed lifecycle facts are part of its
@@ -647,8 +808,65 @@ pub fn gate_with_environment(
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
     bypass: bool,
 ) -> Result<(), i32> {
+    if let Some(subject) = missing_integration_grant(store, facts) {
+        theme.error_coded(
+            "E1335",
+            "environment integration authority is not granted",
+            &format!("the environment requests integration authority `{subject}`, but no persisted grant authorizes it"),
+            &format!("review the integration, then run `jet trust grant integration:{subject} --scope user`"),
+        );
+        return Err(2);
+    }
     let hash = environment_definition_hash(refs, table, secrets, facts);
-    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash)
+    gate_with_hash(
+        theme,
+        store,
+        project_dir,
+        refs,
+        secrets,
+        bypass,
+        hash,
+        is_typed_environment(facts),
+    )
+}
+
+pub fn gate_with_environment_and_snapshot(
+    theme: &Theme,
+    store: &Path,
+    project_dir: &Path,
+    refs: &[RefSpec],
+    table: &SourceTable,
+    secrets: &[String],
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+    source_snapshot: Option<&str>,
+    bypass: bool,
+) -> Result<(), i32> {
+    if let Some(subject) = missing_integration_grant(store, facts) {
+        theme.error_coded(
+            "E1335",
+            "environment integration authority is not granted",
+            &format!("the environment requests integration authority `{subject}`, but no persisted grant authorizes it"),
+            &format!("review the integration, then run `jet trust grant integration:{subject} --scope user`"),
+        );
+        return Err(2);
+    }
+    let hash = environment_definition_hash_with_snapshot(
+        refs,
+        table,
+        secrets,
+        facts,
+        source_snapshot,
+    );
+    gate_with_hash(
+        theme,
+        store,
+        project_dir,
+        refs,
+        secrets,
+        bypass,
+        hash,
+        is_typed_environment(facts),
+    )
 }
 
 /// Gate a finite build hook on its exact resolved identity. The subject comes
@@ -661,17 +879,44 @@ pub fn gate_build_identity(
     identity: &str,
     bypass: bool,
 ) -> Result<(), i32> {
+    let ci = std::env::var_os("CI").is_some();
+    if ci && bypass {
+        theme.error_coded(
+            "E1255",
+            "CI cannot bypass build-hook approval",
+            "a build hook must use its exact package, provider/source, staged source, platform, recipe, and capability identity",
+            &format!(
+                "add the exact repository grant: `jet trust grant build:{identity} --scope repo`."
+            ),
+        );
+        return Err(2);
+    }
     let trusted = list_records(store).iter().any(|record| {
         matches!(
             record,
             TrustRecord::Grant(grant)
                 if grant.authority == AUTH_BUILD
+                    && (!ci || grant.scope == Syntax::TRUST_SCOPE_REPO)
                     && (grant.subject == identity
                         || grant.subject == format!("{HASH_PREFIX}{identity}"))
         )
     });
-    if bypass || trusted {
+    if trusted {
         return Ok(());
+    }
+    if bypass {
+        return Ok(());
+    }
+    if ci {
+        theme.error_coded(
+            "E1255",
+            "this build hook is not approved for CI",
+            "CI accepts only an exact repository-scoped grant for the complete package, provider/source, staged source, platform, recipe, and capability identity",
+            &format!(
+                "add the exact repository grant: `jet trust grant build:{identity} --scope repo`."
+            ),
+        );
+        return Err(2);
     }
     if !std::io::stdin().is_terminal() {
         theme.error_coded(
@@ -717,11 +962,17 @@ fn gate_with_hash(
     secrets: &[String],
     bypass: bool,
     hash: String,
+    typed: bool,
 ) -> Result<(), i32> {
     if !is_trust_sensitive_ext(refs, !secrets.is_empty()) {
         return Ok(());
     }
-    if bypass || is_env_trusted(store, project_dir, &hash, refs, secrets) {
+    let trusted = if typed {
+        is_typed_environment_trusted(store, project_dir, &hash)
+    } else {
+        is_env_trusted(store, project_dir, &hash, refs, secrets)
+    };
+    if bypass || trusted {
         return Ok(());
     }
     if let Some(policy) = project_trust_policy(project_dir) {
@@ -904,6 +1155,17 @@ mod tests {
             package: raw.to_string(),
             raw: raw.to_string(),
         }
+    }
+
+    #[test]
+    fn canonical_build_identity_selector_uses_build_authority() {
+        let grant = parse_grant_selector(
+            "build-sha256:0123456789abcdef",
+            Syntax::TRUST_SCOPE_REPO,
+        )
+        .unwrap();
+        assert_eq!(grant.authority, AUTH_BUILD);
+        assert_eq!(grant.subject, "build-sha256:0123456789abcdef");
     }
 
     #[test]

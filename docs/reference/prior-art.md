@@ -54,6 +54,51 @@ of Jet's ratified safety/error/ownership design; report at
 `docs/archive/2026-07-24-verse-video-mining.md`.
 https://www.youtube.com/watch?v=ebqKYLKjL6U
 
+**Cross-facet polish batch (11 videos, mined 2026-08-03).** These sources
+checked Jet's compiler seams, memory safety, runtime, layout, module, tooling,
+environment, onboarding, UI, UX, and DX. The mine kept small polish cuts as
+well as large design lessons.
+
+Resulting work: [reflection, layout, and generic-call surface research](../research/reflection-layout-and-generic-call-surface-research.md),
+Tower cards #1388 (`inspect expand --json`), #1389 (`inspect unsafe`
+diagnostics and locations), #1390 (`layout` facts), and #1391 (final S33
+reconciliation), with ratified decisions D-LAYOUT-FACTS1=B and
+D-GENERIC-CALL1=A.
+
+- lolzdev — Making my own programming language: keep keyword tables simple;
+  preserve sema and TIR; reject unsafe-by-default design.
+  https://www.youtube.com/watch?v=6lXZCOXCRME
+- Tsoding Daily — Writing Garbage Collector in C: mark before traversal;
+  prefer exact roots and edges over conservative stack scans.
+  https://www.youtube.com/watch?v=2JgEKEd3tw8
+- CsMadeEz — Goroutines Are NOT Threads: keep M:N scheduling, bounded work,
+  known task exits, cancellation, and clear concurrency facts.
+  https://www.youtube.com/watch?v=vfrAX26cqtg
+- Cache Miss — Why Your C++ Struct Is Bigger Than It Should Be: keep explicit
+  C and columnar layouts; measure locality instead of sorting fields blindly.
+  https://www.youtube.com/watch?v=w50ofEmhRoc
+- Adumh00man — Dendritic Nix is the Best Way to Configure a System: keep one
+  reproducible graph with one-file defaults and optional module structure.
+  https://www.youtube.com/watch?v=buxopFR4VXQ
+- Semicolon — Rustc Commands Every Rust Developer Should Know: make errors,
+  compiler facts, profiles, and targets easy to inspect without leaking rustc.
+  https://www.youtube.com/watch?v=-DaVwuQeQD0
+- Adumh00man — Installing Nixos on my Server! (500 ish sub special): preview
+  destructive work; preserve locked bootstrap, recovery, driver, and secret state.
+  https://www.youtube.com/watch?v=E3G2tl0GAb0
+- Indently — `__init__.py` Explained in Just 7 minutes: keep short explicit
+  module facades and reject import-time execution.
+  https://www.youtube.com/watch?v=xn7nZLWXYSg
+- DistroTube — The Age Of Beginner Friendly Distros Is Over: judge beginner
+  UX by install, maintenance, recovery, hardware, docs, and offline states.
+  https://www.youtube.com/watch?v=A6XI_0DWQOw
+- Code to the Moon — 10 Underrated Rust Features & Patterns: keep exclusive
+  mutation, bounded structured work, explicit modules, and uncolored tasks.
+  https://www.youtube.com/watch?v=7QwqShxyHtc
+- Let's Get Rusty — How unsafe Rust made Polars 30x times faster than Pandas:
+  keep audited unsafe internals behind safe APIs; require measured attribution.
+  https://www.youtube.com/watch?v=l6tisoOzTuk
+
 **Jonathan Blow on Jai** (The Standup w/ ThePrimeagen, transcript) — closed-beta
 migration discipline; staged spelling migration through coexistence → warning →
 removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow

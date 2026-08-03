@@ -359,6 +359,155 @@ mod tests {
     }
 
     #[test]
+    fn manual_external_root_is_typed_atomic_and_cas_bound() {
+        let (roots, _g) = temp_roots();
+        let first = ingest_fixture(&roots, "manual-first", &[("out", "first")], Vec::new());
+        let second = ingest_fixture(&roots, "manual-second", &[("out", "second")], Vec::new());
+        let principal = "manual-root-test";
+        let now = super::now_secs();
+        let first_reference = first.entry.reference.clone();
+        let second_reference = second.entry.reference.clone();
+
+        let created = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &first_reference,
+            Some(now + 3600),
+            None,
+            now,
+        )
+        .unwrap();
+        assert_eq!(created.etag, "1.1");
+        assert_eq!(created.closure_size, 1);
+        assert!(!created.prepared);
+
+        let repeated = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &first_reference,
+            Some(now + 3600),
+            None,
+            now + 1,
+        )
+        .unwrap();
+        assert_eq!(repeated.etag, created.etag);
+
+        let missing_etag = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &second_reference,
+            Some(now + 7200),
+            None,
+            now + 2,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            missing_etag,
+            ExternalRootError::Conflict {
+                expected: None,
+                current: Some(ref current),
+                ..
+            } if current == "1.1"
+        ));
+
+        let stale = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &second_reference,
+            Some(now + 7200),
+            Some("1.0"),
+            now + 2,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            stale,
+            ExternalRootError::Conflict {
+                expected: Some(ref expected),
+                current: Some(ref current),
+                ..
+            } if expected == "1.0" && current == "1.1"
+        ));
+
+        let updated = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &second_reference,
+            Some(now + 7200),
+            Some("1.1"),
+            now + 2,
+        )
+        .unwrap();
+        assert_eq!(updated.etag, "2.2");
+        let committed_retry = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &second_reference,
+            Some(now + 7200),
+            Some("1.1"),
+            now + 3,
+        )
+        .unwrap();
+        assert_eq!(committed_retry, updated);
+        let listed = list_external_roots(&roots, principal).unwrap();
+        assert_eq!(listed, vec![updated.clone()]);
+
+        let snapshot = Lifecycle::snapshot(&roots).unwrap();
+        let root = snapshot
+            .roots
+            .values()
+            .find(|root| root.identity.kind == Lifecycle::RootKind::Manual)
+            .unwrap();
+        assert_eq!(root.metadata.label.as_deref(), Some("backup-sdk"));
+        assert_eq!(root.metadata.reference.as_deref(), Some(second_reference.as_str()));
+        assert_eq!(root.revision, 2);
+        assert_eq!(root.identity.incarnation.get(), 2);
+
+        let stale_remove = unregister_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            "1.1",
+            now + 3,
+        )
+        .unwrap_err();
+        assert!(matches!(stale_remove, ExternalRootError::Conflict { .. }));
+        unregister_external_root_at(&roots, principal, "backup-sdk", "2.2", now + 3).unwrap();
+        unregister_external_root_at(&roots, principal, "backup-sdk", "2.2", now + 4).unwrap();
+        assert!(list_external_roots(&roots, principal).unwrap().is_empty());
+
+        let recreated = register_external_root_at(
+            &roots,
+            principal,
+            "backup-sdk",
+            &first_reference,
+            None,
+            None,
+            now + 5,
+        )
+        .unwrap();
+        assert_eq!(recreated.etag, "3.3");
+    }
+
+    #[test]
+    fn manual_external_root_rejects_path_escape_and_unknown_reference() {
+        let (roots, _g) = temp_roots();
+        assert!(matches!(
+            register_external_root_at(&roots, "principal", "../escape", "missing", None, None, 1),
+            Err(ExternalRootError::Store(error)) if error.kind() == std::io::ErrorKind::InvalidInput
+        ));
+        assert!(matches!(
+            register_external_root_at(&roots, "principal", "valid", "missing", None, None, 1),
+            Err(ExternalRootError::ReferenceNotFound(reference)) if reference == "missing"
+        ));
+    }
+
+    #[test]
     fn ids_differ_by_ref() {
         let a = entry_id("x", "1.0", "x@nixpkgs", "/o");
         let b = entry_id("x", "1.0", "o/x@github", "/o");

@@ -227,6 +227,7 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
                 version: Some("1.0.0".into()),
                 flags: Vec::new(),
                 priority: 0,
+                field_priorities: BTreeMap::new(),
                 env: Vec::new(),
                 patches: vec!["patches/a.patch".into()],
                 allow_unfree: false,
@@ -244,6 +245,7 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
                 version: Some("1.0.0".into()),
                 flags: Vec::new(),
                 priority: 0,
+                field_priorities: BTreeMap::new(),
                 env: Vec::new(),
                 patches: vec!["patches/a.patch".into(), "patches/b.patch".into()],
                 allow_unfree: false,
@@ -256,7 +258,7 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
         "foo".into(),
         vec!["action:foo:build".into(), "action:foo:check".into()],
     );
-    let inv = Overlay::invalidations_against(&before, &after, &actions);
+    let inv = Overlay::invalidations_against(&before, &after, &actions).unwrap();
     assert_eq!(inv.len(), 1);
     assert_eq!(
         inv[0].affected_action_keys,
@@ -271,6 +273,7 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
     let mut lock = SemanticLockFile::with_records(vec![
         pkg("app", "foo", "1.0.0", "sha256-foo"),
         Overlay::semantic_records(&before, "app", "x86_64-linux")
+            .unwrap()
             .into_iter()
             .next()
             .unwrap(),
@@ -286,6 +289,54 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
         .find(|r| r.identity.key == "foo")
         .unwrap();
     assert!(foo.identity.hash.is_empty(), "hash cleared for rebuild");
+}
+
+#[test]
+fn overlay_semantic_projection_uses_resolved_facts_and_provenance() {
+    let policy = Overlay::parse_workspace_policy(
+        r#"module workspace {
+    overlay base {
+        package("foo").version: "1"
+    }
+    overlay force {
+        package("foo").version: Force("2")
+    }
+}"#,
+    )
+    .unwrap();
+    let records = Overlay::semantic_records(&policy, "app", "x86_64-linux").unwrap();
+    let record = records
+        .iter()
+        .find(|record| record.identity.key == "force:foo")
+        .unwrap();
+    assert_eq!(record.identity.exact, "2");
+    assert_eq!(
+        record.future_fields.get("overlay-fact-version"),
+        Some(&"2".to_string())
+    );
+    assert_eq!(record.rationales.len(), 2);
+    assert!(record
+        .rationales
+        .iter()
+        .any(|rationale| rationale.reason.contains("base")));
+    assert!(record
+        .rationales
+        .iter()
+        .any(|rationale| rationale.reason.contains("force")));
+
+    let loaded = SemanticLock::parse(&SemanticLock::write(
+        &SemanticLockFile::with_records(records),
+    ));
+    let loaded = loaded
+        .records
+        .iter()
+        .find(|record| record.identity.key == "force:foo")
+        .unwrap();
+    assert_eq!(
+        loaded.future_fields.get("overlay-fact-version"),
+        Some(&"2".to_string())
+    );
+    assert_eq!(loaded.rationales.len(), 2);
 }
 
 #[test]

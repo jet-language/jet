@@ -136,23 +136,18 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info },
     NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated },
 ];
-// D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under `hangar`.
-// `du` is real (jetpack's honest per-object disk accounting); verify/rollback/
-// generations keep their existing real jet-local generation-tracking logic
-// (renamed from `store`); repair/copy/import/export/dump/restore/sign are
-// ratified verb NAMES with no ratified operational design yet (no dump
-// format, signing-key policy, or repair algorithm has been specified) — they
-// route to a real, honest "not built yet" handler rather than a silent no-op
-// or invented behavior.
+// D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under
+// `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
+// quarantine-first import, and atomic closure publication path.
 const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "verify", usage: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "repair", usage: "repair", summary: "Repair package-store damage (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "copy", usage: "copy", summary: "Copy an object between package stores (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "import", usage: "import", summary: "Import an object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "export", usage: "export", summary: "Export an object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "dump", usage: "dump", summary: "Create a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "sign", usage: "sign", summary: "Sign a package-store object (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "repair", usage: "repair <entry> --from <archive.hangar>", summary: "Repair a damaged Hangar object from a signed archive", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "copy", usage: "copy <entry> --to <hangar-root>", summary: "Copy a verified closure between local Hangars", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "import", usage: "import <archive.hangar>", summary: "Verify and import a signed Hangar archive", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "export", usage: "export <entry> --to <archive.hangar>", summary: "Export a signed Hangar closure", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "dump", usage: "dump <entry>", summary: "Stream a signed Hangar archive", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a signed Hangar archive from stdin", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "sign", usage: "sign <entry-or-archive> [--to <path>]", summary: "Sign a Hangar object or archive", handler: HandlerKey::Hangar },
     NestedCommandSpec { name: "rollback", usage: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar },
     NestedCommandSpec { name: "generations", usage: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar },
     NestedCommandSpec { name: "du", usage: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar },
@@ -342,6 +337,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "env",
         summary: "Open the project development shell",
+        headline: false,
+    },
+    CommandSpec {
+        name: "cache",
+        summary: "Manage host-owned binary-cache bindings",
         headline: false,
     },
     CommandSpec {

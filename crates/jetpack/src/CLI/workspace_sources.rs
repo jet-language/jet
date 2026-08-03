@@ -100,9 +100,9 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
     let dir = std::env::current_dir().unwrap_or_default();
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),
-        // A malformed `workspace.jet` is surfaced by project-scoped commands;
-        // for ref classification we fall back to the lock mirror.
-        Some(Err(_)) => WorkspaceLock::load(&dir),
+        // A malformed `workspace.jet` is source failure, never permission to
+        // reuse a stale lock mirror.
+        Some(Err(_)) => None,
         None => WorkspaceLock::load(&dir),
     };
     match plan {

@@ -182,12 +182,15 @@ fn canvas_blueprint_facts_json(
 
 fn output_fact_json(output: &jet_semindex::OutputFact) -> String {
     let effects = output.entry.effects.iter().map(|effect| json_str(effect)).collect::<Vec<_>>().join(",");
+    let params = output.entry.params.iter().map(|param| json_str(param)).collect::<Vec<_>>().join(",");
     format!(
-        "{{\"binding\":{},\"kind\":{},\"name\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"effects\":[{}]}},\"fact_source\":\"semindex_resolved_output\"}}",
+        "{{\"binding\":{},\"kind\":{},\"name\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"authority\":{},\"effects\":[{}]}},\"fact_source\":\"semindex_resolved_output\"}}",
         json_str(&output.binding), json_str(&output.kind), json_str(&output.name),
         json_str(&output.entry.identity), json_str(&output.entry.name),
         json_str(&output.entry.module_path), span_json(output.entry.definition_span),
-        span_json(output.entry.reference_span), effects,
+        span_json(output.entry.reference_span), params,
+        output.entry.return_type.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+        json_str(&output.entry.authority), effects,
     )
 }
 

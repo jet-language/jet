@@ -7,6 +7,8 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
+use crate::Publish::{self, VersionReq};
+use crate::Publish::SemVer::SemVer;
 use crate::Store;
 use crate::Syntax;
 use crate::SHA256::tree_hash;
@@ -445,18 +447,127 @@ impl<'a> Resolver<'a> {
                 );
             }
 
-            DepSpec::Registry(_version) => {
-                // Registry deps are M12.2. Give a clear error.
-                return Err(vec![Diagnostic::error(
-                    "E1207",
-                    format!("registry dependencies are not yet supported in this version"),
-                    "registry support (`textkit = \"1.2.0\"`) is planned for M12.2".to_string(),
-                    format!(
-                        "use `{name} = {{ path = \"...\" }}` or `{name} = {{ git = \"...\", tag = \"...\" }}` for now",
-                        name = dep_name
-                    ),
-                    None,
-                )]);
+            DepSpec::Registry(version_req) => {
+                let registry = Publish::resolve_publish_registry();
+                let (available, _warnings) = Publish::resolve_and_verify(&registry, dep_name)
+                    .map_err(|diagnostic| {
+                        vec![registry_diagnostic(
+                            dep_name,
+                            &diagnostic.what,
+                            &diagnostic.fix,
+                        )]
+                    })?;
+                let requirement = VersionReq::parse(version_req).ok_or_else(|| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &format!("invalid version requirement `{version_req}`"),
+                        "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`",
+                    )]
+                })?;
+                let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let version = SemVer::parse(&entry.version)?;
+                        requirement.matches(&version).then_some((version, entry))
+                    })
+                    .collect();
+                candidates.sort_by(|left, right| left.0.cmp(&right.0));
+                let Some((_selected_version, selected)) = candidates.pop() else {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        &format!("no published version satisfies `{version_req}`"),
+                        "the configured registry has no compatible non-yanked artifact",
+                    )]);
+                };
+                let registry_repo = Publish::index_repo_path(&registry);
+                let artifact = Publish::verify_artifact(&registry_repo, &selected).map_err(|error| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &format!("published artifact is unavailable or corrupt: {error}"),
+                        "refresh the registry mirror or publish the immutable source artifact",
+                    )]
+                })?;
+                let dep_manifest = self.load_dep_manifest(&artifact, dep_name)?;
+                if dep_manifest.package.name != dep_name || dep_manifest.package.version != selected.version {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "published source metadata disagrees with its registry index entry",
+                        "republish a new immutable version with matching payload identity",
+                    )]);
+                }
+                if selected.content_hash.is_empty() || selected.fingerprint.is_empty() {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "published registry metadata has no complete source identity",
+                        "republish the package with its source hash and plan fingerprint",
+                    )]);
+                }
+                let dep_version = selected.version.clone();
+                if let Some((prev_ver, prev_chain)) =
+                    self.version_seen.get(dep_name).cloned()
+                {
+                    if prev_ver != dep_version {
+                        return Err(vec![Lock::e1201(
+                            dep_name,
+                            &prev_ver,
+                            &prev_chain,
+                            &dep_version,
+                            chain,
+                        )]);
+                    }
+                } else {
+                    self.version_seen.insert(
+                        dep_name.to_string(),
+                        (dep_version.clone(), chain.to_vec()),
+                    );
+                }
+
+                let mut trans_deps = Vec::new();
+                for (trans_name, trans_spec) in &dep_manifest.dependencies {
+                    let mut child_chain = chain.to_vec();
+                    child_chain.push(trans_name.clone());
+                    self.resolve_dep(trans_name, trans_spec, &artifact, &child_chain)?;
+                    trans_deps.push(trans_name.clone());
+                }
+                let dep_fps: Vec<&str> = trans_deps
+                    .iter()
+                    .filter_map(|dep| self.resolved.get(dep).map(|pkg| pkg.fingerprint.as_str()))
+                    .collect();
+                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&artifact);
+                let fp = Lock::compute_fingerprint(&selected.content_hash, &dep_fps, &cap_digest);
+                let (store_path, _content_hash) = Store::ensure_path_dep(
+                    dep_name,
+                    &dep_version,
+                    &fp,
+                    &artifact,
+                )
+                .map_err(|diagnostic| vec![diagnostic])?;
+                Store::verify_entry(dep_name, &store_path, &selected.content_hash)
+                    .map_err(|diagnostic| vec![diagnostic])?;
+                let link_dir = self
+                    .project_root
+                    .join(".jet-build")
+                    .join("deps")
+                    .join(dep_name);
+                Store::link_into_project(&store_path, &link_dir).map_err(|diagnostic| vec![diagnostic])?;
+                self.resolved.insert(
+                    dep_name.to_string(),
+                    ResolvedPkg {
+                        version: dep_version,
+                        source: LockSource::Registry {
+                            registry: registry.name,
+                            reference: format!("{}#{}", selected.name, selected.version),
+                            output: store_path.to_string_lossy().into_owned(),
+                            source_hash: selected.content_hash,
+                            repository: registry.url,
+                            authority: "jet-registry-index".to_string(),
+                        },
+                        locked: None,
+                        fingerprint: fp,
+                        deps: trans_deps,
+                        source_dir: artifact,
+                    },
+                );
             }
         }
 
@@ -533,6 +644,16 @@ impl<'a> Resolver<'a> {
     }
 }
 
+fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1207",
+        format!("registry dependency `{name}` cannot be resolved: {what}"),
+        "registry package identity is source-backed and must be verified before it enters the lock".to_string(),
+        fix.to_string(),
+        None,
+    )
+}
+
 // ──────────────────────────────────────────────
 // Build dep_dirs from existing lock (--locked mode)
 // ──────────────────────────────────────────────
@@ -563,14 +684,100 @@ fn build_dep_dirs_from_lock(
                     project_root.to_path_buf()
                 }
             }
-            DepSpec::Registry(_) => {
-                return Err(vec![Diagnostic::error(
-                    "E1207",
-                    "registry dependencies require `jet fetch` (not --locked)".to_string(),
-                    "registry support is planned for M12.2".to_string(),
-                    "use path or git dependencies".to_string(),
-                    None,
-                )]);
+            DepSpec::Registry(version_req) => {
+                let requirement = VersionReq::parse(version_req).ok_or_else(|| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &format!("invalid locked version requirement `{version_req}`"),
+                        "use a valid SemVer requirement before creating a lock",
+                    )]
+                })?;
+                let Some(locked) = lock.packages.iter().find(|package| {
+                    package.name == *dep_name
+                        && SemVer::parse(&package.version)
+                            .is_some_and(|version| requirement.matches(&version))
+                        && matches!(&package.source, LockSource::Registry { .. })
+                }) else {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry dependency has no exact package record",
+                        "run `jet fetch` online to select and record an immutable registry version",
+                    )]);
+                };
+                let LockSource::Registry {
+                    registry,
+                    reference,
+                    repository,
+                    source_hash,
+                    ..
+                } = &locked.source else {
+                    unreachable!("registry package predicate guarantees registry source")
+                };
+                let config = crate::Publish::RegistryConfig {
+                    name: registry.clone(),
+                    url: repository.clone(),
+                    mirror: false,
+                    require_signed: false,
+                };
+                let repo = crate::Publish::index_repo_path(&config);
+                let entry = crate::Publish::Index::find_entry(&repo, dep_name, &locked.version)
+                    .map_err(|error| {
+                        vec![registry_diagnostic(
+                            dep_name,
+                            &format!("locked registry index could not be read: {error}"),
+                            "restore the pinned registry mirror; locked mode never downloads a new index",
+                        )]
+                    })?
+                    .ok_or_else(|| {
+                        vec![registry_diagnostic(
+                            dep_name,
+                            "locked registry index has no pinned version",
+                            "restore the exact offline registry checkpoint or run `jet fetch` online",
+                        )]
+                    })?;
+                let expected_reference = format!("{}#{}", dep_name, locked.version);
+                if reference != &expected_reference {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry reference does not name the locked package version",
+                        "regenerate the lock from the trusted registry checkpoint",
+                    )]);
+                }
+                if source_hash.is_empty() {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry package has no source hash",
+                        "regenerate the lock from a registry entry with immutable source identity",
+                    )]);
+                }
+                if entry.content_hash != *source_hash {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry content hash disagrees with the local index",
+                        "refresh the lock from a trusted registry checkpoint",
+                    )]);
+                }
+                let all_entries = crate::Publish::verify_registry_package(
+                    &repo,
+                    &config.name,
+                    dep_name,
+                )
+                .map_err(|diagnostic| vec![diagnostic])?;
+                crate::Publish::verify_index_entry(
+                    &all_entries,
+                    &entry,
+                    config.require_signed,
+                    &config.name,
+                )
+                .map_err(|diagnostic| vec![diagnostic])?;
+                let artifact = crate::Publish::verify_artifact(&repo, &entry).map_err(|error| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &format!("locked registry artifact is unavailable: {error}"),
+                        "restore the artifact in the local registry mirror; locked mode stays offline",
+                    )]
+                })?;
+                artifact
             }
         };
         dep_dirs.insert(dep_name.clone(), source_dir);
