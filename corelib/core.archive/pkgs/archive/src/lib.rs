@@ -1,11 +1,14 @@
-// core.archive ring package implementation (D-CORE-COMPRESS1=A, D-BFS1).
+// core.archive explicit ABI bridge implementation (D-CORE-COMPRESS1=A, D-BFS1).
 //
-// This is the canonical Rust source for the core.archive module.
+// This is audited Rust bridge source, not ordinary-Jet behavior source. The
+// package declaration currently defines only the module boundary.
 // During `jetpack build core.archive`, CoreProvider::realize() compiles this
 // crate to an rlib and caches it in the hangar (D-BFS1).
 //
-// `jet build` / `jet run` embeds this exact file in the hidden FFI bridge via
-// crates/jet-pkg-model/src/FFI.rs. Stream codecs live only in core.compress.
+// `jet build` / `jet run` embeds this exact file in the hidden FFI bridge, and
+// the JIT host includes the same implementation. Stream codecs live only in
+// core.compress. This bridge classification stays explicit until #1133 moves
+// archive behavior through ordinary Jet source.
 
 use std::io::{Read, Write};
 

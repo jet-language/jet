@@ -1,9 +1,11 @@
 // core.archive — zip/tar containers (D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A).
 //
-// This Jet package declaration is the source authority and package boundary.
-// Its public ABI is implemented only by the sibling audited kernel in
-// `src/lib.rs`; the compiler has no copied archive implementation to use as a
-// fallback. `CoreProvider::realize()` compiles that source tree (D-BFS1), and
-// the same bytes are used by the consumer FFI bridge.
+// This file declares the package boundary. It is not ordinary-Jet behavior
+// source. Current archive behavior uses an explicit audited Rust ABI bridge in
+// `src/lib.rs`; it does not yet satisfy D-CORE-SOURCE-AUTHORITY1=A.
+// `CoreProvider::realize()` compiles that source tree (D-BFS1), and the same
+// implementation serves the consumer FFI bridge and JIT host. No compiler
+// template fallback is allowed. Card #1133 remains open until behavior moves
+// through ordinary Jet source.
 
 module archive { }

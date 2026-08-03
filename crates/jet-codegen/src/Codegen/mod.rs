@@ -332,8 +332,8 @@ fn jet_cov_dump() {
 ///
 /// The JetStd brace chain (`mod jet_std {` … closing `}` in YAML.rs) must stay
 /// contiguous — those files are one audited compiler/runtime kernel. Optional
-/// fragments are selected from `bundle.used_core`. Package-owned Core source is
-/// emitted by its package bridge and never falls back to this path.
+/// fragments are selected from `bundle.used_core`. Package-owned Core behavior
+/// may use an explicit ABI bridge, but never falls back to this path.
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
@@ -453,9 +453,9 @@ fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str
 }
 
 fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
-    // A package-owned Core module is provided by its package bridge. Emitting
-    // no compiler fragment here prevents an older template from becoming a
-    // fallback implementation when the package source is present.
+    // `core.archive` is an explicit ABI bridge, not ordinary-Jet behavior
+    // source. Emit no compiler fragment, so no older template becomes a
+    // fallback implementation.
     if !core_needs_embedded_runtime(used_core) {
         return;
     }

@@ -2,10 +2,11 @@
 
 Published ownership, effect, failure, blocking, platform, and backend facts for
 compiler-known Core modules (R10 / #1134). Accelerated backends must
-differentially conform to these facts against the CPU/oracle path. The
-package-backed source-authority proof in this lane is `core.archive`; the
-remaining rows retain their existing compiler-owned implementation boundary
-until their ordinary-Jet package sources land.
+differentially conform to these facts against the CPU/oracle path. This page
+does not claim that current compiler-owned rows use ordinary-Jet behavior
+source. `core.archive` uses an explicit Rust ABI bridge: `archive.jet` declares
+the package boundary, while `src/lib.rs` implements behavior. This does not
+satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
 
 | Module | Ownership | Effects | Failure | Blocking | Platform | Backend |
 |--------|-----------|---------|---------|----------|----------|---------|
@@ -16,11 +17,11 @@ until their ordinary-Jet package sources land.
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |
 | `core.compute` | `Tensor` owned | pure (CPU oracle) | `ComputeError` | sync | all | reachable Core runtime + CPU ABI; GPU E6 |
 | `core.services` | tree/endpoint owned | tasks/channels | `ServiceError` | sync mailboxes | all | reachable Core runtime over taskgroup ABI |
-| `core.archive` | bytes owned | pure | string/`Result` | sync | all | ordinary Jet package + audited `src/lib.rs` ABI kernel |
+| `core.archive` | bytes owned | pure | string/`Result` | sync | all | package boundary + explicit audited Rust ABI bridge |
 
 ## Differential conformance
 
-1. Sema records the reachable Core source and audited intrinsic/ABI closure.
+1. Sema records the reachable Core closure and its source/ABI classification.
 2. AOT, JIT, and deopt marshal into the same canonical Core/ABI `jet_*`
    symbols; no engine adds a second policy or failure meaning.
 3. Native cache identity includes the SHA-256 R10 source/closure descriptor
@@ -31,9 +32,9 @@ until their ordinary-Jet package sources land.
 ## Offline delivery
 
 Pinned toolchains and content-addressed Core builds remain the delivery path.
-`core.archive` proves the package boundary: one ordinary-Jet source declaration
-and one audited ABI source tree consumed by CoreProvider, with no copied
-compiler-template fallback.
+`core.archive` proves one package boundary and one audited ABI source tree
+consumed by CoreProvider. It does not prove ordinary-Jet behavior authority.
+No copied compiler-template fallback is allowed.
 
 Hostile closure checks:
 
@@ -43,8 +44,8 @@ Hostile closure checks:
   modified cached binary is never treated as a valid artifact.
 - Failure while publishing a new binary or digest → explicit build error; a
   partial cache write is never reported as a successful store.
-- A package Core module must resolve through CoreProvider; a second embedded
-  copy of the same source is forbidden.
+- `core.archive` CoreProvider, AOT bridge, and JIT host must consume the same
+  audited Rust ABI source; no second algorithm or compiler template is allowed.
 - Offline builds use the pinned Jet toolchain identity recorded in the store;
   host drift that changes that identity invalidates the cache. An unreadable
   project manifest also disables cache reuse instead of becoming an empty

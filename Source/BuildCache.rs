@@ -6,6 +6,7 @@
 
 use crate::SHA256::sha256_hex;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Returns `~/.cache/jet/build`.
@@ -70,23 +71,34 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
 
 /// Store a freshly built binary in the cache.
 ///
-/// Atomic: the binary is copied to a per-process temp file first, then renamed
-/// into place. A concurrent `try_copy_cached` reader therefore never observes a
-/// half-written `bin`. Two processes storing the *same* key are storing the
-/// same content by construction (the key is content-addressed), so a
-/// last-writer-wins rename is safe.
+/// Atomic: read source bytes once, hash those bytes, write those same bytes to
+/// a per-process temp file, then rename. A concurrent `try_copy_cached` reader
+/// therefore never observes a half-written `bin`. Preserve source permissions
+/// so cached native artifacts stay executable.
 pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
     let dir = cache_dir().join(key);
     fs::create_dir_all(&dir)
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
-    let bytes = fs::read(bin)
+    let mut source = fs::File::open(bin)
+        .map_err(|error| format!("could not read {}: {error}", bin.display()))?;
+    let permissions = source
+        .metadata()
+        .map_err(|error| format!("could not stat {}: {error}", bin.display()))?
+        .permissions();
+    let mut bytes = Vec::new();
+    source
+        .read_to_end(&mut bytes)
         .map_err(|error| format!("could not read {}: {error}", bin.display()))?;
     let digest = sha256_hex(&bytes);
     let dest = dir.join("bin");
     let tmp = dir.join(format!("bin.tmp.{}", std::process::id()));
-    if let Err(error) = fs::copy(bin, &tmp) {
+    if let Err(error) = fs::write(&tmp, &bytes) {
         let _ = fs::remove_file(&tmp);
         return Err(format!("could not stage {}: {error}", bin.display()));
+    }
+    if let Err(error) = fs::set_permissions(&tmp, permissions) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("could not preserve {} permissions: {error}", bin.display()));
     }
     if let Err(error) = fs::rename(&tmp, &dest) {
         let _ = fs::remove_file(&tmp);
