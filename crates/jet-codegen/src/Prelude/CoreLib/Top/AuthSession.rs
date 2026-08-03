@@ -21,6 +21,7 @@ pub struct JetAuthApp {
 struct JetAuthUser {
     user_id: String,
     password_hash: String,
+    delivery_capability: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +29,7 @@ struct JetAuthMagicToken {
     token: String,
     user_id: String,
     expires_at: i64,
+    delivery_capability: String,
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +56,38 @@ fn jet_auth_valid_identifier(value: &str, max: usize) -> bool {
     !value.trim().is_empty()
         && value.len() <= max
         && value.chars().all(|c| !c.is_control())
+}
+
+fn jet_auth_delivery_capability(value: &str) -> Option<String> {
+    if value.len() > 254 || value.matches('@').count() != 1 {
+        return None;
+    }
+    let (local, domain) = value.split_once('@')?;
+    if local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~.".contains(&byte))
+    {
+        return None;
+    }
+    if domain.is_empty() || domain.len() > 253 {
+        return None;
+    }
+    if domain.split('.').any(|label| {
+        label.is_empty()
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    }) {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn jet_auth_expiry(now_ms: i64, ttl_ms: i64) -> Result<i64, String> {
@@ -112,6 +146,7 @@ fn jet_auth_register_user(user_id: String, password_hash: String) -> Result<(), 
     if password_hash.trim().is_empty() || password_hash.len() > 4096 {
         return Err("password hash is invalid".to_string());
     }
+    let delivery_capability = jet_auth_delivery_capability(&user_id);
     let Ok(mut store) = jet_auth_store().lock() else {
         return Err("auth store is unavailable".to_string());
     };
@@ -121,6 +156,7 @@ fn jet_auth_register_user(user_id: String, password_hash: String) -> Result<(), 
     store.users.push(JetAuthUser {
         user_id,
         password_hash,
+        delivery_capability,
     });
     Ok(())
 }
@@ -180,14 +216,23 @@ fn jet_auth_magic_link_issue(
     if !jet_auth_valid_identifier(&user_id, 512) {
         return Err("user id is invalid".to_string());
     }
-    let token = jet_auth_opaque_token("magic")?;
+    let delivery_capability = jet_auth_delivery_capability(&user_id)
+        .ok_or_else(|| "magic link requires a delivery-capable identity".to_string())?;
     let Ok(mut store) = jet_auth_store().lock() else {
         return Err("auth store is unavailable".to_string());
     };
+    if !store.users.iter().any(|user| {
+        user.user_id == user_id
+            && user.delivery_capability.as_deref() == Some(delivery_capability.as_str())
+    }) {
+        return Err("magic link requires a registered delivery identity".to_string());
+    }
+    let token = jet_auth_opaque_token("magic")?;
     store.magic_tokens.push(JetAuthMagicToken {
         token: token.clone(),
         user_id,
         expires_at,
+        delivery_capability,
     });
     Ok(token)
 }
@@ -201,7 +246,6 @@ fn jet_auth_magic_link_consume(
     if !jet_auth_valid_identifier(&token, 256) {
         return Err("token expired".to_string());
     }
-    let id = jet_auth_opaque_token("sess")?;
     let Ok(mut store) = jet_auth_store().lock() else {
         return Err("auth store is unavailable".to_string());
     };
@@ -210,7 +254,15 @@ fn jet_auth_magic_link_consume(
         .iter()
         .position(|entry| entry.token == token && now_ms < entry.expires_at)
         .ok_or_else(|| "token expired".to_string())?;
-    let entry = store.magic_tokens.remove(idx);
+    let entry = store.magic_tokens[idx].clone();
+    let Some(user) = store.users.iter().find(|user| user.user_id == entry.user_id) else {
+        return Err("magic link identity is no longer registered".to_string());
+    };
+    if user.delivery_capability.as_deref() != Some(entry.delivery_capability.as_str()) {
+        return Err("magic link delivery identity is unavailable".to_string());
+    }
+    let id = jet_auth_opaque_token("sess")?;
+    store.magic_tokens.remove(idx);
     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
     let session = JetAuthSession {
         id: id.clone(),
@@ -266,6 +318,7 @@ fn jet_auth_oauth_finish(
         store.users.push(JetAuthUser {
             user_id: user_id.clone(),
             password_hash: "oauth".to_string(),
+            delivery_capability: None,
         });
     }
     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;

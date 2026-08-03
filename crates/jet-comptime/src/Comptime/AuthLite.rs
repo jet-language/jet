@@ -48,7 +48,7 @@ fn ct_to_session(v: &CtValue, span: Span) -> Result<JetAuthSession, Diagnostic> 
         },
         cookie: match field("cookie")? {
             CtValue::Str(s) => s.clone(),
-            _ => String::new(),
+            _ => return Err(unsupported("cookie", span)),
         },
     })
 }
@@ -93,7 +93,7 @@ fn ct_to_auth(v: &CtValue, span: Span) -> Result<JetAuthApp, Diagnostic> {
             ),
             _ => None,
         })
-        .unwrap_or_default();
+        .ok_or_else(|| unsupported("providers", span))?;
     Ok(JetAuthApp {
         users_table: users,
         providers,

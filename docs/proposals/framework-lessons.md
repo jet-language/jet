@@ -24,6 +24,9 @@ claim that the open transport and validation boundaries are complete.
   Optimistic retry-on-conflict is not claimed.
 - D-AUTH1 now uses typed process-global records, checked lifetimes, single-use
   OAuth and magic-link state, and cryptographic entropy for opaque tokens.
+  Magic links require a registered user with a syntactically valid delivery
+  identity, and consume rechecks that identity. Actual email delivery remains
+  outside this slice.
 - D-SYNC1 keeps typed CRDT carriers and adds typed canonical session documents
   with idempotent duplicate receipts. Remote authenticated reconnect remains
   open.
@@ -31,7 +34,8 @@ claim that the open transport and validation boundaries are complete.
   identifiers. General policy closures are not claimed.
 - D-OBSERVE-LIVE1 renders only typed, bounded task, channel, effect, and
   resource facts. Payloads and process memory remain outside the schema.
-- D-LIVEQUERY1 marks matching subscriptions dirty from typed footprints. A
+- D-LIVEQUERY1 stores typed footprints in a bounded registry, reports invalid
+  or evicted handles explicitly, and marks matching subscriptions dirty. A
   query graph, rerun callback, and browser `core.ws` transport remain open.
 - D-SCHEDULE1 shares parser and sema resolution, but its service-runtime and
   jetos timer consumers remain open.
