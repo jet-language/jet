@@ -220,6 +220,7 @@ pub(crate) fn resolve_builtin_op(
         ("last", 0) => TBuiltinOp::Last,
         ("contains", 1) => TBuiltinOp::Contains,
         ("has", 1) if is_set || is_sorted_set || is_bit_set => TBuiltinOp::Contains,
+        ("index_of", 1) if is_string => TBuiltinOp::StringIndexOf,
         ("index_of", 1) => TBuiltinOp::IndexOf,
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
@@ -242,12 +243,33 @@ pub(crate) fn resolve_builtin_op(
         ("chars", 0) => TBuiltinOp::Chars,
         ("bytes", 0) => TBuiltinOp::Bytes,
         ("trim", 0) => TBuiltinOp::Trim,
+        ("trim_start", 0) => TBuiltinOp::TrimStart,
+        ("trim_end", 0) => TBuiltinOp::TrimEnd,
         ("split", 1) => TBuiltinOp::Split,
         // c97/D-STRPARSE1: String-only `lines`; parsing stays `Type.parse`.
         ("lines", 0) => TBuiltinOp::Lines,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
         ("replace", 2) => TBuiltinOp::Replace,
+        ("pad_start", 2) => TBuiltinOp::PadStart,
+        ("pad_end", 2) => TBuiltinOp::PadEnd,
+        ("count", 1) if is_string => TBuiltinOp::StringCount,
+        ("is_alphabetic", 0) if is_string => TBuiltinOp::StringIsAlphabetic,
+        ("is_numeric", 0) if is_string => TBuiltinOp::StringIsNumeric,
+        ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,
+        ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
+        ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
+        ("split_once", 1) if is_string => {
+            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
+                vec![
+                    ("before".to_string(), Type::String),
+                    ("after".to_string(), Type::String),
+                ]
+            });
+            TBuiltinOp::StringSplitOnce {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
         // D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring split.
         ("after", 1) => TBuiltinOp::After,
         ("before", 1) => TBuiltinOp::Before,
@@ -418,6 +440,18 @@ pub(crate) fn resolve_builtin_op(
         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,
         ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
+        ("intersection", 1) if is_sorted_set => TBuiltinOp::SortedSetIntersection,
+        ("difference", 1) if is_sorted_set => TBuiltinOp::SortedSetDifference,
+        ("symmetric_difference", 1) if is_sorted_set => TBuiltinOp::SortedSetSymmetricDifference,
+        ("is_subset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSubset,
+        ("is_superset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSuperset,
+        ("is_disjoint", 1) if is_sorted_set => TBuiltinOp::SortedSetIsDisjoint,
+        ("intersection", 1) if is_set => TBuiltinOp::SetIntersection,
+        ("difference", 1) if is_set => TBuiltinOp::SetDifference,
+        ("symmetric_difference", 1) if is_set => TBuiltinOp::SetSymmetricDifference,
+        ("is_subset", 1) if is_set => TBuiltinOp::SetIsSubset,
+        ("is_superset", 1) if is_set => TBuiltinOp::SetIsSuperset,
+        ("is_disjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
         ("union", 1) => TBuiltinOp::SetUnion,
         ("add", 2) if is_lru => TBuiltinOp::LruPut,
         ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,

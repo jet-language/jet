@@ -473,6 +473,59 @@ fn set_method(
             };
             Ok(set_struct(type_name, merged))
         }
+        "intersection" | "difference" | "symmetric_difference" | "is_subset"
+        | "is_superset" | "is_disjoint" => {
+            let other = args.first().ok_or_else(|| {
+                unsupported(&format!("{type_name}.{method} missing argument"), span)
+            })?;
+            let CtValue::Struct {
+                type_name: other_type,
+                fields: other_fields,
+            } = other
+            else {
+                return Err(unsupported(
+                    &format!("{type_name}.{method} with a non-set"),
+                    span,
+                ));
+            };
+            if other_type != type_name {
+                return Err(unsupported(
+                    &format!("{type_name}.{method} with a non-set"),
+                    span,
+                ));
+            }
+            let other_items = list_field(other_fields, "items");
+            let has = |value: &CtValue, haystack: &[CtValue]| haystack.iter().any(|candidate| candidate == value);
+            let subset = |left: &[CtValue], right: &[CtValue]| left.iter().all(|value| has(value, right));
+            match method {
+                "is_subset" => Ok(CtValue::Bool(subset(&items, &other_items))),
+                "is_superset" => Ok(CtValue::Bool(subset(&other_items, &items))),
+                "is_disjoint" => Ok(CtValue::Bool(items.iter().all(|value| !has(value, &other_items)))),
+                "intersection" => Ok(set_struct(
+                    type_name,
+                    items.into_iter().filter(|value| has(value, &other_items)).collect(),
+                )),
+                "difference" => Ok(set_struct(
+                    type_name,
+                    items.into_iter().filter(|value| !has(value, &other_items)).collect(),
+                )),
+                "symmetric_difference" => {
+                    let mut values = items
+                        .iter()
+                        .filter(|value| !has(value, &other_items))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    values.extend(
+                        other_items
+                            .into_iter()
+                            .filter(|value| !has(value, &items))
+                            .collect::<Vec<_>>(),
+                    );
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { unique_values(values) }))
+                }
+                _ => unreachable!(),
+            }
+        }
         _ => Err(unsupported(
             &format!("{type_name}.{} at compile time", method),
             span,

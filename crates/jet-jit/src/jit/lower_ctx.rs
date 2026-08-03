@@ -15044,6 +15044,20 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::TrimStart
+            | TBuiltinOp::TrimEnd
+            | TBuiltinOp::PadStart
+            | TBuiltinOp::PadEnd
+            | TBuiltinOp::StringIndexOf
+            | TBuiltinOp::StringCount
+            | TBuiltinOp::StringIsAlphabetic
+            | TBuiltinOp::StringIsNumeric
+            | TBuiltinOp::StringIsWhitespace
+            | TBuiltinOp::StringIsAscii
+            | TBuiltinOp::StringToTitle
+            | TBuiltinOp::StringSplitOnce { .. } => {
+                Err("jit builtin method unsupported".to_string())
+            }
             TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Sum { float: false } => {
                 if !matches!(
@@ -15354,6 +15368,20 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.set_union, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val, other]);
                 Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetIntersection
+            | TBuiltinOp::SetDifference
+            | TBuiltinOp::SetSymmetricDifference
+            | TBuiltinOp::SetIsSubset
+            | TBuiltinOp::SetIsSuperset
+            | TBuiltinOp::SetIsDisjoint
+            | TBuiltinOp::SortedSetIntersection
+            | TBuiltinOp::SortedSetDifference
+            | TBuiltinOp::SortedSetSymmetricDifference
+            | TBuiltinOp::SortedSetIsSubset
+            | TBuiltinOp::SortedSetIsSuperset
+            | TBuiltinOp::SortedSetIsDisjoint => {
+                Err("jit builtin method unsupported".to_string())
             }
             TBuiltinOp::SortedSetFrom => {
                 let host = self
@@ -19261,11 +19289,16 @@ impl LowerCtx<'_, '_> {
             if matches!(
                 op,
                 TBuiltinOp::Trim
+                    | TBuiltinOp::TrimStart
+                    | TBuiltinOp::TrimEnd
+                    | TBuiltinOp::PadStart
+                    | TBuiltinOp::PadEnd
                     | TBuiltinOp::TrimView
                     | TBuiltinOp::AfterView
                     | TBuiltinOp::BeforeView
                     | TBuiltinOp::ToUpper
                     | TBuiltinOp::ToLower
+                    | TBuiltinOp::StringToTitle
             ) {
                 return Type::String;
             }

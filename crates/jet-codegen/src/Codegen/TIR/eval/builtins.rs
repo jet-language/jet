@@ -53,6 +53,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Chars => apply_method(recv, "chars", args, span),
         TBuiltinOp::Bytes => apply_method(recv, "bytes", args, span),
         TBuiltinOp::Trim => apply_method(recv, "trim", args, span),
+        TBuiltinOp::TrimStart => apply_method(recv, "trim_start", args, span),
+        TBuiltinOp::TrimEnd => apply_method(recv, "trim_end", args, span),
         TBuiltinOp::Split => apply_method(recv, "split", args, span),
         TBuiltinOp::Lines => apply_method(recv, "lines", args, span),
         // D-STRPARSE1: text is the builtin receiver; parse is static on Int/Float.
@@ -65,6 +67,16 @@ pub(super) fn eval_builtin(
         TBuiltinOp::StartsWith => apply_method(recv, "starts_with", args, span),
         TBuiltinOp::EndsWith => apply_method(recv, "ends_with", args, span),
         TBuiltinOp::Replace => apply_method(recv, "replace", args, span),
+        TBuiltinOp::PadStart => apply_method(recv, "pad_start", args, span),
+        TBuiltinOp::PadEnd => apply_method(recv, "pad_end", args, span),
+        TBuiltinOp::StringIndexOf => apply_method(recv, "index_of", args, span),
+        TBuiltinOp::StringCount => apply_method(recv, "count", args, span),
+        TBuiltinOp::StringIsAlphabetic => apply_method(recv, "is_alphabetic", args, span),
+        TBuiltinOp::StringIsNumeric => apply_method(recv, "is_numeric", args, span),
+        TBuiltinOp::StringIsWhitespace => apply_method(recv, "is_whitespace", args, span),
+        TBuiltinOp::StringIsAscii => apply_method(recv, "is_ascii", args, span),
+        TBuiltinOp::StringToTitle => apply_method(recv, "to_title", args, span),
+        TBuiltinOp::StringSplitOnce { .. } => apply_method(recv, "split_once", args, span),
         TBuiltinOp::ToUpper => apply_method(recv, "to_upper", args, span),
         TBuiltinOp::ToLower => apply_method(recv, "to_lower", args, span),
         TBuiltinOp::Repeat => apply_method(recv, "repeat", args, span),
@@ -99,6 +111,12 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::SetToList => apply_method(recv, "to_list", args, span),
         TBuiltinOp::SetUnion => apply_method(recv, "union", args, span),
+        TBuiltinOp::SetIntersection => apply_method(recv, "intersection", args, span),
+        TBuiltinOp::SetDifference => apply_method(recv, "difference", args, span),
+        TBuiltinOp::SetSymmetricDifference => apply_method(recv, "symmetric_difference", args, span),
+        TBuiltinOp::SetIsSubset => apply_method(recv, "is_subset", args, span),
+        TBuiltinOp::SetIsSuperset => apply_method(recv, "is_superset", args, span),
+        TBuiltinOp::SetIsDisjoint => apply_method(recv, "is_disjoint", args, span),
         TBuiltinOp::SortedSetFrom => {
             CollectionEval::from_list(Syntax::TYPE_SORTED_SET, recv, span)
         }
@@ -106,6 +124,12 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SortedSetRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::SortedSetToList => apply_method(recv, "to_list", args, span),
         TBuiltinOp::SortedSetUnion => apply_method(recv, "union", args, span),
+        TBuiltinOp::SortedSetIntersection => apply_method(recv, "intersection", args, span),
+        TBuiltinOp::SortedSetDifference => apply_method(recv, "difference", args, span),
+        TBuiltinOp::SortedSetSymmetricDifference => apply_method(recv, "symmetric_difference", args, span),
+        TBuiltinOp::SortedSetIsSubset => apply_method(recv, "is_subset", args, span),
+        TBuiltinOp::SortedSetIsSuperset => apply_method(recv, "is_superset", args, span),
+        TBuiltinOp::SortedSetIsDisjoint => apply_method(recv, "is_disjoint", args, span),
         TBuiltinOp::PriorityQueueFrom => {
             CollectionEval::from_list(Syntax::TYPE_PRIORITY_QUEUE, recv, span)
         }

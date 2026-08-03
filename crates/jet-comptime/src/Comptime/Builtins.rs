@@ -28,6 +28,23 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
+fn string_padding(fill: &str, width: usize) -> String {
+    if width == 0 || fill.is_empty() {
+        return String::new();
+    }
+    fill.chars().cycle().take(width).collect()
+}
+
+fn string_pad_start(s: &str, width: i64, fill: &str) -> String {
+    let want = (width - s.chars().count() as i64).max(0) as usize;
+    format!("{}{}", string_padding(fill, want), s)
+}
+
+fn string_pad_end(s: &str, width: i64, fill: &str) -> String {
+    let want = (width - s.chars().count() as i64).max(0) as usize;
+    format!("{}{}", s, string_padding(fill, want))
+}
+
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -1057,6 +1074,77 @@ pub fn apply_method(
         (CtValue::Str(s), "to_upper") => Ok(CtValue::Str(super::TextLite::upper(s))),
         (CtValue::Str(s), "to_lower") => Ok(CtValue::Str(super::TextLite::lower(s))),
         (CtValue::Str(s), "trim") => Ok(CtValue::Str(super::TextLite::trim(s))),
+        (CtValue::Str(s), "trim_start") => Ok(CtValue::Str(super::TextLite::trim_start(s))),
+        (CtValue::Str(s), "trim_end") => Ok(CtValue::Str(super::TextLite::trim_end(s))),
+        (CtValue::Str(s), "pad_start") => {
+            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
+                return Err(unsupported("pad_start requires an Int width and text fill", span));
+            };
+            Ok(CtValue::Str(string_pad_start(s, *width, fill)))
+        }
+        (CtValue::Str(s), "pad_end") => {
+            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
+                return Err(unsupported("pad_end requires an Int width and text fill", span));
+            };
+            Ok(CtValue::Str(string_pad_end(s, *width, fill)))
+        }
+        (CtValue::Str(s), "index_of") => match args.into_iter().next() {
+            Some(CtValue::Str(needle)) => Ok(match s.find(&needle) {
+                Some(byte) => CtValue::Some(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                None => CtValue::None(Type::Int),
+            }),
+            _ => Err(unsupported("index_of with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "count") => match args.into_iter().next() {
+            Some(CtValue::Str(needle)) => {
+                if needle.is_empty() {
+                    return Ok(CtValue::Int(0));
+                }
+                let mut rest = s.as_str();
+                let mut count = 0i64;
+                while let Some(at) = rest.find(&needle) {
+                    count += 1;
+                    rest = &rest[at + needle.len()..];
+                }
+                Ok(CtValue::Int(count))
+            }
+            _ => Err(unsupported("count with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "is_alphabetic") => Ok(CtValue::Bool(super::TextLite::is_alphabetic(s))),
+        (CtValue::Str(s), "is_numeric") => Ok(CtValue::Bool(super::TextLite::is_numeric(s))),
+        (CtValue::Str(s), "is_whitespace") => Ok(CtValue::Bool(super::TextLite::is_whitespace(s))),
+        (CtValue::Str(s), "is_ascii") => Ok(CtValue::Bool(s.is_ascii())),
+        (CtValue::Str(s), "to_title") => {
+            let mut out = String::with_capacity(s.len());
+            let mut word_start = true;
+            for ch in s.chars() {
+                if ch.is_alphanumeric() {
+                    if word_start { out.extend(ch.to_uppercase()); }
+                    else { out.extend(ch.to_lowercase()); }
+                    word_start = false;
+                } else {
+                    out.push(ch);
+                    word_start = true;
+                }
+            }
+            Ok(CtValue::Str(out))
+        }
+        (CtValue::Str(s), "split_once") => match args.into_iter().next() {
+            Some(CtValue::Str(sep)) => Ok(match s.find(&sep) {
+                Some(at) => CtValue::Some(Box::new(CtValue::Struct {
+                    type_name: "(before,after)".to_string(),
+                    fields: vec![
+                        ("before".to_string(), CtValue::Str(s[..at].to_string())),
+                        ("after".to_string(), CtValue::Str(s[at + sep.len()..].to_string())),
+                    ],
+                })),
+                None => CtValue::None(Type::Tuple(vec![
+                    ("before".to_string(), Box::new(Type::String)),
+                    ("after".to_string(), Box::new(Type::String)),
+                ])),
+            }),
+            _ => Err(unsupported("split_once with a non-text argument", span)),
+        },
         (CtValue::Str(s), "contains") => match args.into_iter().next() {
             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.contains(&n))),
             _ => Err(unsupported("contains with a non-text argument", span)),

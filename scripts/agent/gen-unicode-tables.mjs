@@ -523,6 +523,83 @@ pub fn jet_unicode_trim_end(s: &str) -> String {
 pub fn jet_unicode_trim(s: &str) -> String {
     jet_unicode_trim_view(s).to_string()
 }
+
+pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
+    s.find(needle)
+        .map(|byte| s[..byte].chars().count() as i64)
+}
+
+pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut rest = s.as_str();
+    let mut count = 0i64;
+    while let Some(at) = rest.find(needle) {
+        count += 1;
+        rest = &rest[at + needle.len()..];
+    }
+    count
+}
+
+pub fn jet_unicode_is_alphabetic(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_alphabetic)
+}
+
+pub fn jet_unicode_is_numeric(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_numeric)
+}
+
+pub fn jet_unicode_is_whitespace(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_whitespace)
+}
+
+pub fn jet_unicode_is_ascii(s: &String) -> bool {
+    s.is_ascii()
+}
+
+pub fn jet_unicode_title(s: &String) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut word_start = true;
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            if word_start {
+                out.extend(ch.to_uppercase());
+            } else {
+                out.extend(ch.to_lowercase());
+            }
+            word_start = false;
+        } else {
+            out.push(ch);
+            word_start = true;
+        }
+    }
+    out
+}
+
+fn jet_unicode_padding(fill: &String, width: usize) -> String {
+    if width == 0 || fill.is_empty() {
+        return String::new();
+    }
+    fill.chars().cycle().take(width).collect()
+}
+
+pub fn jet_unicode_pad_start(s: &String, width: i64, fill: &String) -> String {
+    let want = (width - s.chars().count() as i64).max(0) as usize;
+    format!("{}{}", jet_unicode_padding(fill, want), s)
+}
+
+pub fn jet_unicode_pad_end(s: &String, width: i64, fill: &String) -> String {
+    let want = (width - s.chars().count() as i64).max(0) as usize;
+    format!("{}{}", s, jet_unicode_padding(fill, want))
+}
+
+pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, String)> {
+    s.find(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
+}
 `;
 
 const tablesBody = `

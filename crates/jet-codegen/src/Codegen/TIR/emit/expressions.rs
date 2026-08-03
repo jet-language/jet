@@ -1078,6 +1078,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
                 }
                 TBuiltinOp::Trim => format!("jet_unicode_trim(&({}))", recv),
+                TBuiltinOp::TrimStart => format!("{}jet_unicode_trim_start(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::TrimEnd => format!("{}jet_unicode_trim_end(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::Split => {
                     format!("jet_iter_string_split(&({}), &{})", recv, a(0))
                 },
@@ -1095,6 +1097,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
+                TBuiltinOp::PadStart => format!("{}jet_unicode_pad_start(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
+                TBuiltinOp::PadEnd => format!("{}jet_unicode_pad_end(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
+                TBuiltinOp::StringIndexOf => format!("{}jet_unicode_index_of(&({}), &({}))", cx.root_prefix, recv, a(0)),
+                TBuiltinOp::StringCount => format!("{}jet_unicode_count(&({}), &({}))", cx.root_prefix, recv, a(0)),
+                TBuiltinOp::StringIsAlphabetic => format!("{}jet_unicode_is_alphabetic(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsNumeric => format!("{}jet_unicode_is_numeric(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsWhitespace => format!("{}jet_unicode_is_whitespace(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsAscii => format!("{}jet_unicode_is_ascii(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringToTitle => format!("{}jet_unicode_title(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringSplitOnce { tuple_struct } => format!(
+                    "{}jet_unicode_split_once(&({}), &({})).map(|(__before, __after)| {} {{ user_before: __before, user_after: __after }})",
+                    cx.root_prefix, recv, a(0), tuple_struct
+                ),
                 TBuiltinOp::ToUpper => format!("jet_unicode_upper(&({}))", recv),
                 TBuiltinOp::ToLower => format!("jet_unicode_lower(&({}))", recv),
                 TBuiltinOp::Repeat => format!("({}).repeat({} as usize)", recv, a(0)),
@@ -1150,6 +1165,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     recv,
                     a(0)
                 ),
+                TBuiltinOp::SetIntersection => format!(
+                    "({}).intersection(&({})).cloned().collect::<std::collections::HashSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SetDifference => format!(
+                    "({}).difference(&({})).cloned().collect::<std::collections::HashSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SetSymmetricDifference => format!(
+                    "({}).symmetric_difference(&({})).cloned().collect::<std::collections::HashSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SetIsSubset => format!("({}).is_subset(&({}))", recv, a(0)),
+                TBuiltinOp::SetIsSuperset => format!("({}).is_superset(&({}))", recv, a(0)),
+                TBuiltinOp::SetIsDisjoint => format!("({}).is_disjoint(&({}))", recv, a(0)),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",
@@ -1166,6 +1196,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     recv,
                     a(0)
                 ),
+                TBuiltinOp::SortedSetIntersection => format!(
+                    "({}).intersection(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SortedSetDifference => format!(
+                    "({}).difference(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SortedSetSymmetricDifference => format!(
+                    "({}).symmetric_difference(&({})).cloned().collect::<std::collections::BTreeSet<_>>()",
+                    recv, a(0)
+                ),
+                TBuiltinOp::SortedSetIsSubset => format!("({}).is_subset(&({}))", recv, a(0)),
+                TBuiltinOp::SortedSetIsSuperset => format!("({}).is_superset(&({}))", recv, a(0)),
+                TBuiltinOp::SortedSetIsDisjoint => format!("({}).is_disjoint(&({}))", recv, a(0)),
                 TBuiltinOp::PriorityQueueFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BinaryHeap<_>>()",

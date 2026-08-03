@@ -1074,9 +1074,21 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
-        ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
+        ("trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_title" | "to_string", 0) => {
+            Some(Some(Type::String))
+        }
+        ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii", 0) => {
+            Some(Some(Type::Bool))
+        }
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
+        ("pad_start" | "pad_end", 2) => Some(Some(Type::String)),
+        ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("count", 1) => Some(Some(Type::Int)),
+        ("split_once", 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
+            ("before".to_string(), Box::new(Type::String)),
+            ("after".to_string(), Box::new(Type::String)),
+        ]))))),
         // D-STR-AFTER1: first-occurrence substring split; `sep` absent -> the
         // whole original string (mirrors `.replace`'s no-match-is-identity).
         ("after" | "before", 1) => Some(Some(Type::String)),
@@ -1543,6 +1555,10 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
+        ("intersection" | "difference" | "symmetric_difference", 1) => {
+            Some(Some(set_of_elem()))
+        }
+        ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         _ => None,
     }
@@ -1561,6 +1577,10 @@ fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<O
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
+        ("intersection" | "difference" | "symmetric_difference", 1) => {
+            Some(Some(set_of_elem()))
+        }
+        ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         ("first" | "last", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
         _ => None,
@@ -1962,9 +1982,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::String => match method {
-            "contains" | "starts_with" | "ends_with" | "split" => Some(vec![Type::String]),
+            "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "count"
+            | "split_once" => Some(vec![Type::String]),
             "from_bytes" => Some(vec![Type::List(Box::new(u8t()))]),
             "replace" => Some(vec![Type::String, Type::String]),
+            "pad_start" | "pad_end" => Some(vec![Type::Int, Type::String]),
             "slice" => Some(vec![Type::Int, Type::Int]),
             "repeat" => Some(vec![Type::Int]),
             _ => Some(vec![]),
@@ -2216,8 +2238,21 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "add" | "has" | "remove" => Some(vec![elem]),
-                "union" => Some(vec![Type::Apply {
+                "union" | "intersection" | "difference" | "symmetric_difference"
+                | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
+                    args: vec![elem],
+                }]),
+                _ => Some(vec![]),
+            }
+        }
+        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => {
+            let elem = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "add" | "has" | "remove" => Some(vec![elem.clone()]),
+                "union" | "intersection" | "difference" | "symmetric_difference"
+                | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
+                    name: Syntax::TYPE_SORTED_SET.to_string(),
                     args: vec![elem],
                 }]),
                 _ => Some(vec![]),
