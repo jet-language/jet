@@ -604,7 +604,7 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0108",
                                 format!(
-                                    "`{}` says it holds {}, but the value is {}",
+                                    "`{}` says its type is {}, but the value is {}",
                                     b.name,
                                     annot.show(),
                                     actual.show()

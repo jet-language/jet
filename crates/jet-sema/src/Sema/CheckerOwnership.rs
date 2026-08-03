@@ -2312,7 +2312,7 @@ impl<'a> Checker<'a> {
         };
         self.diags.push(Diagnostic::error(
             "E0220",
-            format!("`{read_name}` cannot be read while `{view}` holds a live {window} into it"),
+            format!("`{read_name}` cannot be read while `{view}` has a live {window} into it"),
             format!(
                 "`{view}` is an exclusive window into `{place_name}`; reading the owner beside that window would be rejected after lowering"
             ),
@@ -4039,7 +4039,7 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E0121",
             format!("`{moved_place}` was given away earlier, so it can't be used here"),
-            "after a value moves somewhere else, the old name no longer holds it".to_string(),
+            "after a value moves to another name, the old name no longer gives access to it".to_string(),
             fix,
             Some(span),
         ));

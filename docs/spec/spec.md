@@ -2205,7 +2205,7 @@ caller's group and is cancelled and joined at that outer scope's exit.
 #### Borrowed captures in a group child (D-TASKBORROW1=A)
 
 A lexical group joins every child before its block returns, so a child may
-borrow places the owner still holds — the loan opens before the child launches
+borrow places the owner still gives access to — the loan opens before the child launches
 and closes at the join. Reads are borrowed freely. A write borrow is admitted
 only where the compiler proves the places never overlap; distinct fields and
 distinct constant indexes are disjoint, and anything dynamic is treated as

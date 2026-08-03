@@ -2023,7 +2023,7 @@ impl<'a> Checker<'a> {
                     "E0120",
                     format!("`{name}` was not moved here, so its contents cannot be taken apart"),
                     format!(
-                        "`{name}` is a read-only parameter, and `{ty}` contains a value that cannot be copied"
+                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart"
                     ),
                     format!(
                         "change the parameter to `{name}: {}{ty}`, or inspect it without binding its contents",

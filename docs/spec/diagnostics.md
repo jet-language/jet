@@ -1038,7 +1038,7 @@ named cell.
 | E0217 | A Cell guard is stored inside an unsupported value or captured by a lambda. | A Cell guard is a temporary loan handle. Storing it inside another value could keep the loan after its local scope ends. | Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections. |
 | E0218 | `mem.pin` needs a write window into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with write access instead of a copied value. | Write `mem.pin(&place)`. |
 | E0219 | A pinned place is moved, replaced, or resized while a pin is still live. | The pin promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place. | Finish using the pin before changing the place, or narrow the pin's scope. |
-| E0220 | A place is read through its owner while an exclusive write window into it is still live. | An exclusive window (a pin or a mutable view) already holds that storage; reading the owner beside it would be rejected after lowering. | Read or edit through the live window name instead of the owner. |
+| E0220 | A place is read through its owner while an exclusive write window into it is still live. | An exclusive window (a pin or a mutable view) already gives write access to that storage; reading the owner beside it would be rejected after lowering. | Read or edit through the live window name instead of the owner. |
 | E0221 | A struct field’s strong `Shared` edge can form a reference cycle. | Strong `Shared` handles keep each other alive; a cycle through them never frees. | Use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong handle. |
 
 ## Library authoring diagnostics (E2-M6)
@@ -1303,7 +1303,7 @@ parse error (E0426) pointing at the new spelling —
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type.{ uninit }`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
+| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type.{ uninit }`, so no value is available until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
 | E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>.{ uninit }` ``, e.g. `` `buffer := [U8#4096].{ uninit }` ``. |
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
@@ -2028,7 +2028,7 @@ them:
 | `` `#Wasm`/`#JS` is retired — it no longer does anything ``. | the per-backend target markers were folded into one family. | Write `#Target(Wasm)` or `#Target(JS)` instead (D-MARK-TARGET1=A). |
 | `` `#Suppress` is retired — it no longer does anything ``. | a block-scoped suppression marker isn't the discard mechanism anymore. | Call `.drop("reason")` on the unused value instead (D-MARK-DISCARD1=A). |
 | `` `#Uninit` is retired — it no longer does anything ``. | stored uninitialized-sentinel fields were removed outright. | Give the field a real initial value (D-UNINIT-SENTINEL1). |
-| `` `#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Hold an owned value instead (D-MEM1/S3). |
+| `` `#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Keep an owned value instead (D-MEM1/S3). |
 
 Anything else unrecognized gets an ordinary "did you mean `X`?" (edit
 distance ≤ 2 against the plane's vocabulary) or, with no close match, a
