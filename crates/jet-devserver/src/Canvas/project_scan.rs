@@ -520,22 +520,59 @@ fn output_kind_label(kind: &jet_driver::Package::PackageOutputKind) -> &'static 
     }
 }
 
+fn output_payload_json(payload: &jet_driver::Package::OutputPayload) -> String {
+    use jet_driver::Package::OutputPayload;
+    match payload {
+        OutputPayload::Null => "null".to_string(),
+        OutputPayload::Bool(value) => value.to_string(),
+        OutputPayload::Number(value) => value.clone(),
+        OutputPayload::String(value) => json_str(value),
+        OutputPayload::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(output_payload_json)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        OutputPayload::Object(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(name, value)| format!("{}:{}", json_str(name), output_payload_json(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
+}
+
+fn field_provenance_json(
+    facts: &jet_driver::Package::PackageFacts,
+    field: &str,
+) -> String {
+    format!(
+        "[{}]",
+        facts
+            .field_provenance(field)
+            .iter()
+            .map(|origin| json_str(origin))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 fn canonical_outputs_json(facts: &jet_driver::Package::PackageFacts) -> String {
     facts
         .outputs
-        .values()
-        .map(|output| {
+        .iter()
+        .map(|(name, output)| {
             format!(
-                "{{\"name\":{},\"kind\":{},\"entry\":{},\"fields\":{{{}}}}}",
+                "{{\"name\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":{}}}",
                 json_str(&output.name),
                 json_str(output_kind_label(&output.kind)),
                 json_optional_str(output.entry.as_deref()),
-                output
-                    .fields
-                    .iter()
-                    .map(|(name, value)| format!("{}:{}", json_str(name), json_str(value)))
-                    .collect::<Vec<_>>()
-                    .join(","),
+                output_payload_json(&output.payload),
+                field_provenance_json(facts, &format!("outputs.{name}")),
             )
         })
         .collect::<Vec<_>>()
@@ -595,16 +632,18 @@ fn canonical_package_targets_project_json(project_root: &Path, dir: &Path) -> Op
     Some(
         facts
             .outputs
-            .values()
-            .map(|output| {
+            .iter()
+            .map(|(name, output)| {
                 format!(
-                    "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":{}}}",
+                    "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":{}}}",
                     json_str(&facts.name),
                     json_str(&package_path),
                     json_str(&manifest_rel),
                     json_str(&output.name),
                     json_str(output_kind_label(&output.kind)),
                     json_optional_str(output.entry.as_deref()),
+                    output_payload_json(&output.payload),
+                    field_provenance_json(&facts, &format!("outputs.{name}")),
                 )
             })
             .collect(),
@@ -694,11 +733,44 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
                 .map(dev_service_project_json)
                 .collect::<Vec<_>>()
                 .join(",");
+            let environments = plan
+                .environment_names
+                .iter()
+                .map(|name| json_str(name))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sources = plan
+                .source_files
+                .iter()
+                .map(|path| json_str(path))
+                .collect::<Vec<_>>()
+                .join(",");
+            let profiles = plan
+                .profiles
+                .iter()
+                .map(|profile| json_str(&profile.name))
+                .collect::<Vec<_>>()
+                .join(",");
+            let languages = plan
+                .languages
+                .iter()
+                .map(|language| json_str(&language.name))
+                .collect::<Vec<_>>()
+                .join(",");
+            let reload = match &plan.lifecycle.reload {
+                jet_env_model::ModuleEval::ReloadPolicy::Never => "never".to_string(),
+                jet_env_model::ModuleEval::ReloadPolicy::Prompt => "prompt".to_string(),
+                jet_env_model::ModuleEval::ReloadPolicy::Watch { .. } => "watch".to_string(),
+            };
             EnvProjectJson {
                 envs: format!(
-                    "{{\"path\":{},\"prompt\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
+                    "{{\"path\":{},\"prompt\":{},\"environments\":[{}],\"sources\":[{}],\"profiles\":[{}],\"languages\":[{}],\"reload\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
                     json_str(jet_driver::Syntax::ENV_FILE),
                     json_str(plan.prompt.as_deref().unwrap_or(jet_driver::Syntax::JETPACK_PROMPT_LABEL)),
+                    environments,
+                    sources,
+                    profiles,
+                    json_str(&reload),
                     packages,
                     secrets
                 ),

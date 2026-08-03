@@ -71,6 +71,21 @@ pub struct Realized {
     pub producer: super::Store::ProducerRecord,
 }
 
+/// Immutable Nix identity prepared from the resolved request and output bytes.
+/// The Store receives the same facts through the realization record; no ref
+/// spelling can stand in for an output digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreparedNixIdentity {
+    pub normalized_source: String,
+    pub normalized_node: String,
+    pub normalized_alias: String,
+    pub normalized_query: String,
+    pub lock_digest: String,
+    pub named_output_digests: BTreeMap<String, String>,
+    pub envelope_digest: String,
+    pub cache_identity: super::Store::CacheIdentity,
+}
+
 pub(super) fn producer_record(
     provider: &str,
     immutable_source: &str,
@@ -104,6 +119,34 @@ fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheI
         policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
         platform: super::Envelope::host_platform(),
     }
+}
+
+/// One adapter action identity for both cache expectation and realization.
+/// Executable hooks use the exact approval subject; copy/prebuilt adapters keep
+/// their non-executable identity and never enter the hook trust path.
+pub(crate) fn adapter_action_identity(
+    plan: &AdapterPlan,
+    recipe: &BuildRecipe,
+    source_digest: &str,
+    platform: &str,
+) -> String {
+    if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
+        recipe.build_identity_for_source(&plan.name, &plan.source, source_digest, platform)
+    } else {
+        recipe.build_identity(&plan.name, source_digest, platform)
+    }
+}
+
+pub(crate) fn adapter_cache_identity(
+    source_digest: &str,
+    action_identity: &str,
+    ctx: &Ctx,
+) -> super::Store::CacheIdentity {
+    cache_identity(
+        source_digest,
+        &format!("adapter-v1:{action_identity}"),
+        ctx,
+    )
 }
 
 fn provider_cache_identity(
@@ -327,9 +370,17 @@ pub fn adapter_cache_expectation(
     let staged = stage_adapter_source(&source_ref, ctx)?;
     let recipe = adapter_recipe_to_build(&plan.recipe);
     let source_hash = tree_fingerprint(&staged);
-    let build_identity = recipe.build_identity(
-        &plan.name,
-        &source_hash,
+    let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
+        .map_err(ProviderError::Adapter)?;
+    let identity_source = if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
+        &source_fingerprint
+    } else {
+        &source_hash
+    };
+    let build_identity = adapter_action_identity(
+        plan,
+        &recipe,
+        identity_source,
         &super::Envelope::host_platform(),
     );
     let id_input = format!(
@@ -338,18 +389,241 @@ pub fn adapter_cache_expectation(
     );
     let fp = SHA256::sha256_hex(id_input.as_bytes());
     Ok(super::Store::CacheExpectation {
-        identity: cache_identity(
-            &super::Envelope::try_output_hash_of(&staged.to_string_lossy())
-                .map_err(ProviderError::Adapter)?,
-            &format!("adapter-v1:{build_identity}"),
-            ctx,
-        ),
+        identity: adapter_cache_identity(&source_fingerprint, &build_identity, ctx),
         owned_output: Some(
             ctx.store_dir
                 .join(format!("{}-adapter-{}", plan.name, &fp[..12])),
         ),
         allow_unsigned_local: true,
     })
+}
+
+fn normalize_nix_identity(value: &str) -> String {
+    value.trim().replace('\\', "/")
+}
+
+pub(crate) fn nix_identity_parts(
+    spec: &RefSpec,
+    table: &SourceTable,
+) -> (String, String, String, String) {
+    let source = match &spec.source {
+        Source::Named(name) => table.upstream(name).unwrap_or(name),
+        _ => spec.source.label(),
+    };
+    (
+        normalize_nix_identity(source),
+        normalize_nix_identity(&flake_ref(spec, table)),
+        normalize_nix_identity(spec.source.label()),
+        normalize_nix_identity(&spec.package),
+    )
+}
+
+pub(crate) fn project_lock_digest(project: Option<&Path>) -> Result<String, ProviderError> {
+    let Some(project) = project.filter(|path| path.is_dir()) else {
+        return Ok(String::new());
+    };
+    let path = super::Store::lock_path(project);
+    match std::fs::read(&path) {
+        Ok(raw) => Ok(SHA256::sha256_hex(&raw)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(ProviderError::BadOutput(format!(
+            "could not read project lock `{}`: {error}",
+            path.display()
+        ))),
+    }
+}
+
+pub(crate) fn envelope_digest(envelope: &super::Envelope::Envelope) -> String {
+    SHA256::sha256_hex(
+        format!(
+            "jet-nix-envelope-v1\noutput-hash={}\nplatform={}\nsignature={}\nprovenance={}\n",
+            envelope.output_hash, envelope.platform, envelope.signature, envelope.provenance
+        )
+        .as_bytes(),
+    )
+}
+
+fn primary_nix_output_digest(
+    named_output_digests: &BTreeMap<String, String>,
+) -> Option<String> {
+    named_output_digests
+        .get("out")
+        .or_else(|| named_output_digests.get("bin"))
+        .cloned()
+}
+
+/// Hash every Nix output from its current bytes and prepare the identity that
+/// must survive Store registration. Existing project locks pin the primary
+/// output digest; a missing lock is left for the first successful realization.
+pub(crate) fn prepare_nix_identity(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+    realized: &Realized,
+) -> Result<PreparedNixIdentity, ProviderError> {
+    let mut named_output_digests = BTreeMap::new();
+    for (name, path) in &realized.named_outputs {
+        if name.trim().is_empty() || path.trim().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix provider returned an empty named output `{name}`"
+            )));
+        }
+        let digest = super::Envelope::try_output_hash_of(path).map_err(|reason| {
+            ProviderError::BadOutput(format!(
+                "Nix output `{name}` at `{path}` could not be hashed from its bytes: {reason}"
+            ))
+        })?;
+        if digest.trim().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix output `{name}` at `{path}` has an empty byte digest"
+            )));
+        }
+        named_output_digests.insert(name.clone(), digest);
+    }
+    let output_hash = primary_nix_output_digest(&named_output_digests).ok_or_else(|| {
+        ProviderError::BadOutput("Nix provider returned no non-empty `out` or `bin` output".into())
+    })?;
+    if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
+        if let Some((_, locked)) = super::Lock::nix_realization(project, &spec.raw) {
+            if locked.output_hash != output_hash {
+                return Err(ProviderError::BadOutput(format!(
+                    "Nix output digest mismatch for `{}`: lock has `{}`, realized bytes have `{output_hash}`",
+                    spec.raw, locked.output_hash
+                )));
+            }
+        }
+    }
+    let (normalized_source, normalized_node, normalized_alias, normalized_query) =
+        nix_identity_parts(spec, table);
+    let envelope = super::Envelope::Envelope {
+        output_hash,
+        platform: super::Envelope::host_platform(),
+        signature: String::new(),
+        provenance: format!("{} via nix", spec.raw),
+    };
+    let cache_identity = super::Store::CacheIdentity {
+        source_fingerprint: envelope.output_hash.clone(),
+        recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+        policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+        platform: envelope.platform.clone(),
+    };
+    Ok(PreparedNixIdentity {
+        normalized_source,
+        normalized_node,
+        normalized_alias,
+        normalized_query,
+        lock_digest: project_lock_digest(ctx.project_dir)?,
+        named_output_digests,
+        envelope_digest: envelope_digest(&envelope),
+        cache_identity,
+    })
+}
+
+fn prepared_nix_facts(identity: &PreparedNixIdentity) -> BTreeMap<String, String> {
+    let mut facts = BTreeMap::from([
+        ("nix.identity.source".into(), identity.normalized_source.clone()),
+        ("nix.identity.node".into(), identity.normalized_node.clone()),
+        ("nix.identity.alias".into(), identity.normalized_alias.clone()),
+        ("nix.identity.query".into(), identity.normalized_query.clone()),
+        ("nix.lock.digest".into(), identity.lock_digest.clone()),
+        ("nix.envelope.digest".into(), identity.envelope_digest.clone()),
+        (
+            "nix.cache.source_fingerprint".into(),
+            identity.cache_identity.source_fingerprint.clone(),
+        ),
+        (
+            "nix.cache.recipe_fingerprint".into(),
+            identity.cache_identity.recipe_fingerprint.clone(),
+        ),
+        (
+            "nix.cache.policy_fingerprint".into(),
+            identity.cache_identity.policy_fingerprint.clone(),
+        ),
+        (
+            "nix.cache.platform".into(),
+            identity.cache_identity.platform.clone(),
+        ),
+    ]);
+    for (name, digest) in &identity.named_output_digests {
+        facts.insert(format!("nix.output.{name}.digest"), digest.clone());
+    }
+    facts
+}
+
+pub(crate) fn validate_nix_lock_before_store(
+    ctx: &Ctx,
+    realized: &Realized,
+) -> Result<(), ProviderError> {
+    if realized.producer.provider != "nix" {
+        return Ok(());
+    }
+    let Some(expected) = realized.producer.facts.get("nix.lock.digest") else {
+        return Err(ProviderError::BadOutput(
+            "Nix realization is missing its prepared lock digest".into(),
+        ));
+    };
+    let current = project_lock_digest(ctx.project_dir)?;
+    if &current != expected {
+        return Err(ProviderError::BadOutput(format!(
+            "Nix project lock changed before Store registration: prepared `{expected}`, current `{current}`"
+        )));
+    }
+    Ok(())
+}
+
+/// Publish Nix lock state only after Store returned a registered entry.
+/// Missing or non-directory project roots intentionally do nothing.
+pub(crate) fn record_nix_lock_after_store(
+    ctx: &Ctx,
+    roots: &super::Store::Roots,
+    entry: &super::Store::StoreEntry,
+) -> Result<super::Store::StoreEntry, ProviderError> {
+    let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
+        return Ok(entry.clone());
+    };
+    if entry.reference.is_empty()
+        || entry.envelope.output_hash.is_empty()
+        || entry.cache_identity.source_fingerprint != entry.envelope.output_hash
+        || entry.cache_identity.recipe_fingerprint != SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes())
+    {
+        return Ok(entry.clone());
+    }
+    let Ok(producer) = super::Store::ProducerRecord::decode(&entry.producer_record) else {
+        return Ok(entry.clone());
+    };
+    if producer.provider != "nix" {
+        return Ok(entry.clone());
+    }
+    let Some(expected_lock_digest) = producer.facts.get("nix.lock.digest") else {
+        return Err(ProviderError::BadOutput(
+            "Nix Store entry is missing its prepared lock digest".into(),
+        ));
+    };
+    let current_lock_digest = project_lock_digest(Some(project))?;
+    if &current_lock_digest != expected_lock_digest {
+        return Err(ProviderError::BadOutput(format!(
+            "Nix project lock changed after Store registration: prepared `{expected_lock_digest}`, current `{current_lock_digest}`"
+        )));
+    }
+    super::Lock::record_nix_realization(
+        project,
+        &entry.name,
+        &entry.version,
+        &entry.reference,
+        &entry.out,
+        super::Lock::LockEnvelope {
+            output_hash: entry.envelope.output_hash.clone(),
+            platform: entry.envelope.platform.clone(),
+            signature: entry.envelope.signature.clone(),
+            provenance: entry.envelope.provenance.clone(),
+        },
+    )
+    .map_err(ProviderError::BadOutput)?;
+    let lock_digest = project_lock_digest(Some(project))?;
+    super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest)
+        .map_err(|error| ProviderError::BadOutput(format!(
+            "could not refresh the Nix Store producer after lock publication: {error}"
+        )))
 }
 
 /// How a dependency was realized, for the `jet build` per-package report
@@ -456,7 +730,7 @@ pub struct Ctx<'a> {
 /// D-JPK-OFFLINE2=B: the stable recipe id for a Nix-provider realization. Hashed
 /// into the cache identity's `recipe_fingerprint`, recomputed offline from this
 /// constant so a lock-backed reuse reproduces it without any Nix/network call.
-const NIX_RECIPE_ID: &str = "nix-compat-v1";
+pub(crate) const NIX_RECIPE_ID: &str = "nix-compat-v1";
 
 /// Translate a Jetpack ref into the provider's flake ref. Users never type
 /// `#`; this is the single place `:` becomes the Nix selector. A named source
@@ -517,8 +791,8 @@ pub fn nix_on_path() -> bool {
 //
 // The first-party core resolver owns realization; providers are extensions
 // behind one trait. `core` realizes first-party Jet packages (no Nix); `nix`
-// leverages nixpkgs. Today every built-in source routes to `nix`; source-aware
-// dispatch (named sources picking `core` vs `nix`) is R1, gated on D-JPK16/17.
+// leverages nixpkgs. Source classification is performed once at the provider
+// boundary, so every caller shares the same dispatch and evidence.
 // ──────────────────────────────────────────────
 
 /// A backend that realizes a ref into bytes + a `bin` dir. Both the first-party
@@ -560,21 +834,11 @@ impl Provider for NixProvider {
             None => run_nix(spec, table)?,
         };
         let mut realized = parse_realization(spec, &stdout)?;
-        // D-JPK-OFFLINE2=B: anchor the cache identity to the realized output's
-        // content hash (a locked identity, not the ref spelling — card #418) so a
-        // later offline reuse trusts re-hashed bytes, never text. `recipe`/
-        // `policy`/`platform` are reproducible offline from constants + host.
-        realized.cache_identity = super::Store::CacheIdentity {
-            source_fingerprint: if realized.envelope.output_hash.is_empty() {
-                realized.producer.source_digest.clone()
-            } else {
-                realized.envelope.output_hash.clone()
-            },
-            recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
-            policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
-            platform: super::Envelope::host_platform(),
-        };
+        let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
+        realized.cache_identity = identity.cache_identity.clone();
         let previous = realized.producer;
+        let mut facts = previous.facts;
+        facts.extend(prepared_nix_facts(&identity));
         realized.producer = super::Store::ProducerRecord::new(
             previous.provider,
             previous.immutable_source,
@@ -586,26 +850,9 @@ impl Provider for NixProvider {
                 realized.cache_identity.policy_fingerprint,
                 realized.cache_identity.platform
             ),
-            previous.facts,
+            facts,
         )
         .map_err(ProviderError::BadOutput)?;
-        // Record the locked identity + closure envelope so an offline realize can
-        // reuse this hangar copy after the same proof gate core refs use.
-        if let Some(project) = ctx.project_dir {
-            super::Lock::record_nix_realization(
-                project,
-                &realized.name,
-                &realized.version,
-                &spec.raw,
-                &realized.out,
-                super::Lock::LockEnvelope {
-                    output_hash: realized.envelope.output_hash.clone(),
-                    platform: realized.envelope.platform.clone(),
-                    signature: realized.envelope.signature.clone(),
-                    provenance: realized.envelope.provenance.clone(),
-                },
-            );
-        }
         Ok(realized)
     }
 }
@@ -1184,6 +1431,7 @@ pub(crate) fn realize(
 pub(crate) fn realize_adapter(
     plan: &AdapterPlan,
     ctx: &Ctx,
+    expected: &super::Store::CacheExpectation,
 ) -> Result<Realized, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
         ProviderError::Adapter(format!(
@@ -1195,11 +1443,25 @@ pub(crate) fn realize_adapter(
     let recipe = adapter_recipe_to_build(&plan.recipe);
     let recipe_hash = recipe.recipe_hash();
     let source_hash = tree_fingerprint(&staged);
-    let build_identity = recipe.build_identity(
-        &plan.name,
-        &source_hash,
+    let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
+        .map_err(ProviderError::Adapter)?;
+    let identity_source = if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
+        &source_fingerprint
+    } else {
+        &source_hash
+    };
+    let build_identity = adapter_action_identity(
+        plan,
+        &recipe,
+        identity_source,
         &super::Envelope::host_platform(),
     );
+    let identity = adapter_cache_identity(&source_fingerprint, &build_identity, ctx);
+    if identity != expected.identity {
+        return Err(ProviderError::Adapter(
+            "adapter source or build identity changed after approval".to_string(),
+        ));
+    }
     let id_input = format!(
         "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nidentity={}\n",
         plan.name, plan.source, source_hash, build_identity
@@ -1256,13 +1518,6 @@ pub(crate) fn realize_adapter(
         &out,
         &format!("adapt:{}:{}", plan.name, plan.source),
         &format!("adapter:{build_identity}"),
-    );
-    let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
-        .map_err(ProviderError::Adapter)?;
-    let identity = cache_identity(
-        &source_fingerprint,
-        &format!("adapter-v1:{build_identity}"),
-        ctx,
     );
     let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
         .map_err(|d| ProviderError::Adapter(d.what))?
@@ -1563,7 +1818,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     let provisional_identity = super::Store::CacheIdentity {
         source_fingerprint: envelope.output_hash.clone(),
         recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
-        policy_fingerprint: "pending-provider-policy".into(),
+        policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(false),
         platform: super::Envelope::host_platform(),
     };
     let mut replay_facts = BTreeMap::from([

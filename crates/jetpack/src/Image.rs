@@ -1,8 +1,8 @@
 //! D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the native `.Oci`
-//! image-layout builder. Builds a single-layer OCI image directly from an
-//! already-realized package binary plus optional `expose`/`env_vars`/`files`
-//! metadata (`ImagePlan`, `ModuleEval::Types`) — no Docker, no external OCI
-//! tooling.
+//! image-layout builder. Builds one deterministic native layer, optionally
+//! appended to a validated local OCI base, directly from an already-realized
+//! package binary plus optional `expose`/`env_vars`/`files` metadata
+//! (`ImagePlan`, `ModuleEval::Types`) — no Docker, no external OCI tooling.
 //!
 //! **Deterministic by construction** (this is the hard, budgeted part): every
 //! tar entry uses a fixed mtime (Unix epoch 0), uid/gid 0, and no uname/gname;
@@ -23,8 +23,8 @@
 //! today; gzip layers are a follow-up once/if a native (I6-safe) deflate
 //! exists.
 //!
-//! OCI Image Format Spec layout implemented (the minimal single-layer,
-//! single-platform subset): `oci-layout`, `index.json`, and
+//! OCI Image Format Spec layout implemented (the minimal uncompressed local
+//! subset): `oci-layout`, `index.json`, and
 //! `blobs/sha256/<digest>` for the layer tar, the image config, and the
 //! manifest.
 
@@ -103,24 +103,63 @@ pub struct BuiltImage {
 /// human label recorded in `index.json`'s annotations (e.g. the `image.<name>`
 /// contribution's name) — cosmetic only, never mixed into any digest.
 pub fn build(spec: &BuildSpec, out_dir: &Path, ref_name: &str) -> io::Result<BuiltImage> {
+    build_with_base(spec, out_dir, ref_name, None)
+}
+
+/// Build an OCI layout and append the new deterministic layer to a local OCI
+/// base layout. The base is a directory, not a registry reference; callers
+/// must obtain it through a separately verified transport before invoking this
+/// function.
+pub fn build_with_base(
+    spec: &BuildSpec,
+    out_dir: &Path,
+    ref_name: &str,
+    base: Option<&Path>,
+) -> io::Result<BuiltImage> {
     let mut files: Vec<&LayerFile> = spec.files.iter().collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
+    validate_layer_files(&files)?;
 
     let layer_tar = build_tar(&files);
     let layer_digest = SHA256::sha256_hex(&layer_tar);
 
-    let config_json = build_config_json(spec, &layer_digest);
+    let base = base.map(load_base).transpose()?;
+    let base_layers = base
+        .as_ref()
+        .map(|base| base.layers.clone())
+        .unwrap_or_default();
+    let mut diff_ids = base
+        .as_ref()
+        .map(|base| base.diff_ids.clone())
+        .unwrap_or_default();
+    diff_ids.push(format!("sha256:{layer_digest}"));
+
+    let config_json = build_config_json_with_diff_ids(spec, &diff_ids);
     let config_digest = SHA256::sha256_hex(config_json.as_bytes());
 
-    let manifest_json = build_manifest_json(
-        &config_digest,
-        config_json.len(),
-        &layer_digest,
-        layer_tar.len(),
-    );
+    let mut layers = base_layers;
+    layers.push(LayerDescriptor {
+        media_type: MEDIA_TYPE_LAYER.to_string(),
+        digest: format!("sha256:{layer_digest}"),
+        size: layer_tar.len() as u64,
+    });
+    let manifest_json = build_manifest_json_with_layers(&config_digest, config_json.len(), &layers);
     let manifest_digest = SHA256::sha256_hex(manifest_json.as_bytes());
 
     fs::create_dir_all(out_dir.join("blobs").join("sha256"))?;
+    if let Some(base) = base {
+        for layer in &layers[..layers.len().saturating_sub(1)] {
+            let source = base.root.join("blobs").join("sha256").join(digest_hex(&layer.digest)?);
+            let bytes = fs::read(&source)?;
+            if bytes.len() as u64 != layer.size || digest_for(&bytes) != layer.digest {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("base OCI layer `{}` failed its digest or size check", layer.digest),
+                ));
+            }
+            write_blob(out_dir, &layer.digest, &bytes)?;
+        }
+    }
     write_blob(out_dir, &layer_digest, &layer_tar)?;
     write_blob(out_dir, &config_digest, config_json.as_bytes())?;
     write_blob(out_dir, &manifest_digest, manifest_json.as_bytes())?;
@@ -137,8 +176,102 @@ pub fn build(spec: &BuildSpec, out_dir: &Path, ref_name: &str) -> io::Result<Bui
     })
 }
 
+/// Copy a validated local OCI layout to another local layout root. Every
+/// regular file is compared before reuse; symlinks and special files are not
+/// allowed in an image layout. This is the local half of `--push`; network
+/// registry transport remains an explicit caller concern.
+pub fn copy_layout(source: &Path, destination: &Path) -> io::Result<()> {
+    let _ = load_base(source)?;
+    if source == destination {
+        return Ok(());
+    }
+    let source = fs::canonicalize(source)?;
+    let destination_probe = if destination.exists() {
+        fs::canonicalize(destination)?
+    } else {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| invalid("OCI copy destination has no parent"))?;
+        fs::canonicalize(parent)?.join(
+            destination
+                .file_name()
+                .ok_or_else(|| invalid("OCI copy destination has no name"))?,
+        )
+    };
+    if destination_probe == source || destination_probe.starts_with(&source) {
+        return Err(invalid("OCI copy destination cannot be inside the source layout"));
+    }
+    if destination.exists() && !destination.is_dir() {
+        return Err(invalid("OCI copy destination is not a directory"));
+    }
+    fs::create_dir_all(destination)?;
+    copy_layout_tree(source, destination)
+}
+
+fn copy_layout_tree(source: &Path, destination: &Path) -> io::Result<()> {
+    let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&from)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() && !metadata.is_file() {
+            return Err(invalid("OCI layout contains an unsupported filesystem node"));
+        }
+        if metadata.is_dir() {
+            fs::create_dir_all(&to)?;
+            copy_layout_tree(&from, &to)?;
+        } else if to.is_file() {
+            if fs::read(&from)? != fs::read(&to)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("OCI copy destination has conflicting `{}`", to.display()),
+                ));
+            }
+        } else if to.exists() {
+            return Err(invalid("OCI copy destination has a conflicting node"));
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct LayerDescriptor {
+    media_type: String,
+    digest: String,
+    size: u64,
+}
+
+#[derive(Debug, Clone)]
+struct BaseLayout {
+    root: PathBuf,
+    layers: Vec<LayerDescriptor>,
+    diff_ids: Vec<String>,
+}
+
 fn write_blob(out_dir: &Path, digest: &str, data: &[u8]) -> io::Result<()> {
-    fs::write(out_dir.join("blobs").join("sha256").join(digest), data)
+    let path = out_dir
+        .join("blobs")
+        .join("sha256")
+        .join(digest_hex(digest)?);
+    if path.is_file() {
+        if fs::read(&path)? == data {
+            return Ok(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("OCI blob `{digest}` already has conflicting bytes"),
+        ));
+    }
+    if path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI blob destination is not a regular file",
+        ));
+    }
+    fs::write(path, data)
 }
 
 fn write_index(
@@ -160,9 +293,8 @@ fn write_index(
 /// The OCI image config (minimal subset: `architecture`/`os`/`config`/`rootfs`;
 /// no `created`/`history` — an embedded build timestamp is exactly the kind of
 /// nondeterminism this builder exists to avoid).
-fn build_config_json(spec: &BuildSpec, layer_digest: &str) -> String {
-    let env_arr = spec
-        .env
+fn build_config_json_with_diff_ids(spec: &BuildSpec, diff_ids: &[String]) -> String {
+    let env_arr = sorted_env(&spec.env)
         .iter()
         .map(|(k, v)| JSON::quote(&format!("{k}={v}")))
         .collect::<Vec<_>>()
@@ -187,27 +319,224 @@ fn build_config_json(spec: &BuildSpec, layer_digest: &str) -> String {
             JSON::quote(command)
         )
     });
+    let diff_ids = diff_ids
+        .iter()
+        .map(|digest| JSON::quote(digest))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"architecture\":\"{arch}\",\"os\":\"{os}\",\"config\":{{\"Env\":[{env_arr}],\"ExposedPorts\":{{{exposed}}},\"Entrypoint\":[{entrypoint_arr}],\"User\":\"{user}\"{health}}},\"rootfs\":{{\"type\":\"layers\",\"diff_ids\":[\"sha256:{layer_digest}\"]}}}}",
+        "{{\"architecture\":\"{arch}\",\"os\":\"{os}\",\"config\":{{\"Env\":[{env_arr}],\"ExposedPorts\":{{{exposed}}},\"Entrypoint\":[{entrypoint_arr}],\"User\":\"{user}\"{health}}},\"rootfs\":{{\"type\":\"layers\",\"diff_ids\":[{diff_ids}]}}}}",
         arch = ARCHITECTURE,
         os = OS,
         user = spec.user,
         health = health,
+        diff_ids = diff_ids,
     )
 }
 
-fn build_manifest_json(
+fn build_manifest_json_with_layers(
     config_digest: &str,
     config_size: usize,
-    layer_digest: &str,
-    layer_size: usize,
+    layers: &[LayerDescriptor],
 ) -> String {
+    let layers = layers
+        .iter()
+        .map(|layer| {
+            format!(
+                "{{\"mediaType\":{},\"digest\":{},\"size\":{}}}",
+                JSON::quote(&layer.media_type),
+                JSON::quote(&layer.digest),
+                layer.size
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"schemaVersion\":2,\"mediaType\":{mt},\"config\":{{\"mediaType\":{cmt},\"digest\":\"sha256:{config_digest}\",\"size\":{config_size}}},\"layers\":[{{\"mediaType\":{lmt},\"digest\":\"sha256:{layer_digest}\",\"size\":{layer_size}}}]}}",
+        "{{\"schemaVersion\":2,\"mediaType\":{mt},\"config\":{{\"mediaType\":{cmt},\"digest\":\"sha256:{config_digest}\",\"size\":{config_size}}},\"layers\":[{layers}]}}",
         mt = JSON::quote(MEDIA_TYPE_MANIFEST),
         cmt = JSON::quote(MEDIA_TYPE_CONFIG),
-        lmt = JSON::quote(MEDIA_TYPE_LAYER),
+        layers = layers,
     )
+}
+
+fn load_base(root: &Path) -> io::Result<BaseLayout> {
+    if !root.is_dir()
+        || !root.join("oci-layout").is_file()
+        || !root.join("index.json").is_file()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("OCI base `{}` is not a local OCI image layout", root.display()),
+        ));
+    }
+    let index = JSON::parse(&read_text(root.join("index.json"))?).map_err(io::Error::other)?;
+    let index = object(index, "OCI index")?;
+    let manifests = array(index.get("manifests"), "OCI index manifests")?;
+    let descriptor = object(
+        manifests
+            .first()
+            .ok_or_else(|| invalid("OCI base index has no manifest"))?,
+        "OCI manifest descriptor",
+    )?;
+    let manifest_digest = string_field(descriptor, "digest")?;
+    let manifest = JSON::parse(&read_blob(root, manifest_digest)?).map_err(io::Error::other)?;
+    let manifest = object(manifest, "OCI manifest")?;
+    let layer_values = array(manifest.get("layers"), "OCI manifest layers")?;
+    let mut layers = Vec::with_capacity(layer_values.len());
+    for value in layer_values {
+        let descriptor = object(value, "OCI layer descriptor")?;
+        let digest = string_field(descriptor, "digest")?.to_string();
+        let media_type = string_field(descriptor, "mediaType")?.to_string();
+        let size = number_field(descriptor, "size")?;
+        let bytes = read_blob(root, &digest)?;
+        if bytes.len() as u64 != size || digest_for(&bytes) != digest {
+            return Err(invalid("OCI base layer failed its digest or size check"));
+        }
+        layers.push(LayerDescriptor {
+            media_type,
+            digest,
+            size,
+        });
+    }
+    let config = object(
+        manifest
+            .get("config")
+            .ok_or_else(|| invalid("OCI manifest has no config descriptor"))?,
+        "OCI config descriptor",
+    )?;
+    let config_digest = string_field(config, "digest")?;
+    let config = JSON::parse(&read_blob(root, config_digest)?).map_err(io::Error::other)?;
+    let config = object(config, "OCI config")?;
+    let rootfs = object(
+        config
+            .get("rootfs")
+            .ok_or_else(|| invalid("OCI config has no rootfs"))?,
+        "OCI config rootfs",
+    )?;
+    let mut diff_ids = array(rootfs.get("diff_ids"), "OCI config diff_ids")?
+        .iter()
+        .map(|value| match value {
+            JSON::JSONValue::Str(digest) => {
+                digest_hex(digest)?;
+                Ok(digest.clone())
+            }
+            _ => Err(invalid("OCI config diff_ids contains a non-string")),
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    if diff_ids.len() != layers.len() {
+        return Err(invalid("OCI config diff_ids do not match manifest layers"));
+    }
+    if diff_ids.is_empty() && !layers.is_empty() {
+        diff_ids = layers.iter().map(|layer| layer.digest.clone()).collect();
+    }
+    Ok(BaseLayout {
+        root: root.to_path_buf(),
+        layers,
+        diff_ids,
+    })
+}
+
+fn validate_layer_files(files: &[&LayerFile]) -> io::Result<()> {
+    let mut paths = BTreeMap::new();
+    for file in files {
+        if file.path.is_empty()
+            || file.path.len() > 100
+            || file.path.starts_with('/')
+            || file.path.contains('\\')
+            || file.path.bytes().any(|byte| byte.is_ascii_control())
+        {
+            return Err(invalid("OCI layer path is not a safe tar path"));
+        }
+        let path = Path::new(&file.path);
+        if path.components().any(|component| {
+            matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))
+        }) {
+            return Err(invalid("OCI layer path escapes the image root"));
+        }
+        if file.data.len() > 512 * 1024 * 1024 {
+            return Err(invalid("OCI layer file exceeds the 512 MiB limit"));
+        }
+        if paths.insert(file.path.clone(), ()).is_some() {
+            return Err(invalid("OCI layer contains duplicate paths"));
+        }
+    }
+    let paths: Vec<_> = paths.keys().collect();
+    for pair in paths.windows(2) {
+        if pair[1].starts_with(&format!("{}/", pair[0])) {
+            return Err(invalid("OCI layer contains a file/directory path collision"));
+        }
+    }
+    Ok(())
+}
+
+fn read_text(path: PathBuf) -> io::Result<String> {
+    let bytes = fs::read(path)?;
+    String::from_utf8(bytes).map_err(|_| invalid("OCI JSON is not UTF-8"))
+}
+
+fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
+    let path = root.join("blobs").join("sha256").join(digest_hex(digest)?);
+    let metadata = fs::metadata(&path)?;
+    if !metadata.is_file() || metadata.len() > 512 * 1024 * 1024 {
+        return Err(invalid("OCI blob is not a regular file within its limit"));
+    }
+    let bytes = fs::read(path)?;
+    if digest_for(&bytes) != digest {
+        return Err(invalid("OCI blob digest mismatch"));
+    }
+    Ok(bytes)
+}
+
+fn object<'a>(value: &'a JSON::JSONValue, label: &str) -> io::Result<&'a std::collections::BTreeMap<String, JSON::JSONValue>> {
+    match value {
+        JSON::JSONValue::Object(object) => Ok(object),
+        _ => Err(invalid(&format!("{label} is not an object"))),
+    }
+}
+
+fn array<'a>(value: Option<&'a JSON::JSONValue>, label: &str) -> io::Result<&'a Vec<JSON::JSONValue>> {
+    match value {
+        Some(JSON::JSONValue::Array(values)) => Ok(values),
+        _ => Err(invalid(&format!("{label} is not an array"))),
+    }
+}
+
+fn string_field<'a>(
+    object: &'a std::collections::BTreeMap<String, JSON::JSONValue>,
+    field: &str,
+) -> io::Result<&'a str> {
+    match object.get(field) {
+        Some(JSON::JSONValue::Str(value)) if !value.is_empty() => Ok(value),
+        _ => Err(invalid(&format!("OCI object field `{field}` is not a string"))),
+    }
+}
+
+fn number_field(
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
+    field: &str,
+) -> io::Result<u64> {
+    match object.get(field) {
+        Some(JSON::JSONValue::Num(value)) if *value >= 0.0 && value.fract() == 0.0 => {
+            Ok(*value as u64)
+        }
+        _ => Err(invalid(&format!("OCI object field `{field}` is not a non-negative integer"))),
+    }
+}
+
+fn digest_hex(digest: &str) -> io::Result<&str> {
+    let hex = digest.strip_prefix("sha256:").unwrap_or(digest);
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(invalid("OCI digest is not a SHA-256 value"));
+    }
+    Ok(hex)
+}
+
+fn digest_for(bytes: &[u8]) -> String {
+    format!("sha256:{}", SHA256::sha256_hex(bytes))
+}
+
+fn invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 
 // ── tar (ustar, uncompressed, deterministic) ────────────────────────────────
