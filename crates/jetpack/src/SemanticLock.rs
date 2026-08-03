@@ -3620,7 +3620,7 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
         let body = if machine.trim().is_empty() {
             format!("version = 1\n\n{semantic}")
         } else {
-            format!("{}\n{semantic}", machine.trim_end())
+            format!("{}\n\n{semantic}", machine.trim_end())
         };
         let tmp = path
             .parent()
