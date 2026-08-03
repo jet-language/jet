@@ -255,3 +255,115 @@ fn real_core_provider_registers_canonical_object_and_action_relation() {
     );
     jetpack::Store::verify_hangar_object(&roots, &entry).unwrap();
 }
+
+#[test]
+fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
+    let root = Scratch::new("hangar-v2-manual-root");
+    let project = Scratch::new("hangar-v2-manual-project");
+    let source = Scratch::new("hangar-v2-manual-source");
+    fs::write(source.join("payload"), "manual-root-bytes").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "manual",
+            "--ref",
+            "manual@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let register = jetpack()
+        .args([
+            "hangar",
+            "register-external-root",
+            "backup-sdk",
+            "manual@fixture",
+            "--expires-in",
+            "1w",
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_PRINCIPAL", "manual-root-cli")
+        .output()
+        .unwrap();
+    assert!(
+        register.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&register.stderr)
+    );
+    assert!(String::from_utf8_lossy(&register.stderr).contains("etag 1.1"));
+
+    let listed = jetpack()
+        .args(["hangar", "list-external-roots", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_PRINCIPAL", "manual-root-cli")
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let listed_stderr = String::from_utf8_lossy(&listed.stderr);
+    assert!(listed_stderr.contains("backup-sdk"));
+    assert!(listed_stderr.contains("etag 1.1"));
+
+    let stale = jetpack()
+        .args([
+            "hangar",
+            "register-external-root",
+            "backup-sdk",
+            "manual@fixture",
+            "--if-etag",
+            "1.0",
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_PRINCIPAL", "manual-root-cli")
+        .output()
+        .unwrap();
+    assert_eq!(stale.status.code(), Some(2));
+    let stale_stderr = String::from_utf8_lossy(&stale.stderr);
+    assert!(stale_stderr.contains("error[E1320]"), "{stale_stderr}");
+    assert!(stale_stderr.contains("No requested root mutation was applied."));
+    let diagnostic = stale_stderr
+        .find("\n  error[E1320]")
+        .map(|index| &stale_stderr[index..])
+        .unwrap_or(&stale_stderr);
+    assert_jetos_stderr_snapshot("external_root_stale_etag", diagnostic);
+
+    let unregister = jetpack()
+        .args([
+            "hangar",
+            "unregister-external-root",
+            "backup-sdk",
+            "--etag",
+            "1.1",
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_PRINCIPAL", "manual-root-cli")
+        .output()
+        .unwrap();
+    assert!(
+        unregister.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&unregister.stderr)
+    );
+    assert!(String::from_utf8_lossy(&unregister.stderr).contains("Removed external root"));
+}

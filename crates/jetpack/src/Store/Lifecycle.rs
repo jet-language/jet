@@ -1,15 +1,18 @@
-//! Internal C3 lifecycle root journal.
+//! C3 lifecycle root journal.
 //!
 //! Producers replace roots in two durable steps. A prepared replacement
 //! protects the union of the old and proposed target sets. Commit narrows that
-//! protection to the exact proposed set. No public spelling or command surface
-//! lives here; producer wiring follows the owner-gated lifecycle decision.
+//! protection to the exact proposed set. Manual external roots use the same
+//! journal and lock through the typed atomic update seam below.
 
 use super::{Closure, Roots};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
+use std::error::Error;
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod Directory;
 use Directory::PinnedDirectory;
@@ -36,7 +39,6 @@ pub(crate) enum RootKind {
     ProfileGeneration,
     Toolchain,
     ExternalConsumer,
-    /// Fixture-only until the owner decides the manual-root surface.
     Manual,
 }
 
@@ -115,6 +117,131 @@ impl LifecycleTimestamp {
     }
 }
 
+/// Compare-and-swap token for a durable root incarnation.
+///
+/// The first component is the never-reused incarnation. The second component
+/// is the durable root revision. Both are persisted in the lifecycle state so
+/// a retry after a crash cannot accidentally accept an older mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RootEtag {
+    incarnation: u64,
+    revision: u64,
+}
+
+impl RootEtag {
+    pub(crate) fn new(incarnation: u64, revision: u64) -> io::Result<Self> {
+        Incarnation::new(incarnation)?;
+        if revision == 0 {
+            return Err(invalid("lifecycle root revision must be nonzero"));
+        }
+        Ok(Self {
+            incarnation,
+            revision,
+        })
+    }
+
+    pub(crate) fn parse(value: &str) -> io::Result<Self> {
+        let (incarnation, revision) = value
+            .split_once('.')
+            .ok_or_else(|| invalid("lifecycle root etag must be `<incarnation>.<revision>`"))?;
+        if revision.contains('.') {
+            return Err(invalid("lifecycle root etag has too many components"));
+        }
+        let incarnation = incarnation
+            .parse::<u64>()
+            .map_err(|_| invalid("lifecycle root etag has an invalid incarnation"))?;
+        let revision = revision
+            .parse::<u64>()
+            .map_err(|_| invalid("lifecycle root etag has an invalid revision"))?;
+        // A zero revision is accepted for a stale caller token such as 1.0;
+        // durable roots themselves always carry a nonzero revision.
+        Incarnation::new(incarnation)?;
+        Ok(Self {
+            incarnation,
+            revision,
+        })
+    }
+
+    pub(crate) fn render(self) -> String {
+        format!("{}.{}", self.incarnation, self.revision)
+    }
+
+    fn next_after(root: &LifecycleRoot) -> io::Result<Self> {
+        Self::new(
+            root.identity
+                .incarnation
+                .get()
+                .checked_add(1)
+                .ok_or_else(|| invalid("lifecycle incarnation overflow"))?,
+            root.revision
+                .checked_add(1)
+                .ok_or_else(|| invalid("lifecycle root revision overflow"))?,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RootMetadata {
+    pub(crate) label: Option<String>,
+    pub(crate) reference: Option<String>,
+    pub(crate) expires_at: Option<LifecycleTimestamp>,
+}
+
+impl RootMetadata {
+    pub(crate) fn manual(
+        label: &str,
+        reference: &str,
+        expires_at: Option<LifecycleTimestamp>,
+    ) -> io::Result<Self> {
+        let metadata = Self {
+            label: Some(label.to_string()),
+            reference: Some(reference.to_string()),
+            expires_at,
+        };
+        metadata.validate()?;
+        Ok(metadata)
+    }
+
+    fn validate(&self) -> io::Result<()> {
+        if let Some(label) = &self.label {
+            validate_identity("root label", label)?;
+        }
+        if let Some(reference) = &self.reference {
+            validate_identity("root reference", reference)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_expired(&self, now: LifecycleTimestamp) -> bool {
+        self.expires_at.is_some_and(|expires_at| expires_at <= now)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CasConflict {
+    pub(crate) expected: Option<String>,
+    pub(crate) current: Option<String>,
+}
+
+impl fmt::Display for CasConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "lifecycle root compare-and-swap conflict")
+    }
+}
+
+impl Error for CasConflict {}
+
+#[derive(Debug)]
+pub(crate) struct RootNotFound;
+
+impl fmt::Display for RootNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "lifecycle root was not found")
+    }
+}
+
+impl Error for RootNotFound {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RootIdentity {
     pub(crate) kind: RootKind,
@@ -160,7 +287,20 @@ pub(crate) struct LifecycleRoot {
     pub(crate) prepared_at: LifecycleTimestamp,
     pub(crate) committed_at: Option<LifecycleTimestamp>,
     pub(crate) tombstoned_at: Option<LifecycleTimestamp>,
+    pub(crate) metadata: RootMetadata,
+    pub(crate) revision: u64,
     legacy: bool,
+}
+
+impl LifecycleRoot {
+    pub(crate) fn etag(&self) -> RootEtag {
+        // State validation guarantees this pair is nonzero. Keeping this
+        // accessor infallible makes read-only projections straightforward.
+        RootEtag {
+            incarnation: self.identity.incarnation.get(),
+            revision: self.revision,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +346,8 @@ enum JournalEntry {
         identity: RootIdentity,
         proposed: BTreeSet<String>,
         protected: BTreeSet<String>,
+        metadata: RootMetadata,
+        revision: u64,
         at: LifecycleTimestamp,
     },
     Commit {
@@ -225,6 +367,17 @@ enum JournalEntry {
         targets: BTreeSet<String>,
         at: LifecycleTimestamp,
     },
+}
+
+/// One complete replacement request. The caller supplies the stable typed
+/// identity and expected token; this module owns incarnation allocation,
+/// old-union-new protection, and the prepare/commit journal sequence.
+pub(crate) struct RootUpdate {
+    pub(crate) identity: RootIdentity,
+    pub(crate) targets: Vec<String>,
+    pub(crate) metadata: RootMetadata,
+    pub(crate) expected_etag: Option<String>,
+    pub(crate) at: LifecycleTimestamp,
 }
 
 pub(crate) fn prepare(
@@ -289,6 +442,195 @@ pub(crate) fn remove_root(
     })
 }
 
+/// Atomically replace one typed root. The prepare and commit records are
+/// serialized while one Hangar lock is held. If the process dies between
+/// records, the prepared union remains protected and the same request resumes
+/// by witness/metadata/target identity instead of silently rebinding.
+pub(crate) fn atomic_update(
+    roots: &Roots,
+    update: RootUpdate,
+) -> io::Result<LifecycleSnapshot> {
+    let expected = update
+        .expected_etag
+        .as_deref()
+        .map(RootEtag::parse)
+        .transpose()?;
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_unlocked(roots)?;
+        let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
+        let proposed = checked_targets(update.targets, &known)?;
+        let mut state = load_state(roots, &known)?;
+        let current = state.get(&update.identity.id).cloned();
+
+        let (identity, revision, protected) = match current.as_ref() {
+            Some(root) if root.phase == RootPhase::Prepared => {
+                if !same_request(root, &update, &proposed) {
+                    return Err(cas_conflict(expected, Some(root.etag())));
+                }
+                let current_etag = root.etag();
+                let previous_etag = previous_etag(root);
+                if expected.is_some_and(|value| {
+                    value != current_etag && Some(value) != previous_etag
+                }) {
+                    return Err(cas_conflict(expected, Some(current_etag)));
+                }
+                (
+                    root.identity.clone(),
+                    root.revision,
+                    root.protected_targets.clone(),
+                )
+            }
+            Some(root) => {
+                let current_etag = root.etag();
+                let same = root.phase == RootPhase::Committed && same_request(root, &update, &proposed);
+                let previous_etag = previous_etag(root);
+                if expected.is_some_and(|value| {
+                    value != current_etag && !(same && Some(value) == previous_etag)
+                }) {
+                    return Err(cas_conflict(expected, Some(current_etag)));
+                }
+                if same {
+                    return snapshot_from_state(state, closure_head);
+                }
+                if root.phase != RootPhase::Tombstoned && expected != Some(current_etag) {
+                    return Err(cas_conflict(expected, Some(current_etag)));
+                }
+                if root.identity.kind != update.identity.kind
+                    || root.identity.producer != update.identity.producer
+                {
+                    return Err(invalid("lifecycle root identity changed kind or producer"));
+                }
+                let next = RootEtag::next_after(root)?;
+                let identity = RootIdentity::new(
+                    update.identity.kind,
+                    update.identity.id.clone(),
+                    update.identity.producer.clone(),
+                    Incarnation::new(next.incarnation)?,
+                    update.identity.witness.clone(),
+                );
+                let mut protected = proposed.clone();
+                protected.extend(root.protected_targets.iter().cloned());
+                (identity, next.revision, protected)
+            }
+            None => {
+                if expected.is_some() {
+                    return Err(cas_conflict(expected, None));
+                }
+                (
+                    RootIdentity::new(
+                        update.identity.kind,
+                        update.identity.id.clone(),
+                        update.identity.producer.clone(),
+                        Incarnation::new(1)?,
+                        update.identity.witness.clone(),
+                    ),
+                    1,
+                    proposed.clone(),
+                )
+            }
+        };
+        let prepare = JournalEntry::Prepare {
+            identity: identity.clone(),
+            proposed,
+            protected,
+            metadata: update.metadata,
+            revision,
+            at: update.at,
+        };
+        if !entry_already_applied(&state, &prepare) {
+            apply_entry(&mut state, prepare.clone())?;
+            persist_entry(roots, &prepare, &state, WriteControl::none())?;
+        }
+        let commit = JournalEntry::Commit {
+            id: identity.id.clone(),
+            incarnation: identity.incarnation,
+            witness: identity.witness.clone(),
+            at: update.at,
+        };
+        if !entry_already_applied(&state, &commit) {
+            apply_entry(&mut state, commit.clone())?;
+            persist_entry(roots, &commit, &state, WriteControl::none())?;
+        }
+        snapshot_from_state(state, closure_head)
+    })
+}
+
+/// Tombstone a typed root with one compare-and-swap check. Repeating the same
+/// removal after the tombstone is durable is an idempotent success.
+pub(crate) fn atomic_remove(
+    roots: &Roots,
+    id: &RootId,
+    expected_etag: &str,
+    at: LifecycleTimestamp,
+) -> io::Result<LifecycleSnapshot> {
+    let expected = RootEtag::parse(expected_etag)?;
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_unlocked(roots)?;
+        let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
+        let mut state = load_state(roots, &known)?;
+        let root = state
+            .get(id)
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, RootNotFound))?;
+        if root.etag() != expected {
+            return Err(cas_conflict(Some(expected), Some(root.etag())));
+        }
+        if root.phase == RootPhase::Tombstoned {
+            return snapshot_from_state(state, closure_head);
+        }
+        if root.phase == RootPhase::Prepared {
+            let commit = JournalEntry::Commit {
+                id: root.identity.id.clone(),
+                incarnation: root.identity.incarnation,
+                witness: root.identity.witness.clone(),
+                at,
+            };
+            apply_entry(&mut state, commit.clone())?;
+            persist_entry(roots, &commit, &state, WriteControl::none())?;
+        }
+        let tombstone = JournalEntry::Tombstone {
+            id: root.identity.id.clone(),
+            incarnation: root.identity.incarnation,
+            witness: root.identity.witness,
+            at,
+        };
+        if !entry_already_applied(&state, &tombstone) {
+            apply_entry(&mut state, tombstone.clone())?;
+            persist_entry(roots, &tombstone, &state, WriteControl::none())?;
+        }
+        snapshot_from_state(state, closure_head)
+    })
+}
+
+fn same_request(
+    root: &LifecycleRoot,
+    update: &RootUpdate,
+    proposed: &BTreeSet<String>,
+) -> bool {
+    root.identity.kind == update.identity.kind
+        && root.identity.producer == update.identity.producer
+        && root.identity.witness == update.identity.witness
+        && root.targets == *proposed
+        && root.metadata == update.metadata
+}
+
+fn previous_etag(root: &LifecycleRoot) -> Option<RootEtag> {
+    (root.identity.incarnation.get() > 1 && root.revision > 1).then(|| RootEtag {
+        incarnation: root.identity.incarnation.get() - 1,
+        revision: root.revision - 1,
+    })
+}
+
+fn cas_conflict(expected: Option<RootEtag>, current: Option<RootEtag>) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        CasConflict {
+            expected: expected.map(RootEtag::render),
+            current: current.map(RootEtag::render),
+        },
+    )
+}
+
 pub(crate) fn import_legacy_root(
     roots: &Roots,
     legacy: LegacyRoot,
@@ -326,9 +668,12 @@ pub(super) fn protected_targets_unlocked(roots: &Roots) -> io::Result<BTreeSet<S
     let (known, _) = Closure::lifecycle_inputs_unlocked(roots)?;
     let state = load_state(roots, &known)?;
     validate_state_bounds(&state)?;
+    let now = unix_now();
     Ok(state
         .values()
-        .filter(|root| root.phase != RootPhase::Tombstoned)
+        .filter(|root| {
+            root.phase != RootPhase::Tombstoned && !root.metadata.is_expired(now)
+        })
         .flat_map(|root| root.protected_targets.iter().cloned())
         .collect())
 }
@@ -384,13 +729,28 @@ fn prepare_unlocked_controlled(
     let proposed = checked_targets(targets, known)?;
     let mut state = load_state(roots, known)?;
     let mut protected = proposed.clone();
-    if let Some(old) = state.get(&identity.id) {
+    let revision = if let Some(old) = state.get(&identity.id) {
         protected.extend(old.protected_targets.iter().cloned());
-    }
+        if old.phase == RootPhase::Prepared
+            && old.identity == identity
+            && old.targets == proposed
+            && old.protected_targets == protected
+        {
+            old.revision
+        } else {
+            old.revision
+                .checked_add(1)
+                .ok_or_else(|| invalid("lifecycle root revision overflow"))?
+        }
+    } else {
+        1
+    };
     let entry = JournalEntry::Prepare {
         identity,
         proposed,
         protected,
+        metadata: RootMetadata::default(),
+        revision,
         at,
     };
     if !entry_already_applied(&state, &entry) {
@@ -430,9 +790,12 @@ fn snapshot_from_state(
     closure_head: String,
 ) -> io::Result<LifecycleSnapshot> {
     validate_state_bounds(&roots)?;
+    let now = unix_now();
     let protected_targets = roots
         .values()
-        .filter(|root| root.phase != RootPhase::Tombstoned)
+        .filter(|root| {
+            root.phase != RootPhase::Tombstoned && !root.metadata.is_expired(now)
+        })
         .flat_map(|root| root.protected_targets.iter().cloned())
         .collect::<BTreeSet<_>>();
     let canonical = canonical_state(&roots);
@@ -503,12 +866,16 @@ fn entry_already_applied(
             identity,
             proposed,
             protected,
+            metadata,
+            revision,
             at: _,
         } => state.get(&identity.id).is_some_and(|root| {
             root.phase == RootPhase::Prepared
                 && root.identity == *identity
                 && root.targets == *proposed
                 && root.protected_targets == *protected
+                && root.metadata == *metadata
+                && root.revision == *revision
                 && root.committed_at.is_none()
                 && root.tombstoned_at.is_none()
         }),
@@ -568,6 +935,10 @@ fn validate_state_bounds(state: &BTreeMap<RootId, LifecycleRoot>) -> io::Result<
     }
     let mut total = 0usize;
     for root in state.values() {
+        root.metadata.validate()?;
+        if root.revision == 0 {
+            return Err(invalid("lifecycle root revision must be nonzero"));
+        }
         if root.targets.len() > MAX_TARGETS_PER_ROOT
             || root.protected_targets.len() > MAX_TARGETS_PER_ROOT * 2
         {
@@ -608,10 +979,16 @@ fn apply_entry(
             identity,
             proposed,
             protected,
+            metadata,
+            revision,
             at,
         } => {
             if proposed.is_empty() || protected.is_empty() || !proposed.is_subset(&protected) {
                 return Err(invalid("prepared lifecycle root has invalid target sets"));
+            }
+            metadata.validate()?;
+            if revision == 0 {
+                return Err(invalid("prepared lifecycle root has zero revision"));
             }
             if let Some(old) = state.get(&identity.id) {
                 if old.phase == RootPhase::Prepared {
@@ -624,6 +1001,13 @@ fn apply_entry(
                     .ok_or_else(|| invalid("lifecycle incarnation overflow"))?;
                 if identity.incarnation.get() != expected {
                     return Err(invalid("lifecycle replacement skipped or reused an incarnation"));
+                }
+                let expected_revision = old
+                    .revision
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("lifecycle root revision overflow"))?;
+                if revision != expected_revision {
+                    return Err(invalid("lifecycle replacement skipped or reused a revision"));
                 }
                 if identity.witness == old.identity.witness {
                     return Err(invalid("lifecycle replacement reused its witness"));
@@ -640,6 +1024,9 @@ fn apply_entry(
                 if identity.incarnation.get() != 1 {
                     return Err(invalid("first lifecycle incarnation must be one"));
                 }
+                if revision != 1 {
+                    return Err(invalid("first lifecycle revision must be one"));
+                }
                 if protected != proposed {
                     return Err(invalid("first lifecycle root has unexpected protected targets"));
                 }
@@ -652,6 +1039,8 @@ fn apply_entry(
                 prepared_at: at,
                 committed_at: None,
                 tombstoned_at: None,
+                metadata,
+                revision,
                 legacy: false,
             });
         }
@@ -705,6 +1094,8 @@ fn apply_entry(
                 prepared_at: at,
                 committed_at: Some(at),
                 tombstoned_at: None,
+                metadata: RootMetadata::default(),
+                revision: 1,
                 legacy: true,
             });
         }
@@ -765,6 +1156,15 @@ fn validate_identity(label: &str, value: &str) -> io::Result<()> {
         return Err(invalid(format!("invalid lifecycle {label}")));
     }
     Ok(())
+}
+
+fn unix_now() -> LifecycleTimestamp {
+    LifecycleTimestamp::from_unix_seconds(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    )
 }
 
 fn persist_entry(
@@ -1079,10 +1479,12 @@ fn corrupt_name(
 fn render_entry(entry: &JournalEntry) -> String {
     let mut out = String::from("jet-lifecycle-journal-v1\n");
     match entry {
-        JournalEntry::Prepare { identity, proposed, protected, at } => {
-            out.push_str(&format!("prepare\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        JournalEntry::Prepare { identity, proposed, protected, metadata, revision, at } => {
+            out.push_str(&format!("prepare\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 identity.kind.wire(), hex(identity.id.as_str()), hex(identity.producer.as_str()),
-                identity.incarnation.get(), hex(identity.witness.as_str()), at.get()));
+                identity.incarnation.get(), hex(identity.witness.as_str()), revision, at.get(),
+                hex_option(metadata.label.as_deref()), hex_option(metadata.reference.as_deref()),
+                metadata.expires_at.map(|value| value.get().to_string()).unwrap_or_else(|| "-".to_string())));
             for target in proposed { out.push_str(&format!("target\t{}\n", target)); }
             for target in protected { out.push_str(&format!("protect\t{}\n", target)); }
         }
@@ -1135,6 +1537,18 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
             identity: parse_identity(kind, id, producer, incarnation, witness)?,
             proposed: targets,
             protected,
+            metadata: RootMetadata::default(),
+            revision: incarnation
+                .parse()
+                .map_err(|_| "invalid lifecycle root revision".to_string())?,
+            at: parse_timestamp(at)?,
+        }),
+        ["prepare", kind, id, producer, incarnation, witness, revision, at, label, reference, expires] => Ok(JournalEntry::Prepare {
+            identity: parse_identity(kind, id, producer, incarnation, witness)?,
+            proposed: targets,
+            protected,
+            metadata: parse_metadata(label, reference, expires)?,
+            revision: parse_revision(revision)?,
             at: parse_timestamp(at)?,
         }),
         ["commit", id, incarnation, witness, at] if targets.is_empty() && protected.is_empty() => {
@@ -1184,7 +1598,7 @@ fn render_snapshot(
             .map(|value| value.get().to_string())
             .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "root\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "root\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             root.identity.kind.wire(),
             hex(root.identity.id.as_str()),
             hex(root.identity.producer.as_str()),
@@ -1199,6 +1613,13 @@ fn render_snapshot(
             committed,
             tombstoned,
             u8::from(root.legacy),
+            root.revision,
+            hex_option(root.metadata.label.as_deref()),
+            hex_option(root.metadata.reference.as_deref()),
+            root.metadata
+                .expires_at
+                .map(|value| value.get().to_string())
+                .unwrap_or_else(|| "-".to_string()),
         ));
         for target in &root.targets {
             out.push_str(&format!("target\t{target}\n"));
@@ -1252,6 +1673,10 @@ fn parse_snapshot(raw: &str) -> Result<(u64, BTreeMap<RootId, LifecycleRoot>), S
                 committed,
                 tombstoned,
                 legacy @ ("0" | "1"),
+                revision,
+                label,
+                reference,
+                expires,
             ] => {
                 if roots.len() >= MAX_ROOTS {
                     return Err("lifecycle snapshot exceeds root-count bound".to_string());
@@ -1277,6 +1702,54 @@ fn parse_snapshot(raw: &str) -> Result<(u64, BTreeMap<RootId, LifecycleRoot>), S
                         prepared_at: parse_timestamp(prepared)?,
                         committed_at: parse_optional_timestamp(committed)?,
                         tombstoned_at: parse_optional_timestamp(tombstoned)?,
+                        metadata: parse_metadata(label, reference, expires)?,
+                        revision: parse_revision(revision)?,
+                        legacy: *legacy == "1",
+                    },
+                );
+                current = Some(id);
+            }
+            [
+                "root",
+                kind,
+                id,
+                producer,
+                incarnation,
+                witness,
+                phase,
+                prepared,
+                committed,
+                tombstoned,
+                legacy @ ("0" | "1"),
+            ] => {
+                if roots.len() >= MAX_ROOTS {
+                    return Err("lifecycle snapshot exceeds root-count bound".to_string());
+                }
+                let identity = parse_identity(kind, id, producer, incarnation, witness)?;
+                let id = identity.id.clone();
+                if roots.contains_key(&id) {
+                    return Err(format!("duplicate lifecycle snapshot root `{}`", id.as_str()));
+                }
+                let phase = match *phase {
+                    "prepared" => RootPhase::Prepared,
+                    "committed" => RootPhase::Committed,
+                    "tombstoned" => RootPhase::Tombstoned,
+                    _ => return Err("invalid lifecycle snapshot phase".to_string()),
+                };
+                roots.insert(
+                    id.clone(),
+                    LifecycleRoot {
+                        identity,
+                        targets: BTreeSet::new(),
+                        protected_targets: BTreeSet::new(),
+                        phase,
+                        prepared_at: parse_timestamp(prepared)?,
+                        committed_at: parse_optional_timestamp(committed)?,
+                        tombstoned_at: parse_optional_timestamp(tombstoned)?,
+                        metadata: RootMetadata::default(),
+                        revision: incarnation
+                            .parse()
+                            .map_err(|_| "invalid lifecycle root revision".to_string())?,
                         legacy: *legacy == "1",
                     },
                 );
@@ -1321,6 +1794,10 @@ fn validate_snapshot_state(roots: &BTreeMap<RootId, LifecycleRoot>) -> Result<()
     for (id, root) in roots {
         if id != &root.identity.id || root.targets.is_empty() {
             return Err("invalid lifecycle snapshot root identity or targets".to_string());
+        }
+        root.metadata.validate().map_err(|error| error.to_string())?;
+        if root.revision == 0 {
+            return Err(format!("lifecycle snapshot root `{}` has zero revision", id.as_str()));
         }
         match root.phase {
             RootPhase::Prepared
@@ -1379,19 +1856,54 @@ fn parse_timestamp(value: &str) -> Result<LifecycleTimestamp, String> {
         .map_err(|_| "invalid lifecycle timestamp".to_string())?))
 }
 
+fn parse_revision(value: &str) -> Result<u64, String> {
+    let revision = value
+        .parse::<u64>()
+        .map_err(|_| "invalid lifecycle root revision".to_string())?;
+    if revision == 0 {
+        return Err("lifecycle root revision must be nonzero".to_string());
+    }
+    Ok(revision)
+}
+
+fn parse_metadata(label: &str, reference: &str, expires: &str) -> Result<RootMetadata, String> {
+    let metadata = RootMetadata {
+        label: unhex_option(label)?,
+        reference: unhex_option(reference)?,
+        expires_at: parse_optional_timestamp(expires)?,
+    };
+    metadata.validate().map_err(|error| error.to_string())?;
+    Ok(metadata)
+}
+
 fn canonical_state(roots: &BTreeMap<RootId, LifecycleRoot>) -> String {
     let mut out = String::from("jet-lifecycle-state-v1\n");
     for root in roots.values() {
-        out.push_str(&format!("root\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        out.push_str(&format!("root\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             root.identity.kind.wire(), hex(root.identity.id.as_str()), hex(root.identity.producer.as_str()),
             root.identity.incarnation.get(), hex(root.identity.witness.as_str()),
             match root.phase { RootPhase::Prepared => "prepared", RootPhase::Committed => "committed", RootPhase::Tombstoned => "tombstoned" },
             root.prepared_at.get(), root.committed_at.map(LifecycleTimestamp::get).unwrap_or(0),
-            root.tombstoned_at.map(LifecycleTimestamp::get).unwrap_or(0), u8::from(root.legacy)));
+            root.tombstoned_at.map(LifecycleTimestamp::get).unwrap_or(0), u8::from(root.legacy),
+            root.revision, hex_option(root.metadata.label.as_deref()),
+            hex_option(root.metadata.reference.as_deref()),
+            root.metadata.expires_at.map(LifecycleTimestamp::get).unwrap_or(0)));
         for target in &root.targets { out.push_str(&format!("target\t{}\n", target)); }
         for target in &root.protected_targets { out.push_str(&format!("protect\t{}\n", target)); }
     }
     out
+}
+
+fn hex_option(value: Option<&str>) -> String {
+    value.map(hex).unwrap_or_else(|| "-".to_string())
+}
+
+fn unhex_option(value: &str) -> Result<Option<String>, String> {
+    if value == "-" {
+        Ok(None)
+    } else {
+        Ok(Some(unhex(value)?))
+    }
 }
 
 fn hex(value: &str) -> String {
@@ -1895,6 +2407,8 @@ mod tests {
                     prepared_at: LifecycleTimestamp(1),
                     committed_at: Some(LifecycleTimestamp(2)),
                     tombstoned_at: None,
+                    metadata: RootMetadata::default(),
+                    revision: 1,
                     legacy: false,
                 },
             );
