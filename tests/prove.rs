@@ -104,7 +104,11 @@ fn prove_uses_canonical_package_marker_in_target_identity() {
 #[test]
 fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let root = workspace("replay_round_trip");
-    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    fs::write(
+        root.join("main.jet"),
+        "use core.time as time\nfn run() { observed :: time.now() }\n",
+    )
+    .unwrap();
     let artifact = root.join("capture.jetproof-replay");
     let artifact_arg = artifact.file_name().unwrap().to_string_lossy().to_string();
     let captured = Command::new(jet())
@@ -121,6 +125,10 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         artifact.display()
     );
     assert!(artifact.is_file());
+    assert!(captured.stderr.is_empty(), "JSON capture leaked stderr: {}", String::from_utf8_lossy(&captured.stderr));
+    let artifact_bytes = fs::read(&artifact).unwrap();
+    assert!(artifact_bytes.starts_with(b"JREPLAY\0"));
+    assert!(String::from_utf8_lossy(&artifact_bytes).contains("\"roots\":[\"Time\"]"));
 
     let replayed = Command::new(jet())
         .current_dir(&root)
@@ -128,8 +136,10 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         .output()
         .unwrap();
     assert_eq!(replayed.status.code(), Some(0), "{}", String::from_utf8_lossy(&replayed.stderr));
+    assert!(replayed.stderr.is_empty(), "JSON replay leaked stderr: {}", String::from_utf8_lossy(&replayed.stderr));
     let report = String::from_utf8(replayed.stdout).unwrap();
     assert!(report.contains("\"facet\":\"replay\""), "{report}");
+    assert!(report.contains("\"reason\":\"parity_not_available\""), "{report}");
 
     let mut corrupt = fs::read(&artifact).unwrap();
     let middle = corrupt.len() / 2;
@@ -142,6 +152,99 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         .unwrap();
     assert_eq!(rejected.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("Error [E3622]"));
+}
+
+#[test]
+fn prove_replay_rejects_source_identity_divergence_before_execution() {
+    let root = workspace("replay_identity_divergence");
+    fs::write(
+        root.join("main.jet"),
+        "use core.time as time\nfn run() { observed :: time.now() }\n",
+    )
+    .unwrap();
+    let artifact = root.join("capture.jetproof-replay");
+    let captured = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=capture.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(captured.status.code(), Some(0), "{}", String::from_utf8_lossy(&captured.stderr));
+    assert!(artifact.is_file());
+
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let replayed = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay=capture.jetproof-replay", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(replayed.status.code(), Some(1));
+    assert!(replayed.stderr.is_empty(), "JSON identity refusal leaked stderr: {}", String::from_utf8_lossy(&replayed.stderr));
+    assert!(String::from_utf8_lossy(&replayed.stdout).contains("\"code\":\"E3621\""));
+}
+
+#[test]
+fn prove_lens_union_is_canonical_and_keeps_the_complete_report() {
+    let root = workspace("lens_union");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let baseline = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(baseline.status.code(), Some(0), "{}", String::from_utf8_lossy(&baseline.stderr));
+    let selected = Command::new(jet())
+        .current_dir(&root)
+        .args([
+            "prove",
+            "main.jet",
+            "--lens",
+            "budgets",
+            "--lens",
+            "tests",
+            "--lens",
+            "budgets",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(selected.status.code(), Some(0), "{}", String::from_utf8_lossy(&selected.stderr));
+    assert_eq!(baseline.stdout, selected.stdout, "presentation lenses changed ProofReport");
+
+    let human = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--lens", "budgets", "--lens", "tests", "--lens", "budgets"])
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert!(String::from_utf8_lossy(&human.stdout).contains("LENSES   tests, budgets"));
+
+    let absorbed = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--lens", "all", "--lens", "tests"])
+        .output()
+        .unwrap();
+    assert_eq!(absorbed.status.code(), Some(0), "{}", String::from_utf8_lossy(&absorbed.stderr));
+    let absorbed_stdout = String::from_utf8_lossy(&absorbed.stdout);
+    assert!(absorbed_stdout.contains("LENSES   all"));
+    assert!(!absorbed_stdout.contains("LENSES   all, tests"));
+}
+
+#[test]
+fn prove_rejected_budget_reports_are_unavailable_and_counted() {
+    let root = budget_workspace("budget_rejected_equation");
+    fs::create_dir_all(root.join(".jet/perf/reports")).unwrap();
+    fs::write(root.join(".jet/perf/reports/broken.json"), "not canonical budget JSON\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "src/main.jet", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"result\":\"pass_incomplete\""), "{report}");
+    assert!(report.contains("\"deterministicBudget\":{\"failed\":0,\"met\":0,\"selected\":1,\"skipped\":0,\"unavailable\":1}"), "{report}");
+    assert!(report.contains("\"facet\":\"budgets\""), "{report}");
+    assert!(report.contains("\"outcome\":\"unavailable\""), "{report}");
 }
 
 #[test]
@@ -185,6 +288,105 @@ fn prove_capture_refuses_reachable_io_before_the_child_runs() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3627]"));
     assert!(!artifact.exists(), "preflight refusal must happen before artifact creation");
+}
+
+#[test]
+fn prove_capture_refuses_an_opaque_callable_before_the_child_runs() {
+    let root = workspace("capture_opaque_preflight");
+    fs::write(root.join("main.jet"), "fn run() { provider_call() }\n").unwrap();
+    let artifact = root.join("opaque.jetproof-replay");
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=opaque.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+    assert!(!artifact.exists(), "opaque call must be refused before artifact creation");
+}
+
+#[test]
+fn prove_capture_refuses_an_unrecorded_time_operation_before_the_child_runs() {
+    let root = workspace("capture_time_sleep_preflight");
+    fs::write(
+        root.join("main.jet"),
+        "use core.time as time\nfn run() { time.sleep(1) }\n",
+    )
+    .unwrap();
+    let artifact = root.join("sleep.jetproof-replay");
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=sleep.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+    assert!(!artifact.exists(), "unsupported Time must be refused before artifact creation");
+}
+
+#[test]
+fn prove_capture_refuses_multiple_time_sites_for_the_single_record_adapter() {
+    let root = workspace("capture_multiple_time_preflight");
+    fs::write(
+        root.join("main.jet"),
+        "use core.time as time\nfn run() {\n    first :: time.now()\n    second :: time.now()\n}\n",
+    )
+    .unwrap();
+    let artifact = root.join("multiple.jetproof-replay");
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--capture=multiple.jetproof-replay"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+    assert!(!artifact.exists(), "multiple Time sites must be refused before artifact creation");
+}
+
+#[test]
+fn prove_replay_rejects_unsafe_artifact_path_before_reading() {
+    let root = workspace("replay_path");
+    fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay=../outside.jetproof-replay", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "JSON path refusal leaked stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3622\""));
+}
+
+#[test]
+fn prove_replay_refuses_unrecorded_io_before_opening_an_artifact() {
+    let root = workspace("replay_io");
+    fs::write(root.join("main.jet"), "fn run() { print(\"not replayed\") }\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay=missing.jetproof-replay", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "JSON authority refusal leaked stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3623\""));
+}
+
+#[test]
+fn prove_replay_refuses_unrecorded_time_sleep_before_opening_an_artifact() {
+    let root = workspace("replay_time_sleep");
+    fs::write(
+        root.join("main.jet"),
+        "use core.time as time\nfn run() { time.sleep(1) }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "main.jet", "--replay=missing.jetproof-replay", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "JSON authority refusal leaked stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3623\""));
 }
 
 #[cfg(unix)]

@@ -454,6 +454,17 @@ fn validate_replay_path(path: &str) -> Result<PathBuf, String> {
     if path.is_empty() {
         return Err("replay artifact path is empty".into());
     }
+    if path.contains('\0') || path.contains('\\') {
+        return Err("replay artifact path must use forward-slash components".into());
+    }
+    let components = if let Some(relative) = path.strip_prefix('/') {
+        relative.split('/')
+    } else {
+        path.split('/')
+    };
+    if components.any(|component| component.is_empty()) {
+        return Err("replay artifact path must use non-empty components".into());
+    }
     let path = Path::new(path);
     if path.components().any(|component| {
         matches!(component, Component::CurDir | Component::ParentDir | Component::Prefix(_))

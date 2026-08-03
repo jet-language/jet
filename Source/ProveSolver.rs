@@ -621,11 +621,13 @@ fn collect_call_preconditions(
     let mut caller_flow_unsupported = false;
     let mut caller_machine_overflow = false;
     for statement in &func.body {
+        let statement_flow_unsupported =
+            caller_flow_unsupported || statement_is_flow_boundary(statement);
         visit_stmt_calls(statement, &mut |call| {
             calls.push((
                 call.clone(),
                 caller_substitutions.clone(),
-                caller_flow_unsupported,
+                statement_flow_unsupported,
                 caller_machine_overflow,
             ))
         });
@@ -648,7 +650,7 @@ fn collect_call_preconditions(
             } else {
                 caller_flow_unsupported = true;
             }
-        } else if !matches!(statement, jet::AST::Stmt::Expr(_)) {
+        } else if statement_is_flow_boundary(statement) {
             // Assignment, branching, looping, and returns can invalidate the
             // affine snapshot captured for a later call. Do not reuse facts
             // across those control-flow boundaries.
@@ -711,6 +713,49 @@ fn collect_call_preconditions(
             formula,
             unsupported_reason,
         });
+    }
+}
+
+fn statement_is_flow_boundary(statement: &jet::AST::Stmt) -> bool {
+    match statement {
+        jet::AST::Stmt::Expr(expr)
+        | jet::AST::Stmt::Val(jet::AST::Binding { init: expr, .. })
+        | jet::AST::Stmt::Return(Some(expr), _) => !matches!(expr, Expr::Call(_)),
+        jet::AST::Stmt::Assign { .. }
+        | jet::AST::Stmt::Yield(..)
+        | jet::AST::Stmt::BreakValue(..)
+        | jet::AST::Stmt::BreakLabelValue(..)
+        | jet::AST::Stmt::While { .. }
+        | jet::AST::Stmt::For { .. }
+        | jet::AST::Stmt::Switch { .. }
+        | jet::AST::Stmt::ComptimeSwitch { .. }
+        | jet::AST::Stmt::CountedLoop { .. }
+        | jet::AST::Stmt::ComptimeIf { .. }
+        | jet::AST::Stmt::ContextBlock { .. }
+        | jet::AST::Stmt::ScopeMember { .. }
+        | jet::AST::Stmt::Loop { .. }
+        | jet::AST::Stmt::Unsafe { .. }
+        | jet::AST::Stmt::Impure { .. }
+        | jet::AST::Stmt::Reactive { .. }
+        | jet::AST::Stmt::Shield { .. }
+        | jet::AST::Stmt::Off { .. }
+        | jet::AST::Stmt::DebugOnly { .. }
+        | jet::AST::Stmt::Region { .. }
+        | jet::AST::Stmt::Policy { .. }
+        | jet::AST::Stmt::TaskGroup { .. }
+        | jet::AST::Stmt::Layout { .. }
+        | jet::AST::Stmt::Caps { .. }
+        | jet::AST::Stmt::Grant { .. }
+        | jet::AST::Stmt::ComptimeBlock { .. }
+        | jet::AST::Stmt::Live { .. }
+        | jet::AST::Stmt::AssumeDet { .. }
+        | jet::AST::Stmt::Transact { .. } => true,
+        jet::AST::Stmt::Return(None, _)
+        | jet::AST::Stmt::Break(_)
+        | jet::AST::Stmt::Continue(_)
+        | jet::AST::Stmt::BreakLabel(..)
+        | jet::AST::Stmt::ContinueLabel(..) => false,
+        _ => true,
     }
 }
 
@@ -969,8 +1014,11 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
                 }
             }
         }
-        Expr::Tainted(inner, _, _)
-        | Expr::PatternTest { subject: inner, .. } => visit_expr_calls(inner, calls),
+        Expr::Tainted(inner, _, _) => visit_expr_calls(inner, calls),
+        Expr::PatternTest { subject, pattern, .. } => {
+            visit_expr_calls(subject, calls);
+            visit_pattern_calls(pattern, calls);
+        }
         Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
             visit_expr_calls(cond, calls);
             visit_stmt_list(then_body, calls);
@@ -992,6 +1040,24 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
             }
         }
         Expr::PtrFromAddr { addr, .. } => visit_expr_calls(addr, calls),
+        _ => {}
+    }
+}
+
+fn visit_pattern_calls(pattern: &jet::AST::Pattern, calls: &mut impl FnMut(&jet::AST::Call)) {
+    match pattern {
+        jet::AST::Pattern::Or(patterns, _) => {
+            for pattern in patterns {
+                visit_pattern_calls(pattern, calls);
+            }
+        }
+        jet::AST::Pattern::Struct { fields, .. } => {
+            for field in fields {
+                if let jet::AST::StructPatField::Value { value, .. } = field {
+                    visit_expr_calls(value, calls);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -1703,11 +1769,14 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
                 return Err("certificate_invalid");
             }
             let mut seen = BTreeSet::new();
-            for child in children {
+            for (expected_index, child) in children.iter().enumerate() {
                 let child = as_object(child)?;
                 exact_certificate_keys(child, &["branchIndex", "proof"])?;
                 let branch_index = json_usize(child.get("branchIndex"))?;
-                if branch_index >= negated.len() || !seen.insert(branch_index) {
+                if branch_index != expected_index
+                    || branch_index >= negated.len()
+                    || !seen.insert(branch_index)
+                {
                     return Err("certificate_invalid");
                 }
                 let proof = child.get("proof").ok_or("certificate_invalid")?;
@@ -1853,7 +1922,7 @@ fn check_certificate_node(
                     return Err("certificate_invalid");
                 }
                 let multiplier = json_i128(entry.get("multiplier"))?;
-                if multiplier <= 0 {
+                if multiplier < 0 {
                     return Err("certificate_invalid");
                 }
                 sum = sum
@@ -1873,6 +1942,12 @@ fn check_certificate_node(
                 Some(JSONValue::String(variable)) if !variable.is_empty() => variable,
                 _ => return Err("certificate_invalid"),
             };
+            if !inequalities
+                .iter()
+                .any(|inequality| inequality.affine.terms.contains_key(variable))
+            {
+                return Err("certificate_invalid");
+            }
             let pivot = json_i128(object.get("pivot"))?;
             let left = object.get("left").ok_or("certificate_invalid")?;
             let right = object.get("right").ok_or("certificate_invalid")?;
@@ -1893,7 +1968,23 @@ fn check_certificate_node(
             check_certificate_node(left, &left_branch)?;
             check_certificate_node(right, &right_branch)
         }
-        "assumption" => Err("certificate_invalid"),
+        "assumption" => {
+            let object = as_object(value)?;
+            exact_certificate_keys(object, &["assumptionIndex", "kind"])?;
+            let index = json_usize(object.get("assumptionIndex"))?;
+            let Some(assumption) = inequalities.get(index) else {
+                return Err("certificate_invalid");
+            };
+            // An assumption leaf closes only on an already-false constant
+            // assumption. Referencing an ordinary input inequality would make
+            // the certificate unsound by treating a satisfiable branch as
+            // closed.
+            if assumption.affine.terms.is_empty() && assumption.affine.constant > 0 {
+                Ok(())
+            } else {
+                Err("certificate_invalid")
+            }
+        }
         _ => Err("certificate_invalid"),
     }
 }
@@ -2061,6 +2152,32 @@ mod tests {
     }
 
     #[test]
+    fn checks_canonical_branch_order_and_sound_assumption_leaves() {
+        let formula = Formula {
+            assumptions: vec![Inequality::le(Affine::constant(1))],
+            claim: vec![
+                Inequality::le(Affine::constant(0)),
+                Inequality::le(Affine::constant(0)),
+            ],
+        };
+        let proof = r#"{"children":[{"branchIndex":0,"proof":{"assumptionIndex":0,"kind":"assumption"}},{"branchIndex":1,"proof":{"assumptionIndex":0,"kind":"assumption"}}],"kind":"and_intro"}"#;
+        assert!(check_certificate(&formula, proof).is_ok());
+
+        let reordered = r#"{"children":[{"branchIndex":1,"proof":{"assumptionIndex":0,"kind":"assumption"}},{"branchIndex":0,"proof":{"assumptionIndex":0,"kind":"assumption"}}],"kind":"and_intro"}"#;
+        assert!(check_certificate(&formula, reordered).is_err());
+    }
+
+    #[test]
+    fn rejects_a_split_on_an_unconstrained_variable() {
+        let formula = Formula {
+            assumptions: vec![Inequality::le(Affine::constant(1))],
+            claim: vec![Inequality::le(Affine::constant(0))],
+        };
+        let proof = r#"{"kind":"split","left":{"assumptionIndex":0,"kind":"assumption"},"pivot":"0","right":{"assumptionIndex":0,"kind":"assumption"},"variable":"ghost"}"#;
+        assert!(check_certificate(&formula, proof).is_err());
+    }
+
+    #[test]
     fn marks_machine_arithmetic_postconditions_unknown_without_range_facts() {
         let source = r#"
 #[Pre(value > 0, "positive"), Post(result > value, "grows")]
@@ -2134,6 +2251,35 @@ fn caller(input: Int) => Int {
             evidence[0].outcome,
             SolverOutcome::Unknown {
                 reason: "machine_overflow",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn does_not_reuse_affine_facts_after_a_non_call_expression() {
+        let source = r#"
+#Pre(value > 0, "positive")
+fn checked(value: Int) => Int { return value }
+
+#Pre(input > 0, "positive input")
+fn caller(input: Int) => Int {
+    shifted :: input
+    input + 1
+    return checked(shifted)
+}
+"#;
+        let evidence = run_solver_producer(
+            &[("calls-flow.jet".into(), source.into())],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(matches!(
+            evidence[0].outcome,
+            SolverOutcome::Unknown {
+                reason: "unsupported_formula",
                 ..
             }
         ));
