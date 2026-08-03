@@ -38,6 +38,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod Producer;
 pub use Producer::*;
+mod Cache;
+pub use Cache::*;
+mod Archive;
+pub use Archive::*;
+mod Nar;
+pub use Nar::*;
+mod Broker;
+pub use Broker::*;
 
 fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
     jet_pkg_model::Store::list(roots)
@@ -63,6 +71,41 @@ pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
 /// `list_checked`.
 pub fn list(roots: &Roots) -> Vec<StoreEntry> {
     list_checked(roots).unwrap_or_default()
+}
+
+/// Refresh the immutable producer facts after the Nix provider publishes the
+/// realization it just recorded in the project lock. The lock digest is part
+/// of the Nix action key, so leaving the pre-publication digest in the closure
+/// record would let a later replay accept stale provenance.
+pub(crate) fn refresh_nix_lock_digest(
+    roots: &Roots,
+    entry: &StoreEntry,
+    lock_digest: &str,
+) -> std::io::Result<StoreEntry> {
+    if lock_digest.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cannot refresh a Nix producer with an empty project lock digest",
+        ));
+    }
+    let mut producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(std::io::Error::other)?;
+    if producer.provider != "nix" {
+        return Ok(entry.clone());
+    }
+    producer
+        .facts
+        .insert("nix.lock.digest".to_string(), lock_digest.to_string());
+    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(producer.facts.clone())
+        .map_err(std::io::Error::other)?;
+
+    let mut refreshed = entry.clone();
+    refreshed.producer_record = producer.encode();
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Closure::recover_closure_journal_unlocked(roots)?;
+        Closure::register_entry_unlocked(roots, &refreshed)?;
+        Ok(refreshed)
+    })
 }
 
 fn canonical_producer(
@@ -229,7 +272,10 @@ pub enum RealizeRequest<'a> {
         spec: &'a super::RefSpec::RefSpec,
         table: &'a super::RefSpec::SourceTable,
     },
-    Adapter(&'a jet_env_model::ModuleEval::AdapterPlan),
+    Adapter {
+        plan: &'a jet_env_model::ModuleEval::AdapterPlan,
+        expectation: &'a CacheExpectation,
+    },
 }
 
 pub struct VerifiedRealization {
@@ -1508,6 +1554,150 @@ fn make_tree_writable_for_removal(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn hook_fact_mismatch(name: &str, expected: &str, actual: Option<&str>) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!(
+            "adapter build hook provenance mismatch for `{name}`: expected `{expected}`, got `{}`",
+            actual.unwrap_or("<missing>")
+        ),
+    )
+}
+
+fn validate_adapter_hook_producer(
+    producer: &ProducerRecord,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    let jet_env_model::ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe else {
+        return Ok(());
+    };
+    if producer.provider != "adapter" {
+        return Err(hook_fact_mismatch(
+            "provider",
+            "adapter",
+            Some(&producer.provider),
+        ));
+    }
+    if producer.source_digest != expectation.identity.source_fingerprint {
+        return Err(hook_fact_mismatch(
+            "source-digest",
+            &expectation.identity.source_fingerprint,
+            Some(&producer.source_digest),
+        ));
+    }
+    if producer.facts.get("adapter.source").map(String::as_str) != Some(plan.source.as_str()) {
+        return Err(hook_fact_mismatch(
+            "provider-source",
+            &plan.source,
+            producer.facts.get("adapter.source").map(String::as_str),
+        ));
+    }
+    let identity = super::Provider::adapter_action_identity(
+        plan,
+        recipe,
+        &expectation.identity.source_fingerprint,
+        &expectation.identity.platform,
+    );
+    if producer.facts.get("build.identity").map(String::as_str) != Some(identity.as_str()) {
+        return Err(hook_fact_mismatch(
+            "build.identity",
+            &identity,
+            producer.facts.get("build.identity").map(String::as_str),
+        ));
+    }
+    let capabilities = recipe.declared_capabilities().join(",");
+    if producer.facts.get("build.capabilities").map(String::as_str)
+        != Some(capabilities.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "build.capabilities",
+            &capabilities,
+            producer.facts.get("build.capabilities").map(String::as_str),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_cached_adapter_hook(
+    entry: &StoreEntry,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    if !matches!(
+        &plan.recipe,
+        jet_env_model::ModuleEval::AdapterRecipe::Build(_)
+    ) {
+        return Ok(());
+    }
+    if entry.cache_identity != expectation.identity {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter cache identity is not the exact build-hook identity",
+        ));
+    }
+    let producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(std::io::Error::other)?;
+    validate_adapter_hook_producer(&producer, plan, expectation)
+}
+
+fn bind_adapter_hook_identity(
+    realized: &mut super::Provider::Realized,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+    ctx: &super::Provider::Ctx<'_>,
+) -> std::io::Result<()> {
+    if !matches!(
+        &plan.recipe,
+        jet_env_model::ModuleEval::AdapterRecipe::Build(_)
+    ) {
+        return Ok(());
+    }
+    validate_adapter_hook_producer(&realized.producer, plan, expectation)?;
+    let expected = super::Provider::adapter_cache_identity(
+        &expectation.identity.source_fingerprint,
+        realized
+            .producer
+            .facts
+            .get("build.identity")
+            .ok_or_else(|| hook_fact_mismatch("build.identity", "exact subject", None))?,
+        ctx,
+    );
+    if expected != expectation.identity {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter cache expectation is not derived from the exact build-hook subject",
+        ));
+    }
+    for (name, expected, actual) in [
+        (
+            "source-fingerprint",
+            &expectation.identity.source_fingerprint,
+            &realized.cache_identity.source_fingerprint,
+        ),
+        (
+            "policy-fingerprint",
+            &expectation.identity.policy_fingerprint,
+            &realized.cache_identity.policy_fingerprint,
+        ),
+        (
+            "platform",
+            &expectation.identity.platform,
+            &realized.cache_identity.platform,
+        ),
+    ] {
+        if expected != actual {
+            return Err(hook_fact_mismatch(
+                name,
+                expected.as_str(),
+                Some(actual.as_str()),
+            ));
+        }
+    }
+    realized.cache_identity = expected;
+    Ok(())
+}
+
 /// Single realization boundary for every product consumer. Cache reuse,
 /// quarantine, provider execution, and recording cannot be bypassed by CLI or
 /// JetOS callers.
@@ -1519,7 +1709,7 @@ pub fn realize_verified(
     // WAL is authority. Recover package projections before cache verification;
     // selected-candidate proofs run below so invalid bytes can be quarantined.
     Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
-    let (reference, expectation) = match request {
+    let (reference, expectation) = match &request {
         RealizeRequest::Package { spec, table } => {
             super::Provider::validate_cache_authority(spec, table, ctx)
                 .map_err(RealizeError::Provider)?;
@@ -1528,12 +1718,9 @@ pub fn realize_verified(
                 super::Provider::cache_expectation(spec, table, ctx),
             )
         }
-        RealizeRequest::Adapter(plan) => (
+        RealizeRequest::Adapter { plan, expectation } => (
             format!("adapt:{}:{}", plan.name, plan.source),
-            Some(
-                super::Provider::adapter_cache_expectation(plan, ctx)
-                    .map_err(RealizeError::Provider)?,
-            ),
+            Some((*expectation).clone()),
         ),
     };
 
@@ -1544,6 +1731,10 @@ pub fn realize_verified(
             .map_err(RealizeError::Store)?
         {
             Some(hit) => {
+                if let RealizeRequest::Adapter { plan, .. } = &request {
+                    validate_cached_adapter_hook(&hit.entry, plan, expectation)
+                        .map_err(RealizeError::Store)?;
+                }
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -1561,15 +1752,45 @@ pub fn realize_verified(
         }
     }
 
+    if let Some(expectation) = expectation.as_ref() {
+        if reuse_shared_entry(roots, &reference, expectation)
+            .map_err(RealizeError::Store)?
+            .is_some()
+        {
+            if let Some(hit) = find_verified_by_reference(roots, &reference, expectation)
+                .map_err(RealizeError::Store)?
+            {
+                return Ok(VerifiedRealization {
+                    entry: hit.entry,
+                    source_state: super::Provider::SourceState::Cached,
+                    lease: hit.lease,
+                });
+            }
+        }
+    }
+
     let realized = match request {
         RealizeRequest::Package { spec, table } => {
             super::Provider::realize(spec, table, ctx).map_err(RealizeError::Provider)?
         }
-        RealizeRequest::Adapter(plan) => {
-            super::Provider::realize_adapter(plan, ctx).map_err(RealizeError::Provider)?
+        RealizeRequest::Adapter { plan, expectation } => {
+            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation)
+                .map_err(RealizeError::Provider)?;
+            bind_adapter_hook_identity(&mut realized, plan, expectation, ctx)
+                .map_err(RealizeError::Store)?;
+            realized
         }
     };
-    let entry = record_realized_mode(roots, &realized).map_err(RealizeError::Store)?;
+    // The provider snapshots its Nix lock facts before producing bytes. Check
+    // that snapshot again immediately before the Store registration so a
+    // concurrent lock edit cannot detach the producer record from the output
+    // that is about to become reusable.
+    super::Provider::validate_nix_lock_before_store(ctx, &realized)
+        .map_err(RealizeError::Provider)?;
+    let mut entry = record_realized_mode(roots, &realized).map_err(RealizeError::Store)?;
+    entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
+        .map_err(RealizeError::Provider)?;
+    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(VerifiedRealization {
         entry,
@@ -1992,6 +2213,274 @@ pub(crate) fn commit_external_consumer_root(
         &prepared.witness,
         Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
     )?;
+    Ok(())
+}
+
+/// A manually retained Hangar closure, projected for the external-root CLI
+/// and consumers. The lifecycle WAL remains the source of truth; this is only
+/// the typed Store view of one committed root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExternalRootView {
+    pub(crate) label: String,
+    pub(crate) reference: String,
+    pub(crate) etag: String,
+    pub(crate) closure_size: usize,
+    pub(crate) prepared: bool,
+    pub(crate) expires_at: Option<u64>,
+}
+
+#[derive(Debug)]
+pub(crate) enum ExternalRootError {
+    Conflict {
+        label: String,
+        expected: Option<String>,
+        current: Option<String>,
+    },
+    ReferenceNotFound(String),
+    Store(std::io::Error),
+}
+
+impl std::fmt::Display for ExternalRootError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict {
+                label,
+                expected,
+                current,
+            } => {
+                write!(
+                    f,
+                    "external root `{label}` changed before the request applied (expected {:?}, current {:?})",
+                    expected,
+                    current
+                )
+            }
+            Self::ReferenceNotFound(reference) => {
+                write!(f, "no Hangar entry matches `{reference}`")
+            }
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ExternalRootError {}
+
+fn validate_external_root_label(label: &str) -> std::io::Result<()> {
+    if label.is_empty()
+        || label.len() > 128
+        || label == "."
+        || label == ".."
+        || label.contains('/')
+        || label.contains('\\')
+        || label.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "external root label must be one safe path component",
+        ));
+    }
+    Ok(())
+}
+
+fn manual_root_id(
+    principal: &Lifecycle::ProducerId,
+    label: &str,
+) -> std::io::Result<Lifecycle::RootId> {
+    Lifecycle::RootId::new(format!("manual:{}:{label}", principal.as_str()))
+}
+
+fn manual_root_witness(
+    principal: &Lifecycle::ProducerId,
+    label: &str,
+    reference: &str,
+    targets: &[String],
+) -> std::io::Result<Lifecycle::RootWitness> {
+    let mut canonical = String::from("jet-manual-root-v1\n");
+    for value in [principal.as_str(), label, reference] {
+        canonical.push_str(&value.len().to_string());
+        canonical.push('\n');
+        canonical.push_str(value);
+        canonical.push('\n');
+    }
+    for target in targets {
+        canonical.push_str(target);
+        canonical.push('\n');
+    }
+    Lifecycle::RootWitness::new(format!(
+        "sha256-{}",
+        SHA256::sha256_hex(canonical.as_bytes())
+    ))
+}
+
+fn external_root_targets(
+    roots: &Roots,
+    reference: &str,
+) -> Result<Vec<String>, ExternalRootError> {
+    let entry = list_checked(roots)
+        .map_err(ExternalRootError::Store)?
+        .into_iter()
+        .find(|entry| entry.reference == reference)
+        .ok_or_else(|| ExternalRootError::ReferenceNotFound(reference.to_string()))?;
+    let mut targets = Closure::closure_of(roots, &entry.envelope.output_hash)
+        .map_err(ExternalRootError::Store)?;
+    targets.sort();
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar entry `{reference}` has no closure objects"),
+        )));
+    }
+    Ok(targets)
+}
+
+pub(crate) fn external_root_closure_size(
+    roots: &Roots,
+    reference: &str,
+) -> Result<usize, ExternalRootError> {
+    Ok(external_root_targets(roots, reference)?.len())
+}
+
+fn external_root_view(root: &Lifecycle::LifecycleRoot) -> std::io::Result<ExternalRootView> {
+    let label = root.metadata.label.clone().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "manual lifecycle root has no label metadata",
+        )
+    })?;
+    let reference = root.metadata.reference.clone().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "manual lifecycle root has no reference metadata",
+        )
+    })?;
+    Ok(ExternalRootView {
+        label,
+        reference,
+        etag: root.etag().render(),
+        closure_size: root.targets.len(),
+        prepared: root.phase == Lifecycle::RootPhase::Prepared,
+        expires_at: root.metadata.expires_at.map(|value| value.get()),
+    })
+}
+
+fn map_external_root_error(label: &str, error: std::io::Error) -> ExternalRootError {
+    if let Some(conflict) = error
+        .get_ref()
+        .and_then(|cause| cause.downcast_ref::<Lifecycle::CasConflict>())
+    {
+        return ExternalRootError::Conflict {
+            label: label.to_string(),
+            expected: conflict.expected.clone(),
+            current: conflict.current.clone(),
+        };
+    }
+    ExternalRootError::Store(error)
+}
+
+/// Atomically create or replace one manually retained Hangar closure.
+/// Lifecycle owns the typed identity, CAS check, expiry metadata, and
+/// prepare/commit journal sequence while this Store adapter resolves the
+/// reference to the complete closure under Hangar authority.
+pub(crate) fn register_external_root_at(
+    roots: &Roots,
+    principal: &str,
+    label: &str,
+    reference: &str,
+    expires_at: Option<u64>,
+    expected_etag: Option<&str>,
+    at: u64,
+) -> Result<ExternalRootView, ExternalRootError> {
+    validate_external_root_label(label).map_err(ExternalRootError::Store)?;
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    let metadata = Lifecycle::RootMetadata::manual(
+        label,
+        reference,
+        expires_at.map(Lifecycle::LifecycleTimestamp::from_unix_seconds),
+    )
+    .map_err(ExternalRootError::Store)?;
+    let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
+    let mut targets = external_root_targets(roots, reference)?;
+    let witness = manual_root_witness(&producer, label, reference, &targets)
+        .map_err(ExternalRootError::Store)?;
+    let update = Lifecycle::RootUpdate {
+        identity: Lifecycle::RootIdentity::new(
+            Lifecycle::RootKind::Manual,
+            id.clone(),
+            producer,
+            Lifecycle::Incarnation::new(1).map_err(ExternalRootError::Store)?,
+            witness,
+        ),
+        targets: std::mem::take(&mut targets),
+        metadata,
+        expected_etag: expected_etag.map(str::to_string),
+        at: Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    };
+    let snapshot = Lifecycle::atomic_update(roots, update)
+        .map_err(|error| map_external_root_error(label, error))?;
+    let root = snapshot.roots.get(&id).ok_or_else(|| {
+        ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("manual lifecycle root `{label}` disappeared after update"),
+        ))
+    })?;
+    external_root_view(root).map_err(ExternalRootError::Store)
+}
+
+pub(crate) fn list_external_roots(
+    roots: &Roots,
+    principal: &str,
+) -> Result<Vec<ExternalRootView>, ExternalRootError> {
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    Lifecycle::snapshot(roots)
+        .map_err(ExternalRootError::Store)?
+        .roots
+        .values()
+        .filter(|root| {
+            root.identity.kind == Lifecycle::RootKind::Manual
+                && root.identity.producer == producer
+                && root.phase != Lifecycle::RootPhase::Tombstoned
+        })
+        .map(external_root_view)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ExternalRootError::Store)
+}
+
+pub(crate) fn unregister_external_root_at(
+    roots: &Roots,
+    principal: &str,
+    label: &str,
+    expected_etag: &str,
+    at: u64,
+) -> Result<(), ExternalRootError> {
+    validate_external_root_label(label).map_err(ExternalRootError::Store)?;
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
+    let snapshot = Lifecycle::snapshot(roots).map_err(ExternalRootError::Store)?;
+    let Some(root) = snapshot.roots.get(&id) else {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("external root `{label}` was not found"),
+        )));
+    };
+    if root.identity.kind != Lifecycle::RootKind::Manual
+        || root.identity.producer != producer
+    {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("external root `{label}` is owned by another producer"),
+        )));
+    }
+    Lifecycle::atomic_remove(
+        roots,
+        &id,
+        expected_etag,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )
+    .map_err(|error| map_external_root_error(label, error))?;
     Ok(())
 }
 

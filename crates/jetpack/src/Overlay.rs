@@ -7,11 +7,13 @@
 
 pub use jet_pkg_model::Overlay::{
     balanced_with_len, find_workspace_body_start, top_level_commas, unquote,
-    OverlayError, OverlayPolicy, OverlaySet, PackageOverride, PatchApplication,
-    ProviderOverride, parse_workspace_policy, strip_overlay_policy,
+    OverrideProvenance, OverlayError, OverlayPolicy, OverlaySet, PackageOverride,
+    PatchApplication, ProviderOverride, ResolvedPackageOverride, parse_workspace_policy,
+    strip_overlay_policy,
 };
 
 use super::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub fn apply_overlay_patches(
@@ -190,70 +192,197 @@ pub fn semantic_records(
     policy: &OverlayPolicy,
     owner: &str,
     platform: &str,
-) -> Vec<SemanticRecord> {
+) -> Result<Vec<SemanticRecord>, OverlayError> {
     let mut records = Vec::new();
     for overlay in &policy.overlays {
         for package in &overlay.packages {
-            let provider = overlay
-                .provider
-                .as_ref()
-                .map(|p| p.provider.clone())
-                .unwrap_or_else(|| "unchanged".to_string());
-            let channel = overlay
-                .provider
-                .as_ref()
-                .and_then(|p| p.channel.clone())
-                .unwrap_or_default();
-            let exact = package
+            let resolved = policy
+                .resolve_package_override_checked(&package.package)?
+                .ok_or_else(|| {
+                    OverlayError::Malformed(format!(
+                        "overlay `{}` package `{}` disappeared during resolution",
+                        overlay.name, package.package
+                    ))
+                })?;
+            let exact = resolved
                 .version
                 .clone()
-                .or_else(|| package.source.clone())
+                .or_else(|| resolved.source.clone())
                 .unwrap_or_else(|| "source-policy".to_string());
-            records.push(SemanticRecord::new(
-                LockIdentity {
-                    kind: LockRecordKind::PackageOverlay,
-                    key: format!("{}:{}", overlay.name, package.package),
-                    exact,
-                    hash: package.policy_fingerprint(overlay),
-                    platform: platform.to_string(),
-                },
-                LockRationale {
+            let policy_fingerprint = resolved_policy_fingerprint(&resolved, overlay);
+            let mut rationales = resolved
+                .provenance
+                .iter()
+                .map(|fact| {
+                    let source_overlay = policy.overlay(&fact.overlay);
+                    let provider = source_overlay
+                        .and_then(|overlay| overlay.provider.as_ref())
+                        .map(|provider| provider.provider.clone())
+                        .unwrap_or_else(|| "unchanged".to_string());
+                    let channel = source_overlay
+                        .and_then(|overlay| overlay.provider.as_ref())
+                        .and_then(|provider| provider.channel.clone())
+                        .unwrap_or_default();
+                    LockRationale {
+                        owner_package: owner.to_string(),
+                        reason: format!(
+                            "overlay `{}` contributed `{}` = `{}` at priority {}",
+                            fact.overlay, fact.field, fact.value, fact.priority
+                        ),
+                        source_ref: resolved
+                            .source
+                            .clone()
+                            .unwrap_or_else(|| resolved.package.clone()),
+                        provider,
+                        channel_input: channel,
+                        exact_output: exact.clone(),
+                        policy_fingerprint: policy_fingerprint.clone(),
+                        recipe_id: resolved.patches.join(","),
+                        adapter_id: "workspace.overlay".to_string(),
+                        signature: String::new(),
+                        cache_provenance: "workspace.jet".to_string(),
+                        update_command: "jetpack override draft".to_string(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            if rationales.is_empty() {
+                rationales.push(LockRationale {
                     owner_package: owner.to_string(),
                     reason: "workspace package overlay".to_string(),
-                    source_ref: package
+                    source_ref: resolved
                         .source
                         .clone()
-                        .unwrap_or_else(|| package.package.clone()),
-                    provider,
-                    channel_input: channel,
-                    exact_output: package.package.clone(),
-                    policy_fingerprint: package.policy_fingerprint(overlay),
-                    recipe_id: package.patches.join(","),
+                        .unwrap_or_else(|| resolved.package.clone()),
+                    provider: overlay
+                        .provider
+                        .as_ref()
+                        .map(|provider| provider.provider.clone())
+                        .unwrap_or_else(|| "unchanged".to_string()),
+                    channel_input: overlay
+                        .provider
+                        .as_ref()
+                        .and_then(|provider| provider.channel.clone())
+                        .unwrap_or_default(),
+                    exact_output: exact.clone(),
+                    policy_fingerprint: policy_fingerprint.clone(),
+                    recipe_id: resolved.patches.join(","),
                     adapter_id: "workspace.overlay".to_string(),
                     signature: String::new(),
                     cache_provenance: "workspace.jet".to_string(),
                     update_command: "jetpack override draft".to_string(),
+                });
+            }
+            let record = SemanticRecord {
+                identity: LockIdentity {
+                    kind: LockRecordKind::PackageOverlay,
+                    key: format!("{}:{}", overlay.name, package.package),
+                    exact,
+                    hash: policy_fingerprint,
+                    platform: platform.to_string(),
                 },
-            ));
+                rationales,
+                future_fields: resolved_fact_fields(&resolved, &overlay.name),
+            };
+            records.push(record);
         }
     }
-    records
+    Ok(records)
+}
+
+fn resolved_policy_fingerprint(
+    resolved: &ResolvedPackageOverride,
+    overlay: &OverlaySet,
+) -> String {
+    let provider = overlay
+        .provider
+        .as_ref()
+        .map(|provider| {
+            provider
+                .channel
+                .as_ref()
+                .map(|channel| format!("{}#{channel}", provider.provider))
+                .unwrap_or_else(|| provider.provider.clone())
+        })
+        .unwrap_or_else(|| "provider:unchanged".to_string());
+    format!("{}:{}", resolved.policy_fingerprint(), provider)
+}
+
+fn resolved_fact_fields(
+    resolved: &ResolvedPackageOverride,
+    overlay: &str,
+) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    fields.insert("overlay-fact-overlay".to_string(), overlay.to_string());
+    fields.insert("overlay-fact-package".to_string(), resolved.package.clone());
+    fields.insert(
+        "overlay-fact-source".to_string(),
+        resolved.source.clone().unwrap_or_default(),
+    );
+    fields.insert(
+        "overlay-fact-version".to_string(),
+        resolved.version.clone().unwrap_or_default(),
+    );
+    fields.insert("overlay-fact-flags".to_string(), resolved.flags.join(","));
+    fields.insert(
+        "overlay-fact-env".to_string(),
+        resolved
+            .env
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    fields.insert(
+        "overlay-fact-patches".to_string(),
+        resolved.patches.join(","),
+    );
+    fields.insert(
+        "overlay-fact-allow-unfree".to_string(),
+        resolved.allow_unfree.to_string(),
+    );
+    fields.insert(
+        "overlay-fact-priority".to_string(),
+        resolved.priority.to_string(),
+    );
+    for (field, priority) in &resolved.field_priorities {
+        fields.insert(
+            format!("overlay-field-priority.{field}"),
+            priority.to_string(),
+        );
+    }
+    for (index, fact) in resolved.provenance.iter().enumerate() {
+        let prefix = format!("overlay-provenance.{index}");
+        fields.insert(format!("{prefix}.overlay"), fact.overlay.clone());
+        fields.insert(format!("{prefix}.order"), fact.order.to_string());
+        fields.insert(format!("{prefix}.field"), fact.field.clone());
+        fields.insert(format!("{prefix}.value"), fact.value.clone());
+        fields.insert(format!("{prefix}.priority"), fact.priority.to_string());
+    }
+    fields
 }
 
 /// Map `(overlay, package)` → policy fingerprint for exact invalidation diffs.
 pub fn policy_fingerprints(
     policy: &OverlayPolicy,
-) -> std::collections::BTreeMap<(String, String), String> {
-    let mut out = std::collections::BTreeMap::new();
+) -> Result<BTreeMap<(String, String), String>, OverlayError> {
+    let mut out = BTreeMap::new();
     for overlay in &policy.overlays {
         for package in &overlay.packages {
+            let resolved = policy
+                .resolve_package_override_checked(&package.package)?
+                .ok_or_else(|| {
+                    OverlayError::Malformed(format!(
+                        "overlay `{}` package `{}` disappeared during resolution",
+                        overlay.name, package.package
+                    ))
+                })?;
             out.insert(
                 (overlay.name.clone(), package.package.clone()),
-                package.policy_fingerprint(overlay),
+                resolved_policy_fingerprint(&resolved, overlay),
             );
         }
     }
-    out
+    Ok(out)
 }
 
 /// Diff overlay policies and return exact action invalidations (E4-JP13).
@@ -261,12 +390,12 @@ pub fn invalidations_against(
     before: &OverlayPolicy,
     after: &OverlayPolicy,
     actions_by_package: &std::collections::BTreeMap<String, Vec<String>>,
-) -> Vec<super::SemanticLock::OverlayInvalidation> {
-    super::SemanticLock::overlay_invalidations(
-        &policy_fingerprints(before),
-        &policy_fingerprints(after),
+) -> Result<Vec<super::SemanticLock::OverlayInvalidation>, OverlayError> {
+    Ok(super::SemanticLock::overlay_invalidations(
+        &policy_fingerprints(before)?,
+        &policy_fingerprints(after)?,
         actions_by_package,
-    )
+    ))
 }
 
 pub fn draft_overlay_source(
@@ -354,7 +483,7 @@ mod tests {
 }"#,
         )
         .unwrap();
-        let records = semantic_records(&policy, "app", "x86_64-linux");
+        let records = semantic_records(&policy, "app", "x86_64-linux").unwrap();
         assert_eq!(records.len(), 1);
         let rec = &records[0];
         assert_eq!(rec.identity.kind, LockRecordKind::PackageOverlay);

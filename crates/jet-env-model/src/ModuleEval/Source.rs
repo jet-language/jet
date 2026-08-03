@@ -1,5 +1,5 @@
 //! The `env.jet` → `EnvPlan` driver: route the typed `module { … }` surface,
-//! discover `imports: find(…)` files (U4), build the merged `(name → upstream)`
+//! discover `imports: find(…)` files (U4), lower typed integration imports, and build the merged `(name → upstream)`
 //! source table (U5/U6/U9), and fold every module's contributions into the
 //! runnable plan.
 
@@ -19,7 +19,8 @@ use super::Diagnostics::{
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
-    EnvironmentLifecycle, LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
+    qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
+    IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
 };
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
@@ -28,29 +29,31 @@ use super::Types::{
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
-/// file that parses with at least one module declaration is evaluated through
-/// `evaluate_env`; everything else (including text that doesn't parse cleanly)
-/// falls back to the directive scanner, which is deliberately tolerant.
+/// file that declares the `module` keyword stays on this path even when its
+/// later syntax is malformed; only the legacy directive surface uses the
+/// tolerant fallback scanner.
 pub fn is_module_surface(src: &str) -> bool {
     let (toks, diags) = crate::Lexer::lex(src);
+    let has_module = toks
+        .iter()
+        .any(|token| matches!(&token.kind, crate::Lexer::TokKind::KwModule));
     if !diags.is_empty() {
-        return false;
+        return has_module;
     }
     match crate::Parser::parse(&toks) {
         Ok(program) => program
             .items
             .iter()
             .any(|item| matches!(item, Item::Module(_))),
-        Err(_) => false,
+        Err(_) => has_module,
     }
 }
 
 /// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
 /// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
 /// (U5); package sugar resolves to `package@source` refs; the `prompt`
-/// scalar becomes the label. `imports: find(…)` is walked before evaluation,
-/// so all reachable modules participate in the same source and environment
-/// graph.
+/// scalar becomes the label. `imports: find(…)` is walked before evaluation;
+/// typed integration calls lower into the same source and environment graph.
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     evaluate_env_with_profile(src, base_dir, None)
 }
@@ -65,6 +68,15 @@ pub fn evaluate_env_with_profile(
     requested_profile: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
+    let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+        Diagnostic::error(
+            "E1331",
+            format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
+            "one environment graph must resolve from a real project directory before it follows imports or path-backed facts".to_string(),
+            "run the command from an existing project directory".to_string(),
+            None,
+        )
+    })?;
 
     // The root `env.jet` plus every file reachable through `imports: find(…)`
     // (U4). Each unit owns its source text (spans index into it) and the dir its
@@ -72,10 +84,23 @@ pub fn evaluate_env_with_profile(
     let mut units = vec![EvalUnit {
         items: program.items,
         src: src.to_string(),
-        base_dir: base_dir.to_path_buf(),
+        base_dir: environment_root.clone(),
+        source_path: environment_root.join(Syntax::ENV_FILE),
     }];
-    let discovered = discover_imports(&units[0], base_dir)?;
+    let discovered = discover_imports(&units[0], &environment_root)?;
     units.extend(discovered);
+    let source_files = units
+        .iter()
+        .filter_map(|unit| {
+            unit.source_path
+                .strip_prefix(&environment_root)
+                .ok()
+                .map(|path| {
+                    path.to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/")
+                })
+        })
+        .collect::<Vec<_>>();
 
     let table = build_source_table(&units)?;
 
@@ -101,6 +126,9 @@ pub fn evaluate_env_with_profile(
     let mut profiles = ProfileSet::default();
     let mut languages = Vec::new();
     let mut files: Vec<ManagedFile> = Vec::new();
+    let mut integrations: Vec<EnvironmentIntegration> = Vec::new();
+    let mut integration_facts = IntegrationFactProjection::default();
+    let mut integration_packages = Vec::new();
     let environment_names: std::collections::BTreeSet<String> = modules
         .iter()
         .flat_map(|module| module.entries.iter())
@@ -130,6 +158,69 @@ pub fn evaluate_env_with_profile(
             push_unique(&mut secrets, secret.clone());
         }
         adapters.extend(module.adapters.iter().cloned());
+        for integration in &module.integrations {
+            if let Some(existing) = integrations
+                .iter()
+                .find(|existing| existing.name == integration.name)
+            {
+                if existing != integration {
+                    return Err(Diagnostic::error(
+                        "E1335",
+                        format!("integration `{}` has conflicting declarations", integration.name),
+                        "one environment graph cannot silently choose different SDK, host, credential, or grant facts".to_string(),
+                        "merge the integration options so they agree, or keep one declaration".to_string(),
+                        None,
+                    ));
+                }
+            } else {
+                integrations.push(integration.clone());
+            }
+            for package in &integration.packages {
+                push_unique(&mut integration_packages, package.clone());
+            }
+            for file in &integration.files {
+                if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
+                    if existing != file {
+                        return Err(Diagnostic::error(
+                            "E1326",
+                            format!("managed file `{}` has conflicting declarations", file.destination),
+                            "one environment graph cannot apply two different owners to the same destination".to_string(),
+                            "merge the file declarations or choose distinct destinations".to_string(),
+                            None,
+                        ));
+                    }
+                } else {
+                    files.push(file.clone());
+                }
+            }
+            for task in &integration.tasks {
+                push_unique(&mut integration_facts.tasks, task.clone());
+                let fact = super::Environment::IntegrationTaskFact {
+                    name: task.clone(),
+                    integration: integration.kind,
+                    packages: integration.packages.clone(),
+                    secrets: integration.secrets.clone(),
+                    providers: integration.providers.clone(),
+                    host_checks: integration.host_checks.clone(),
+                    grants: integration.grants.clone(),
+                };
+                if !integration_facts.task_facts.contains(&fact) {
+                    integration_facts.task_facts.push(fact);
+                }
+            }
+            for provider in &integration.providers {
+                push_unique(&mut integration_facts.providers, provider.clone());
+            }
+            for host_check in &integration.host_checks {
+                push_unique(&mut integration_facts.host_checks, host_check.clone());
+            }
+            for grant in &integration.grants {
+                push_unique(&mut integration_facts.grants, grant.clone());
+            }
+            for loss in &integration.losses {
+                push_unique(&mut integration_facts.losses, loss.clone());
+            }
+        }
         for dotenv in &module.lifecycle.dotenv {
             if let Some(existing) = lifecycle.dotenv.iter().find(|item| item.file == dotenv.file) {
                 if existing != dotenv {
@@ -286,6 +377,16 @@ pub fn evaluate_env_with_profile(
 
     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
 
+    if let Err(error) = integration_facts.validate() {
+        return Err(Diagnostic::error(
+            "E1335",
+            "environment integration lowering was lossy".to_string(),
+            error,
+            "use named secret references and supported typed integration arguments".to_string(),
+            None,
+        ));
+    }
+
     // Collect the `env`-namespace contributions in a deterministic order so the
     // realized package list is stable across runs (merge_all returns a HashMap).
     let mut env_keys: Vec<(Namespace, String)> = merged
@@ -296,6 +397,7 @@ pub fn evaluate_env_with_profile(
     env_keys.sort_by(|a, b| a.1.cmp(&b.1));
 
     let mut package_refs = Vec::new();
+    package_refs.extend(integration_packages);
     let mut prompt = None;
     let mut prompt_path = PromptPathMode::default();
     let mut prompt_strip = PromptStripMode::default();
@@ -316,16 +418,18 @@ pub fn evaluate_env_with_profile(
             prompt_strip = prompt_strip_mode(strip);
         }
     }
-    let selected_name = requested_profile.map(str::to_string).or_else(|| {
-        profiles.auto_select(
-            &std::env::var("HOSTNAME").unwrap_or_default(),
-            &std::env::var("USER")
-                .or_else(|_| std::env::var("USERNAME"))
-                .unwrap_or_default(),
-        )
-    });
-    let selected_profile = selected_name
-        .map(|name| profiles.resolve(&name))
+    let selected_names = requested_profile
+        .map(|name| vec![name.to_string()])
+        .unwrap_or_else(|| {
+            profiles.auto_select_many(
+                &std::env::var("HOSTNAME").unwrap_or_default(),
+                &std::env::var("USER")
+                    .or_else(|_| std::env::var("USERNAME"))
+                    .unwrap_or_default(),
+            )
+        });
+    let selected_profile = (!selected_names.is_empty())
+        .then(|| profiles.resolve_many(&selected_names))
         .transpose()
         .map_err(|error| {
             Diagnostic::error(
@@ -354,13 +458,11 @@ pub fn evaluate_env_with_profile(
     for package in &language_expansion.packages {
         push_unique(&mut package_refs, package.clone());
     }
-    let language_packs = language_expansion
-        .applied
-        .iter()
-        .filter_map(|name| catalog.get(name).cloned())
-        .collect();
+    let language_packs = language_expansion.packs.clone();
+    let language_projections = language_expansion.projections.clone();
     Ok(EnvPlan {
         table,
+        source_files,
         package_refs,
         adapters,
         prompt,
@@ -376,8 +478,13 @@ pub fn evaluate_env_with_profile(
         profiles: profiles.profiles.values().cloned().collect(),
         languages,
         selected_profile,
+        language_expansion,
         language_packs,
+        language_projections,
         files,
+        integrations,
+        integration_facts,
+        environment_names: environment_names.into_iter().collect(),
     })
 }
 
@@ -409,21 +516,42 @@ struct EvalUnit {
     items: Vec<Item>,
     src: String,
     base_dir: PathBuf,
+    source_path: PathBuf,
 }
 
 /// Walk every `imports: find("<dir>")` directive in the root unit's modules,
-/// returning one `EvalUnit` per discovered `*.jet` file (U4 import-tree
+/// skipping recognized typed integrations, and return one `EvalUnit` per
+/// discovered `*.jet` file (U4 import-tree
 /// discovery). Discovery is one level deep: a discovered file may not itself
 /// import (the liftability law — modules contribute to the merged whole, they
 /// don't import each other; violations are E0971).
 fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, Diagnostic> {
     let mut out = Vec::new();
+    let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+        Diagnostic::error(
+            "E1331",
+            format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
+            "imports follow physical paths and cannot be evaluated from an unresolved root".to_string(),
+            "run the command from an existing project directory".to_string(),
+            None,
+        )
+    })?;
+    let mut seen_files = std::collections::BTreeSet::new();
     for item in &root.items {
         let Item::Module(m) = item else { continue };
         if !m.is_auto_discovered() {
             continue;
         }
-        for imp in &m.imports {
+        let mut directives = Vec::new();
+        for import in &m.imports {
+            collect_import_directives(import, &mut directives);
+        }
+        for imp in directives {
+            if let Some(name) = qualified_call_name(imp) {
+                if IntegrationKind::from_call(&name).is_some() {
+                    continue;
+                }
+            }
             let rel = find_dir_arg(imp)?;
             let relative = Path::new(&rel);
             if relative.is_absolute()
@@ -440,31 +568,44 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
                 ));
             }
             let dir = base_dir.join(&rel);
-            let root = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
-            if let Ok(real) = std::fs::canonicalize(&dir) {
-                if !real.starts_with(&root) {
+            let real_dir = std::fs::canonicalize(&dir).map_err(|_| find_dir_missing(&dir, imp.span()))?;
+            if !real_dir.starts_with(&environment_root) {
+                return Err(Diagnostic::error(
+                    "E1331",
+                    format!("module import `{rel}` resolves outside the environment root"),
+                    "imports follow physical paths and cannot cross the project boundary".to_string(),
+                    "remove the escaping symlink or move the imported directory below the project root".to_string(),
+                    Some(imp.span()),
+                ));
+            }
+            for file in list_jet_files(&real_dir, imp)? {
+                let canonical_file = std::fs::canonicalize(&file).map_err(|_| {
+                    find_dir_missing(&real_dir, imp.span())
+                })?;
+                if !canonical_file.starts_with(&environment_root) || !canonical_file.is_file() {
                     return Err(Diagnostic::error(
                         "E1331",
-                        format!("module import `{rel}` resolves outside the environment root"),
+                        format!("discovered module `{}` resolves outside the environment root", file.display()),
                         "imports follow physical paths and cannot cross the project boundary".to_string(),
-                        "remove the escaping symlink or move the imported directory below the project root".to_string(),
+                        "remove the escaping symlink or move the module below the environment root".to_string(),
                         Some(imp.span()),
                     ));
                 }
-            }
-            for file in list_jet_files(&dir, imp)? {
-                let file_src = std::fs::read_to_string(&file)
-                    .map_err(|_| find_dir_missing(&dir, imp.span()))?;
+                if !seen_files.insert(canonical_file.clone()) {
+                    continue;
+                }
+                let file_src = std::fs::read_to_string(&canonical_file)
+                    .map_err(|_| find_dir_missing(&real_dir, imp.span()))?;
                 let prog = parse_program(&file_src)?;
                 // Liftability law (U4): a discovered module may not import.
                 for nested in &prog.items {
                     if let Item::Module(nm) = nested {
                         if !nm.imports.is_empty() {
-                            return Err(discovered_module_imports(&file));
+                            return Err(discovered_module_imports(&canonical_file));
                         }
                     }
                 }
-                let file_base = file
+                let file_base = canonical_file
                     .parent()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| base_dir.to_path_buf());
@@ -472,11 +613,23 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
                     items: prog.items,
                     src: file_src,
                     base_dir: file_base,
+                    source_path: canonical_file,
                 });
             }
         }
     }
     Ok(out)
+}
+
+fn collect_import_directives<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::ListLit(items, _) => {
+            for item in items {
+                collect_import_directives(item, out);
+            }
+        }
+        _ => out.push(expr),
+    }
 }
 
 /// Extract the literal directory path from an `imports: find("dir")` directive.
@@ -507,8 +660,10 @@ fn find_dir_arg(imp: &Expr) -> Result<String, Diagnostic> {
 fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
     let entries = std::fs::read_dir(dir).map_err(|_| find_dir_missing(dir, imp.span()))?;
     let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for entry in entries {
+        let path = entry
+            .map_err(|_| find_dir_missing(dir, imp.span()))?
+            .path();
         if path.extension().and_then(|e| e.to_str()) == Some(Syntax::FILE_EXT) {
             files.push(path);
         }
@@ -540,7 +695,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
             if !m.is_auto_discovered() {
                 continue;
             }
-            let mut map = BTreeMap::new();
+            let mut map: BTreeMap<String, String> = BTreeMap::new();
             for s in &m.sources {
                 let ref_text = unit.src[s.ref_span.start..s.ref_span.end].trim();
                 let span = if is_root { Some(s.ref_span) } else { None };
@@ -552,9 +707,34 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                     Syntax::REF_SEPARATOR,
                     pref.target
                 );
+                if let Some(existing) = map.get(&s.name) {
+                    if existing != &upstream {
+                        return Err(merge_error_to_diagnostic(
+                            &Merge::MergeError::SourceConflict {
+                                name: s.name.clone(),
+                                a: existing.clone(),
+                                b: upstream,
+                            },
+                        ));
+                    }
+                    continue;
+                }
                 // Probe the resolved target against the *declaring file's* dir,
                 // so a bare `./local` path resolves where it was written.
-                kinds.insert(s.name.clone(), infer_provider_kind(&pref, &unit.base_dir));
+                let kind = infer_provider_kind(&pref, &unit.base_dir);
+                if let Some(existing) = kinds.get(&s.name) {
+                    if existing != &kind {
+                        return Err(Diagnostic::error(
+                            "E0967",
+                            format!("source `{}` resolves to conflicting provider kinds", s.name),
+                            "one named source must have one deterministic realization path across the environment graph".to_string(),
+                            "make every declaration use the same source location and provider kind".to_string(),
+                            span,
+                        ));
+                    }
+                } else {
+                    kinds.insert(s.name.clone(), kind);
+                }
                 map.insert(s.name.clone(), upstream);
             }
             maps.push(map);

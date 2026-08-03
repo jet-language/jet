@@ -401,6 +401,8 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
+  {bin} cache bind <role> <mirror>  bind host-owned binary-cache mirrors (D-JPK-CACHECONFIG1)
+  {bin} shared-store install       install the optional socket-activated shared Hangar broker
   {bin} trust list                  show package/build/env/service/image/fleet/jetos grants
   {bin} trust explain [<grant>]      explain exact trust authority
   {bin} trust grant <grant>          add a reviewed trust grant
@@ -1900,11 +1902,9 @@ fn main() {
         // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
         // store verb. `verify`/`rollback`/`generations` reuse the existing
         // real generation-tracking logic (renamed from `store`); `du` is
-        // jetpack's real honest per-object disk accounting. `repair`/`copy`/
-        // `import`/`export`/`dump`/`restore`/`sign` are ratified verb NAMES
-        // with no ratified operational design yet (no dump format, signing-key
-        // policy, or repair algorithm has shipped) — they answer honestly
-        // rather than faking success or silently doing nothing.
+        // Jetpack's real per-object disk accounting. Archive operations cross
+        // the version-checked Jetpack boundary so every transfer verb shares
+        // one signed archive and closure implementation.
         "hangar" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
             match sub {
@@ -1922,14 +1922,11 @@ fn main() {
                     ));
                 }
                 "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign" => {
-                    eprintln!("error: `jet hangar {sub}` isn't built yet");
-                    eprintln!(
-                        " why: D-JPK-STORECLI1 names this verb, but its operational design (archive format, signing-key policy, repair algorithm) hasn't shipped"
-                    );
-                    eprintln!(
-                        " fix: `jet hangar verify`, `jet hangar rollback <gen>`, `jet hangar generations`, and `jet hangar du` work today"
-                    );
-                    exit(ExitCodes::USAGE);
+                    exit(EngineDispatch::dispatch(
+                        jet::Syntax::JETPACK_BINARY_NAME,
+                        "hangar",
+                        &raw,
+                    ));
                 }
                 _ => {
                     eprintln!("error: unknown hangar subcommand `{}`", sub);
@@ -1938,6 +1935,22 @@ fn main() {
                 }
             }
             return;
+        }
+        // D-JPK-CACHECONFIG1=D: cache roles and mirrors are host-owned by
+        // Jetpack. The compiler front door forwards the exact argv.
+        "cache" => {
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "cache",
+                &raw,
+            ));
+        }
+        "shared-store" => {
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "shared-store",
+                &raw,
+            ));
         }
         "eval" => {
             // S60 / D-PURE1 (E2-M16): deterministic evaluation of a pure program.
@@ -2440,8 +2453,14 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
 /// `src/run.jet` and `<package>.jet`. Old `main.jet` locations remain fallback
 /// inputs, never defaults. Missing-entry errors name `run.jet`.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
-    if let Some(entry) = package_output_entry(root) {
-        return entry;
+    match package_output_entry(root) {
+        Ok(Some(entry)) => return entry,
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("error: {error}");
+            eprintln!(" fix: repair the typed Package output or point at a `.jet` file directly");
+            exit(ExitCodes::USER_ERROR);
+        }
     }
     let default = root.join(jet::Syntax::DEFAULT_ENTRY_FILE);
     if default.is_file() {
@@ -2478,13 +2497,32 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// the migration-era `run.jet` convention. Invalid or incomplete package
 /// output paths are not trusted as filesystem paths; the compiler/manifest
 /// diagnostics remain the authority for the malformed Package itself.
-fn package_output_entry(root: &Path) -> Option<PathBuf> {
-    let package = jet::Package::PackageFacts::load(root)?.ok()?;
-    let output = package.select_output("run", None, None).ok()?;
-    package.entry_path(root, output).or_else(|| {
-        let candidate = root.join(format!("{}.{}", output.name, jet::Syntax::FILE_EXT));
-        candidate.is_file().then_some(candidate)
-    })
+fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(package) = jet::Package::PackageFacts::load(root) else {
+        return Ok(None);
+    };
+    let package = match package {
+        Ok(package) => package,
+        Err(_error)
+            if !root.join(jet::Syntax::PACKAGE_FILE).is_file()
+                && jet::PackageManifest::PackManifest::load(root)
+                    .is_some_and(|manifest| manifest.is_ok()) =>
+        {
+            // A legacy `pkg.jet` manifest still owns package identity and
+            // publish metadata, but it is not a typed Package output. Let
+            // the normal entry-file fallback handle that project shape.
+            return Ok(None);
+        }
+        Err(error) => {
+            let source = if root.join(jet::Syntax::PACKAGE_FILE).is_file() {
+                root.join(jet::Syntax::PACKAGE_FILE)
+            } else {
+                root.join(jet::Syntax::PAYLOAD_FILE)
+            };
+            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+        }
+    };
+    package.resolve_run_entry(root)
 }
 
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/

@@ -168,6 +168,15 @@ fn trust_record_matches(record: &Trust::TrustRecord, selector: &str) -> bool {
 /// label). Returns an exit code after reporting if any ref fails to realize.
 pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
     RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
+    if let Err(error) = validate_integration_facts(plan) {
+        theme.error_coded(
+            "E1335",
+            "environment integration facts are not executable",
+            &error,
+            "use the supported integration preset and keep its typed package, host, task, and grant facts intact",
+        );
+        return Err(2);
+    }
     let mut bin_dirs = Vec::new();
     let mut provider_vars: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     let mut realized_refs = Vec::new();
@@ -323,6 +332,127 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     })
 }
 
+fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
+    plan.environment.integration_facts.validate()?;
+    let target = std::env::var("JET_TARGET").unwrap_or_else(|_| {
+        let os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            std::env::consts::OS
+        };
+        format!("{}-{os}", std::env::consts::ARCH)
+    });
+    for task in &plan.environment.integration_facts.task_facts {
+        if !plan.environment.integration_facts.tasks.contains(&task.name) {
+            return Err(format!(
+                "integration task `{}` is not disclosed by its fact projection",
+                task.name
+            ));
+        }
+        for package in &task.packages {
+            if !plan
+                .refs
+                .iter()
+                .any(|reference| reference.raw == *package || reference.short_name() == *package)
+            {
+                return Err(format!(
+                    "integration task `{}` lost package `{package}` before realization",
+                    task.name
+                ));
+            }
+        }
+        for secret in &task.secrets {
+            if !plan.secrets.iter().any(|declared| declared == secret) {
+                return Err(format!(
+                    "integration task `{}` lost secret `{secret}` before activation",
+                    task.name
+                ));
+            }
+        }
+        let expected_provider = match task.integration {
+            ModuleEval::IntegrationKind::Android
+            | ModuleEval::IntegrationKind::Apple
+            | ModuleEval::IntegrationKind::Editor => "nixpkgs",
+            ModuleEval::IntegrationKind::Certificates | ModuleEval::IntegrationKind::Vault => "vault",
+            ModuleEval::IntegrationKind::CloudCredentials => "credential-store",
+            ModuleEval::IntegrationKind::Hosts => "host-binding",
+            ModuleEval::IntegrationKind::CodexAgent => "mcp",
+        };
+        if !task.providers.iter().any(|provider| provider == expected_provider) {
+            return Err(format!(
+                "integration task `{}` has no executable `{expected_provider}` provider",
+                task.name
+            ));
+        }
+        if task.providers.iter().any(|provider| {
+            !matches!(
+                provider.as_str(),
+                "nixpkgs" | "vault" | "credential-store" | "host-binding" | "mcp"
+            )
+        }) {
+            return Err(format!(
+                "integration task `{}` names an unsupported provider",
+                task.name
+            ));
+        }
+        for provider in &task.providers {
+            if !plan.environment.integration_facts.providers.contains(provider) {
+                return Err(format!(
+                    "integration task `{}` lost provider `{provider}` before realization",
+                    task.name
+                ));
+            }
+        }
+        for grant in &task.grants {
+            if !plan.environment.integration_facts.grants.contains(grant) {
+                return Err(format!(
+                    "integration task `{}` lost grant `{grant}` before realization",
+                    task.name
+                ));
+            }
+        }
+        for check in &task.host_checks {
+            validate_integration_host_check(check, &target)?;
+        }
+    }
+    if plan
+        .environment
+        .integration_facts
+        .providers
+        .iter()
+        .any(|provider| provider.trim().is_empty())
+    {
+        return Err("integration provider authority cannot be empty".to_string());
+    }
+    if plan
+        .environment
+        .integration_facts
+        .host_checks
+        .iter()
+        .any(|check| check.trim().is_empty())
+    {
+        return Err("integration host checks cannot be empty".to_string());
+    }
+    Ok(())
+}
+
+fn validate_integration_host_check(check: &str, target: &str) -> Result<(), String> {
+    let Some(expected) = check.strip_prefix("target:") else {
+        return Ok(());
+    };
+    let target = target.to_ascii_lowercase();
+    if expected
+        .split("-or-")
+        .any(|candidate| target.contains(&candidate.to_ascii_lowercase()))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "integration host check `{check}` failed for target `{target}`"
+        ))
+    }
+}
+
 fn read_dotenv(
     path: &std::path::Path,
 ) -> Result<std::collections::BTreeMap<String, String>, String> {
@@ -381,7 +511,12 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
             }
             let mut components = relative.components();
             if components.clone().next().is_none()
-                || !components.all(|component| matches!(component, std::path::Component::Normal(_)))
+                || !components.all(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::CurDir | std::path::Component::Normal(_)
+                    )
+                })
             {
                 return None;
             }
@@ -417,6 +552,14 @@ mod tests {
         assert_eq!(
             resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "../outside"),
             None
+        );
+    }
+
+    #[test]
+    fn current_directory_provider_metadata_resolves_inside_realized_output() {
+        assert_eq!(
+            resolve_provider_paths("/hangar/objects/sha256-output", "gem-home", "."),
+            Some("/hangar/objects/sha256-output/.".into())
         );
     }
 

@@ -213,13 +213,57 @@ fn check_lsp() -> Check {
 }
 
 fn check_registry() -> Check {
-    // Offline-first: we do not bundle a network client (I6 / no crates), and the
-    // registry backend is M12.2. Report honestly rather than fake a probe.
-    Check::note(
-        "registry",
-        "registry",
-        "registry backend is not wired yet (M12.2); nothing to reach",
-    )
+    let registry = crate::Publish::resolve_publish_registry();
+    let safe_url = redact_registry_url(&registry.url);
+    if registry.url.starts_with("file://") {
+        let path = registry.url.trim_start_matches("file://");
+        return if PathBuf::from(path).exists() {
+            Check::ok("registry", registry.name, format!("{safe_url} (local index reachable)"))
+        } else {
+            Check::problem(
+                "registry",
+                registry.name,
+                format!("{safe_url} (local index is missing)"),
+                "create the configured local registry or set JET_REGISTRY_URL to a reachable index",
+                false,
+            )
+        };
+    }
+    match Command::new("git")
+        .args(["ls-remote", &registry.url])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            Check::ok("registry", registry.name, format!("{safe_url} (reachable)"))
+        }
+        Ok(output) => Check::problem(
+            "registry",
+            registry.name,
+            format!("{safe_url} (unreachable: {})", redact_registry_url(&String::from_utf8_lossy(&output.stderr))),
+            "check JET_REGISTRY_URL, credentials, and network access, then retry",
+            false,
+        ),
+        Err(error) => Check::problem(
+            "registry",
+            registry.name,
+            format!("{safe_url} (git unavailable: {error})"),
+            "install git or configure a local registry index",
+            false,
+        ),
+    }
+}
+
+fn redact_registry_url(value: &str) -> String {
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return value.to_string();
+    };
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let safe_authority = authority
+        .rsplit_once('@')
+        .map(|(_, host)| format!("***@{host}"))
+        .unwrap_or_else(|| authority.to_string());
+    format!("{scheme}://{}{suffix}", safe_authority, suffix = &rest[authority_end..])
 }
 
 fn check_ffi() -> Vec<Check> {

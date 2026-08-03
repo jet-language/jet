@@ -10,6 +10,279 @@ use std::path::Path;
 use crate::AST::CtKey;
 use crate::Comptime::CtValue;
 
+/// Return the fully-qualified name of a first-party integration call.
+///
+/// The parser represents `env.platform.android(...)` as a method call on the
+/// field path `env.platform`, while bare calls use `Expr::Call`. Both spellings
+/// are the same integration surface and must share one lowering path.
+pub(super) fn qualified_call_name(expr: &crate::AST::Expr) -> Option<String> {
+    match expr {
+        crate::AST::Expr::Call(call) => Some(call.name.clone()),
+        crate::AST::Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            let mut name = expression_path(receiver)?;
+            name.push('.');
+            name.push_str(method);
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn expression_path(expr: &crate::AST::Expr) -> Option<String> {
+    match expr {
+        crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+        crate::AST::Expr::Field(base, member, _) => {
+            let mut name = expression_path(base)?;
+            name.push('.');
+            name.push_str(member);
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+/// D-ENV-INTEGRATIONS1=A: the closed first-party integration vocabulary. An
+/// integration is a typed projection into ordinary environment facts, not a
+/// second package resolver, lock, effect system, or activation engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IntegrationKind {
+    Android,
+    Apple,
+    Certificates,
+    Hosts,
+    CodexAgent,
+    Editor,
+    CloudCredentials,
+    Vault,
+}
+
+impl IntegrationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Android => "android",
+            Self::Apple => "apple",
+            Self::Certificates => "certificates",
+            Self::Hosts => "hosts",
+            Self::CodexAgent => "codex-agent",
+            Self::Editor => "editor",
+            Self::CloudCredentials => "cloud-credentials",
+            Self::Vault => "vault",
+        }
+    }
+
+    pub fn from_call(name: &str) -> Option<Self> {
+        match name {
+            crate::Syntax::ENV_INTEGRATION_ANDROID => Some(Self::Android),
+            crate::Syntax::ENV_INTEGRATION_APPLE => Some(Self::Apple),
+            crate::Syntax::ENV_INTEGRATION_CERTIFICATES => Some(Self::Certificates),
+            crate::Syntax::ENV_INTEGRATION_HOSTS => Some(Self::Hosts),
+            crate::Syntax::ENV_INTEGRATION_CODEX => Some(Self::CodexAgent),
+            crate::Syntax::ENV_INTEGRATION_EDITOR => Some(Self::Editor),
+            crate::Syntax::ENV_INTEGRATION_CLOUD => Some(Self::CloudCredentials),
+            crate::Syntax::ENV_INTEGRATION_VAULT => Some(Self::Vault),
+            _ => None,
+        }
+    }
+}
+
+/// One lowered integration import. Secret-bearing inputs are represented by
+/// names only; values never enter this record, fingerprints, dossiers, image
+/// layers, or logs.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EnvironmentIntegration {
+    pub kind: IntegrationKind,
+    pub name: String,
+    pub preset: String,
+    pub options: BTreeMap<String, String>,
+    pub packages: Vec<String>,
+    pub files: Vec<ManagedFile>,
+    /// Existing lifecycle/task facts selected by the preset. These are names
+    /// only; activation still belongs to the ordinary environment lifecycle.
+    pub tasks: Vec<String>,
+    /// Provider authorities used by package and host facts. This is metadata,
+    /// not a second resolver.
+    pub providers: Vec<String>,
+    pub host_checks: Vec<String>,
+    pub secrets: Vec<String>,
+    pub grants: Vec<String>,
+    pub losses: Vec<String>,
+}
+
+/// The non-package portion of integration lowering. These facts stay in the
+/// ordinary environment plan so trust, inspection, and activation all consume
+/// one projection instead of treating integrations as report-only annotations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrationTaskFact {
+    pub name: String,
+    pub integration: IntegrationKind,
+    pub packages: Vec<String>,
+    pub secrets: Vec<String>,
+    pub providers: Vec<String>,
+    pub host_checks: Vec<String>,
+    pub grants: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IntegrationFactProjection {
+    pub tasks: Vec<String>,
+    /// Typed task contracts. `tasks` is only the stable disclosure projection;
+    /// realization consumes these records and their ordinary package,
+    /// provider, host, and grant facts.
+    pub task_facts: Vec<IntegrationTaskFact>,
+    pub providers: Vec<String>,
+    pub host_checks: Vec<String>,
+    pub grants: Vec<String>,
+    pub losses: Vec<String>,
+}
+
+impl IntegrationFactProjection {
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::new();
+        for task in &self.task_facts {
+            text.push_str("task-fact=");
+            text.push_str(task.integration.as_str());
+            text.push('\t');
+            text.push_str(&task.name);
+            text.push('\t');
+            text.push_str(&task.packages.join(","));
+            text.push('\t');
+            text.push_str(&task.secrets.join(","));
+            text.push('\t');
+            text.push_str(&task.providers.join(","));
+            text.push('\t');
+            text.push_str(&task.host_checks.join(","));
+            text.push('\t');
+            text.push_str(&task.grants.join(","));
+            text.push('\n');
+        }
+        for (label, values) in [
+            ("task", &self.tasks),
+            ("provider", &self.providers),
+            ("host-check", &self.host_checks),
+            ("grant", &self.grants),
+            ("loss", &self.losses),
+        ] {
+            for value in values {
+                text.push_str(label);
+                text.push('=');
+                text.push_str(value);
+                text.push('\n');
+            }
+        }
+        text
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.losses.is_empty() {
+            Err(format!(
+                "integration lowering lost declared facts: {}",
+                self.losses.join("; ")
+            ))
+        } else if self.task_facts.iter().any(|task| {
+            task.name.trim().is_empty()
+                || task.providers.iter().any(|provider| provider.trim().is_empty())
+                || task.secrets.iter().any(|secret| secret.trim().is_empty())
+                || task.host_checks.iter().any(|check| check.trim().is_empty())
+                || task.grants.iter().any(|grant| grant.trim().is_empty())
+        }) {
+            Err("integration task facts contain an empty executable field".to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl EnvironmentIntegration {
+    pub fn fingerprint(&self) -> String {
+        let mut text = format!(
+            "jet-environment-integration-v1\nkind={}\nname={}\npreset={}\n",
+            self.kind.as_str(), self.name, self.preset
+        );
+        for (key, value) in &self.options {
+            text.push_str("option=");
+            text.push_str(key);
+            text.push('=');
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.packages {
+            text.push_str("package=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for file in &self.files {
+            text.push_str("file=");
+            text.push_str(&file.fingerprint());
+            text.push('\n');
+        }
+        for value in &self.host_checks {
+            text.push_str("host-check=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.tasks {
+            text.push_str("task=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.providers {
+            text.push_str("provider=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.secrets {
+            text.push_str("secret-name=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.grants {
+            text.push_str("grant=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        for value in &self.losses {
+            text.push_str("loss=");
+            text.push_str(value);
+            text.push('\n');
+        }
+        text
+    }
+
+    /// Validate a target at the host/realization boundary. Graph evaluation
+    /// keeps cross-platform modules composable, while an activation path can
+    /// fail with the exact unsupported-host fact instead of silently omitting
+    /// an SDK.
+    pub fn validate_target(&self, target: &str) -> Result<(), String> {
+        let target = target.to_ascii_lowercase();
+        let supported = match self.kind {
+            IntegrationKind::Android => target.contains("linux") || target.contains("android"),
+            IntegrationKind::Apple => {
+                target.contains("darwin") || target.contains("macos") || target.contains("ios")
+            }
+            IntegrationKind::Certificates
+            | IntegrationKind::Hosts
+            | IntegrationKind::CodexAgent
+            | IntegrationKind::Editor
+            | IntegrationKind::CloudCredentials
+            | IntegrationKind::Vault => true,
+        };
+        supported.then_some(()).ok_or_else(|| {
+            format!(
+                "{} integration `{}` is not supported on target `{target}`",
+                self.kind.as_str(), self.name
+            )
+        })
+    }
+}
+
+impl Default for IntegrationKind {
+    fn default() -> Self {
+        Self::Android
+    }
+}
+
 /// The one managed-file write policy. The default is a symlink to an immutable
 /// Jet-owned content object; `Seed` preserves an existing destination and
 /// `Copy` owns the destination after the first successful application.
@@ -275,6 +548,10 @@ pub struct ProfileSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResolvedProfile {
     pub name: String,
+    /// Ambient selection order before inheritance expansion. Explicit CLI
+    /// selection contains one name; hostname and user matching can contain
+    /// both names in deterministic order.
+    pub selected_profiles: Vec<String>,
     pub applied: Vec<String>,
     pub packages: Vec<String>,
     pub variables: BTreeMap<String, String>,
@@ -323,37 +600,66 @@ impl ProfileSet {
     }
 
     pub fn resolve(&self, name: &str) -> Result<ResolvedProfile, ProfileError> {
+        self.resolve_many(&[name.to_string()])
+    }
+
+    pub fn resolve_many(&self, names: &[String]) -> Result<ResolvedProfile, ProfileError> {
+        let mut selected_profiles = Vec::new();
+        for name in names {
+            if !selected_profiles.iter().any(|existing| existing == name) {
+                selected_profiles.push(name.clone());
+            }
+        }
         let mut resolved = ResolvedProfile {
-            name: name.to_string(),
+            name: selected_profiles.join("+"),
+            selected_profiles,
             ..Default::default()
         };
         let mut stack = Vec::new();
-        self.resolve_into(name, &mut stack, &mut resolved)?;
+        for name in resolved.selected_profiles.clone() {
+            self.resolve_into(&name, &mut stack, &mut resolved)?;
+        }
         Ok(resolved)
     }
 
     pub fn auto_select(&self, hostname: &str, user: &str) -> Option<String> {
-        self.profiles
+        self.auto_select_many(hostname, user).into_iter().next()
+    }
+
+    /// Select all matching ambient profiles. Hostname matches are applied
+    /// before user matches; the BTreeMap keeps each group deterministic. The
+    /// default profile is a fallback only when neither ambient selector matches.
+    pub fn auto_select_many(&self, hostname: &str, user: &str) -> Vec<String> {
+        let mut selected = self
+            .profiles
             .values()
-            .find(|profile| {
+            .filter(|profile| {
                 profile
                     .hostname
                     .as_deref()
                     .is_some_and(|candidate| candidate == hostname)
             })
             .map(|profile| profile.name.clone())
-            .or_else(|| {
-                self.profiles
-                    .values()
-                    .find(|profile| {
-                        profile
-                            .user
-                            .as_deref()
-                            .is_some_and(|candidate| candidate == user)
-                    })
-                    .map(|profile| profile.name.clone())
+            .collect::<Vec<_>>();
+        for name in self
+            .profiles
+            .values()
+            .filter(|profile| {
+                profile
+                    .user
+                    .as_deref()
+                    .is_some_and(|candidate| candidate == user)
             })
-            .or_else(|| self.profiles.contains_key("default").then(|| "default".to_string()))
+            .map(|profile| profile.name.clone())
+        {
+            if !selected.iter().any(|existing| existing == &name) {
+                selected.push(name);
+            }
+        }
+        if selected.is_empty() && self.profiles.contains_key("default") {
+            selected.push("default".to_string());
+        }
+        selected
     }
 
     fn resolve_into(
@@ -384,9 +690,17 @@ impl ProfileSet {
                 resolved.packages.push(package.clone());
             }
         }
-        resolved
-            .variables
-            .extend(profile.variables.iter().map(|(key, value)| (key.clone(), value.clone())));
+        for (key, value) in &profile.variables {
+            if let Some(existing) = resolved.variables.get(key) {
+                if existing != value {
+                    return Err(ProfileError::Conflict {
+                        name: format!("{name}.{key}"),
+                    });
+                }
+            } else {
+                resolved.variables.insert(key.clone(), value.clone());
+            }
+        }
         stack.pop();
         Ok(())
     }
@@ -399,6 +713,43 @@ pub struct LanguagePack {
     pub venv_packages: Vec<String>,
     pub variables: BTreeMap<String, String>,
     pub commands: BTreeMap<String, String>,
+}
+
+impl LanguagePack {
+    /// Stable identity for one catalog entry. Pack metadata is environment
+    /// policy, not presentation: variables and commands must invalidate trust
+    /// even when its package list is unchanged.
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::from("jet-language-pack-v1\n");
+        text.push_str("name=");
+        text.push_str(&self.name);
+        text.push('\n');
+        for package in &self.packages {
+            text.push_str("package=");
+            text.push_str(package);
+            text.push('\n');
+        }
+        for package in &self.venv_packages {
+            text.push_str("venv-package=");
+            text.push_str(package);
+            text.push('\n');
+        }
+        for (name, value) in &self.variables {
+            text.push_str("var=");
+            text.push_str(name);
+            text.push('=');
+            text.push_str(value);
+            text.push('\n');
+        }
+        for (name, command) in &self.commands {
+            text.push_str("command=");
+            text.push_str(name);
+            text.push('=');
+            text.push_str(command);
+            text.push('\n');
+        }
+        text
+    }
 }
 
 /// One user selection from `languages`. Expansion turns enabled selections
@@ -438,6 +789,39 @@ impl LanguageSpec {
             && self.channel == other.channel
             && self.venv == other.venv
             && self.extra_packages == other.extra_packages
+    }
+}
+
+/// One typed language selection projected through its catalog entry. The
+/// selection preserves author facts; `included` and `omitted` make the
+/// package projection explicit for trust, image, and diagnostics consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LanguageProjection {
+    pub selection: LanguageSpec,
+    pub pack: LanguagePack,
+    pub included: Vec<String>,
+    pub omitted: Vec<String>,
+    pub changed: Vec<String>,
+}
+
+impl LanguageProjection {
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::new();
+        text.push_str("selection=");
+        text.push_str(&self.selection.fingerprint());
+        text.push('\n');
+        text.push_str("pack=");
+        text.push_str(&self.pack.fingerprint());
+        text.push_str("included=");
+        text.push_str(&self.included.join(","));
+        text.push('\n');
+        text.push_str("omitted=");
+        text.push_str(&self.omitted.join(","));
+        text.push('\n');
+        text.push_str("changed=");
+        text.push_str(&self.changed.join(","));
+        text.push('\n');
+        text
     }
 }
 
@@ -567,37 +951,78 @@ impl LanguagePackCatalog {
                 .ok_or_else(|| format!("language pack '{}' is not in the catalog", name))?;
             let mut normalized = selection.clone();
             normalized.name = pack.name.clone();
-            if !expansion
+            if let Some(existing) = expansion
                 .selections
                 .iter()
-                .any(|item| item.key() == normalized.key())
+                .find(|item| item.key() == normalized.key())
             {
-                expansion.selections.push(normalized);
+                if !existing.same_selection(&normalized) {
+                    return Err(format!(
+                        "language pack `{}` is declared with conflicting selection facts",
+                        normalized.name
+                    ));
+                }
+                continue;
+            }
+            expansion.selections.push(normalized.clone());
+            let mut projection = LanguageProjection {
+                selection: normalized,
+                pack: pack.clone(),
+                ..Default::default()
+            };
+            if let Some(version) = selection.version.as_deref() {
+                projection.changed.push(format!("version={version}"));
+            }
+            if let Some(channel) = selection.channel.as_deref() {
+                projection.changed.push(format!("channel={channel}"));
+            }
+            if selection.venv {
+                projection.changed.push("venv=true".to_string());
+            }
+            if !selection.extra_packages.is_empty() {
+                projection
+                    .changed
+                    .push(format!("extra={}", selection.extra_packages.join(",")));
             }
             if !selection.enable {
+                projection.omitted.extend(pack.packages.iter().cloned());
+                projection
+                    .omitted
+                    .extend(pack.venv_packages.iter().cloned());
+                projection
+                    .omitted
+                    .extend(selection.extra_packages.iter().cloned());
+                projection.changed.push("enable=false".to_string());
+                expansion.projections.push(projection);
                 continue;
             }
             if !expansion.applied.iter().any(|item| item == &pack.name) {
                 expansion.applied.push(pack.name.clone());
+                expansion.packs.push(pack.clone());
             }
             for package in &pack.packages {
                 let package = versioned_package(package, selection.version.as_deref());
                 if !expansion.packages.iter().any(|item| item == &package) {
-                    expansion.packages.push(package);
+                    expansion.packages.push(package.clone());
                 }
+                projection.included.push(package);
             }
             for package in &selection.extra_packages {
                 if !expansion.packages.iter().any(|item| item == package) {
                     expansion.packages.push(package.clone());
                 }
+                projection.included.push(package.clone());
             }
             if selection.venv {
                 for package in &pack.venv_packages {
                     let package = versioned_package(package, selection.version.as_deref());
                     if !expansion.packages.iter().any(|item| item == &package) {
-                        expansion.packages.push(package);
+                        expansion.packages.push(package.clone());
                     }
+                    projection.included.push(package);
                 }
+            } else {
+                projection.omitted.extend(pack.venv_packages.iter().cloned());
             }
             expansion
                 .variables
@@ -605,6 +1030,7 @@ impl LanguagePackCatalog {
             expansion
                 .commands
                 .extend(pack.commands.iter().map(|(key, value)| (key.clone(), value.clone())));
+            expansion.projections.push(projection);
         }
         Ok(expansion)
     }
@@ -625,10 +1051,54 @@ impl LanguagePackCatalog {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LanguageExpansion {
     pub applied: Vec<String>,
+    /// The exact catalog entries used by this expansion. Keeping these with
+    /// the derived package list makes the expansion the one runtime fact
+    /// shared by planning, trust, activation, and disclosure.
+    pub packs: Vec<LanguagePack>,
     pub selections: Vec<LanguageSpec>,
     pub packages: Vec<String>,
     pub variables: BTreeMap<String, String>,
     pub commands: BTreeMap<String, String>,
+    pub projections: Vec<LanguageProjection>,
+}
+
+impl LanguageExpansion {
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::from("jet-language-expansion-v1\n");
+        for selection in &self.selections {
+            text.push_str("selection=");
+            text.push_str(&selection.fingerprint());
+            text.push('\n');
+        }
+        for pack in &self.packs {
+            text.push_str("pack=");
+            text.push_str(&pack.fingerprint());
+        }
+        for package in &self.packages {
+            text.push_str("expanded-package=");
+            text.push_str(package);
+            text.push('\n');
+        }
+        for (name, value) in &self.variables {
+            text.push_str("expanded-var=");
+            text.push_str(name);
+            text.push('=');
+            text.push_str(value);
+            text.push('\n');
+        }
+        for (name, command) in &self.commands {
+            text.push_str("expanded-command=");
+            text.push_str(name);
+            text.push('=');
+            text.push_str(command);
+            text.push('\n');
+        }
+        for projection in &self.projections {
+            text.push_str("projection=");
+            text.push_str(&projection.fingerprint());
+        }
+        text
+    }
 }
 
 fn language_key(name: &str) -> String {
@@ -753,6 +1223,8 @@ impl EnvironmentLifecycle {
                 text.push('\n');
             }
         }
+        text.push_str("reload-explicit=");
+        text.push_str(if self.reload_explicit { "true\n" } else { "false\n" });
         text
     }
 }
@@ -936,7 +1408,7 @@ pub fn lifecycle_from_field(
             Ok(true)
         }
         "unset" => {
-            lifecycle.unset = list_strings_named(value, "unset")?;
+            lifecycle.unset = env_names_named(value, "unset")?;
             Ok(true)
         }
         "on_enter" => {
@@ -1036,7 +1508,7 @@ fn validate_dotenv_spec(spec: &DotenvSpec) -> Result<(), String> {
     Ok(())
 }
 
-fn valid_env_name(name: &str) -> bool {
+pub fn valid_env_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
         && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
@@ -1183,6 +1655,16 @@ fn list_strings_named(value: &CtValue, scope: &str) -> Result<Vec<String>, Strin
         .collect()
 }
 
+fn env_names_named(value: &CtValue, scope: &str) -> Result<Vec<String>, String> {
+    let names = list_strings_named(value, scope)?;
+    for name in &names {
+        if !valid_env_name(name) {
+            return Err(format!("{scope} variable '{name}' is not a valid environment name"));
+        }
+    }
+    Ok(names)
+}
+
 fn string_map_named(value: &CtValue, scope: &str) -> Result<BTreeMap<String, String>, String> {
     match value {
         CtValue::Map(values) => values
@@ -1191,6 +1673,9 @@ fn string_map_named(value: &CtValue, scope: &str) -> Result<BTreeMap<String, Str
                 let CtKey::Str(key) = key else {
                     return Err(format!("{scope} keys must be strings"));
                 };
+                if !valid_env_name(key) {
+                    return Err(format!("{scope} variable '{key}' is not a valid environment name"));
+                }
                 let value = string_value(value)
                     .ok_or_else(|| format!("{scope} values must be strings"))?;
                 Ok((key.clone(), value))
@@ -1199,6 +1684,9 @@ fn string_map_named(value: &CtValue, scope: &str) -> Result<BTreeMap<String, Str
         CtValue::Struct { fields, .. } => fields
             .iter()
             .map(|(key, value)| {
+                if !valid_env_name(key) {
+                    return Err(format!("{scope} variable '{key}' is not a valid environment name"));
+                }
                 let value = string_value(value)
                     .ok_or_else(|| format!("{scope} values must be strings"))?;
                 Ok((key.clone(), value))
@@ -1466,6 +1954,61 @@ mod tests {
     }
 
     #[test]
+    fn ambient_hostname_and_user_profiles_merge_without_overrides() {
+        let mut set = ProfileSet::default();
+        set.insert(ProfileSpec {
+            name: "host".to_string(),
+            hostname: Some("build-01".to_string()),
+            packages: vec!["git@nixpkgs".to_string()],
+            variables: BTreeMap::from([("HOST_MODE".to_string(), "host".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+        set.insert(ProfileSpec {
+            name: "sam".to_string(),
+            user: Some("sam".to_string()),
+            packages: vec!["ripgrep@nixpkgs".to_string()],
+            variables: BTreeMap::from([("USER_MODE".to_string(), "user".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let selected = set.auto_select_many("build-01", "sam");
+        assert_eq!(selected, vec!["host", "sam"]);
+        let resolved = set.resolve_many(&selected).unwrap();
+        assert_eq!(resolved.name, "host+sam");
+        assert_eq!(resolved.selected_profiles, selected);
+        assert_eq!(resolved.packages, vec!["git@nixpkgs", "ripgrep@nixpkgs"]);
+        assert_eq!(resolved.variables.get("HOST_MODE"), Some(&"host".to_string()));
+        assert_eq!(resolved.variables.get("USER_MODE"), Some(&"user".to_string()));
+    }
+
+    #[test]
+    fn ambient_profile_variable_conflicts_are_rejected() {
+        let mut set = ProfileSet::default();
+        set.insert(ProfileSpec {
+            name: "host".to_string(),
+            hostname: Some("build-01".to_string()),
+            variables: BTreeMap::from([("MODE".to_string(), "host".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+        set.insert(ProfileSpec {
+            name: "sam".to_string(),
+            user: Some("sam".to_string()),
+            variables: BTreeMap::from([("MODE".to_string(), "user".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let selected = set.auto_select_many("build-01", "sam");
+        assert!(matches!(
+            set.resolve_many(&selected),
+            Err(ProfileError::Conflict { .. })
+        ));
+    }
+
+    #[test]
     fn profile_cycles_are_rejected() {
         let mut set = ProfileSet::default();
         set.insert(ProfileSpec {
@@ -1581,6 +2124,39 @@ mod tests {
             .packages
             .contains(&"rust-analyzer@nixpkgs".to_string()));
         assert_eq!(expansion.selections.len(), 2);
+        let rust_projection = expansion
+            .projections
+            .iter()
+            .find(|projection| projection.selection.name == "Rust")
+            .unwrap();
+        assert!(rust_projection
+            .included
+            .contains(&"rustc#version=1.78@nixpkgs".to_string()));
+        assert!(rust_projection.changed.contains(&"channel=Stable".to_string()));
+        let python_projection = expansion
+            .projections
+            .iter()
+            .find(|projection| projection.selection.name == "Python")
+            .unwrap();
+        assert!(python_projection
+            .omitted
+            .contains(&"python@nixpkgs".to_string()));
+        assert!(python_projection.changed.contains(&"enable=false".to_string()));
+    }
+
+    #[test]
+    fn language_pack_fingerprint_keeps_venv_and_environment_facts() {
+        let pack = LanguagePack {
+            name: "Python".to_string(),
+            packages: vec!["python@nixpkgs".to_string()],
+            venv_packages: vec!["pythonPackages.virtualenv@nixpkgs".to_string()],
+            variables: BTreeMap::from([("PYTHONUTF8".to_string(), "1".to_string())]),
+            commands: BTreeMap::from([("python".to_string(), "python3".to_string())]),
+        };
+        let fingerprint = pack.fingerprint();
+        assert!(fingerprint.contains("venv-package=pythonPackages.virtualenv@nixpkgs"));
+        assert!(fingerprint.contains("var=PYTHONUTF8=1"));
+        assert!(fingerprint.contains("command=python=python3"));
     }
 
     #[test]

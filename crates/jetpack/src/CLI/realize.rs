@@ -338,17 +338,34 @@ pub(super) fn realize_adapter(
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
     };
-    let identity = match Provider::adapter_cache_expectation(plan, &ctx) {
-        Ok(expectation) => expectation.identity.recipe_fingerprint,
+    let expectation = match Provider::adapter_cache_expectation(plan, &ctx) {
+        Ok(expectation) => expectation,
         Err(error) => {
             report_provider_error(theme, &error);
             return None;
         }
     };
-    if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust).is_err() {
-        return None;
+    if let ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe {
+        let identity = Provider::adapter_action_identity(
+            plan,
+            recipe,
+            &expectation.identity.source_fingerprint,
+            &expectation.identity.platform,
+        );
+        if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
+            .is_err()
+        {
+            return None;
+        }
     }
-    match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
+    match Store::realize_verified(
+        roots,
+        &ctx,
+        Store::RealizeRequest::Adapter {
+            plan,
+            expectation: &expectation,
+        },
+    ) {
         Ok(realized) => {
             let (mut entry, source_state, lease) = realized.into_parts();
             if consume {
@@ -601,6 +618,25 @@ fn typed_plan_with_defaults(
         );
         2
     })?;
+    let target = std::env::var("JET_TARGET").unwrap_or_else(|_| {
+        let os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            std::env::consts::OS
+        };
+        format!("{}-{os}", std::env::consts::ARCH)
+    });
+    for integration in &plan.integrations {
+        if let Err(error) = integration.validate_target(&target) {
+            theme.error_coded(
+                "E1335",
+                "environment integration target check failed",
+                &error,
+                "set JET_TARGET to an explicitly supported target, or remove the integration from this environment",
+            );
+            return Err(2);
+        }
+    }
     let mut table = plan.table;
     table.merge_defaults(toml_defaults);
     // U12: a dev service with no explicit `run:` that matches the built-in
@@ -609,18 +645,10 @@ fn typed_plan_with_defaults(
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
     let selected_profile = plan.selected_profile;
-    let catalog = ModuleEval::LanguagePackCatalog::builtin();
-    let language_expansion = match catalog.expand(&plan.languages) {
-        Ok(expansion) => expansion,
-        Err(error) => {
-            theme.error(
-                "environment language pack could not be expanded",
-                &error,
-                "choose a language pack from jet env info or register a typed contribution.",
-            );
-            return Err(2);
-        }
-    };
+    // `evaluate_env_with_profile` already expanded the typed selections. Keep
+    // that exact graph fact through realization; re-expanding here could make
+    // planning, trust, and activation disagree if the catalog changes.
+    let language_expansion = plan.language_expansion;
     if let Some(profile) = &selected_profile {
         for package in &profile.packages {
             if !package_refs.iter().any(|existing| existing == package) {
@@ -631,6 +659,13 @@ fn typed_plan_with_defaults(
     for package in &language_expansion.packages {
         if !package_refs.iter().any(|existing| existing == package) {
             package_refs.push(package.clone());
+        }
+    }
+    for integration in &plan.integrations {
+        for package in &integration.packages {
+            if !package_refs.iter().any(|existing| existing == package) {
+                package_refs.push(package.clone());
+            }
         }
     }
     for svc in &plan.dev_services {
@@ -652,19 +687,22 @@ fn typed_plan_with_defaults(
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string()),
         prompt_path: plan.prompt_path,
         prompt_strip: plan.prompt_strip,
-        dev_services: plan.dev_services,
+        dev_services: plan.dev_services.clone(),
         secrets: plan.secrets,
         environment: ModuleEval::EnvironmentFacts {
+            environment_names: plan.environment_names,
+            source_files: plan.source_files,
+            dev_services: plan.dev_services,
             lifecycle: plan.lifecycle,
             profiles: plan.profiles,
-            languages: language_expansion.selections,
+            languages: language_expansion.selections.clone(),
             selected_profile,
-            language_packs: language_expansion
-                .applied
-                .iter()
-                .filter_map(|name| catalog.get(name).cloned())
-                .collect(),
+            language_expansion: language_expansion.clone(),
+            language_packs: language_expansion.packs.clone(),
+            language_projections: language_expansion.projections.clone(),
             files: plan.files,
+            integrations: plan.integrations,
+            integration_facts: plan.integration_facts,
         },
     })
 }

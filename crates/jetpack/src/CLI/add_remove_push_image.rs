@@ -437,26 +437,51 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    if let Some(push_ref) = &parsed.flags.push {
-        theme.error_coded(
-            "E1268",
-            &format!("`jet image {name}` can't push to `{push_ref}` yet"),
-            "D-JPK-IMAGE1: pushing to a registry needs TLS support for the connection, which jetpack doesn't have yet — `jet image` never fakes a push.",
-            &format!(
-                "build without `--push` (`jet image {name}`) and push the OCI layout with another tool for now; `--push` will work once TLS lands."
-            ),
-        );
-        return 2;
-    }
+    let push_destination = match parsed.flags.push.as_deref() {
+        Some(push_ref) if push_ref.starts_with("https://") || push_ref.starts_with("http://") => {
+            theme.error_coded(
+                "E1268",
+                &format!("`jet image {name}` cannot push to remote registry `{push_ref}`"),
+                "the image bytes are built and verified locally, but this binary has no configured OCI registry transport; it never fakes a remote push.",
+                "use `--push file:///path/to/layout` for a local mirror, or configure a verified registry transport.",
+            );
+            return 2;
+        }
+        Some(push_ref) => Some(if let Some(path) = push_ref.strip_prefix("file://") {
+            std::path::PathBuf::from(path)
+        } else {
+            std::path::PathBuf::from(push_ref)
+        }),
+        None => None,
+    };
 
-    if let Some(base) = &image.base {
-        theme.error(
-            &format!("`base: oci(\"{base}\")` isn't realized yet"),
-            "D-JPK-IMAGE1: layering onto a base image needs a native registry-pull client, which doesn't exist yet — `jet image` never silently builds from scratch instead of the requested base.",
-            "drop `base:` to build a from-scratch image, or track the registry-pull client.",
-        );
-        return 2;
-    }
+    let base_directory = match image.base.as_deref() {
+        Some(reference) if reference.starts_with("https://") || reference.starts_with("http://") => {
+            theme.error_coded(
+                "E1268",
+                &format!("base OCI reference `{reference}` needs a verified local copy"),
+                "remote base pulls require registry transport and digest admission before their layers can become image input.",
+                "copy the base into a local OCI layout and use `base: oci(\"file:///path/to/layout\")`.",
+            );
+            return 2;
+        }
+        Some(reference) => {
+            let path = reference
+                .strip_prefix("file://")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| dir.join(reference));
+            if !path.is_dir() {
+                theme.error(
+                    &format!("base OCI layout `{}` does not exist", path.display()),
+                    "a base image must be a verified local OCI image layout.",
+                    "use `file:///...` or a project-relative OCI layout directory.",
+                );
+                return 2;
+            }
+            Some(path)
+        }
+        None => None,
+    };
 
     // D-JPK-IMAGE1/D-ENV-IMAGE1: build from what `jet build` already realized.
     // Jetpack has
@@ -520,8 +545,18 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         healthcheck: image.health.clone(),
     };
     let out_dir = dir.join(".jet").join("images").join(name);
-    match Image::build(&spec, &out_dir, name) {
+    match Image::build_with_base(&spec, &out_dir, name, base_directory.as_deref()) {
         Ok(built) => {
+            if let Some(destination) = push_destination {
+                if let Err(error) = Image::copy_layout(&out_dir, &destination) {
+                    theme.error(
+                        &format!("couldn't copy image `{name}` to `{}`", destination.display()),
+                        &error.to_string(),
+                        "choose an empty or byte-identical local OCI layout destination.",
+                    );
+                    return 2;
+                }
+            }
             theme.ok(&format!(
                 "built image `{name}` -> {} ({})",
                 out_dir.display(),

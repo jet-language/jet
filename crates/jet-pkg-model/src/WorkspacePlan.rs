@@ -24,6 +24,9 @@ pub struct WorkspacePlan {
     /// `workspace.jet`; CLI commands may draft this source but never create
     /// hidden override state.
     pub overlay_policy: OverlayPolicy,
+    /// Digest of the workspace source that produced this plan. Locks may be
+    /// reused only when the source bytes still have this identity.
+    pub source_digest: String,
 }
 
 /// One workspace member package.
@@ -33,4 +36,6 @@ pub struct WorkspaceMember {
     pub name: String,
     /// Path to the package directory, relative to the workspace root.
     pub path: String,
+    /// Canonical physical directory identity used by the workspace lock.
+    pub canonical_path: String,
 }

@@ -45,7 +45,19 @@ pub use jet_pkg_model::WorkspacePlan::{WorkspaceMember, WorkspacePlan};
 /// for the declaration. Two files both declaring `module workspace` is E1239.
 pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
     let path = dir.join(Syntax::WORKSPACE_FILE);
-    if let Ok(src) = std::fs::read_to_string(&path) {
+    if path.exists() {
+        let src = match std::fs::read_to_string(&path) {
+            Ok(src) => src,
+            Err(error) => {
+                return Some(Err(Diagnostic::error(
+                    "E1239",
+                    format!("couldn't read `{}`", path.display()),
+                    format!("the canonical workspace source is present but unavailable: {error}"),
+                    "restore read access to `workspace.jet`; do not rely on a stale `.jet/lock`".to_string(),
+                    None,
+                )))
+            }
+        };
         return Some(evaluate(&src, dir));
     }
     // Discovery-by-declaration over the other top-level `.jet` files.
@@ -237,8 +249,8 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
         let (paths, inputs) =
             eval_members_expr(expr, src, base_dir, &funcs, &extern_names, &globals)?;
         comptime_inputs.extend(inputs);
-        for rel_path in paths {
-            validate_member_path(&rel_path, base_dir, &members)?;
+        for (rel_path, span) in paths {
+            validate_member_path(&rel_path, base_dir, &members, Some(span))?;
             let member = resolve_member(&rel_path, base_dir);
             members.push(member);
         }
@@ -248,6 +260,7 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
         members,
         comptime_inputs,
         overlay_policy,
+        source_digest: jet_pkg_model::SHA256::sha256_hex(src.as_bytes()),
     })
 }
 
@@ -257,6 +270,7 @@ fn validate_member_path(
     rel_path: &str,
     base_dir: &Path,
     members: &[WorkspaceMember],
+    span: Option<Span>,
 ) -> Result<(), Diagnostic> {
     let raw = Path::new(rel_path);
     if raw.is_absolute()
@@ -269,7 +283,7 @@ fn validate_member_path(
             format!("workspace member `{rel_path}` escapes the workspace root"),
             "Package membership is rooted in the workspace and cannot follow an absolute or `..` path".to_string(),
             "use a relative member path below the workspace root, or use `find(\"./packages\")`".to_string(),
-            None,
+            span,
         ));
     }
     let abs = base_dir.join(raw);
@@ -279,64 +293,92 @@ fn validate_member_path(
             format!("workspace member `{rel_path}` is not a Package directory"),
             "an explicit workspace member must exist and contain `package.jet` or the migration-era `pkg.jet`".to_string(),
             "create the Package file, correct the member path, or use `find(\"./packages\")` for discovery".to_string(),
-            None,
+            span,
         ));
     }
-    let root = std::fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
-    if let Ok(real) = std::fs::canonicalize(&abs) {
-        if !real.starts_with(&root) {
-            return Err(Diagnostic::error(
-                "E1322",
-                format!("workspace member `{rel_path}` resolves outside the workspace root"),
-                "member identity follows the real path, including symlinks; an escaping target is not a workspace member".to_string(),
-                "move the member under the workspace root or remove the escaping symlink".to_string(),
-                None,
-            ));
-        }
-        if members.iter().any(|member| {
-            std::fs::canonicalize(base_dir.join(&member.path))
-                .map(|existing| existing == real)
-                .unwrap_or(false)
-        }) {
+    let root = std::fs::canonicalize(base_dir).map_err(|error| {
+        Diagnostic::error(
+            "E1322",
+            format!("couldn't resolve the workspace root: {error}"),
+            "workspace membership uses real directory identity, so the workspace root must be canonicalizable".to_string(),
+            "fix the workspace root permissions or path before declaring members".to_string(),
+            span,
+        )
+    })?;
+    let real = std::fs::canonicalize(&abs).map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't resolve workspace member `{rel_path}`: {error}"),
+            "a member's physical identity must be known before the workspace accepts it".to_string(),
+            "fix the member path or its symlink and try again".to_string(),
+            span,
+        )
+    })?;
+    if !real.starts_with(&root) {
+        return Err(Diagnostic::error(
+            "E1322",
+            format!("workspace member `{rel_path}` resolves outside the workspace root"),
+            "member identity follows the real path, including symlinks; an escaping target is not a workspace member".to_string(),
+            "move the member under the workspace root or remove the escaping symlink".to_string(),
+            span,
+        ));
+    }
+    for member in members {
+        let existing = std::fs::canonicalize(base_dir.join(&member.path)).map_err(|error| {
+            Diagnostic::error(
+                "E1324",
+                format!("couldn't resolve existing workspace member `{}`: {error}", member.path),
+                "duplicate detection uses physical member identity and cannot ignore an unresolved existing path".to_string(),
+                "fix the earlier member path before adding another member".to_string(),
+                span,
+            )
+        })?;
+        if existing == real {
             return Err(Diagnostic::error(
                 "E1324",
                 format!("workspace member `{rel_path}` has the same physical identity as another member"),
                 "a workspace member is identified by its real directory, not by two spelling variants".to_string(),
                 "keep one member path for this directory".to_string(),
-                None,
+                span,
             ));
         }
     }
-    if let Some(path) = package_file(&abs) {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            let has_members = if path.file_name().and_then(|name| name.to_str())
-                == Some(Syntax::PACKAGE_FILE)
-            {
-                match PackageFacts::parse(&text, path.display().to_string()) {
-                    Ok(facts) => !facts.members.is_empty(),
-                    Err(error) => {
-                        return Err(Diagnostic::error(
-                            "E1334",
-                            format!("workspace member `{rel_path}` has an invalid Package file"),
-                            error.to_string(),
-                            "fix the member's `package.jet` fields before adding it to the workspace".to_string(),
-                            None,
-                        ));
-                    }
-                }
-            } else {
-                text.lines().any(|line| line.trim_start().starts_with("members:"))
-            };
-            if has_members {
+    let path = package_file(&abs).expect("package file checked above");
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        Diagnostic::error(
+            "E1334",
+            format!("couldn't read workspace member `{rel_path}` Package file: {error}"),
+            "workspace membership must validate the complete member manifest before accepting it".to_string(),
+            "fix the member manifest permissions or contents and try again".to_string(),
+            span,
+        )
+    })?;
+    let has_members = if path.file_name().and_then(|name| name.to_str())
+        == Some(Syntax::PACKAGE_FILE)
+    {
+        match PackageFacts::parse_uncomposed(&text, path.display().to_string()) {
+            Ok(facts) => !facts.members.is_empty(),
+            Err(error) => {
                 return Err(Diagnostic::error(
-                    "E1323",
-                    format!("member package `{rel_path}` declares `members`"),
-                    "Package membership has depth cap one: only the workspace root may list members".to_string(),
-                    "remove the inner `members:` field and lift its references into the workspace root".to_string(),
-                    None,
+                    "E1334",
+                    format!("workspace member `{rel_path}` has an invalid Package file"),
+                    error.to_string(),
+                    "fix the member's `package.jet` fields before adding it to the workspace".to_string(),
+                    span,
                 ));
             }
         }
+    } else {
+        text.lines().any(|line| line.trim_start().starts_with("members:"))
+    };
+    if has_members {
+        return Err(Diagnostic::error(
+            "E1323",
+            format!("member package `{rel_path}` declares `members`"),
+            "Package membership has depth cap one: only the workspace root may list members".to_string(),
+            "remove the inner `members:` field and lift its references into the workspace root".to_string(),
+            span,
+        ));
     }
     let name = resolve_member(rel_path, base_dir).name;
     if members.iter().any(|member| member.name == name) {
@@ -345,7 +387,7 @@ fn validate_member_path(
             format!("workspace member name `{name}` is declared more than once"),
             "Package references use a stable name; two physical members cannot claim the same name".to_string(),
             "rename one package or remove the duplicate member reference".to_string(),
-            None,
+            span,
         ));
     }
     Ok(())
@@ -366,7 +408,7 @@ fn eval_members_expr(
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
-) -> Result<(Vec<String>, Vec<ComptimeInput>), Diagnostic> {
+) -> Result<(Vec<(String, Span)>, Vec<ComptimeInput>), Diagnostic> {
     // Fast path: workspace `find("./dir")` scans for package directories. This
     // manifest helper is separate from comptime `find(glob) -> [String]`, which
     // records matched file hashes for ordinary Jet comptime bindings.
@@ -385,7 +427,11 @@ fn eval_members_expr(
             })?;
             if let Some(dir_str) = extract_literal_string(&arg.expr) {
                 let scan_dir = validate_find_scan_dir(&dir_str, base_dir, span)?;
-                return Ok((find_package_dirs(&scan_dir, base_dir, span)?, Vec::new()));
+                let paths = find_package_dirs(&scan_dir, base_dir, span)?
+                    .into_iter()
+                    .map(|path| (path, arg.expr.span()))
+                    .collect();
+                return Ok((paths, Vec::new()));
             }
             // A non-literal `find` argument (e.g. `find(base + "/pkgs")`) is a
             // computed path: fall through to the comptime evaluator, which
@@ -406,7 +452,11 @@ fn eval_members_expr(
         false,
         0,
     )?;
-    Ok((extract_string_list(v, expr.span())?, inputs))
+    let paths = extract_string_list(v, expr.span())?
+        .into_iter()
+        .map(|path| (path, expr.span()))
+        .collect();
+    Ok((paths, inputs))
 }
 
 /// Extract a plain string literal from an `Expr::Str` with no interpolation.
@@ -482,9 +532,15 @@ fn validate_find_scan_dir(
             Some(span),
         ));
     }
-    let root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let root = workspace_root.canonicalize().map_err(|error| {
+        Diagnostic::error(
+            "E0997",
+            format!("couldn't resolve the workspace root `{}`: {error}", workspace_root.display()),
+            "workspace discovery uses real paths and cannot safely scan an unresolved root".to_string(),
+            "fix the workspace root permissions or path before using `find`".to_string(),
+            Some(span),
+        )
+    })?;
     let candidate = workspace_root.join(path);
     let canonical = candidate
         .canonicalize()
@@ -509,13 +565,20 @@ fn find_package_dirs(
     workspace_root: &Path,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
-    let workspace_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let workspace_root = workspace_root.canonicalize().map_err(|error| {
+        Diagnostic::error(
+            "E0997",
+            format!("couldn't resolve the workspace root `{}`: {error}", workspace_root.display()),
+            "workspace discovery uses real paths and cannot safely report member paths from an unresolved root".to_string(),
+            "fix the workspace root permissions or path before using `find`".to_string(),
+            Some(span),
+        )
+    })?;
     let entries =
         std::fs::read_dir(scan_dir).map_err(|_| e0997_find_dir_missing(scan_dir, span))?;
     let mut found = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|_| e0997_find_dir_missing(scan_dir, span))?;
         let path = entry.path();
         if !path.is_dir() {
             continue;
@@ -560,6 +623,10 @@ fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
     WorkspaceMember {
         name,
         path: rel_path.to_string(),
+        canonical_path: abs
+            .canonicalize()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     }
 }
 
@@ -570,7 +637,7 @@ fn read_package_name(dir: &Path) -> Option<String> {
 
     let src = std::fs::read_to_string(&manifest_path).ok()?;
     if manifest_path.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
-        if let Ok(facts) = PackageFacts::parse(&src, manifest_path.display().to_string()) {
+        if let Ok(facts) = PackageFacts::parse_uncomposed(&src, manifest_path.display().to_string()) {
             return Some(facts.name);
         }
     }
@@ -705,6 +772,75 @@ module workspace {
         assert_eq!(plan.members[0].name, "hello");
         assert_eq!(plan.members[1].path, "./packages/ranker");
         assert_eq!(plan.members[1].name, "ranker");
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[test]
+    fn member_can_be_the_workspace_root() {
+        let tmp = tempdir("member-root");
+        std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
+        let plan = evaluate(
+            "module workspace { members: [\".\"] }\n",
+            &tmp,
+        )
+        .expect("the workspace root may be an explicit member");
+        assert_eq!(plan.members.len(), 1);
+        assert_eq!(plan.members[0].path, ".");
+        assert_eq!(plan.members[0].name, "root");
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[test]
+    fn member_paths_cannot_duplicate_one_physical_directory() {
+        let tmp = tempdir("member-physical-duplicate");
+        let package = tmp.join("packages/app");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
+        let error = evaluate(
+            "module workspace { members: [\"./packages/app\", \"./packages/app/.\"] }\n",
+            &tmp,
+        )
+        .expect_err("two spellings cannot create two member identities");
+        assert_eq!(error.code, "E1324");
+        assert!(error.span.is_some());
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[test]
+    fn member_names_are_unique() {
+        let tmp = tempdir("member-name-duplicate");
+        for path in ["packages/one", "packages/two"] {
+            let package = tmp.join(path);
+            std::fs::create_dir_all(&package).unwrap();
+            std::fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"same\"\n").unwrap();
+        }
+        let error = evaluate(
+            "module workspace { members: [\"./packages/one\", \"./packages/two\"] }\n",
+            &tmp,
+        )
+        .expect_err("stable Package names must be unique");
+        assert_eq!(error.code, "E1325");
+        assert!(error.span.is_some());
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    #[test]
+    fn member_package_cannot_declare_nested_members() {
+        let tmp = tempdir("member-nested");
+        let package = tmp.join("packages/app");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join(Syntax::PACKAGE_FILE),
+            "name: \"app\"\nmembers: [\"./child\"]\n",
+        )
+        .unwrap();
+        let error = evaluate(
+            "module workspace { members: [\"./packages/app\"] }\n",
+            &tmp,
+        )
+        .expect_err("nested Package membership is not allowed");
+        assert_eq!(error.code, "E1323");
+        assert!(error.span.is_some());
         std::fs::remove_dir_all(tmp).ok();
     }
 

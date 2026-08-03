@@ -598,9 +598,12 @@ errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
 always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
-reserved for collections/indexing/shorthands. No call-site type args in
-general positions (exception: `decode<T>` turbofish blessed as general
-grammar by D-SERDE6).
+reserved for collections/indexing/shorthands. Calls infer type arguments by
+default. **D-GENERIC-CALL1=A** *(ratified 2026-08-03)* allows explicit
+`call<T>(…)` arguments on every generic free, namespaced, and method call.
+Jet does not use Rust's `::<T>` separator. This final uniform law supersedes
+S45's ban, D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved
+general ban.
 
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
@@ -1290,7 +1293,8 @@ sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
-`$` is splice-only.
+Later rulings assign `$name` to known-value splice, `$[ … ]$` to statement
+expansion, and `T.$layout` to the compiler-known layout projection.
 
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
 D-VERDICT-732-1)*: on `#`: `MustUse`,
@@ -1961,6 +1965,15 @@ grammar).
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
 `.name`, `.fields`; each field carries `.name`/`.ty`/`.markers`/
 `.has_marker("…")`.
+
+**D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
+2026-08-03)*: `T.$layout` is exactly the focused projection of
+`T.reflect().layout`, not a second metadata model. Users cannot declare `$`
+members. Layout exposes kind, optional size/alignment/stride, target,
+guarantee, source, fields, and typed `[.field]` selection. Field byte facts are
+optional when physical layout is not guaranteed. Completion visibly groups
+`$layout` as a compiler fact; hover, rename, navigation, diagnostics,
+`jet inspect expand --facts layout`, and JSON project the same model.
 
 **D-METADERIVE1 — User derives**: `derive T.Wire { … }` (old
 `derive Wire for T` is E2714); body uses `T.reflect()` + `$name` splices,
@@ -4000,11 +4013,25 @@ family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
 syntax is OCI-only: `from: packages.<name>` (a package this project's `pkg.jet`
 declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
 [KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
-`files: [String]`, and `base: oci("<ref>")` (captured but not yet realized; no
-native registry-pull client exists). `jet image <name>` builds a deterministic
-OCI layout (`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an
-uncompressed tar layer. `--push` is honestly gated on TLS (E1268), never a fake
-push.
+`files: [String]`, and `base: oci("<ref>")`. A local `file://` OCI layout is
+validated and its layers are preserved before Jet appends the new deterministic
+layer. `jet image <name>` builds a deterministic OCI layout
+(`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an uncompressed tar
+layer. Remote base pulls and pushes remain E1268 until a verified registry
+transport is configured; Jet never silently builds from scratch or claims a
+remote transfer.
+
+**D-ENV-INTEGRATIONS1=A**: first-party environment integrations are typed
+imports in the existing module `imports:` field. The closed v1 names are
+`env.platform.android()`, `env.platform.apple()`,
+`env.security.certificates(...)`, `env.network.hosts(...)`,
+`env.agent.codex(...)`, `env.editor.vscode(...)`,
+`env.cloud.credentials(...)`, and `env.security.vault(...)`. Each lowers into
+the existing package, file, task, provider, host-check, secret, and grant
+facts. Safe presets are deterministic; expert arguments preserve exact SDK,
+target, path, license, certificate, host, tool, and policy facts. Secret values
+are names-only in plans and receipts. There is no integration-owned resolver,
+lock, effect, or activation engine.
 
 ### jetos Runtime Slice
 

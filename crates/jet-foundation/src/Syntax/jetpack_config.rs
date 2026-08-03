@@ -491,6 +491,28 @@ pub const BUILTIN_FIND: &str = "find";
 pub const MODULE_FIELD_SOURCES: &str = "sources";
 pub const MODULE_FIELD_IMPORTS: &str = "imports";
 
+/// D-ENV-INTEGRATIONS1=A: first-party environment integrations are ordinary
+/// typed import calls. They lower into the existing package/file/task/provider
+/// and trust facts; they do not create a private resolver or activation plane.
+pub const ENV_INTEGRATION_ANDROID: &str = "env.platform.android";
+pub const ENV_INTEGRATION_APPLE: &str = "env.platform.apple";
+pub const ENV_INTEGRATION_CERTIFICATES: &str = "env.security.certificates";
+pub const ENV_INTEGRATION_HOSTS: &str = "env.network.hosts";
+pub const ENV_INTEGRATION_CODEX: &str = "env.agent.codex";
+pub const ENV_INTEGRATION_EDITOR: &str = "env.editor.vscode";
+pub const ENV_INTEGRATION_CLOUD: &str = "env.cloud.credentials";
+pub const ENV_INTEGRATION_VAULT: &str = "env.security.vault";
+pub const ENV_INTEGRATIONS: &[&str] = &[
+    ENV_INTEGRATION_ANDROID,
+    ENV_INTEGRATION_APPLE,
+    ENV_INTEGRATION_CERTIFICATES,
+    ENV_INTEGRATION_HOSTS,
+    ENV_INTEGRATION_CODEX,
+    ENV_INTEGRATION_EDITOR,
+    ENV_INTEGRATION_CLOUD,
+    ENV_INTEGRATION_VAULT,
+];
+
 /// U6/U8: the conventional name of the default source (`sources: { default: … }`)
 /// that bare packages and `default.ripgrep` sugar resolve against. Not a
 /// reserved keyword — just the well-known name `jetpack` falls back to.

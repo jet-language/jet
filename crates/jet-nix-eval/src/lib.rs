@@ -84,6 +84,8 @@ const REQUIRED_SYSTEMS: [&str; 4] = [
 ];
 const MAX_EVALUATOR_INPUT_BYTES: usize = 1 << 20;
 
+pub type ImportAuthority = alloc::rc::Rc<dyn Fn(&str) -> core::result::Result<String, String>>;
+
 /// A typed projection of the supported, non-executing devShell surface.
 ///
 /// This is deliberately smaller than the Nix language. It evaluates bounded
@@ -220,7 +222,7 @@ pub fn evaluate_devshell(
 pub fn evaluate_devshell_with_import_authority(
     source: &str,
     system: &str,
-    import_authority: Option<alloc::rc::Rc<dyn Fn(&str) -> core::result::Result<String, String>>>,
+    import_authority: Option<ImportAuthority>,
 ) -> core::result::Result<DevShellEvaluation, EvaluationError> {
     if source.len() > MAX_EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);

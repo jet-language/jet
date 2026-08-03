@@ -311,8 +311,24 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
             return 2;
         }
     };
+    let records = match Overlay::semantic_records(
+        &plan.overlay_policy,
+        "workspace",
+        std::env::consts::OS,
+    ) {
+        Ok(records) => records,
+        Err(error) => {
+            theme.error_coded(
+                "E0998",
+                "workspace overlay policy is malformed",
+                &error.message(),
+                "fix the conflicting overlay facts in `workspace.jet`.",
+            );
+            return 2;
+        }
+    };
     let lock = SemanticLock::SemanticLockFile {
-        records: Overlay::semantic_records(&plan.overlay_policy, "workspace", std::env::consts::OS),
+        records,
         ..Default::default()
     };
     let Some(fact) = SemanticLock::explain(&lock, query) else {

@@ -55,6 +55,7 @@ fn export_cmd(dir: &std::path::Path) -> Command {
         .env_remove("JET_ENV_DISABLE")
         .env_remove("JETPACK_ENV")
         .env_remove("JETPACK_ENV_DIR")
+        .env_remove("JETPACK_ENV_HASH")
         .env_remove("JETPACK_ENV_OLD_PATH")
         .env_remove("JETPACK_REF")
         .env("PATH", "/usr/bin:/bin");
@@ -64,9 +65,21 @@ fn export_cmd(dir: &std::path::Path) -> Command {
 fn write_prompt_only_env(dir: &std::path::Path) {
     fs::write(
         dir.join("env.jet"),
-        "module env.dev {\n  env.dev: Env {\n    prompt: \"smoke\"\n  }\n}\n",
+        "module env.dev {\n  prompt: \"smoke\"\n}\n",
     )
     .unwrap();
+}
+
+fn activation_hash(stdout: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stdout);
+    text
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("export JETPACK_ENV_HASH='")
+                .and_then(|value| value.strip_suffix('\''))
+                .map(str::to_string)
+        })
+        .expect("activation must export its definition hash")
 }
 
 #[test]
@@ -174,9 +187,16 @@ fn export_unchanged_directory_is_silent() {
     let scratch = Scratch::new("stable");
     write_prompt_only_env(&scratch.path);
     let root = scratch.path.to_string_lossy().into_owned();
+    let first = export_cmd(&scratch.path)
+        .args(["enter", "export", "bash"])
+        .output()
+        .unwrap();
+    assert!(first.status.success());
+    let hash = activation_hash(&first.stdout);
     let out = export_cmd(&scratch.path)
         .args(["enter", "export", "bash"])
         .env("JETPACK_ENV_DIR", &root)
+        .env("JETPACK_ENV_HASH", hash)
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -184,5 +204,63 @@ fn export_unchanged_directory_is_silent() {
         out.stdout.is_empty(),
         "already-active env must be a no-op:\n{}",
         String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn export_changed_definition_reactivates_at_next_prompt() {
+    let scratch = Scratch::new("changed");
+    write_prompt_only_env(&scratch.path);
+    let root = scratch.path.to_string_lossy().into_owned();
+    let first = export_cmd(&scratch.path)
+        .args(["enter", "export", "bash"])
+        .output()
+        .unwrap();
+    assert!(first.status.success());
+    let hash = activation_hash(&first.stdout);
+    fs::write(
+        scratch.path.join("env.jet"),
+        "module env.dev {\n  prompt: \"changed\"\n}\n",
+    )
+    .unwrap();
+    let out = export_cmd(&scratch.path)
+        .args(["enter", "export", "bash"])
+        .env("JETPACK_ENV_DIR", &root)
+        .env("JETPACK_ENV_HASH", hash)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(
+        !out.stdout.is_empty(),
+        "a changed definition must emit replacement activation"
+    );
+    let replacement = String::from_utf8_lossy(&out.stdout);
+    assert!(replacement.contains("changed"), "replacement facts missing:\n{replacement}");
+    assert!(!replacement.contains("smoke"), "stale facts survived reload:\n{replacement}");
+    assert!(replacement.contains("export JETPACK_ENV_HASH='"));
+}
+
+#[test]
+fn export_failed_reload_keeps_the_previous_activation() {
+    let scratch = Scratch::new("failed-reload");
+    write_prompt_only_env(&scratch.path);
+    let root = scratch.path.to_string_lossy().into_owned();
+    let first = export_cmd(&scratch.path)
+        .args(["enter", "export", "bash"])
+        .output()
+        .unwrap();
+    assert!(first.status.success());
+    let hash = activation_hash(&first.stdout);
+    fs::write(scratch.path.join("env.jet"), "module env.dev {\n").unwrap();
+    let out = export_cmd(&scratch.path)
+        .args(["enter", "export", "bash"])
+        .env("JETPACK_ENV_DIR", &root)
+        .env("JETPACK_ENV_HASH", hash)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(
+        out.stdout.is_empty(),
+        "failed reload must not unload the previous activation"
     );
 }
