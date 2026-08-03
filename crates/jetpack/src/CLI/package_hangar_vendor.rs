@@ -772,8 +772,19 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         "restore" => {
             let mut bytes = Vec::new();
             let result = std::io::stdin()
+                .lock()
+                .take((Store::MAX_ARCHIVE_BYTES as u64).saturating_add(1))
                 .read_to_end(&mut bytes)
                 .map_err(|error| std::io::Error::other(format!("could not read archive from stdin: {error}")))
+                .and_then(|_| {
+                    if bytes.len() > Store::MAX_ARCHIVE_BYTES {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "archive from stdin exceeds the 1 GiB Hangar limit",
+                        ));
+                    }
+                    Ok(())
+                })
                 .and_then(|_| {
                     if !theme.confirm_apply(parsed.flags.assume_yes) {
                         return Ok(Store::ArchiveReport {

@@ -19,7 +19,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8] = b"jet-hangar-archive-v1\0";
-const MAX_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
+pub const MAX_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_OBJECTS: usize = 16_384;
 const MAX_NODES_PER_OBJECT: usize = 1_000_000;
 const MAX_FIELD_BYTES: usize = 16 * 1024 * 1024;
