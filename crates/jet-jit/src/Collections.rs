@@ -1567,7 +1567,16 @@ extern "C" fn jet_jit_sorted_set_first(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let value = rt.sorted_sets
             .get((handle as usize).wrapping_sub(1))
-            .and_then(|set| set.first().copied());
+            .and_then(|set| {
+                if sorted_set_is_string(rt, handle) {
+                    sorted_string_ids(rt, set)
+                        .into_iter()
+                        .min_by(|left, right| left.0.cmp(&right.0))
+                        .map(|(_, id)| id)
+                } else {
+                    set.first().copied()
+                }
+            });
         option_i64(rt, value)
     })
 }
@@ -1576,7 +1585,16 @@ extern "C" fn jet_jit_sorted_set_last(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let value = rt.sorted_sets
             .get((handle as usize).wrapping_sub(1))
-            .and_then(|set| set.last().copied());
+            .and_then(|set| {
+                if sorted_set_is_string(rt, handle) {
+                    sorted_string_ids(rt, set)
+                        .into_iter()
+                        .max_by(|left, right| left.0.cmp(&right.0))
+                        .map(|(_, id)| id)
+                } else {
+                    set.last().copied()
+                }
+            });
         option_i64(rt, value)
     })
 }

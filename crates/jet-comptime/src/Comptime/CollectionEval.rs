@@ -8,6 +8,10 @@ use super::Builtins::{as_int, cmp};
 use super::Diagnostics::unsupported;
 use super::Value::CtValue;
 
+mod set_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
+}
+
 fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
     fields
         .iter()
@@ -495,33 +499,28 @@ fn set_method(
                 ));
             }
             let other_items = list_field(other_fields, "items");
-            let has = |value: &CtValue, haystack: &[CtValue]| haystack.iter().any(|candidate| candidate == value);
-            let subset = |left: &[CtValue], right: &[CtValue]| left.iter().all(|value| has(value, right));
+            let equal = |left: &CtValue, right: &CtValue| left == right;
             match method {
-                "is_subset" => Ok(CtValue::Bool(subset(&items, &other_items))),
-                "is_superset" => Ok(CtValue::Bool(subset(&other_items, &items))),
-                "is_disjoint" => Ok(CtValue::Bool(items.iter().all(|value| !has(value, &other_items)))),
-                "intersection" => Ok(set_struct(
-                    type_name,
-                    items.into_iter().filter(|value| has(value, &other_items)).collect(),
-                )),
-                "difference" => Ok(set_struct(
-                    type_name,
-                    items.into_iter().filter(|value| !has(value, &other_items)).collect(),
-                )),
+                "is_subset" => Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
+                    &items, &other_items, equal,
+                ))),
+                "is_superset" => Ok(CtValue::Bool(set_semantics::jet_set_is_superset_by(
+                    &items, &other_items, equal,
+                ))),
+                "is_disjoint" => Ok(CtValue::Bool(set_semantics::jet_set_is_disjoint_by(
+                    &items, &other_items, equal,
+                ))),
+                "intersection" => {
+                    let values = set_semantics::jet_set_intersection_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                }
+                "difference" => {
+                    let values = set_semantics::jet_set_difference_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                }
                 "symmetric_difference" => {
-                    let mut values = items
-                        .iter()
-                        .filter(|value| !has(value, &other_items))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    values.extend(
-                        other_items
-                            .into_iter()
-                            .filter(|value| !has(value, &items))
-                            .collect::<Vec<_>>(),
-                    );
-                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { unique_values(values) }))
+                    let values = set_semantics::jet_set_symmetric_difference_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
                 }
                 _ => unreachable!(),
             }

@@ -96,6 +96,8 @@ fn epoch3_string_and_set_surface_runs_on_default_tier() {
     print(SortedSet.from([1, 2, 3]).difference(SortedSet.from([2, 3, 4])).len())
     print(Set.from(["left", "right"]).intersection(Set.from(["right", "other"])).len())
     print(SortedSet.from(["left", "right"]).is_subset(SortedSet.from(["left", "right", "other"])))
+    print(SortedSet.from(["z", "a"]).first() ?? "none")
+    print(SortedSet.from(["z", "a"]).last() ?? "none")
 }
 "#,
     )
@@ -114,7 +116,7 @@ fn epoch3_string_and_set_surface_runs_on_default_tier() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n"
+        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\na\nz\n"
     );
 }
 

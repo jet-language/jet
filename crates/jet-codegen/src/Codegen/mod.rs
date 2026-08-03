@@ -2031,6 +2031,7 @@ mod tests {
             range_bounds.as_str(),
             disjoint.as_str(),
             expiring_secret.as_str(),
+            set_algebra.as_str(),
             core.as_str(),
             typed_text.as_str(),
             collections.as_str(),
@@ -2046,10 +2047,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 286_529, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 289_259, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "7f1aedb94694ab3ce188edd8cec00752964fba2520db36691369b8629dccf7d6",
+            "d54e62a062214e87698001cc65071e7fb699d80328ee0b05b01851dd6f5aef92",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
