@@ -260,6 +260,38 @@ pub(super) fn upper(s: &str) -> String {
     jet_unicode_upper(s)
 }
 
+fn title_mapping(cp: u32) -> Option<&'static [u32]> {
+    let at = UNICODE_TITLE_INDEX
+        .binary_search_by_key(&cp, |&(source, _, _)| source)
+        .ok()?;
+    let (_, start, len) = UNICODE_TITLE_INDEX[at];
+    Some(&UNICODE_TITLE_POOL[start as usize..(start + len) as usize])
+}
+
+pub(super) fn title(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut word_start = true;
+    for ch in s.chars() {
+        let cp = ch as u32;
+        if alphabetic(cp) || numeric(cp) {
+            if word_start {
+                if let Some(mapped) = title_mapping(cp) {
+                    out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
+                } else {
+                    out.push(ch);
+                }
+            } else {
+                out.push_str(&lower(&ch.to_string()));
+            }
+            word_start = false;
+        } else {
+            out.push(ch);
+            word_start = true;
+        }
+    }
+    out
+}
+
 // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
 pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
     nfd(&casefold(&nfd(a))) == nfd(&casefold(&nfd(b)))

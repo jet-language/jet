@@ -75,6 +75,7 @@ const canonDecomp = new Map(); // cp -> [u32...] (no <tag>)
 const compatDecomp = new Map(); // cp -> [u32...] (any decomposition, tag or not)
 const simpleLower = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const simpleUpper = new Map(); // cp -> [u32...], overridden by SpecialCasing
+const simpleTitle = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const generalCategory = []; // [start,end,gcTagIndex]
 const letterRanges = []; // General_Category L*
 const numericRanges = []; // General_Category Nd/Nl/No
@@ -113,6 +114,7 @@ for (const raw of unicodeData.split("\n")) {
   if (["Nd", "Nl", "No"].includes(gc)) numericRanges.push([cp, cp]);
   if (f[12]) simpleUpper.set(cp, [parseInt(f[12], 16)]);
   if (f[13]) simpleLower.set(cp, [parseInt(f[13], 16)]);
+  if (f[14]) simpleTitle.set(cp, [parseInt(f[14], 16)]);
   if (decomp) {
     const tagged = decomp.startsWith("<");
     let rest = decomp;
@@ -135,6 +137,7 @@ for (const raw of specialCasing.split("\n")) {
   if (f.length < 5 || f[4] !== "") continue;
   const cp = parseInt(f[0], 16);
   simpleLower.set(cp, f[1].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
+  simpleTitle.set(cp, f[2].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
   simpleUpper.set(cp, f[3].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
 }
 
@@ -404,6 +407,7 @@ function mappingPool(map) {
 }
 const lower = mappingPool(simpleLower);
 const upper = mappingPool(simpleUpper);
+const title = mappingPool(simpleTitle);
 
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
@@ -428,6 +432,10 @@ pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
   .join(",")}];
 pub static UNICODE_UPPER_POOL: &[u32] = &[${upper.pool.join(",")}];
 pub static UNICODE_UPPER_INDEX: &[(u32,u32,u32)] = &[${upper.index
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+pub static UNICODE_TITLE_POOL: &[u32] = &[${title.pool.join(",")}];
+pub static UNICODE_TITLE_INDEX: &[(u32,u32,u32)] = &[${title.index
   .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
   .join(",")}];
 pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
@@ -540,58 +548,6 @@ pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
         rest = &rest[at + needle.len()..];
     }
     count
-}
-
-pub fn jet_unicode_is_alphabetic(s: &String) -> bool {
-    !s.is_empty() && s.chars().all(char::is_alphabetic)
-}
-
-pub fn jet_unicode_is_numeric(s: &String) -> bool {
-    !s.is_empty() && s.chars().all(char::is_numeric)
-}
-
-pub fn jet_unicode_is_whitespace(s: &String) -> bool {
-    !s.is_empty() && s.chars().all(char::is_whitespace)
-}
-
-pub fn jet_unicode_is_ascii(s: &String) -> bool {
-    s.is_ascii()
-}
-
-pub fn jet_unicode_title(s: &String) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut word_start = true;
-    for ch in s.chars() {
-        if ch.is_alphanumeric() {
-            if word_start {
-                out.extend(ch.to_uppercase());
-            } else {
-                out.extend(ch.to_lowercase());
-            }
-            word_start = false;
-        } else {
-            out.push(ch);
-            word_start = true;
-        }
-    }
-    out
-}
-
-fn jet_unicode_padding(fill: &String, width: usize) -> String {
-    if width == 0 || fill.is_empty() {
-        return String::new();
-    }
-    fill.chars().cycle().take(width).collect()
-}
-
-pub fn jet_unicode_pad_start(s: &String, width: i64, fill: &String) -> String {
-    let want = (width - s.chars().count() as i64).max(0) as usize;
-    format!("{}{}", jet_unicode_padding(fill, want), s)
-}
-
-pub fn jet_unicode_pad_end(s: &String, width: i64, fill: &String) -> String {
-    let want = (width - s.chars().count() as i64).max(0) as usize;
-    format!("{}{}", s, jet_unicode_padding(fill, want))
 }
 
 pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, String)> {

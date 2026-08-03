@@ -1078,8 +1078,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
                 }
                 TBuiltinOp::Trim => format!("jet_unicode_trim(&({}))", recv),
-                TBuiltinOp::TrimStart => format!("{}jet_unicode_trim_start(&({}))", cx.root_prefix, recv),
-                TBuiltinOp::TrimEnd => format!("{}jet_unicode_trim_end(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::TrimStart => format!("{}jet_text_trim_start(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::TrimEnd => format!("{}jet_text_trim_end(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::Split => {
                     format!("jet_iter_string_split(&({}), &{})", recv, a(0))
                 },
@@ -1097,15 +1097,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
-                TBuiltinOp::PadStart => format!("{}jet_unicode_pad_start(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
-                TBuiltinOp::PadEnd => format!("{}jet_unicode_pad_end(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
+                TBuiltinOp::PadStart => format!("{}jet_text_pad_start(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
+                TBuiltinOp::PadEnd => format!("{}jet_text_pad_end(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
                 TBuiltinOp::StringIndexOf => format!("{}jet_unicode_index_of(&({}), &({}))", cx.root_prefix, recv, a(0)),
                 TBuiltinOp::StringCount => format!("{}jet_unicode_count(&({}), &({}))", cx.root_prefix, recv, a(0)),
-                TBuiltinOp::StringIsAlphabetic => format!("{}jet_unicode_is_alphabetic(&({}))", cx.root_prefix, recv),
-                TBuiltinOp::StringIsNumeric => format!("{}jet_unicode_is_numeric(&({}))", cx.root_prefix, recv),
-                TBuiltinOp::StringIsWhitespace => format!("{}jet_unicode_is_whitespace(&({}))", cx.root_prefix, recv),
-                TBuiltinOp::StringIsAscii => format!("{}jet_unicode_is_ascii(&({}))", cx.root_prefix, recv),
-                TBuiltinOp::StringToTitle => format!("{}jet_unicode_title(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsAlphabetic => format!("{}jet_text_is_alphabetic(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsNumeric => format!("{}jet_text_is_numeric(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsWhitespace => format!("{}jet_text_is_whitespace(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringIsAscii => format!("{}jet_text_unicode_is_ascii(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringToTitle => format!("{}jet_text_title(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::StringSplitOnce { tuple_struct } => format!(
                     "{}jet_unicode_split_once(&({}), &({})).map(|(__before, __after)| {} {{ user_before: __before, user_after: __after }})",
                     cx.root_prefix, recv, a(0), tuple_struct

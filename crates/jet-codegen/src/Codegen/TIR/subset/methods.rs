@@ -486,6 +486,17 @@ pub(crate) fn method_call_in_subset(
             && labels_ok
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    // Sema may retain the nominal Set family in `recv_type` for an instance
+    // operation. It is still the same built-in collection surface, not a user
+    // method; keep it on the TIR/JIT path rather than falling through to Todo.
+    if matches!(recv_type.as_deref(), Some("Set") | Some("SortedSet"))
+        && is_covered_builtin_name(method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
     // `Set.from([...])` or `Deque.new()`. The receiver is a bare type-name ident
     // (`"Set"` / `"Deque"`), NOT a local. Sema types the call and leaves

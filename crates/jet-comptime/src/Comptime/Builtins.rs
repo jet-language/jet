@@ -28,23 +28,6 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
-fn string_padding(fill: &str, width: usize) -> String {
-    if width == 0 || fill.is_empty() {
-        return String::new();
-    }
-    fill.chars().cycle().take(width).collect()
-}
-
-fn string_pad_start(s: &str, width: i64, fill: &str) -> String {
-    let want = (width - s.chars().count() as i64).max(0) as usize;
-    format!("{}{}", string_padding(fill, want), s)
-}
-
-fn string_pad_end(s: &str, width: i64, fill: &str) -> String {
-    let want = (width - s.chars().count() as i64).max(0) as usize;
-    format!("{}{}", s, string_padding(fill, want))
-}
-
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -1080,13 +1063,13 @@ pub fn apply_method(
             let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
                 return Err(unsupported("pad_start requires an Int width and text fill", span));
             };
-            Ok(CtValue::Str(string_pad_start(s, *width, fill)))
+            Ok(CtValue::Str(super::TextLite::pad_start(s, *width, fill)))
         }
         (CtValue::Str(s), "pad_end") => {
             let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
                 return Err(unsupported("pad_end requires an Int width and text fill", span));
             };
-            Ok(CtValue::Str(string_pad_end(s, *width, fill)))
+            Ok(CtValue::Str(super::TextLite::pad_end(s, *width, fill)))
         }
         (CtValue::Str(s), "index_of") => match args.into_iter().next() {
             Some(CtValue::Str(needle)) => Ok(match s.find(&needle) {
@@ -1114,21 +1097,7 @@ pub fn apply_method(
         (CtValue::Str(s), "is_numeric") => Ok(CtValue::Bool(super::TextLite::is_numeric(s))),
         (CtValue::Str(s), "is_whitespace") => Ok(CtValue::Bool(super::TextLite::is_whitespace(s))),
         (CtValue::Str(s), "is_ascii") => Ok(CtValue::Bool(s.is_ascii())),
-        (CtValue::Str(s), "to_title") => {
-            let mut out = String::with_capacity(s.len());
-            let mut word_start = true;
-            for ch in s.chars() {
-                if ch.is_alphanumeric() {
-                    if word_start { out.extend(ch.to_uppercase()); }
-                    else { out.extend(ch.to_lowercase()); }
-                    word_start = false;
-                } else {
-                    out.push(ch);
-                    word_start = true;
-                }
-            }
-            Ok(CtValue::Str(out))
-        }
+        (CtValue::Str(s), "to_title") => Ok(CtValue::Str(super::TextLite::title(s))),
         (CtValue::Str(s), "split_once") => match args.into_iter().next() {
             Some(CtValue::Str(sep)) => Ok(match s.find(&sep) {
                 Some(at) => CtValue::Some(Box::new(CtValue::Struct {

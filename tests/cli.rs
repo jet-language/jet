@@ -68,6 +68,55 @@ fn inspect_unsafe_reports_policy_provenance_and_operations() {
 }
 
 #[test]
+fn epoch3_string_and_set_surface_runs_on_default_tier() {
+    let dir = isolated_cwd("epoch3_string_set_default");
+    fs::write(
+        dir.join("main.jet"),
+        r#"fn run() {
+    print("  jet".trim_start())
+    print("jet  ".trim_end())
+    print("jet".pad_start(5, "."))
+    print("jet".pad_end(5, "."))
+    print("hello jet".index_of("jet"))
+    print("banana".count("an"))
+    print("hELLO jet".to_title())
+    print("Hello".is_alphabetic())
+    print("123".is_numeric())
+    print(" \t".is_whitespace())
+    print("Jet lang".is_ascii())
+    pair :: "left:right".split_once(":") ?? panic("split")
+    print(pair.before)
+    print(pair.after)
+    print(Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).is_subset(Set.from([1, 2, 3, 4])))
+    print(Set.from([1, 2, 3]).is_superset(Set.from([1, 2])))
+    print(Set.from([1, 2, 3]).is_disjoint(Set.from([8])))
+    print(SortedSet.from([1, 2, 3]).union(SortedSet.from([3, 4])).len())
+    print(SortedSet.from([1, 2, 3]).difference(SortedSet.from([2, 3, 4])).len())
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n"
+    );
+}
+
+#[test]
 fn configured_organization_unsafe_policy_fails_closed_and_keeps_path() {
     let dir = isolated_cwd("organization_unsafe");
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();

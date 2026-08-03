@@ -166,8 +166,35 @@ pub(crate) mod text_rt {
     pub(crate) fn is_numeric(s: &str) -> bool {
         jet_text_is_numeric(&s.to_string())
     }
+    pub(crate) fn is_whitespace(s: &str) -> bool {
+        jet_text_is_whitespace(&s.to_string())
+    }
+    pub(crate) fn is_ascii(s: &str) -> bool {
+        jet_text_unicode_is_ascii(&s.to_string())
+    }
+    pub(crate) fn trim_start(s: &str) -> String {
+        jet_text_trim_start(&s.to_string())
+    }
+    pub(crate) fn trim_end(s: &str) -> String {
+        jet_text_trim_end(&s.to_string())
+    }
     pub(crate) fn pad_start(s: &str, width: i64, fill: &str) -> String {
         jet_text_pad_start(&s.to_string(), width, &fill.to_string())
+    }
+    pub(crate) fn pad_end(s: &str, width: i64, fill: &str) -> String {
+        jet_text_pad_end(&s.to_string(), width, &fill.to_string())
+    }
+    pub(crate) fn index_of(s: &str, needle: &str) -> Option<i64> {
+        jet_unicode_index_of(&s.to_string(), &needle.to_string())
+    }
+    pub(crate) fn count(s: &str, needle: &str) -> i64 {
+        jet_unicode_count(&s.to_string(), &needle.to_string())
+    }
+    pub(crate) fn title(s: &str) -> String {
+        jet_text_title(&s.to_string())
+    }
+    pub(crate) fn split_once(s: &str, separator: &str) -> Option<(String, String)> {
+        jet_unicode_split_once(&s.to_string(), &separator.to_string())
     }
     pub(crate) fn center(s: &str, width: i64, fill: &str) -> String {
         jet_text_center(&s.to_string(), width, &fill.to_string())
@@ -301,8 +328,55 @@ extern "C" fn jet_jit_text_is_numeric(s: i64) -> i8 {
     i8::from(text_rt::is_numeric(&clone_str(s)))
 }
 
+extern "C" fn jet_jit_text_is_whitespace(s: i64) -> i8 {
+    i8::from(text_rt::is_whitespace(&clone_str(s)))
+}
+
+extern "C" fn jet_jit_text_is_ascii(s: i64) -> i8 {
+    i8::from(text_rt::is_ascii(&clone_str(s)))
+}
+
+extern "C" fn jet_jit_text_trim_start(s: i64) -> i64 {
+    alloc_str(text_rt::trim_start(&clone_str(s)))
+}
+
+extern "C" fn jet_jit_text_trim_end(s: i64) -> i64 {
+    alloc_str(text_rt::trim_end(&clone_str(s)))
+}
+
 extern "C" fn jet_jit_text_pad_start(s: i64, width: i64, fill: i64) -> i64 {
     alloc_str(text_rt::pad_start(&clone_str(s), width, &clone_str(fill)))
+}
+
+extern "C" fn jet_jit_text_pad_end(s: i64, width: i64, fill: i64) -> i64 {
+    alloc_str(text_rt::pad_end(&clone_str(s), width, &clone_str(fill)))
+}
+
+extern "C" fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
+    text_rt::index_of(&clone_str(s), &clone_str(needle))
+        .map_or(0, |index| index.wrapping_add(1))
+}
+
+extern "C" fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
+    text_rt::count(&clone_str(s), &clone_str(needle))
+}
+
+extern "C" fn jet_jit_text_title(s: i64) -> i64 {
+    alloc_str(text_rt::title(&clone_str(s)))
+}
+
+extern "C" fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
+    let Some((before, after)) = text_rt::split_once(&clone_str(s), &clone_str(separator)) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let before_id = rt.heap.alloc_string(before);
+        let after_id = rt.heap.alloc_string(after);
+        let _ = rt.heap.record_set_string(record, 0, before_id);
+        let _ = rt.heap.record_set_string(record, 1, after_id);
+        record.wrapping_add(1)
+    })
 }
 
 extern "C" fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
@@ -554,7 +628,16 @@ pub(crate) struct TextHostFns {
     pub display_width_policy: FuncId,
     pub is_alphabetic: FuncId,
     pub is_numeric: FuncId,
+    pub is_whitespace: FuncId,
+    pub is_ascii: FuncId,
+    pub trim_start: FuncId,
+    pub trim_end: FuncId,
     pub pad_start: FuncId,
+    pub pad_end: FuncId,
+    pub index_of: FuncId,
+    pub count: FuncId,
+    pub title: FuncId,
+    pub split_once: FuncId,
     pub center: FuncId,
     pub starts_any: FuncId,
     pub char_indices: FuncId,
@@ -598,7 +681,25 @@ pub(crate) fn register_text_symbols(builder: &mut JITBuilder) {
         jet_jit_text_is_alphabetic as *const u8,
     );
     builder.symbol("jet_jit_text_is_numeric", jet_jit_text_is_numeric as *const u8);
+    builder.symbol(
+        "jet_jit_text_is_whitespace",
+        jet_jit_text_is_whitespace as *const u8,
+    );
+    builder.symbol("jet_jit_text_is_ascii", jet_jit_text_is_ascii as *const u8);
+    builder.symbol(
+        "jet_jit_text_trim_start",
+        jet_jit_text_trim_start as *const u8,
+    );
+    builder.symbol("jet_jit_text_trim_end", jet_jit_text_trim_end as *const u8);
     builder.symbol("jet_jit_text_pad_start", jet_jit_text_pad_start as *const u8);
+    builder.symbol("jet_jit_text_pad_end", jet_jit_text_pad_end as *const u8);
+    builder.symbol("jet_jit_text_index_of", jet_jit_text_index_of as *const u8);
+    builder.symbol("jet_jit_text_count", jet_jit_text_count as *const u8);
+    builder.symbol("jet_jit_text_title", jet_jit_text_title as *const u8);
+    builder.symbol(
+        "jet_jit_text_split_once",
+        jet_jit_text_split_once as *const u8,
+    );
     builder.symbol("jet_jit_text_center", jet_jit_text_center as *const u8);
     builder.symbol("jet_jit_text_starts_any", jet_jit_text_starts_any as *const u8);
     builder.symbol(
@@ -662,7 +763,16 @@ pub(crate) fn declare_text_host_fns(module: &mut JITModule) -> Result<TextHostFn
         display_width_policy: import("jet_jit_text_display_width_policy", &binary)?,
         is_alphabetic: import("jet_jit_text_is_alphabetic", &unary_i8)?,
         is_numeric: import("jet_jit_text_is_numeric", &unary_i8)?,
+        is_whitespace: import("jet_jit_text_is_whitespace", &unary_i8)?,
+        is_ascii: import("jet_jit_text_is_ascii", &unary_i8)?,
+        trim_start: import("jet_jit_text_trim_start", &unary)?,
+        trim_end: import("jet_jit_text_trim_end", &unary)?,
         pad_start: import("jet_jit_text_pad_start", &ternary)?,
+        pad_end: import("jet_jit_text_pad_end", &ternary)?,
+        index_of: import("jet_jit_text_index_of", &binary)?,
+        count: import("jet_jit_text_count", &binary)?,
+        title: import("jet_jit_text_title", &unary)?,
+        split_once: import("jet_jit_text_split_once", &binary)?,
         center: import("jet_jit_text_center", &ternary)?,
         starts_any: import("jet_jit_text_starts_any", &binary_i8)?,
         char_indices: import("jet_jit_text_char_indices", &unary)?,

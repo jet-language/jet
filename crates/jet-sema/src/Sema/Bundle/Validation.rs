@@ -759,6 +759,31 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            // Epoch 3 String surface delegates Unicode classification, title
+            // casing, trimming, and display-width padding to the pinned
+            // `core.text` implementation. Mark that shared prelude reachable
+            // even though these are ambient String methods rather than a
+            // qualified core call.
+            if matches!(
+                method.as_str(),
+                "trim_start"
+                    | "trim_end"
+                    | "pad_start"
+                    | "pad_end"
+                    | "is_alphabetic"
+                    | "is_numeric"
+                    | "is_whitespace"
+                    | "is_ascii"
+                    | "to_title"
+            )
+            {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.text::__string_surface__",
+                    Some(*method_span),
+                );
+            }
             if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
                 && method == Syntax::TASKGROUP_SPAWN_METHOD
             {

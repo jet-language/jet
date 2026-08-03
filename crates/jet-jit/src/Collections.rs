@@ -1161,6 +1161,90 @@ extern "C" fn jet_jit_set_union(a: i64, b: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_set_intersection(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        set_handle(rt, left.intersection(&right).copied().collect())
+    })
+}
+
+extern "C" fn jet_jit_set_difference(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        set_handle(rt, left.difference(&right).copied().collect())
+    })
+}
+
+extern "C" fn jet_jit_set_symmetric_difference(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        set_handle(rt, left.symmetric_difference(&right).copied().collect())
+    })
+}
+
+extern "C" fn jet_jit_set_is_subset(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)) else {
+            return i8::from(left.is_empty());
+        };
+        i8::from(left.is_subset(right))
+    })
+}
+
+extern "C" fn jet_jit_set_is_superset(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)) else {
+            return i8::from(rt.sets.get((b as usize).wrapping_sub(1)).is_some_and(HashSet::is_empty));
+        };
+        let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        i8::from(left.is_superset(right))
+    })
+}
+
+extern "C" fn jet_jit_set_is_disjoint(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        i8::from(left.is_disjoint(right))
+    })
+}
+
 extern "C" fn jet_jit_deque_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| deque_handle(rt, VecDeque::new()))
 }
@@ -1374,6 +1458,115 @@ extern "C" fn jet_jit_sorted_set_last(handle: i64) -> i64 {
             .get((handle as usize).wrapping_sub(1))
             .and_then(|set| set.last().copied());
         option_i64(rt, value)
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_union(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut out = rt
+            .sorted_sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        if let Some(other) = rt.sorted_sets.get((b as usize).wrapping_sub(1)) {
+            out.extend(other.iter().copied());
+        }
+        rt.sorted_sets.push(out);
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_intersection(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sorted_sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sorted_sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let out = left.intersection(&right).copied().collect();
+        rt.sorted_sets.push(out);
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_difference(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sorted_sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sorted_sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let out = left.difference(&right).copied().collect();
+        rt.sorted_sets.push(out);
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_symmetric_difference(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sorted_sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sorted_sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let out = left.symmetric_difference(&right).copied().collect();
+        rt.sorted_sets.push(out);
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_is_subset(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)) else {
+            return i8::from(left.is_empty());
+        };
+        i8::from(left.is_subset(right))
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_is_superset(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)) else {
+            return i8::from(
+                rt.sorted_sets
+                    .get((b as usize).wrapping_sub(1))
+                    .is_some_and(std::collections::BTreeSet::is_empty),
+            );
+        };
+        let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        i8::from(left.is_superset(right))
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_is_disjoint(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)) else {
+            return 1;
+        };
+        i8::from(left.is_disjoint(right))
     })
 }
 
@@ -1765,6 +1958,12 @@ pub(crate) struct CollectionsHostFns {
     pub set_len: cranelift_module::FuncId,
     pub set_to_list: cranelift_module::FuncId,
     pub set_union: cranelift_module::FuncId,
+    pub set_intersection: cranelift_module::FuncId,
+    pub set_difference: cranelift_module::FuncId,
+    pub set_symmetric_difference: cranelift_module::FuncId,
+    pub set_is_subset: cranelift_module::FuncId,
+    pub set_is_superset: cranelift_module::FuncId,
+    pub set_is_disjoint: cranelift_module::FuncId,
     pub deque_new: cranelift_module::FuncId,
     pub deque_push_front: cranelift_module::FuncId,
     pub deque_push_back: cranelift_module::FuncId,
@@ -1786,6 +1985,13 @@ pub(crate) struct CollectionsHostFns {
     pub sorted_set_to_list: cranelift_module::FuncId,
     pub sorted_set_first: cranelift_module::FuncId,
     pub sorted_set_last: cranelift_module::FuncId,
+    pub sorted_set_union: cranelift_module::FuncId,
+    pub sorted_set_intersection: cranelift_module::FuncId,
+    pub sorted_set_difference: cranelift_module::FuncId,
+    pub sorted_set_symmetric_difference: cranelift_module::FuncId,
+    pub sorted_set_is_subset: cranelift_module::FuncId,
+    pub sorted_set_is_superset: cranelift_module::FuncId,
+    pub sorted_set_is_disjoint: cranelift_module::FuncId,
     pub priority_queue_new: cranelift_module::FuncId,
     pub priority_queue_from: cranelift_module::FuncId,
     pub priority_queue_push: cranelift_module::FuncId,
@@ -1903,6 +2109,18 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_set_len", jet_jit_set_len as *const u8);
     builder.symbol("jet_jit_set_to_list", jet_jit_set_to_list as *const u8);
     builder.symbol("jet_jit_set_union", jet_jit_set_union as *const u8);
+    builder.symbol(
+        "jet_jit_set_intersection",
+        jet_jit_set_intersection as *const u8,
+    );
+    builder.symbol("jet_jit_set_difference", jet_jit_set_difference as *const u8);
+    builder.symbol(
+        "jet_jit_set_symmetric_difference",
+        jet_jit_set_symmetric_difference as *const u8,
+    );
+    builder.symbol("jet_jit_set_is_subset", jet_jit_set_is_subset as *const u8);
+    builder.symbol("jet_jit_set_is_superset", jet_jit_set_is_superset as *const u8);
+    builder.symbol("jet_jit_set_is_disjoint", jet_jit_set_is_disjoint as *const u8);
     builder.symbol("jet_jit_deque_new", jet_jit_deque_new as *const u8);
     builder.symbol("jet_jit_deque_push_front", jet_jit_deque_push_front as *const u8);
     builder.symbol("jet_jit_deque_push_back", jet_jit_deque_push_back as *const u8);
@@ -1924,6 +2142,34 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_sorted_set_to_list", jet_jit_sorted_set_to_list as *const u8);
     builder.symbol("jet_jit_sorted_set_first", jet_jit_sorted_set_first as *const u8);
     builder.symbol("jet_jit_sorted_set_last", jet_jit_sorted_set_last as *const u8);
+    builder.symbol(
+        "jet_jit_sorted_set_union",
+        jet_jit_sorted_set_union as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_intersection",
+        jet_jit_sorted_set_intersection as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_difference",
+        jet_jit_sorted_set_difference as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_symmetric_difference",
+        jet_jit_sorted_set_symmetric_difference as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_is_subset",
+        jet_jit_sorted_set_is_subset as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_is_superset",
+        jet_jit_sorted_set_is_superset as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_sorted_set_is_disjoint",
+        jet_jit_sorted_set_is_disjoint as *const u8,
+    );
     builder.symbol("jet_jit_priority_queue_new", jet_jit_priority_queue_new as *const u8);
     builder.symbol("jet_jit_priority_queue_from", jet_jit_priority_queue_from as *const u8);
     builder.symbol("jet_jit_priority_queue_push", jet_jit_priority_queue_push as *const u8);
@@ -2148,6 +2394,12 @@ pub(crate) fn declare_collections_host_fns(
         set_len: import("jet_jit_set_len", &sig_len)?,
         set_to_list: import("jet_jit_set_to_list", &sig_len)?,
         set_union: import("jet_jit_set_union", &sig_get_opt)?,
+        set_intersection: import("jet_jit_set_intersection", &sig_get_opt)?,
+        set_difference: import("jet_jit_set_difference", &sig_get_opt)?,
+        set_symmetric_difference: import("jet_jit_set_symmetric_difference", &sig_get_opt)?,
+        set_is_subset: import("jet_jit_set_is_subset", &sig_list_eq)?,
+        set_is_superset: import("jet_jit_set_is_superset", &sig_list_eq)?,
+        set_is_disjoint: import("jet_jit_set_is_disjoint", &sig_list_eq)?,
         deque_new: import("jet_jit_deque_new", &sig_new)?,
         deque_push_front: import("jet_jit_deque_push_front", &sig_push)?,
         deque_push_back: import("jet_jit_deque_push_back", &sig_push)?,
@@ -2169,6 +2421,16 @@ pub(crate) fn declare_collections_host_fns(
         sorted_set_to_list: import("jet_jit_sorted_set_to_list", &sig_len)?,
         sorted_set_first: import("jet_jit_sorted_set_first", &sig_len)?,
         sorted_set_last: import("jet_jit_sorted_set_last", &sig_len)?,
+        sorted_set_union: import("jet_jit_sorted_set_union", &sig_get_opt)?,
+        sorted_set_intersection: import("jet_jit_sorted_set_intersection", &sig_get_opt)?,
+        sorted_set_difference: import("jet_jit_sorted_set_difference", &sig_get_opt)?,
+        sorted_set_symmetric_difference: import(
+            "jet_jit_sorted_set_symmetric_difference",
+            &sig_get_opt,
+        )?,
+        sorted_set_is_subset: import("jet_jit_sorted_set_is_subset", &sig_list_eq)?,
+        sorted_set_is_superset: import("jet_jit_sorted_set_is_superset", &sig_list_eq)?,
+        sorted_set_is_disjoint: import("jet_jit_sorted_set_is_disjoint", &sig_list_eq)?,
         priority_queue_new: import("jet_jit_priority_queue_new", &sig_new)?,
         priority_queue_from: import("jet_jit_priority_queue_from", &sig_len)?,
         priority_queue_push: import("jet_jit_priority_queue_push", &sig_push)?,

@@ -78,6 +78,12 @@ const CASES: &[&str] = &[
     "SortedSet.from([1, 2]).is_subset(SortedSet.from([1, 2, 3]))",
     "SortedSet.from([1, 2, 3]).is_superset(SortedSet.from([1, 2]))",
     "SortedSet.from([1, 2]).is_disjoint(SortedSet.from([3, 4]))",
+    "Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2, 3]).difference(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len()",
+    "Set.from([1, 2]).is_subset(Set.from([1, 2, 3]))",
+    "Set.from([1, 2, 3]).is_superset(Set.from([1, 2]))",
+    "Set.from([1, 2]).is_disjoint(Set.from([3, 4]))",
     // D-BIGINT1 (card #392): arbitrary-precision arithmetic — no overflow,
     // no auto-promotion. comptime must match AOT's limb-based `JetBigInt`
     // byte-for-byte (R12 parity).

@@ -1553,10 +1553,38 @@ Epoch 3 (D-ADAPT-PROVIDER1=A). Automatic adaptive scheduling is declined
 
 ---
 
+### `String` convenience surface (Epoch 3, #1409)
+
+These methods are ambient `String` operations. Unicode classification, title
+casing, trimming, and padding call the same pinned `core.text` algorithms as
+the qualified module; there is one semantic implementation across AOT,
+comptime, and default `jet run`.
+
+| Method | Returns | Meaning |
+|--------|---------|---------|
+| `.trim_start()` / `.trim_end()` | `String` | Remove Unicode `White_Space` at one edge |
+| `.pad_start(width, fill)` / `.pad_end(width, fill)` | `String` | Pad to terminal display width using the first grapheme in `fill` |
+| `.index_of(needle)` | `Int?` | Unicode-scalar index of the first substring |
+| `.count(needle)` | `Int` | Non-overlapping substring count; empty needles count as zero |
+| `.is_alphabetic()` / `.is_numeric()` / `.is_whitespace()` | `Bool` | True only when non-empty and every scalar has the pinned property |
+| `.is_ascii()` | `Bool` | True when every byte is ASCII |
+| `.to_title()` | `String` | Word-start Unicode titlecase mapping; remaining letters are lowercase |
+| `.split_once(separator)` | `(before: String, after: String)?` | Split at the first separator |
+
+Competitor accounting is explicit: Python `partition`/`count`, Rust
+`find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
+Kotlin `indexOf`/`count`, and JavaScript `indexOf`/`split` map to the rows
+above or the existing `before`/`after`/`split` methods. Locale collation,
+locale-sensitive casing, and regex replacement remain the documented v1
+out-of-scope cases in `core.text`; they require the existing explicit i18n or
+regex decisions and are not silently added to the ambient String surface.
+
+---
+
 ### `core.text` — Unicode text algorithms
 
-`String` stays small. `core.text` owns Unicode-heavy operations and tooling may
-insert these calls from String contexts. Results are pinned to Unicode 16.0.0;
+`core.text` owns the Unicode algorithms used by both its qualified calls and the
+ambient String convenience methods above. Results are pinned to Unicode 16.0.0;
 they do not inherit the host Rust, OS, locale, or terminal Unicode version.
 
 | Function | Returns | What it does |
