@@ -36,7 +36,7 @@ use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::BranchClass;
-use crate::Codegen::variant_binding_types;
+use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
@@ -431,7 +431,17 @@ fn lower_if_cond_atom(
         if !is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
-                let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
+                let ty = match &subj.ty {
+                    Type::Named(enum_name) | Type::Apply { name: enum_name, .. } => {
+                        let resolved = cx
+                            .core_qualified_rust_type_name(enum_name)
+                            .unwrap_or(enum_name.as_str());
+                        variant_binding_types_for_enum(cx, resolved, variant)
+                            .and_then(|ts| ts.into_iter().next())
+                    }
+                    _ => variant_binding_types(cx, variant)
+                        .and_then(|ts| ts.into_iter().next()),
+                };
                 return (
                     TIfCond::IfLet {
                         pattern: TPattern::binding(pattern.clone()),

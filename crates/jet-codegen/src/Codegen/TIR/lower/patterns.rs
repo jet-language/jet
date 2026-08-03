@@ -22,7 +22,7 @@ use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::variant_pattern_enum;
-use crate::Codegen::variant_binding_types;
+use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
 /// `(name, type)` canonical hole list the SAME way sema did when it set this
@@ -569,7 +569,7 @@ pub(crate) fn tir_add_pattern_bindings(
             let tys = hook_payload
                 .map(|ty| vec![ty])
                 .or(union_payload)
-                .or_else(|| variant_payload_types(cx, variant));
+                .or_else(|| variant_payload_types(cx, variant, subject_ty));
             for (i, slot) in bindings.iter().enumerate() {
                 if let PatSlot::Bind { name, .. } = slot {
                     // Payload types are scalar/Char (the enum is covered), so the
@@ -598,8 +598,22 @@ pub(crate) fn tir_add_pattern_bindings(
 /// (`cx.variant_owner` → `cx.enum_variants`) — pure table lookups, no env/inference —
 /// so the bound payload type is byte-parity-faithful for every covered enum (e.g. a
 /// foreign `ParseError.NoFrontmatter(p)` binds `p: String`).
-pub(crate) fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
-    variant_binding_types(cx, variant)
+pub(crate) fn variant_payload_types(
+    cx: &Cx,
+    variant: &str,
+    subject_ty: Option<&Type>,
+) -> Option<Vec<Type>> {
+    let typed = subject_ty.and_then(|ty| {
+        let name = match ty {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => return None,
+        };
+        let resolved = cx
+            .core_qualified_rust_type_name(name)
+            .unwrap_or(name.as_str());
+        variant_binding_types_for_enum(cx, resolved, variant)
+    });
+    typed.or_else(|| variant_binding_types(cx, variant))
 }
 
 /// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
@@ -685,6 +699,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     }
     if type_name == "ServiceReceipt" {
         return format!("{}JetServiceReceipt::{}", cx.root_prefix, variant);
+    }
+    if type_name == "ServiceError" {
+        return format!("{}JetServiceError::{}", cx.root_prefix, variant);
     }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),

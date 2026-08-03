@@ -29,14 +29,19 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_email = etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_service_receipt = etype == Some("ServiceReceipt");
+    let is_service_error = etype == Some("ServiceError");
     let is_hook_outcome = etype == Some("HookOutcome");
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
-        let from_variant = if let Pattern::Variant { variant, .. } = pattern {
-            is_key_variant(variant)
+        let from_variant = if etype.is_none() {
+            if let Pattern::Variant { variant, .. } = pattern {
+                is_key_variant(variant)
+            } else {
+                false
+            }
         } else {
             false
         };
@@ -65,6 +70,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}JetAuthError", cx.root_prefix)
             } else if t == "ServiceReceipt" {
                 format!("{}JetServiceReceipt", cx.root_prefix)
+            } else if t == "ServiceError" {
+                format!("{}JetServiceError", cx.root_prefix)
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
@@ -85,7 +92,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_http || is_email || is_auth || is_service_receipt || is_hook_outcome || is_anon_union {
+        if is_json || is_key || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -134,7 +141,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
                 let real_names = variant_field_names(cx, variant).map(|names| {
-                    if is_email || is_auth || is_service_receipt {
+                    if is_email || is_auth || is_service_receipt || is_service_error {
                         names.into_iter().map(|name| name.strip_prefix("user_").unwrap_or(&name).to_string()).collect()
                     } else {
                         names
@@ -226,6 +233,11 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             _ => None,
         };
     }
+    if let Some(owner) = cx.variant_owner.get(variant) {
+        if let Some(types) = variant_binding_types_for_enum(cx, owner, variant) {
+            return Some(types);
+        }
+    }
     // D-TERM1 (ratified 2026-06-22): `Key` variant payload types for codegen.
     if is_key_variant(variant) {
         return match variant {
@@ -234,8 +246,25 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             _ => Some(Vec::new()), // unit variants
         };
     }
-    let owner = cx.variant_owner.get(variant)?;
-    let variants = cx.enum_variants.get(owner)?;
+    None
+}
+
+pub(crate) fn variant_binding_types_for_enum(
+    cx: &Cx,
+    enum_name: &str,
+    variant: &str,
+) -> Option<Vec<Type>> {
+    if enum_name == Syntax::TYPE_KEY {
+        return match variant {
+            "Char" | "Ctrl" => Some(vec![Type::Char]),
+            "F" => Some(vec![Type::Int]),
+            _ => Some(Vec::new()),
+        };
+    }
+    let resolved = cx
+        .core_qualified_rust_type_name(enum_name)
+        .unwrap_or(enum_name);
+    let variants = cx.enum_variants.get(resolved)?;
     let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
     match payload {
         VariantPayload::Unit => Some(Vec::new()),
@@ -283,7 +312,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .collect();
                 if let Some(names) = variant_field_names(cx, variant) {
                     let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
-                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError" | "ServiceReceipt")
+                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError" | "ServiceReceipt" | "ServiceError")
                     });
                     let fields = names
                         .iter()
