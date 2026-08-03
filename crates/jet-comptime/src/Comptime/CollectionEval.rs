@@ -468,12 +468,12 @@ fn set_method(
                     span,
                 ));
             }
-            let mut merged = items;
-            merged.extend(list_field(other_fields, "items"));
+            let other_items = list_field(other_fields, "items");
+            let merged = set_semantics::jet_set_union_by(&items, &other_items, |left, right| left == right);
             let merged = if sorted {
                 sorted_unique(merged, span)?
             } else {
-                unique_values(merged)
+                merged
             };
             Ok(set_struct(type_name, merged))
         }

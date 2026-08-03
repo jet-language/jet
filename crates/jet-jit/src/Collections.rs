@@ -1132,6 +1132,26 @@ fn sorted_string_values(rt: &crate::JitRuntime, values: &BTreeSet<i64>) -> BTree
     sorted_string_ids(rt, values).into_keys().collect()
 }
 
+fn canonical_string_set(
+    rt: &crate::JitRuntime,
+    values: impl IntoIterator<Item = i64>,
+) -> HashSet<i64> {
+    let mut ids = HashMap::new();
+    for id in values {
+        if let Some(value) = rt.heap.clone_string(id) {
+            ids.entry(value).or_insert(id);
+        }
+    }
+    ids.into_values().collect()
+}
+
+fn canonical_sorted_string_set(
+    rt: &crate::JitRuntime,
+    values: impl IntoIterator<Item = i64>,
+) -> BTreeSet<i64> {
+    canonical_string_set(rt, values).into_iter().collect()
+}
+
 fn deque_handle(rt: &mut crate::JitRuntime, dq: VecDeque<i64>) -> i64 {
     rt.deques.push(dq);
     rt.deques.len() as i64
@@ -1140,7 +1160,13 @@ fn deque_handle(rt: &mut crate::JitRuntime, dq: VecDeque<i64>) -> i64 {
 extern "C" fn jet_jit_set_from_list(list: i64, string_kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt.heap.clone_int_list(list).unwrap_or_default();
-        set_handle(rt, xs.into_iter().collect(), string_kind != 0)
+        let string_kind = string_kind != 0;
+        let set = if string_kind {
+            canonical_string_set(rt, xs)
+        } else {
+            xs.into_iter().collect()
+        };
+        set_handle(rt, set, string_kind)
     })
 }
 
@@ -1501,13 +1527,14 @@ extern "C" fn jet_jit_sorted_set_new() -> i64 {
 
 extern "C" fn jet_jit_sorted_set_from(list: i64, string_kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let set = rt
-            .heap
-            .clone_int_list(list)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        sorted_set_handle(rt, set, string_kind != 0)
+        let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+        let string_kind = string_kind != 0;
+        let set = if string_kind {
+            canonical_sorted_string_set(rt, xs)
+        } else {
+            xs.into_iter().collect()
+        };
+        sorted_set_handle(rt, set, string_kind)
     })
 }
 
