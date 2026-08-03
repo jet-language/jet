@@ -370,8 +370,53 @@ pub fn cbor_parse_for_tir(
         .map_err(EncodingLite::cbor_error_value)
 }
 
+/// Convert a parser failure to the typed decoder's shared `[FieldError]`
+/// contract. CBOR's parser keeps byte offsets and `$` paths; typed decode
+/// exposes those details in the field-error reason and uses source paths.
+pub fn cbor_decode_source_error_for_tir(error: CtValue) -> CtValue {
+    let CtValue::Struct { fields, .. } = &error else {
+        return TypedDecode::decode_error(error.jet_show());
+    };
+    let text = |name: &str| {
+        fields.iter().find_map(|(field, value)| {
+            (field == name).then_some(value).and_then(|value| match value {
+                CtValue::Str(value) => Some(value.as_str()),
+                _ => None,
+            })
+        })
+    };
+    let kind = fields
+        .iter()
+        .find_map(|(field, value)| {
+            (field == "kind").then_some(value).and_then(|value| match value {
+                CtValue::Enum { variant, .. } => Some(variant.as_str()),
+                _ => None,
+            })
+        })
+        .unwrap_or("Unsupported");
+    let offset = fields
+        .iter()
+        .find_map(|(field, value)| {
+            (field == "byte_offset").then_some(value).and_then(|value| match value {
+                CtValue::Int(offset) => Some(*offset),
+                _ => None,
+            })
+        })
+        .unwrap_or(0);
+    let raw_path = text("path").unwrap_or("$");
+    let path = if raw_path == "$" {
+        String::new()
+    } else if let Some(path) = raw_path.strip_prefix("$.") {
+        path.to_string()
+    } else {
+        raw_path.strip_prefix('$').unwrap_or(raw_path).to_string()
+    };
+    let reason = text("reason").unwrap_or("CBOR decode failed");
+    TypedDecode::decode_error_at(path, format!("CBOR {kind} at byte {offset}: {reason}"))
+}
+
 /// TIR core-call bridge for generic CBOR decode. TIR retains the resolved
-/// `Result<T, CBORError>` type, so use its `T` with the shared typed decoder
+/// `Result<T, [FieldError]>` type, so use its `T` with the shared typed decoder
 /// instead of returning the parser's internal `DataTree` representation.
 pub fn cbor_decode_typed_for_tir(
     bytes: &[u8],
@@ -381,79 +426,26 @@ pub fn cbor_decode_typed_for_tir(
     let options = match EncodingLite::cbor_options(options) {
         Ok(options) => options,
         Err(error) => {
-            return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
+            return CtValue::ResErr(Box::new(cbor_decode_source_error_for_tir(
+                EncodingLite::cbor_error_value(error),
+            )));
         }
     };
     let tree = match EncodingLite::cbor_decode(bytes, &options, true) {
         Ok(tree) => tree,
         Err(error) => {
-            return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
+            return CtValue::ResErr(Box::new(cbor_decode_source_error_for_tir(
+                EncodingLite::cbor_error_value(error),
+            )));
         }
     };
     match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
         Some(Ok(value)) => CtValue::ResOk(Box::new(value)),
-        Some(Err(CtValue::Struct { fields, .. })) => {
-            let path = fields
-                .iter()
-                .find_map(|(name, value)| match (name.as_str(), value) {
-                    ("path", CtValue::Str(path)) => Some(path.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
-            let reason = fields
-                .iter()
-                .find_map(|(name, value)| match (name.as_str(), value) {
-                    ("reason", CtValue::Str(reason)) => Some(reason.clone()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| "CBOR value does not match requested type".to_string());
-            CtValue::ResErr(Box::new(CtValue::Struct {
-                type_name: "CBORError".to_string(),
-                fields: vec![
-                    (
-                        "kind".to_string(),
-                        CtValue::Enum {
-                            type_name: "CBORErrorKind".to_string(),
-                            variant: "TypeMismatch".to_string(),
-                            args: Vec::new(),
-                        },
-                    ),
-                    ("byte_offset".to_string(), CtValue::Int(0)),
-                    (
-                        "path".to_string(),
-                        CtValue::Str(if path.is_empty() {
-                            "$".to_string()
-                        } else {
-                            format!("${path}")
-                        }),
-                    ),
-                    ("reason".to_string(), CtValue::Str(reason)),
-                ],
-            }))
-        }
         Some(Err(error)) => CtValue::ResErr(Box::new(error)),
-        None => CtValue::ResErr(Box::new(CtValue::Struct {
-            type_name: "CBORError".to_string(),
-            fields: vec![
-                (
-                    "kind".to_string(),
-                    CtValue::Enum {
-                        type_name: "CBORErrorKind".to_string(),
-                        variant: "Unsupported".to_string(),
-                        args: Vec::new(),
-                    },
-                ),
-                ("byte_offset".to_string(), CtValue::Int(0)),
-                ("path".to_string(), CtValue::Str("$".to_string())),
-                (
-                    "reason".to_string(),
-                    CtValue::Str(format!(
-                        "comptime can't decode `{}` yet",
-                        root_ty.name()
-                    )),
-                ),
-            ],
-        })),
+        None => CtValue::ResErr(Box::new(TypedDecode::decode_error(format!(
+            "comptime can't decode `{}` yet",
+            root_ty.name()
+        )))),
     }
 }
 

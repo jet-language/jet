@@ -19,23 +19,25 @@ use jet_codegen::scheduler::{
 };
 use std::sync::Arc;
 
-#[derive(Clone, Debug)]
-struct JetDataTreeStub;
+type JetDataTree = crate::Encoding::json_rt::DataTree;
+
 trait user_Encode {
-    fn jet_encode(&self) -> JetDataTreeStub;
+    fn jet_encode(&self) -> JetDataTree;
 }
 trait user_Decode: Sized {
-    fn jet_decode_traced(
-        _tree: &JetDataTreeStub,
-    ) -> Result<(Self, ()), Vec<jet_std::FieldError>>;
+    fn jet_decode_traced(tree: &JetDataTree) -> Result<(Self, ()), Vec<jet_std::FieldError>>;
 }
 fn jet_enc_json_to_string<T: user_Encode>(v: &T) -> String {
-    let _ = v.jet_encode();
-    String::new()
+    crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
 }
 fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let _ = text;
-    Err(jet_std::FieldError::one("decode unsupported in jit net host"))
+    let tree = crate::Encoding::json_rt::parse_datatree(text).map_err(|error| {
+        jet_std::FieldError::one(format!(
+            "invalid JSON (line {}): {}",
+            error.line, error.message
+        ))
+    })?;
+    T::jet_decode_traced(&tree).map(|(value, _)| value)
 }
 struct JetFileReader {
     inner: std::io::BufReader<std::fs::File>,
@@ -168,21 +170,7 @@ pub mod jet_std {
         pub params: Vec<(String, String)>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JSONError {
-        pub line: i64,
-        pub message: String,
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum JSON {
-        Null,
-        Boolean(bool),
-        Number(f64),
-        Text(String),
-        Array(Vec<JSON>),
-        Object(std::collections::BTreeMap<String, JSON>),
-    }
+    pub use crate::Encoding::json_rt::{JSON, JSONError};
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct FieldError {
@@ -227,16 +215,12 @@ pub mod jet_std {
         pub redacted: bool,
     }
 
-    pub fn render_datatree_json(
-        _tree: &super::JetDataTreeStub,
-        _pretty: bool,
-        _indent: i64,
-    ) -> String {
-        String::new()
+    pub fn render_datatree_json(tree: &super::JetDataTree, pretty: bool, indent: i64) -> String {
+        crate::Encoding::json_rt::render_datatree_json(tree, pretty, indent as usize)
     }
 
-    pub fn datatree_from_json(_j: &JSON) -> super::JetDataTreeStub {
-        super::JetDataTreeStub
+    pub fn datatree_from_json(j: &JSON) -> super::JetDataTree {
+        crate::Encoding::json_rt::datatree_from_json(j)
     }
 
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");

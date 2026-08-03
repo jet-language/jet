@@ -1902,11 +1902,31 @@ extern "C" fn jet_jit_decode_error_under_segment(result: i64, segment: i64) -> i
     result_err_fields(json_rt::FieldError::under_errors(&segment, errors))
 }
 
+/// Add one failed list element to the resident `[FieldError]` accumulator.
+/// Zero is the SSA-level empty accumulator; every non-zero value is a normal
+/// Result error handle. Keeping this operation here makes JIT list traversal
+/// an adapter over the same error-list shape as AOT/TIR.
+extern "C" fn jet_jit_decode_error_accumulate(accum: i64, result: i64, index: i64) -> i64 {
+    let Some(errors) = result_errors(result) else {
+        return accum;
+    };
+    let mut combined = result_errors(accum).unwrap_or_default();
+    combined.extend(json_rt::FieldError::under_errors(
+        &format!("[{index}]"),
+        errors,
+    ));
+    result_err_fields(combined)
+}
+
+extern "C" fn jet_jit_datatree_decode_union_error() -> i64 {
+    result_err_decode("", "value does not match any union member")
+}
+
 extern "C" fn jet_jit_datatree_text(tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");
     };
-    match tree.text() {
+    match json_rt::decode_string(&tree) {
         Ok(value) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
             result_ok_bits(sid as u64)
@@ -1919,7 +1939,7 @@ extern "C" fn jet_jit_datatree_bool(tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");
     };
-    match tree.bool() {
+    match json_rt::decode_bool(&tree) {
         Ok(value) => result_ok_bits(u64::from(value)),
         Err(errors) => result_err_fields(errors),
     }
@@ -2076,6 +2096,8 @@ pub(crate) struct EncodingHostFns {
     pub datatree_decode_list_error: cranelift_module::FuncId,
     pub decode_error_under: cranelift_module::FuncId,
     pub decode_error_under_segment: cranelift_module::FuncId,
+    pub decode_error_accumulate: cranelift_module::FuncId,
+    pub datatree_decode_union_error: cranelift_module::FuncId,
     pub datatree_text: cranelift_module::FuncId,
     pub datatree_bool: cranelift_module::FuncId,
     pub datatree_float: cranelift_module::FuncId,
@@ -2181,6 +2203,14 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol(
         "jet_jit_decode_error_under_segment",
         jet_jit_decode_error_under_segment as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_error_accumulate",
+        jet_jit_decode_error_accumulate as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_datatree_decode_union_error",
+        jet_jit_datatree_decode_union_error as *const u8,
     );
     builder.symbol("jet_jit_datatree_text", jet_jit_datatree_text as *const u8);
     builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
@@ -2497,6 +2527,11 @@ pub(crate) fn declare_encoding_host_fns(
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.returns.push(AbiParam::new(types::I64));
+    let mut sig_ternary = Signature::new(cc);
+    for _ in 0..3 {
+        sig_ternary.params.push(AbiParam::new(types::I64));
+    }
+    sig_ternary.returns.push(AbiParam::new(types::I64));
     let mut sig_quaternary = Signature::new(cc);
     for _ in 0..4 {
         sig_quaternary.params.push(AbiParam::new(types::I64));
@@ -2561,6 +2596,11 @@ pub(crate) fn declare_encoding_host_fns(
         decode_error_under_segment: import(
             "jet_jit_decode_error_under_segment",
             &sig_binary,
+        )?,
+        decode_error_accumulate: import("jet_jit_decode_error_accumulate", &sig_ternary)?,
+        datatree_decode_union_error: import(
+            "jet_jit_datatree_decode_union_error",
+            &sig_nullary,
         )?,
         datatree_text: import("jet_jit_datatree_text", &sig_unary)?,
         datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,

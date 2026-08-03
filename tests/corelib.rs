@@ -2806,11 +2806,11 @@ fn run() {
     }
     if cbor.decode<[Int]>([129, 97, 120], strict_decode) == {
         .Ok(_) -> print("unexpected success")
-        .Err(error) -> print("{error.path}|{error.reason}")
+        .Err(error) -> print("{error[0].path}|{error[0].reason}")
     }
     if cbor.decode<Int>([65, 0]) == {
         .Ok(_) -> print("unexpected success")
-        .Err(error) -> print("{error.path}|{error.reason}")
+        .Err(error) -> print("{error[0].path}|{error[0].reason}")
     }
 }
 "#;
@@ -3130,7 +3130,7 @@ fn run() {
     }
     if cbor.decode<[Int]>([129, 97, 120], roomy) == {
         Ok(_) -> panic("typed mismatch accepted")
-        Err(e) -> print(e.path == "[0]" && e.reason.contains("expected Int"))
+        Err(e) -> print(e[0].path == "[0]" && e[0].reason.contains("expected Int"))
     }
     print(true)
 }

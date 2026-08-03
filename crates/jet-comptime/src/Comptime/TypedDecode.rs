@@ -336,6 +336,47 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
     }
 }
 
+fn decode_int_n(tree: &CtValue, signed: bool, bits: u8, name: &str) -> Result<CtValue, CtValue> {
+    let decoded = decode_int(tree)?;
+    let CtValue::Int(value) = decoded else {
+        unreachable!();
+    };
+    let in_range = if signed {
+        let shift = u32::from(bits - 1);
+        (-(1_i128 << shift)..=(1_i128 << shift) - 1).contains(&i128::from(value))
+    } else {
+        (0..=(1_i128 << u32::from(bits)) - 1).contains(&i128::from(value))
+    };
+    if in_range {
+        Ok(CtValue::Int(value))
+    } else {
+        let found = if !signed && bits == 8 {
+            "Int"
+        } else {
+            "out-of-range Int"
+        };
+        Err(decode_error(format!("expected {name}, found {found}")))
+    }
+}
+
+fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
+    let value = match variant_of(tree) {
+        Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
+        Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
+        _ => {
+            return Err(decode_error(format!(
+                "expected F32, found {}",
+                datatree_kind(tree)
+            )))
+        }
+    };
+    if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+        Ok(CtValue::Float(CtFloat::f32(value as f32)))
+    } else {
+        Err(decode_error("expected F32, found out-of-range Float"))
+    }
+}
+
 /// Decode the closed primitive/container subset without an interpreter-owned
 /// struct registry. TIR core calls retain their resolved return type but not
 /// source turbofish syntax, so CBOR uses this same scalar/list walker instead
@@ -344,74 +385,92 @@ pub(super) fn typed_decode_builtin_value(
     ty: &Type,
     tree: &CtValue,
 ) -> Option<Result<CtValue, CtValue>> {
-    Some(match ty {
-        Type::Int => decode_int(tree),
-        Type::Float => decode_float(tree),
-        Type::Bool => decode_bool(tree),
-        Type::String => decode_string(tree),
-        Type::Char => decode_char(tree),
+    match ty {
+        Type::Int => Some(decode_int(tree)),
+        Type::IntN { signed, bits } => Some(decode_int_n(tree, *signed, *bits, &ty.name())),
+        Type::Float => Some(decode_float(tree)),
+        Type::Float32 => Some(decode_f32(tree)),
+        Type::Bool => Some(decode_bool(tree)),
+        Type::String => Some(decode_string(tree)),
+        Type::Char => Some(decode_char(tree)),
         Type::Option(inner) => match variant_of(tree) {
-            Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
-            _ => typed_decode_builtin_value(inner, tree)?
-                .map(|value| CtValue::Some(Box::new(value))),
+            Some(("Null", _)) => Some(Ok(CtValue::None((**inner).clone()))),
+            _ => typed_decode_builtin_value(inner, tree)
+                .map(|result| result.map(|value| CtValue::Some(Box::new(value)))),
         },
-        Type::List(inner)
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
             if matches!(
                 inner.as_ref(),
                 Type::IntN {
                     signed: false,
                     bits: 8
                 }
-            ) && matches!(tree, CtValue::Bytes(_)) =>
-        {
-            let CtValue::Bytes(bytes) = tree else {
-                unreachable!()
-            };
-            Ok(CtValue::List(
-                bytes
-                    .iter()
-                    .map(|byte| CtValue::Int(i64::from(*byte)))
-                    .collect(),
-            ))
-        }
-        Type::List(inner) => match variant_of(tree) {
-            Some(("Array", Some(CtValue::List(items)))) => {
-                let mut out = Vec::with_capacity(items.len());
-                let mut errors = Vec::new();
-                for (index, item) in items.iter().enumerate() {
-                    match typed_decode_builtin_value(inner, item)? {
-                        Ok(value) => out.push(value),
-                        Err(error) => extend_decode_errors(
-                            &mut errors,
-                            decode_error_under(&format!("[{index}]"), error),
-                        ),
+            ) && matches!(tree, CtValue::Bytes(_))
+            {
+                let CtValue::Bytes(bytes) = tree else {
+                    unreachable!();
+                };
+                if let Type::FixedList { len, .. } = ty {
+                    if bytes.len() != *len as usize {
+                        return Some(Err(decode_error(format!(
+                            "expected a fixed list of length {len}, found {}",
+                            bytes.len()
+                        ))));
                     }
                 }
-                if errors.is_empty() {
-                    Ok(CtValue::List(out))
-                } else {
-                    Err(CtValue::List(errors))
+                return Some(Ok(CtValue::List(
+                    bytes
+                        .iter()
+                        .map(|byte| CtValue::Int(i64::from(*byte)))
+                        .collect(),
+                )));
+            }
+            let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
+                return Some(Err(decode_error(format!(
+                    "expected a list, found {}",
+                    datatree_kind(tree)
+                ))));
+            };
+            if let Type::FixedList { len, .. } = ty {
+                if items.len() != *len as usize {
+                    return Some(Err(decode_error(format!(
+                        "expected a fixed list of length {len}, found {}",
+                        items.len()
+                    ))));
                 }
             }
-            _ => Err(decode_error(format!(
-                "expected a list, found {}",
-                datatree_kind(tree)
-            ))),
-        },
-        _ => return None,
-    })
+            let mut out = Vec::with_capacity(items.len());
+            let mut errors = Vec::new();
+            for (index, item) in items.iter().enumerate() {
+                match typed_decode_builtin_value(inner, item)? {
+                    Ok(value) => out.push(value),
+                    Err(error) => extend_decode_errors(
+                        &mut errors,
+                        decode_error_under(&format!("[{index}]"), error),
+                    ),
+                }
+            }
+            Some(if errors.is_empty() {
+                Ok(CtValue::List(out))
+            } else {
+                Err(CtValue::List(errors))
+            })
+        }
+        _ => None,
+    }
 }
 
 /// A reasonable zero value for a type with no `#[Default(expr)]` argument —
 /// mirrors what `Default::default()` would build for AOT's Rust field type.
 fn zero_value(ty: &Type) -> CtValue {
     match ty {
-        Type::Int => CtValue::Int(0),
-        Type::Float => CtValue::Float(CtFloat::f64(0.0)),
+        Type::Int | Type::IntN { .. } => CtValue::Int(0),
+        Type::Float | Type::Float32 => CtValue::Float(CtFloat::f64(0.0)),
         Type::Bool => CtValue::Bool(false),
         Type::String => CtValue::Str(String::new()),
         Type::Char => CtValue::Char('\0'),
-        Type::List(_) => CtValue::List(Vec::new()),
+        Type::List(_) | Type::FixedList { .. } => CtValue::List(Vec::new()),
+        Type::Map { .. } => CtValue::Map(std::collections::BTreeMap::new()),
         Type::Option(inner) => CtValue::None((**inner).clone()),
         _ => CtValue::Unit,
     }
@@ -431,27 +490,65 @@ impl<'a> Interp<'a> {
                 Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
                 _ => Ok(CtValue::Some(Box::new(self.typed_decode_value(inner, tree, span)?))),
             },
-            Type::List(inner) => match variant_of(tree) {
-                Some(("Array", Some(CtValue::List(items)))) => {
-                    let mut out = Vec::with_capacity(items.len());
-                    let mut errors = Vec::new();
-                    for (i, item) in items.iter().enumerate() {
-                        match self.typed_decode_value(inner, item, span) {
-                            Ok(value) => out.push(value),
-                            Err(error) => extend_decode_errors(
-                                &mut errors,
-                                decode_error_under(&format!("[{i}]"), error),
-                            ),
-                        }
-                    }
-                    if errors.is_empty() {
-                        Ok(CtValue::List(out))
-                    } else {
-                        Err(CtValue::List(errors))
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
+                    return Err(decode_error(format!(
+                        "expected a list, found {}",
+                        datatree_kind(tree)
+                    )));
+                };
+                if let Type::FixedList { len, .. } = ty {
+                    if items.len() != *len as usize {
+                        return Err(decode_error(format!(
+                            "expected a fixed list of length {len}, found {}",
+                            items.len()
+                        )));
                     }
                 }
-                _ => Err(decode_error(format!("expected a list, found {}", datatree_kind(tree)))),
-            },
+                let mut out = Vec::with_capacity(items.len());
+                let mut errors = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    match self.typed_decode_value(inner, item, span) {
+                        Ok(value) => out.push(value),
+                        Err(error) => extend_decode_errors(
+                            &mut errors,
+                            decode_error_under(&format!("[{i}]"), error),
+                        ),
+                    }
+                }
+                if errors.is_empty() {
+                    Ok(CtValue::List(out))
+                } else {
+                    Err(CtValue::List(errors))
+                }
+            }
+            Type::Map { key, value, .. } if matches!(key.as_ref(), Type::String) => {
+                let Some(pairs) = object_pairs(tree) else {
+                    return Err(decode_error(format!(
+                        "expected an object, found {}",
+                        datatree_kind(tree)
+                    )));
+                };
+                let mut out = std::collections::BTreeMap::new();
+                let mut errors = Vec::new();
+                for (map_key, item) in pairs {
+                    match self.typed_decode_value(value, &item, span) {
+                        Ok(decoded) => {
+                            out.insert(CtKey::Str(map_key), decoded);
+                        }
+                        Err(error) => extend_decode_errors(
+                            &mut errors,
+                            decode_error_under(&map_key, error),
+                        ),
+                    }
+                }
+                if errors.is_empty() {
+                    Ok(CtValue::Map(out))
+                } else {
+                    Err(CtValue::List(errors))
+                }
+            }
+            Type::Map { .. } => Err(decode_error("comptime maps require String keys")),
             Type::Named(name) => self.typed_decode_struct(name, tree, span),
             other => Err(decode_error(format!(
                 "comptime can't decode `{}` yet — this type isn't a struct, primitive, `[T]`, or `T?`",

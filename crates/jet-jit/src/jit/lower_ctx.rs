@@ -1328,16 +1328,11 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(next);
                     self.b.seal_block(next);
                 }
-                let message = self
-                    .runtime
-                    .heap
-                    .alloc_string("value does not match any union member".to_string());
-                let message = self.b.ins().iconst(types::I64, message);
-                let err_tag = self.b.ins().iconst(types::I8, 0);
-                let result = self
-                    .module
-                    .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                let result_call = self.b.ins().call(result, &[err_tag, message]);
+                let result = self.module.declare_func_in_func(
+                    self.host.encoding.datatree_decode_union_error,
+                    self.b.func,
+                );
+                let result_call = self.b.ins().call(result, &[]);
                 let result_value = self.b.inst_results(result_call)[0];
                 self.b.ins().jump(merge, &[result_value]);
                 self.b.switch_to_block(merge);
@@ -1526,11 +1521,17 @@ impl LowerCtx<'_, '_> {
         let body = self.b.create_block();
         let step = self.b.create_block();
         let exit = self.b.create_block();
-        let fail = self.b.create_block();
-        self.b.append_block_param(fail, types::I64);
+        let bad = self.b.create_block();
+        let ok_result = self.b.create_block();
+        let error_result = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
         let idx_var = self.fresh_var(types::I64);
         let zero = self.b.ins().iconst(types::I64, 0);
         self.b.def_var(idx_var, zero);
+        let errors_var = self.fresh_var(types::I64);
+        self.b.def_var(errors_var, zero);
+        let failed_result_var = self.fresh_var(types::I64);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(header);
@@ -1563,7 +1564,8 @@ impl LowerCtx<'_, '_> {
         let status_call = self.b.ins().call(status_ref, &[decoded_r]);
         let is_ok = self.b.inst_results(status_call)[0];
         let ok_block = self.b.create_block();
-        self.b.ins().brif(is_ok, ok_block, &[], fail, &[decoded_r]);
+        self.b.def_var(failed_result_var, decoded_r);
+        self.b.ins().brif(is_ok, ok_block, &[], bad, &[]);
 
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
@@ -1575,6 +1577,23 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(push_ref, &[out, payload]);
         self.b.ins().jump(step, &[]);
 
+        self.b.switch_to_block(bad);
+        self.b.seal_block(bad);
+        let accumulate_ref = self.module.declare_func_in_func(
+            self.host.encoding.decode_error_accumulate,
+            self.b.func,
+        );
+        let current_errors = self.b.use_var(errors_var);
+        let failed_result = self.b.use_var(failed_result_var);
+        let index = self.b.use_var(idx_var);
+        let accumulated = self
+            .b
+            .ins()
+            .call(accumulate_ref, &[current_errors, failed_result, index]);
+        self.b
+            .def_var(errors_var, self.b.inst_results(accumulated)[0]);
+        self.b.ins().jump(step, &[]);
+
         self.b.switch_to_block(step);
         self.b.seal_block(step);
         let idx = self.b.use_var(idx_var);
@@ -1583,12 +1602,15 @@ impl LowerCtx<'_, '_> {
         self.b.def_var(idx_var, next);
         self.b.ins().jump(header, &[]);
 
-        let merge = self.b.create_block();
-        self.b.append_block_param(merge, types::I64);
-
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
+        let errors = self.b.use_var(errors_var);
+        let no_errors = self.b.ins().icmp(IntCC::Equal, errors, zero);
+        self.b.ins().brif(no_errors, ok_result, &[], error_result, &[]);
+
+        self.b.switch_to_block(ok_result);
+        self.b.seal_block(ok_result);
         let out = self.b.use_var(out_var);
         let tag = self.b.ins().iconst(types::I8, 1);
         let host_ref = self
@@ -1598,16 +1620,10 @@ impl LowerCtx<'_, '_> {
         let ok = self.b.inst_results(ok)[0];
         self.b.ins().jump(merge, &[ok]);
 
-        self.b.switch_to_block(fail);
-        self.b.seal_block(fail);
-        let err = self.b.block_params(fail)[0];
-        let idx = self.b.use_var(idx_var);
-        let under_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.decode_error_under, self.b.func);
-        let framed = self.b.ins().call(under_ref, &[err, idx]);
-        let framed = self.b.inst_results(framed)[0];
-        self.b.ins().jump(merge, &[framed]);
+        self.b.switch_to_block(error_result);
+        self.b.seal_block(error_result);
+        let errors = self.b.use_var(errors_var);
+        self.b.ins().jump(merge, &[errors]);
 
         self.b.switch_to_block(merge);
         self.b.seal_block(merge);
@@ -15918,6 +15934,12 @@ impl LowerCtx<'_, '_> {
         }
         // Option packed ABI is a plain i64 — clone is a bitwise copy.
         if matches!(&inner.ty, Type::Option(_)) {
+            return self.lower_expr(inner);
+        }
+        // Result values are immutable arena handles in the JIT ABI. Copying
+        // the handle preserves both payloads, including structured errors
+        // such as `[FieldError]`, without cloning an opaque result payload.
+        if matches!(&inner.ty, Type::Result { .. }) {
             return self.lower_expr(inner);
         }
         let source = match &inner.kind {

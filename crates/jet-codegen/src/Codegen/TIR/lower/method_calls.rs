@@ -1539,10 +1539,12 @@ pub(crate) fn lower_method_call(
                     && method == "decode"
                     && !type_args.is_empty()
                 {
-                    Type::Result {
+                    resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                         ok: Box::new(type_args[0].clone()),
-                        err: Box::new(Type::Named("CBORError".to_string())),
-                    }
+                        err: Box::new(Type::List(Box::new(Type::Named(
+                            "FieldError".to_string(),
+                        )))),
+                    })
                 } else if crate::Sema::is_polymorphic_core_special(&module, method) {
                     resolved_ret.cloned().unwrap_or_else(unit_type)
                 } else if module == "core.event"

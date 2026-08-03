@@ -260,37 +260,6 @@ fn decode_error(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     }])
 }
 
-fn decode_error_fields(error: &CtValue) -> (String, String) {
-    let entries = match error {
-        CtValue::List(entries) => entries,
-        _ => return (String::new(), error.jet_show()),
-    };
-    let mut path = String::new();
-    let mut reasons = Vec::new();
-    for entry in entries {
-        let CtValue::Struct { fields, .. } = entry else { continue };
-        let text = |name: &str| {
-            fields.iter().find_map(|(field, value)| {
-                (field == name).then_some(value).and_then(|value| match value {
-                    CtValue::Str(value) => Some(value.clone()),
-                    _ => None,
-                })
-            })
-        };
-        if path.is_empty() {
-            path = text("path").unwrap_or_default();
-        }
-        if let Some(reason) = text("reason") {
-            reasons.push(reason);
-        }
-    }
-    if reasons.is_empty() {
-        (path, error.jet_show())
-    } else {
-        (path, reasons.join("; "))
-    }
-}
-
 fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
     let CtValue::List(entries) = error else {
         return decode_error(segment, error.jet_show());
@@ -635,45 +604,59 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let result: Result<CtValue, CtValue> = match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(tree),
-            Type::Int | Type::IntN { .. } => match datatree_variant(&tree) {
-                Some(("Int", Some(CtValue::Int(value)))) => {
-                    if let Type::IntN { signed, bits } = ty {
-                        let in_range = if *signed {
-                            let shift = u32::from(*bits - 1);
-                            (-(1_i128 << shift)..=(1_i128 << shift) - 1).contains(&i128::from(*value))
-                        } else {
-                            (0..=(1_i128 << u32::from(*bits)) - 1).contains(&i128::from(*value))
-                        };
-                        if !in_range {
-                            let found = if !*signed && *bits == 8 {
-                                "Int"
-                            } else {
-                                "out-of-range Int"
-                            };
-                            Err(decode_error(
+            Type::Int | Type::IntN { .. } => {
+                let decoded = match datatree_variant(&tree) {
+                    Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Int(*value)),
+                    Some(("Float", Some(CtValue::Float(value))))
+                        if value.as_f64().fract() == 0.0 =>
+                    {
+                        Ok(CtValue::Int(value.as_f64() as i64))
+                    }
+                    Some(("Text", Some(CtValue::Str(value)))) => value
+                        .trim()
+                        .parse::<i64>()
+                        .map(CtValue::Int)
+                        .map_err(|_| {
+                            decode_error(
                                 "",
-                                format!("expected {}, found {found}", ty.name()),
-                            ))
-                        } else {
-                            Ok(CtValue::Int(*value))
-                        }
+                                format!("expected {}, found text {:?}", ty.name(), value),
+                            )
+                        }),
+                    _ => Err(decode_error(
+                        "",
+                        format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
+                    )),
+                };
+                let decoded = match decoded {
+                    Ok(value) => value,
+                    Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+                };
+                if let Type::IntN { signed, bits } = ty {
+                    let CtValue::Int(int_value) = &decoded else {
+                        unreachable!();
+                    };
+                    let in_range = if *signed {
+                        let shift = u32::from(*bits - 1);
+                        (-(1_i128 << shift)..=(1_i128 << shift) - 1)
+                            .contains(&i128::from(*int_value))
                     } else {
-                        Ok(CtValue::Int(*value))
+                        (0..=(1_i128 << u32::from(*bits)) - 1)
+                            .contains(&i128::from(*int_value))
+                    };
+                    if !in_range {
+                        let found = if !*signed && *bits == 8 {
+                            "Int"
+                        } else {
+                            "out-of-range Int"
+                        };
+                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                            "",
+                            format!("expected {}, found {found}", ty.name()),
+                        ))));
                     }
                 }
-                Some(("Float", Some(CtValue::Float(value)))) if value.as_f64().fract() == 0.0 => {
-                    Ok(CtValue::Int(value.as_f64() as i64))
-                }
-                Some(("Text", Some(CtValue::Str(value)))) => value
-                    .trim()
-                    .parse::<i64>()
-                    .map(CtValue::Int)
-                    .map_err(|_| decode_error("", format!("expected {}, found text {:?}", ty.name(), value))),
-                _ => Err(decode_error(
-                    "",
-                    format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
-                )),
-            },
+                Ok(decoded)
+            }
             Type::Float => match datatree_variant(&tree) {
                 Some(("Float", Some(CtValue::Float(value)))) => {
                     Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
@@ -681,6 +664,16 @@ impl<'a> EvalCtx<'a> {
                 Some(("Int", Some(CtValue::Int(value)))) => {
                     Ok(CtValue::Float(CtFloat::f64(*value as f64)))
                 }
+                Some(("Text", Some(CtValue::Str(value)))) => value
+                    .trim()
+                    .parse::<f64>()
+                    .map(|value| CtValue::Float(CtFloat::f64(value)))
+                    .map_err(|_| {
+                        decode_error(
+                            "",
+                            format!("expected Float, found text {:?}", value),
+                        )
+                    }),
                 _ => Err(decode_error(
                     "",
                     format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
@@ -711,6 +704,14 @@ impl<'a> EvalCtx<'a> {
             }
             Type::Bool => match datatree_variant(&tree) {
                 Some(("Bool", Some(CtValue::Bool(value)))) => Ok(CtValue::Bool(*value)),
+                Some(("Text", Some(CtValue::Str(value)))) => match value.trim() {
+                    "true" => Ok(CtValue::Bool(true)),
+                    "false" => Ok(CtValue::Bool(false)),
+                    _ => Err(decode_error(
+                        "",
+                        format!("expected Bool, found text {:?}", value),
+                    )),
+                },
                 _ => Err(decode_error(
                     "",
                     format!("expected Bool, found {}", datatree_kind(&tree)),
@@ -928,33 +929,6 @@ impl<'a> EvalCtx<'a> {
             Ok(value) => CtValue::ResOk(Box::new(value)),
             Err(error) => CtValue::ResErr(Box::new(error)),
         })
-    }
-
-    fn cbor_type_error(error: CtValue) -> CtValue {
-        let (path, reason) = decode_error_fields(&error);
-        CtValue::Struct {
-            type_name: "CBORError".to_string(),
-            fields: vec![
-                (
-                    "kind".to_string(),
-                    CtValue::Enum {
-                        type_name: "CBORErrorKind".to_string(),
-                        variant: "TypeMismatch".to_string(),
-                        args: Vec::new(),
-                    },
-                ),
-                ("byte_offset".to_string(), CtValue::Int(0)),
-                (
-                    "path".to_string(),
-                    CtValue::Str(if path.is_empty() {
-                        "$".to_string()
-                    } else {
-                        format!("${path}")
-                    }),
-                ),
-                ("reason".to_string(), CtValue::Str(reason)),
-            ],
-        }
     }
 
     fn eval_cell_guard_project(
@@ -2329,13 +2303,15 @@ impl<'a> EvalCtx<'a> {
                         true,
                     ) {
                         Ok(tree) => tree,
-                        Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+                        Err(error) => {
+                            return Ok(CtValue::ResErr(Box::new(
+                                crate::Comptime::cbor_decode_source_error_for_tir(error),
+                            )))
+                        }
                     };
                     return Ok(match self.eval_datatree_decode(tree, ok)? {
                         CtValue::ResOk(value) => CtValue::ResOk(value),
-                        CtValue::ResErr(error) => {
-                            CtValue::ResErr(Box::new(Self::cbor_type_error(*error)))
-                        }
+                        CtValue::ResErr(error) => CtValue::ResErr(error),
                         _ => unreachable!("Decode protocol returns Result"),
                     });
                 }
@@ -3685,11 +3661,29 @@ impl<'a> EvalCtx<'a> {
                     ))
                 }
             },
-            TExprKind::DataEntriesToMap(local) => scope
-                .get(&local.name)
-                .cloned()
-                .or_else(|| self.globals.get(&local.name).cloned())
-                .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span())),
+            TExprKind::DataEntriesToMap(local) => {
+                let value = scope
+                    .get(&local.name)
+                    .cloned()
+                    .or_else(|| self.globals.get(&local.name).cloned())
+                    .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span()))?;
+                // DataTree.Object binds its ordered payload as the evaluator's
+                // JSONObject record. The AOT/JIT paths collect that payload into
+                // the user-facing Map before the generated decoder iterates it;
+                // keep the same boundary in TIR so named deopt executes the same
+                // generated source instead of rejecting the internal record.
+                match value {
+                    CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+                        Ok(CtValue::Map(
+                            fields
+                                .into_iter()
+                                .map(|(key, value)| (crate::AST::CtKey::Str(key), value))
+                                .collect(),
+                        ))
+                    }
+                    other => Ok(other),
+                }
+            }
             TExprKind::DistinctCtor { name: _, arg, base: _ } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
                 self.eval_expr(arg, scope)

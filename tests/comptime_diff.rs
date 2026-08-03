@@ -795,7 +795,7 @@ fn show_alloc(bytes: [U8]) => String {
 fn show_ints(bytes: [U8]) => String {
     if cbor.decode<[Int]>(bytes, safe()) == {
         .Ok(_) -> return "ok"
-        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Err(e) -> return "{e[0].path}|{e[0].reason}"
     }
     return "unreachable"
 }

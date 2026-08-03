@@ -1850,6 +1850,8 @@ fn resident_safe_builtin_op(
         TBuiltinOp::IsEmpty => {
             (jit_list_native_type(&recv.ty)
                 || jit_list_iter_elem_type(&recv.ty).is_some()
+                || jit_list_record_type(&recv.ty)
+                || matches!(&recv.ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
                 || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque")))
                 && args.is_empty()
         }

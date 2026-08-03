@@ -419,7 +419,7 @@ struct Packet {
 #Known packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
 fn gap() => String {
-    folded :: text.casefold("Straße")
+    folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
     actual_root := hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
     actual_packet := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
@@ -531,7 +531,7 @@ fn resident() => String {
 }
 
 fn forced_deopt() => String {
-    folded :: text.casefold("Straße")
+    folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
     value := Packet.{
         display_name: "Ada",
@@ -670,7 +670,7 @@ fn failed_change() => String {
     }
     if cbor.decode<Profile>(~bytes) == {
         .Ok(_) -> return "accepted"
-        .Err(error) -> return "{error.path}:{error.reason}"
+        .Err(error) -> return "{error[0].path}:{error[0].reason}"
     }
 }
 
@@ -713,7 +713,7 @@ fn run() {
         matches!(
             failed_change,
             jet::AST::CtValue::Str(ref value)
-                if value == "$score:expected Int, found text \"bad\""
+                if value == "score:expected Int, found text \"bad\""
         ),
         "failed migration change lost its keyed decode error: {failed_change:?}"
     );
@@ -727,7 +727,7 @@ fn run() {
     assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
-        "Ada|95|localhost\n$score:expected Int, found text \"bad\"\n"
+        "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n"
     );
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::DeoptInterp);
@@ -744,7 +744,7 @@ fn u64_codable_is_rejected_before_backend_selection() {
             r#"
 use core.encoding.cbor as cbor
 fn run() {
-    value :: U64 = U64.{ 1 }
+    value := U64.{ 1 }
     cbor.to_bytes(value)
 }
 "#,
@@ -850,21 +850,21 @@ fn invalid_range_rejected() => Bool {
 fn invalid_i8_error() => String {
     if cbor.decode<I8>([U8].{ 0x18, 0x80 }) == {
         .Ok(_) -> return "accepted"
-        .Err(error) -> return error.reason
+        .Err(error) -> return error[0].reason
     }
 }
 
 fn invalid_u8_error() => String {
     if cbor.decode<U8>([U8].{ 0x19, 0x01, 0x00 }) == {
         .Ok(_) -> return "accepted"
-        .Err(error) -> return error.reason
+        .Err(error) -> return error[0].reason
     }
 }
 
 fn invalid_fixed_bytes_error() => String {
     if cbor.decode<[U8#2]>([U8].{ 0x41, 0xde }) == {
         .Ok(_) -> return "accepted"
-        .Err(error) -> return error.reason
+        .Err(error) -> return error[0].reason
     }
 }
 
@@ -980,7 +980,7 @@ fn datatree_int_accessor_matches_aot_on_named_deopt_inner() {
 use core.text as text
 
 fn gap() {
-    folded :: text.casefold("Straße")
+    folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
     if DataTree.Int(7).int() == {
         .Ok(value) -> print(value)
