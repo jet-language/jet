@@ -177,8 +177,8 @@ Ratified on card #710 (inherited from #296). D-ENCXML1 already fixes the closed
 
 Exact public signatures:
 
-- `decode<T: Codable>(text: String, options: XMLParseOptions = XMLParseOptions.safe()) => T ? XMLError`
-- `decode_bytes<T: Codable>(bytes: [U8], options: XMLParseOptions = XMLParseOptions.safe()) => T ? XMLError`
+- `decode<T: Codable>(text: String, options: XMLParseOptions = XMLParseOptions.safe()) => T ? [FieldError]`
+- `decode_bytes<T: Codable>(bytes: [U8], options: XMLParseOptions = XMLParseOptions.safe()) => T ? [FieldError]`
 - `root(document: DataTree) => DataTree ? XMLError`
 - `expanded_name(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) ? XMLError`
 - `attribute(element: DataTree, name: String) => String? ? XMLError`
@@ -187,9 +187,10 @@ Exact public signatures:
 Attribute selectors are local names or Clark names, never prefixes. `attribute`
 returns `normalized_value`. A found attribute with an unresolved entity returns
 `XMLError` kind `Entity`. `content` returns exact child nodes in source order.
-Parse failures keep source locations. Projection failures use kind `Shape`, no
-source location, and the deepest known projected path. No additional query or
-wrapper type ships.
+The focused helpers keep `XMLError` and source locations. Typed decode projects
+parse, projection, and Codable shape failures into the one `[FieldError]` list;
+the root path is empty and nested paths use the same field/index segments as
+every other codec. No additional query or wrapper type ships.
 
 ```jet
 use core.encoding.xml as xml
@@ -245,7 +246,7 @@ fn run() => Void ? {
 
 Ratified D-ENCBIN1=A selects CBOR (RFC 8949), native binary strings, the worked `to_bytes`/`decode<T>`/`to_bytes_canonical` spelling, and deterministic bytes for hashing. Ratified D-ENCSTREAM1=A requires the same core.encoding.cbor adapter identity for whole and stream modes. Ratified D-ENC-DYN1 keeps DataTree closed to Object, Array, Int, Float, Text, Bool, and Null; there is no public DataTree.Bytes variant. This ballot fixes the exact whole-value surface without reopening those decisions.
 
-Option A exact namespace and verbs. Only core.encoding.cbor exports CBOROptions, CBORError, CBORErrorKind, parse, decode, to_bytes, and to_bytes_canonical; shared DataTree remains core.encoding.DataTree. `parse(bytes:[U8], options:cbor.CBOROptions=cbor.CBOROptions.safe()) => encoding.DataTree ? cbor.CBORError` decodes one complete item to DataTree. `decode<T:Codable>(bytes:[U8], options:cbor.CBOROptions=cbor.CBOROptions.safe()) => T ? cbor.CBORError` decodes through the same checked CBOR event/value engine directly into T. `to_bytes<T:Codable>(value:T) => [U8] ? cbor.CBORError` emits preferred interoperable CBOR. `to_bytes_canonical<T:Codable>(value:T) => [U8] ? cbor.CBORError` selects RFC 8949 Section 4.2.1 Core Deterministic Encoding in that same encoder. No public canonical-mode enum/flag exists; one hash/signature spelling has one byte law (I8). DataTree satisfies Codable, so both byte verbs accept DataTree without a second overload or encoder. There is no CBOR `to_string`: binary `parse`/`to_bytes` are the exact analogues of text `parse`/`to_string`.
+Option A exact namespace and verbs. Only core.encoding.cbor exports CBOROptions, CBORError, CBORErrorKind, parse, decode, to_bytes, and to_bytes_canonical; shared DataTree remains core.encoding.DataTree. `parse(bytes:[U8], options:cbor.CBOROptions=cbor.CBOROptions.safe()) => encoding.DataTree ? cbor.CBORError` decodes one complete item to DataTree. `decode<T:Codable>(bytes:[U8], options:cbor.CBOROptions=cbor.CBOROptions.safe()) => T ? [FieldError]` decodes through the same checked CBOR event/value engine directly into T. `to_bytes<T:Codable>(value:T) => [U8] ? cbor.CBORError` emits preferred interoperable CBOR. `to_bytes_canonical<T:Codable>(value:T) => [U8] ? cbor.CBORError` selects RFC 8949 Section 4.2.1 Core Deterministic Encoding in that same encoder. No public canonical-mode enum/flag exists; one hash/signature spelling has one byte law (I8). DataTree satisfies Codable, so both byte verbs accept DataTree without a second overload or encoder. There is no CBOR `to_string`: binary `parse`/`to_bytes` are the exact analogues of text `parse`/`to_string`.
 
 Codable and DataTree law. Codable [U8] encodes as CBOR major type 2 and decode<[U8]> accepts major type 2; it never degrades to an integer array. Other Codable lists use major type 4, structs/maps use major type 5 with text keys, strings use major type 3, and scalar mappings follow their Jet types. parse into DataTree rejects a major-type-2 byte string as Unsupported because D-ENC-DYN1 has no lossless public DataTree case; callers that expect bytes use decode<[U8]> or a Codable field. parse also rejects tags, bignums outside Int, non-text map keys, duplicate text keys, undefined/unsupported simple values, and values outside DataTree, never coercing. decode<T> may accept only CBOR shapes that T's single Codable schema admits. Thus native binary strings and one closed DataTree algebra both remain honest.
 
@@ -292,7 +293,7 @@ fn run() => Void ? {
     failed := cbor.decode<Packet>(malformed)
 }
 
-// Err(CBORError.{ kind: .Truncated, byte_offset: 15, path: "$[\"payload\"]", reason: "CBOR byte string declares 2 bytes but input ended after 1" })
+// Err([FieldError.{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
 ```
 
 ## D-ENCBASE-STRICT1=A — Canonical RFC 4648 decoder policy

@@ -814,6 +814,137 @@ fn map_err(err: JetServiceError) -> CtValue {
     }
 }
 
+fn receipt_to_ct(receipt: JetServiceReceipt) -> CtValue {
+    match receipt {
+        JetServiceReceipt::Accepted(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Accepted".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        JetServiceReceipt::Duplicate(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Duplicate".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        JetServiceReceipt::Retained { id, until } => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Retained".to_string(),
+            args: vec![
+                (Some("id".to_string()), CtValue::Str(id)),
+                (Some("until".to_string()), CtValue::Int(until)),
+            ],
+        },
+        JetServiceReceipt::DeadLettered(id) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "DeadLettered".to_string(),
+            args: vec![(None, CtValue::Str(id))],
+        },
+        JetServiceReceipt::Rejected(reason) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Rejected".to_string(),
+            args: vec![(None, CtValue::Str(reason))],
+        },
+        JetServiceReceipt::Unavailable(reason) => CtValue::Enum {
+            type_name: "ServiceReceipt".to_string(),
+            variant: "Unavailable".to_string(),
+            args: vec![(None, CtValue::Str(reason))],
+        },
+    }
+}
+
+fn ct_to_runtime(value: &CtValue, span: Span) -> Result<JetServiceRuntime, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ServiceRuntime", span));
+    };
+    if type_name != "ServiceRuntime" {
+        return Err(unsupported("ServiceRuntime", span));
+    }
+    let store = fields
+        .iter()
+        .find_map(|(name, value)| (name == "store").then_some(value))
+        .ok_or_else(|| unsupported("ServiceRuntime.store", span))
+        .and_then(|value| {
+            ct_to_service_string(value, SERVICE_AUTH_MAX_STORE, "ServiceRuntime.store", span)
+        })?;
+    let retention_ms = fields
+        .iter()
+        .find_map(|(name, value)| (name == "retention_ms").then_some(value))
+        .ok_or_else(|| unsupported("ServiceRuntime.retention_ms", span))
+        .and_then(|value| match value {
+            CtValue::Int(value) => Ok(*value),
+            _ => Err(unsupported("ServiceRuntime.retention_ms", span)),
+        })?;
+    Ok(jet_services_runtime(store, retention_ms))
+}
+
+/// Apply a `ServiceRuntime` handle method through the same Prelude authority
+/// functions used by AOT and the runtime ambient adapter. The TIR evaluator is
+/// only responsible for CtValue conversion at this boundary.
+pub fn apply_runtime_method(
+    receiver: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let runtime = ct_to_runtime(receiver, span)?;
+    let one = |index: usize| {
+        args.get(index)
+            .ok_or_else(|| unsupported(&format!("ServiceRuntime.{method} arg {index}"), span))
+    };
+    match method {
+        "send" => {
+            let endpoint = ct_to_endpoint(one(0)?, span)?;
+            let message = ct_to_service_string(
+                one(1)?,
+                SERVICE_AUTH_MAX_MESSAGE,
+                "ServiceRuntime.send message",
+                span,
+            )?;
+            let key = ct_to_service_string(
+                one(2)?,
+                SERVICE_AUTH_MAX_KEY,
+                "ServiceRuntime.send key",
+                span,
+            )?;
+            Ok(match jet_services_runtime_send(&runtime, &endpoint, &message, &key) {
+                Ok(receipt) => CtValue::ResOk(Box::new(receipt_to_ct(receipt))),
+                Err(error) => CtValue::ResErr(Box::new(map_err(error))),
+            })
+        }
+        "retry" | "dead_letter" | "retain" => {
+            let id = ct_to_service_string(
+                one(0)?,
+                SERVICE_AUTH_MAX_KEY,
+                &format!("ServiceRuntime.{method} id"),
+                span,
+            )?;
+            let result = match method {
+                "retry" => jet_services_runtime_retry(&runtime, &id),
+                "dead_letter" => jet_services_runtime_dead_letter(&runtime, &id),
+                "retain" => jet_services_runtime_retain(&runtime, &id),
+                _ => unreachable!(),
+            };
+            Ok(match result {
+                Ok(receipt) => CtValue::ResOk(Box::new(receipt_to_ct(receipt))),
+                Err(error) => CtValue::ResErr(Box::new(map_err(error))),
+            })
+        }
+        "commit" => {
+            let id = ct_to_service_string(
+                one(0)?,
+                SERVICE_AUTH_MAX_KEY,
+                "ServiceRuntime.commit id",
+                span,
+            )?;
+            Ok(match jet_services_runtime_commit(&runtime, &id) {
+                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::ResErr(Box::new(map_err(error))),
+            })
+        }
+        _ => Err(unsupported(&format!("ServiceRuntime.{method}"), span)),
+    }
+}
+
 fn mutate_ok(tree: JetServiceTree, value: CtValue) -> CtValue {
     CtValue::Struct {
         type_name: "__JetServiceMut".to_string(),

@@ -455,6 +455,7 @@ fn jet_enc_csv_decode_traced<T: user_Decode>(
         });
     };
     let mut value = Vec::new();
+    let mut errors = Vec::new();
     // Each row decodes independently; the record-level status is the first row
     // that actually migrated (a CSV file is one shape per column layout, so a
     // migrated file migrates uniformly — the first hit describes the batch).
@@ -469,12 +470,21 @@ fn jet_enc_csv_decode_traced<T: user_Decode>(
             })
             .collect();
         let tree = jet_std::DataTree::Object(obj);
-        let (v, m) = T::jet_decode_traced(&tree)
-            .map_err(|e| jet_std::FieldError::under_errors(&format!("row {}", i + 1), e))?;
-        if m.migrated && !migration.migrated {
-            migration = m;
+        match T::jet_decode_traced(&tree) {
+            Ok((v, m)) => {
+                if m.migrated && !migration.migrated {
+                    migration = m;
+                }
+                value.push(v);
+            }
+            Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                &format!("row {}", i + 1),
+                error,
+            )),
         }
-        value.push(v);
+    }
+    if !errors.is_empty() {
+        return Err(errors);
     }
     Ok(jet_std::DecodeResult { value, migration })
 }

@@ -2784,7 +2784,8 @@ index, not a substitute for that law.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
   surface is `parse([U8], options) => DataTree`, `decode<T: Codable>`, `to_bytes`,
-  and `to_bytes_canonical`, returning closed `CBORError`. `[U8]` uses native
+  and `to_bytes_canonical`; `parse` and byte verbs return closed `CBORError`,
+  while typed `decode<T>` returns the ratified `[FieldError]` list. `[U8]` uses native
   byte strings through typed Codable; untyped `DataTree` rejects byte strings,
   tags, bignums, non-text/duplicate map keys, and unsupported values rather than
   coercing. `CBOROptions` bounds depth/items/input and live allocation and may
@@ -4771,6 +4772,14 @@ policy is F32Strict + Reproducible. Fast math, reassociation, and nondeterminist
 reductions require named recorded profiles. Typed capability negotiation fails
 before launch. Every tier backend differentially conforms to the CPU oracle;
 dev and AOT use the same backend, policy, and cache identity.
+
+**D-COMPUTE-RAWBOUNDARY1=A — provider-issued opaque raw-kernel contract**
+*(ratified 2026-08-03)*: a raw-device contract is minted only by a trusted
+provider after it checks the kernel metadata and differential reference. The
+contract is opaque to safe Jet, is accepted only inside `#Unsafe`, and is
+carried through TIR into the launch receipt. A reason string, arity, or ordinary
+record is never a proof. With no raw-device provider in the Epoch 3 CPU
+profile, the built-in constructor fails closed; it must not fabricate a token.
 
 **D-SERVICE1=D — sema-known structured service tree**: typed builders promote
 ordinary functions into named workers/groups; sema validates topology, endpoint

@@ -3163,12 +3163,15 @@ profile; the tiled path reports real `F32Strict+Reproducible` arithmetic and
 ordered reduction. The ratified production profile and provider capabilities
 remain gated, and unsupported requests fail before launch.
 
-`D-COMPUTE-RAWBOUNDARY1` is open. The legacy
-`raw_kernel_contract(reason, arity)` entry point fails closed: reason and arity
-cannot prove address spaces, read/write sets, effects, races, or barriers.
-`RawKernelContract` has no ambient constructor or empty wire value. A
-provider-issued typed `#Unsafe` boundary proof is required before raw code can
-be launched; no descriptor or display label can stand in for that proof.
+`D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
+provider-issued opaque contract. The legacy `raw_kernel_contract(reason, arity)`
+entry point remains a deliberate fail-closed diagnostic because the built-in
+CPU oracle is not a raw-device provider; reason and arity cannot prove address
+spaces, read/write sets, effects, races, or barriers. `RawKernelContract` has
+no ambient constructor or empty wire value. A provider-issued typed `#Unsafe`
+boundary proof is required before raw code can be launched, and no descriptor
+or display label can stand in for that proof. The first provider belongs to the
+explicit accelerator-provider work tracked outside Epoch 3.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).

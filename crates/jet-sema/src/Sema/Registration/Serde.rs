@@ -79,6 +79,12 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
                 f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
             );
             source.push_str("__errors := []\n");
+            // A missing field is only a missing field on an object. Do not let
+            // optional/default fallbacks turn a scalar/array root into a
+            // successfully decoded record, or hide the root shape error.
+            source.push_str(
+                "__is_object := false\nif (~tree) == .Object(__root_entries) { __is_object = true }\nif !__is_object { return Err([FieldError.{ path: \"\", reason: \"expected an object\" }]) }\n",
+            );
             if deny_unknown && !has_flatten {
                 let keys = s.fields.iter()
                     .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
@@ -275,7 +281,9 @@ fn expand_builtin_enum_serde(
                 source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
             }
         } else if let Some(tag_key) = &tag {
-            source.push_str(&format!("tag_tree := tree.field({tag_key:?})?\ntag_value := tag_tree.text()?\n"));
+            source.push_str(&format!(
+                "tag_tree := tree.field({tag_key:?})?\ntag_value := FieldError.under({tag_key:?}, tag_tree.text())?\n"
+            ));
             for v in &e.variants {
                 let wire = serde_enum_variant_key(v);
                 let payload_source = if matches!(v.payload, crate::AST::VariantPayload::Single(..)) {

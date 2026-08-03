@@ -127,65 +127,22 @@ impl user_Encode for jet_std::DataTree {
 
 impl user_Decode for i64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Int(n) => Ok(*n),
-            jet_std::DataTree::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
-            jet_std::DataTree::Text(s) => s.trim().parse::<i64>().map_err(|_| {
-                jet_std::FieldError::one(format!("expected Int, found text {:?}", s))
-            }),
-            other => Err(jet_std::FieldError::one(format!(
-                "expected Int, found {}",
-                jet_std::datatree_kind(other)
-            ))),
-        }
+        jet_std::decode_int(t)
     }
 }
 impl user_Decode for f64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Float(f) => Ok(*f),
-            jet_std::DataTree::Int(n) => Ok(*n as f64),
-            jet_std::DataTree::Text(s) => s.trim().parse::<f64>().map_err(|_| {
-                jet_std::FieldError::one(format!("expected Float, found text {:?}", s))
-            }),
-            other => Err(jet_std::FieldError::one(format!(
-                "expected Float, found {}",
-                jet_std::datatree_kind(other)
-            ))),
-        }
+        jet_std::decode_float(t)
     }
 }
 impl user_Decode for bool {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Bool(b) => Ok(*b),
-            jet_std::DataTree::Text(s) => match s.trim() {
-                "true" => Ok(true),
-                "false" => Ok(false),
-                _ => Err(jet_std::FieldError::one(format!(
-                    "expected Bool, found text {:?}",
-                    s
-                ))),
-            },
-            other => Err(jet_std::FieldError::one(format!(
-                "expected Bool, found {}",
-                jet_std::datatree_kind(other)
-            ))),
-        }
+        jet_std::decode_bool(t)
     }
 }
 impl user_Decode for String {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Text(s) => Ok(s.clone()),
-            jet_std::DataTree::Int(n) => Ok(n.to_string()),
-            jet_std::DataTree::Float(f) => Ok(format!("{:?}", f)),
-            jet_std::DataTree::Bool(b) => Ok(b.to_string()),
-            other => Err(jet_std::FieldError::one(format!(
-                "expected Text, found {}",
-                jet_std::datatree_kind(other)
-            ))),
-        }
+        jet_std::decode_string(t)
     }
 }
 impl user_Decode for char {
@@ -239,21 +196,7 @@ jet_impl_sized_int_decode!(
 );
 impl user_Decode for f32 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        let value = match t {
-            jet_std::DataTree::Float(value) => *value,
-            jet_std::DataTree::Int(value) => *value as f64,
-            other => {
-                return Err(jet_std::FieldError::one(format!(
-                    "expected F32, found {}",
-                    jet_std::datatree_kind(other)
-                )));
-            }
-        };
-        if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
-            Ok(value as f32)
-        } else {
-            Err(jet_std::FieldError::one("expected F32, found out-of-range Float"))
-        }
+        jet_std::decode_f32(t)
     }
 }
 impl user_Decode for jet_std::JetDecimal {
@@ -274,16 +217,35 @@ impl<T: user_Decode> user_Decode for Vec<T> {
         match t {
             jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
                 let mut out = Vec::with_capacity(bytes.len());
-                for byte in bytes { out.push(T::jet_decode(&jet_std::DataTree::Int(*byte as i64))?); }
+                let mut errors = Vec::new();
+                for (index, byte) in bytes.iter().enumerate() {
+                    match T::jet_decode(&jet_std::DataTree::Int(*byte as i64)) {
+                        Ok(value) => out.push(value),
+                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                            &format!("[{}]", index),
+                            error,
+                        )),
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(errors);
+                }
                 Ok(out)
             }
             jet_std::DataTree::Array(items) => {
                 let mut out = Vec::with_capacity(items.len());
+                let mut errors = Vec::new();
                 for (i, item) in items.iter().enumerate() {
-                    out.push(
-                        T::jet_decode(item)
-                            .map_err(|e| jet_std::FieldError::under_errors(&format!("[{}]", i), e))?,
-                    );
+                    match T::jet_decode(item) {
+                        Ok(value) => out.push(value),
+                        Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                            &format!("[{}]", i),
+                            error,
+                        )),
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(errors);
                 }
                 Ok(out)
             }
@@ -322,11 +284,19 @@ impl<V: user_Decode> user_Decode for std::collections::BTreeMap<String, V> {
         match t {
             jet_std::DataTree::Object(entries) => {
                 let mut out = std::collections::BTreeMap::new();
+                let mut errors = Vec::new();
                 for (k, v) in entries {
-                    out.insert(
-                        k.clone(),
-                        V::jet_decode(v).map_err(|e| jet_std::FieldError::under_errors(k, e))?,
-                    );
+                    match V::jet_decode(v) {
+                        Ok(value) => {
+                            out.insert(k.clone(), value);
+                        }
+                        Err(error) => {
+                            errors.extend(jet_std::FieldError::under_errors(k, error));
+                        }
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(errors);
                 }
                 Ok(out)
             }
@@ -379,6 +349,7 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_s
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
+    let mut errors = Vec::new();
     for (i, row) in it.enumerate() {
         let obj: Vec<(String, jet_std::DataTree)> = header
             .iter()
@@ -390,11 +361,16 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_s
             .collect();
         let tree = jet_std::DataTree::Object(obj);
         // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-        out.push(
-            T::jet_decode_traced(&tree)
-                .map(|(v, _)| v)
-                .map_err(|e| jet_std::FieldError::under_errors(&format!("row {}", i + 1), e))?,
-        );
+        match T::jet_decode_traced(&tree) {
+            Ok((value, _)) => out.push(value),
+            Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                &format!("row {}", i + 1),
+                error,
+            )),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
     }
     Ok(out)
 }

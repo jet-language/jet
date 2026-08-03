@@ -140,9 +140,17 @@
             match self {
                 DataTree::Array(items) => {
                     let idx = if i < 0 {
-                        items.len().wrapping_sub((-i) as usize)
+                        i.checked_neg()
+                            .and_then(|value| usize::try_from(value).ok())
+                            .and_then(|value| items.len().checked_sub(value))
                     } else {
-                        i as usize
+                        usize::try_from(i).ok()
+                    };
+                    let Some(idx) = idx else {
+                        return Err(FieldError::at(
+                            format!("[{}]", i),
+                            format!("index {} out of bounds (len {})", i, items.len()),
+                        ));
                     };
                     items.get(idx).cloned().ok_or_else(|| FieldError::at(
                         format!("[{}]", i),
@@ -192,6 +200,117 @@
                 ))),
             }
         }
+    }
+
+    // Primitive typed-decode rules live beside the tree and are shared by the
+    // AOT Prelude and the JIT's handle marshalling adapter. The engines only
+    // convert their resident representation to this tree and back.
+    pub fn decode_int(t: &DataTree) -> Result<i64, Vec<FieldError>> {
+        match t {
+            DataTree::Int(n) => Ok(*n),
+            DataTree::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
+            DataTree::Text(s) => s.trim().parse::<i64>().map_err(|_| {
+                FieldError::one(format!("expected Int, found text {:?}", s))
+            }),
+            other => Err(FieldError::one(format!(
+                "expected Int, found {}",
+                datatree_kind(other)
+            ))),
+        }
+    }
+
+    pub fn decode_float(t: &DataTree) -> Result<f64, Vec<FieldError>> {
+        match t {
+            DataTree::Float(f) => Ok(*f),
+            DataTree::Int(n) => Ok(*n as f64),
+            DataTree::Text(s) => s.trim().parse::<f64>().map_err(|_| {
+                FieldError::one(format!("expected Float, found text {:?}", s))
+            }),
+            other => Err(FieldError::one(format!(
+                "expected Float, found {}",
+                datatree_kind(other)
+            ))),
+        }
+    }
+
+    pub fn decode_bool(t: &DataTree) -> Result<bool, Vec<FieldError>> {
+        match t {
+            DataTree::Bool(value) => Ok(*value),
+            DataTree::Text(s) => match s.trim() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(FieldError::one(format!(
+                    "expected Bool, found text {:?}",
+                    s
+                ))),
+            },
+            other => Err(FieldError::one(format!(
+                "expected Bool, found {}",
+                datatree_kind(other)
+            ))),
+        }
+    }
+
+    pub fn decode_string(t: &DataTree) -> Result<String, Vec<FieldError>> {
+        match t {
+            DataTree::Text(s) => Ok(s.clone()),
+            DataTree::Int(n) => Ok(n.to_string()),
+            DataTree::Float(f) => Ok(format!("{:?}", f)),
+            DataTree::Bool(value) => Ok(value.to_string()),
+            other => Err(FieldError::one(format!(
+                "expected Text, found {}",
+                datatree_kind(other)
+            ))),
+        }
+    }
+
+    pub fn decode_f32(t: &DataTree) -> Result<f32, Vec<FieldError>> {
+        let value = match t {
+            DataTree::Float(value) => *value,
+            DataTree::Int(value) => *value as f64,
+            other => {
+                return Err(FieldError::one(format!(
+                    "expected F32, found {}",
+                    datatree_kind(other)
+                )))
+            }
+        };
+        if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+            Ok(value as f32)
+        } else {
+            Err(FieldError::one("expected F32, found out-of-range Float"))
+        }
+    }
+
+    pub fn check_int_range(
+        value: Result<i64, Vec<FieldError>>,
+        lo: i64,
+        hi: i64,
+        type_name: &str,
+    ) -> Result<i64, Vec<FieldError>> {
+        let value = value?;
+        if (lo..=hi).contains(&value) {
+            Ok(value)
+        } else {
+            Err(FieldError::one(format!(
+                "expected {type_name}, found out-of-range Int"
+            )))
+        }
+    }
+
+    pub fn check_f32_range(value: Result<f64, Vec<FieldError>>) -> Result<f64, Vec<FieldError>> {
+        let value = value?;
+        if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+            Ok(value)
+        } else {
+            Err(FieldError::one("expected F32, found out-of-range Float"))
+        }
+    }
+
+    pub fn fixed_list_length_error(found: usize, expected: usize) -> Vec<FieldError> {
+        FieldError::one(format!(
+            "expected a fixed list of length {expected}, found {found}"
+        ))
     }
 
     impl super::JetShow for FieldError {

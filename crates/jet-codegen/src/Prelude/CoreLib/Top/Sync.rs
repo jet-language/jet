@@ -801,6 +801,33 @@ fn jet_sync_decode_array<'a>(
     }
 }
 
+fn jet_sync_decode_field<T>(
+    fields: &[(String, jet_std::DataTree)],
+    name: &str,
+    label: &str,
+    errors: &mut Vec<jet_std::FieldError>,
+    decode: impl FnOnce(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+) -> Option<T> {
+    match jet_sync_object_field(fields, name, label).and_then(decode) {
+        Ok(value) => Some(value),
+        Err(child) => {
+            errors.extend(jet_std::FieldError::under_errors(name, child));
+            None
+        }
+    }
+}
+
+fn jet_sync_frame_entry(
+    errors: &mut Vec<jet_std::FieldError>,
+    index: usize,
+    entry_errors: Vec<jet_std::FieldError>,
+) {
+    errors.extend(jet_std::FieldError::under_errors(
+        &format!("[{index}]"),
+        entry_errors,
+    ));
+}
+
 impl user_Encode for JetSyncText {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Object(vec![
@@ -834,27 +861,58 @@ impl user_Decode for JetSyncText {
             return Err(jet_sync_decode_error("SyncText replica limit exceeded"));
         }
         let mut replicas = Vec::with_capacity(values.len());
-        for value in values {
-            let fields = jet_sync_object(value, &["replica", "text", "clock"], "SyncText replica")?;
-            let replica = jet_sync_decode_string(
-                jet_sync_object_field(fields, "replica", "SyncText replica")?,
-                "SyncText.replica",
-            )?;
-            let text = jet_sync_decode_string(
-                jet_sync_object_field(fields, "text", "SyncText replica")?,
-                "SyncText.text",
-            )?;
-            let clock = jet_sync_decode_u64(
-                jet_sync_object_field(fields, "clock", "SyncText replica")?,
-                "SyncText.clock",
-            )?;
-            if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT || clock == 0 {
-                return Err(jet_sync_decode_error("SyncText replica is invalid"));
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let fields = match jet_sync_object(
+                value,
+                &["replica", "text", "clock"],
+                "SyncText replica",
+            ) {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let replica = jet_sync_decode_field(
+                fields,
+                "replica",
+                "SyncText replica",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncText.replica"),
+            );
+            let text = jet_sync_decode_field(
+                fields,
+                "text",
+                "SyncText replica",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncText.text"),
+            );
+            let clock = jet_sync_decode_field(
+                fields,
+                "clock",
+                "SyncText replica",
+                &mut entry_errors,
+                |tree| jet_sync_decode_u64(tree, "SyncText.clock"),
+            );
+            if let (Some(replica), Some(text), Some(clock)) = (replica, text, clock) {
+                if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT || clock == 0 {
+                    entry_errors.extend(jet_sync_decode_error("SyncText replica is invalid"));
+                } else if replicas.iter().any(|(existing, _, _)| existing == &replica) {
+                    entry_errors.extend(jet_sync_decode_error(
+                        "SyncText contains duplicate replicas",
+                    ));
+                } else {
+                    replicas.push((replica, text, clock));
+                }
             }
-            if replicas.iter().any(|(existing, _, _)| existing == &replica) {
-                return Err(jet_sync_decode_error("SyncText contains duplicate replicas"));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
             }
-            replicas.push((replica, text, clock));
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         replicas.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(JetSyncText { replicas })
@@ -894,31 +952,59 @@ impl user_Decode for JetSyncCounter {
             return Err(jet_sync_decode_error("SyncCounter replica limit exceeded"));
         }
         let mut counts = Vec::with_capacity(values.len());
-        for value in values {
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
             let fields = jet_sync_object(
                 value,
                 &["replica", "positive", "negative"],
                 "SyncCounter entry",
-            )?;
-            let replica = jet_sync_decode_string(
-                jet_sync_object_field(fields, "replica", "SyncCounter entry")?,
-                "SyncCounter.replica",
-            )?;
-            let positive = jet_sync_decode_u64(
-                jet_sync_object_field(fields, "positive", "SyncCounter entry")?,
-                "SyncCounter.positive",
-            )?;
-            let negative = jet_sync_decode_u64(
-                jet_sync_object_field(fields, "negative", "SyncCounter entry")?,
-                "SyncCounter.negative",
-            )?;
-            if !jet_sync_token_is_valid(&replica) {
-                return Err(jet_sync_decode_error("SyncCounter replica is invalid"));
+            );
+            let fields = match fields {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let replica = jet_sync_decode_field(
+                fields,
+                "replica",
+                "SyncCounter entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncCounter.replica"),
+            );
+            let positive = jet_sync_decode_field(
+                fields,
+                "positive",
+                "SyncCounter entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_u64(tree, "SyncCounter.positive"),
+            );
+            let negative = jet_sync_decode_field(
+                fields,
+                "negative",
+                "SyncCounter entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_u64(tree, "SyncCounter.negative"),
+            );
+            if let (Some(replica), Some(positive), Some(negative)) = (replica, positive, negative) {
+                if !jet_sync_token_is_valid(&replica) {
+                    entry_errors.extend(jet_sync_decode_error("SyncCounter replica is invalid"));
+                } else if counts.iter().any(|(existing, _, _)| existing == &replica) {
+                    entry_errors.extend(jet_sync_decode_error(
+                        "SyncCounter contains duplicate replicas",
+                    ));
+                } else {
+                    counts.push((replica, positive, negative));
+                }
             }
-            if counts.iter().any(|(existing, _, _)| existing == &replica) {
-                return Err(jet_sync_decode_error("SyncCounter contains duplicate replicas"));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
             }
-            counts.push((replica, positive, negative));
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         counts.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(JetSyncCounter { counts })
@@ -959,39 +1045,71 @@ impl user_Decode for JetSyncMap {
             return Err(jet_sync_decode_error("SyncMap entry limit exceeded"));
         }
         let mut entries = Vec::with_capacity(values.len());
-        for value in values {
-            let fields = jet_sync_object(
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let fields = match jet_sync_object(
                 value,
                 &["key", "value", "clock", "writer"],
                 "SyncMap entry",
-            )?;
-            let key = jet_sync_decode_string(
-                jet_sync_object_field(fields, "key", "SyncMap entry")?,
-                "SyncMap.key",
-            )?;
-            let entry_value = jet_sync_decode_string(
-                jet_sync_object_field(fields, "value", "SyncMap entry")?,
-                "SyncMap.value",
-            )?;
-            let clock = jet_sync_decode_u64(
-                jet_sync_object_field(fields, "clock", "SyncMap entry")?,
-                "SyncMap.clock",
-            )?;
-            let writer = jet_sync_decode_string(
-                jet_sync_object_field(fields, "writer", "SyncMap entry")?,
-                "SyncMap.writer",
-            )?;
-            if !jet_sync_token_is_valid(&key)
-                || !jet_sync_token_is_valid(&writer)
-                || entry_value.len() > MAX_SYNC_TEXT
-                || clock == 0
+            ) {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let key = jet_sync_decode_field(
+                fields,
+                "key",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncMap.key"),
+            );
+            let entry_value = jet_sync_decode_field(
+                fields,
+                "value",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncMap.value"),
+            );
+            let clock = jet_sync_decode_field(
+                fields,
+                "clock",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_u64(tree, "SyncMap.clock"),
+            );
+            let writer = jet_sync_decode_field(
+                fields,
+                "writer",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncMap.writer"),
+            );
+            if let (Some(key), Some(entry_value), Some(clock), Some(writer)) =
+                (key, entry_value, clock, writer)
             {
-                return Err(jet_sync_decode_error("SyncMap entry is invalid"));
+                if !jet_sync_token_is_valid(&key)
+                    || !jet_sync_token_is_valid(&writer)
+                    || entry_value.len() > MAX_SYNC_TEXT
+                    || clock == 0
+                {
+                    entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"));
+                } else if entries.iter().any(|(existing, _, _, _)| existing == &key) {
+                    entry_errors.extend(jet_sync_decode_error(
+                        "SyncMap contains duplicate keys",
+                    ));
+                } else {
+                    entries.push((key, entry_value, clock, writer));
+                }
             }
-            if entries.iter().any(|(existing, _, _, _)| existing == &key) {
-                return Err(jet_sync_decode_error("SyncMap contains duplicate keys"));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
             }
-            entries.push((key, entry_value, clock, writer));
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         entries.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(JetSyncMap { entries })
@@ -1030,25 +1148,47 @@ impl user_Decode for JetSyncList {
             return Err(jet_sync_decode_error("SyncList item limit exceeded"));
         }
         let mut items = Vec::with_capacity(values.len());
-        for value in values {
-            let fields = jet_sync_object(value, &["replica", "item"], "SyncList item")?;
-            let replica = jet_sync_decode_string(
-                jet_sync_object_field(fields, "replica", "SyncList item")?,
-                "SyncList.replica",
-            )?;
-            let item = jet_sync_decode_string(
-                jet_sync_object_field(fields, "item", "SyncList item")?,
-                "SyncList.item",
-            )?;
-            if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
-                return Err(jet_sync_decode_error("SyncList item is invalid"));
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let fields = match jet_sync_object(value, &["replica", "item"], "SyncList item") {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let replica = jet_sync_decode_field(
+                fields,
+                "replica",
+                "SyncList item",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncList.replica"),
+            );
+            let item = jet_sync_decode_field(
+                fields,
+                "item",
+                "SyncList item",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncList.item"),
+            );
+            if let (Some(replica), Some(item)) = (replica, item) {
+                if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
+                    entry_errors.extend(jet_sync_decode_error("SyncList item is invalid"));
+                } else if items.iter().any(|(existing_replica, existing_item)| {
+                    existing_replica == &replica && existing_item == &item
+                }) {
+                    entry_errors.extend(jet_sync_decode_error("SyncList contains duplicate items"));
+                } else {
+                    items.push((replica, item));
+                }
             }
-            if items.iter().any(|(existing_replica, existing_item)| {
-                existing_replica == &replica && existing_item == &item
-            }) {
-                return Err(jet_sync_decode_error("SyncList contains duplicate items"));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
             }
-            items.push((replica, item));
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
         Ok(JetSyncList { items })
@@ -1097,35 +1237,73 @@ where
             return Err(jet_sync_decode_error("SyncMap entry limit exceeded"));
         }
         let mut entries = Vec::with_capacity(values.len());
-        for value in values {
-            let fields = jet_sync_object(
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let fields = match jet_sync_object(
                 value,
                 &["key", "value", "clock", "writer"],
                 "SyncMap entry",
-            )?;
-            let key = K::jet_decode(jet_sync_object_field(fields, "key", "SyncMap entry")?)?;
-            let entry_value = V::jet_decode(
-                jet_sync_object_field(fields, "value", "SyncMap entry")?,
-            )?;
-            let clock = jet_sync_decode_u64(
-                jet_sync_object_field(fields, "clock", "SyncMap entry")?,
-                "SyncMap.clock",
-            )?;
-            let writer = jet_sync_decode_string(
-                jet_sync_object_field(fields, "writer", "SyncMap entry")?,
-                "SyncMap.writer",
-            )?;
-            if !jet_sync_token_is_valid(&writer) || clock == 0 {
-                return Err(jet_sync_decode_error("SyncMap entry is invalid"));
-            }
-            let key_id = jet_sync_value_id(&key);
-            if entries
-                .iter()
-                .any(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
+            ) {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let key = jet_sync_decode_field(
+                fields,
+                "key",
+                "SyncMap entry",
+                &mut entry_errors,
+                K::jet_decode,
+            );
+            let entry_value = jet_sync_decode_field(
+                fields,
+                "value",
+                "SyncMap entry",
+                &mut entry_errors,
+                V::jet_decode,
+            );
+            let clock = jet_sync_decode_field(
+                fields,
+                "clock",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_u64(tree, "SyncMap.clock"),
+            );
+            let writer = jet_sync_decode_field(
+                fields,
+                "writer",
+                "SyncMap entry",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncMap.writer"),
+            );
+            if let (Some(key), Some(entry_value), Some(clock), Some(writer)) =
+                (key, entry_value, clock, writer)
             {
-                return Err(jet_sync_decode_error("SyncMap contains duplicate keys"));
+                if !jet_sync_token_is_valid(&writer) || clock == 0 {
+                    entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"));
+                } else {
+                    let key_id = jet_sync_value_id(&key);
+                    if entries
+                        .iter()
+                        .any(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
+                    {
+                        entry_errors.extend(jet_sync_decode_error(
+                            "SyncMap contains duplicate keys",
+                        ));
+                    } else {
+                        entries.push((key, entry_value, clock, writer));
+                    }
+                }
             }
-            entries.push((key, entry_value, clock, writer));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         entries.sort_by(|left, right| {
             jet_sync_value_id(&left.0).cmp(&jet_sync_value_id(&right.0))
@@ -1172,23 +1350,52 @@ where
             return Err(jet_sync_decode_error("SyncList item limit exceeded"));
         }
         let mut items = Vec::with_capacity(values.len());
-        for value in values {
-            let fields = jet_sync_object(value, &["replica", "item"], "SyncList item")?;
-            let replica = jet_sync_decode_string(
-                jet_sync_object_field(fields, "replica", "SyncList item")?,
-                "SyncList.replica",
-            )?;
-            let item = T::jet_decode(jet_sync_object_field(fields, "item", "SyncList item")?)?;
-            if !jet_sync_token_is_valid(&replica) {
-                return Err(jet_sync_decode_error("SyncList item is invalid"));
+        let mut errors = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let fields = match jet_sync_object(value, &["replica", "item"], "SyncList item") {
+                Ok(fields) => fields,
+                Err(entry_errors) => {
+                    jet_sync_frame_entry(&mut errors, index, entry_errors);
+                    continue;
+                }
+            };
+            let mut entry_errors = Vec::new();
+            let replica = jet_sync_decode_field(
+                fields,
+                "replica",
+                "SyncList item",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncList.replica"),
+            );
+            let item = jet_sync_decode_field(
+                fields,
+                "item",
+                "SyncList item",
+                &mut entry_errors,
+                T::jet_decode,
+            );
+            if let (Some(replica), Some(item)) = (replica, item) {
+                if !jet_sync_token_is_valid(&replica) {
+                    entry_errors.extend(jet_sync_decode_error("SyncList item is invalid"));
+                } else {
+                    let item_id = jet_sync_value_id(&item);
+                    if items.iter().any(|(existing_replica, existing_item)| {
+                        existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+                    }) {
+                        entry_errors.extend(jet_sync_decode_error(
+                            "SyncList contains duplicate items",
+                        ));
+                    } else {
+                        items.push((replica, item));
+                    }
+                }
             }
-            let item_id = jet_sync_value_id(&item);
-            if items.iter().any(|(existing_replica, existing_item)| {
-                existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
-            }) {
-                return Err(jet_sync_decode_error("SyncList contains duplicate items"));
+            if !entry_errors.is_empty() {
+                jet_sync_frame_entry(&mut errors, index, entry_errors);
             }
-            items.push((replica, item));
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
         items.sort_by(|left, right| {
             let left_id = jet_sync_value_id(&left.1);

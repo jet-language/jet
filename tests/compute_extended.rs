@@ -57,7 +57,7 @@ fn raw_kernel_boundary_and_f32_profile_are_explicit() {
     assert_aot_and_default_parity(
         "compute_kernel_targeted",
         include_str!("../examples/features/tooling/compute_kernel.jet"),
-        &["kernel:42", "bounds:true", "raw:RawKernelContract"],
+        &["kernel:42", "bounds:true", "raw:unsupported:"],
     );
     assert_aot_and_default_parity(
         "compute_simd_targeted",

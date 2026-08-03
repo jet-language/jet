@@ -27,13 +27,27 @@ use super::Value::CtValue;
 // ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
+    decode_error_at("", reason)
+}
+
+pub(super) fn decode_error_at(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     CtValue::List(vec![CtValue::Struct {
         type_name: "FieldError".to_string(),
         fields: vec![
-            ("path".to_string(), CtValue::Str(String::new())),
+            ("path".to_string(), CtValue::Str(path.into())),
             ("reason".to_string(), CtValue::Str(reason.into())),
         ],
     }])
+}
+
+fn extend_decode_errors(errors: &mut Vec<CtValue>, error: CtValue) {
+    match error {
+        CtValue::List(items) => errors.extend(items),
+        other => errors.extend(match decode_error(other.jet_show()) {
+            CtValue::List(items) => items,
+            _ => Vec::new(),
+        }),
+    }
 }
 
 /// Mirrors `jet_std::FieldError::under` — prefix every child error's path with
@@ -363,18 +377,21 @@ pub(super) fn typed_decode_builtin_value(
         Type::List(inner) => match variant_of(tree) {
             Some(("Array", Some(CtValue::List(items)))) => {
                 let mut out = Vec::with_capacity(items.len());
+                let mut errors = Vec::new();
                 for (index, item) in items.iter().enumerate() {
                     match typed_decode_builtin_value(inner, item)? {
                         Ok(value) => out.push(value),
-                        Err(error) => {
-                            return Some(Err(decode_error_under(
-                                &format!("[{index}]"),
-                                error,
-                            )));
-                        }
+                        Err(error) => extend_decode_errors(
+                            &mut errors,
+                            decode_error_under(&format!("[{index}]"), error),
+                        ),
                     }
                 }
-                Ok(CtValue::List(out))
+                if errors.is_empty() {
+                    Ok(CtValue::List(out))
+                } else {
+                    Err(CtValue::List(errors))
+                }
             }
             _ => Err(decode_error(format!(
                 "expected a list, found {}",
@@ -417,13 +434,21 @@ impl<'a> Interp<'a> {
             Type::List(inner) => match variant_of(tree) {
                 Some(("Array", Some(CtValue::List(items)))) => {
                     let mut out = Vec::with_capacity(items.len());
+                    let mut errors = Vec::new();
                     for (i, item) in items.iter().enumerate() {
-                        out.push(
-                            self.typed_decode_value(inner, item, span)
-                                .map_err(|e| decode_error_under(&format!("[{}]", i), e))?,
-                        );
+                        match self.typed_decode_value(inner, item, span) {
+                            Ok(value) => out.push(value),
+                            Err(error) => extend_decode_errors(
+                                &mut errors,
+                                decode_error_under(&format!("[{i}]"), error),
+                            ),
+                        }
                     }
-                    Ok(CtValue::List(out))
+                    if errors.is_empty() {
+                        Ok(CtValue::List(out))
+                    } else {
+                        Err(CtValue::List(errors))
+                    }
                 }
                 _ => Err(decode_error(format!("expected a list, found {}", datatree_kind(tree)))),
             },
@@ -442,6 +467,9 @@ impl<'a> Interp<'a> {
                 name
             )));
         };
+        if !matches!(variant_of(tree), Some(("Object", _))) {
+            return Err(decode_error("expected an object"));
+        }
         let style = container_rename_all(&sdef.serde_markers);
         let style = style.as_deref();
         let deny = serde_has(&sdef.serde_markers, crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS);
@@ -449,6 +477,7 @@ impl<'a> Interp<'a> {
             .fields
             .iter()
             .any(|f| serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN));
+        let mut errors = Vec::new();
         if deny && !has_flatten {
             if let Some(pairs) = object_pairs(tree) {
                 let known: Vec<String> = sdef
@@ -459,7 +488,16 @@ impl<'a> Interp<'a> {
                     .collect();
                 for (k, _) in &pairs {
                     if !known.contains(k) {
-                        return Err(decode_error(format!("E2412: unknown field `{}`", k)));
+                        errors.push(CtValue::Struct {
+                            type_name: "FieldError".to_string(),
+                            fields: vec![
+                                ("path".to_string(), CtValue::Str(k.clone())),
+                                (
+                                    "reason".to_string(),
+                                    CtValue::Str(format!("E2412: unknown field `{k}`")),
+                                ),
+                            ],
+                        });
                     }
                 }
             }
@@ -472,33 +510,77 @@ impl<'a> Interp<'a> {
                 continue;
             }
             if serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN) {
-                let v = self
-                    .typed_decode_value(&f.ty, tree, span)
-                    .map_err(|e| decode_error_under(&f.name, e))?;
+                let v = match self.typed_decode_value(&f.ty, tree, span) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        extend_decode_errors(
+                            &mut errors,
+                            decode_error_under(&f.name, error),
+                        );
+                        zero_value(&f.ty)
+                    }
+                };
                 out_fields.push((f.name.clone(), v));
                 continue;
             }
             let key = field_wire_key(style, f);
             let v = match object_get(tree, &key) {
-                Some(cell) => self
-                    .typed_decode_value(&f.ty, cell, span)
-                    .map_err(|e| decode_error_under(&key, e))?,
+                Some(cell) => match self.typed_decode_value(&f.ty, cell, span) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        extend_decode_errors(
+                            &mut errors,
+                            decode_error_under(&key, error),
+                        );
+                        zero_value(&f.ty)
+                    }
+                },
                 None => {
                     if let Type::Option(inner) = &f.ty {
                         CtValue::None((**inner).clone())
                     } else if serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT).is_some() {
                         self.field_default_value(f, span)
                     } else {
-                        return Err(decode_error(format!(
-                            "E2410: missing required field `{}`",
-                            f.name
-                        )));
+                        errors.push(CtValue::Struct {
+                            type_name: "FieldError".to_string(),
+                            fields: vec![
+                                ("path".to_string(), CtValue::Str(key.clone())),
+                                (
+                                    "reason".to_string(),
+                                    CtValue::Str(format!(
+                                        "E2410: missing required field `{}`",
+                                        f.name
+                                    )),
+                                ),
+                            ],
+                        });
+                        zero_value(&f.ty)
                     }
                 }
             };
             out_fields.push((f.name.clone(), v));
         }
-        Ok(CtValue::Struct { type_name: name.to_string(), fields: out_fields })
+        if !errors.is_empty() {
+            return Err(CtValue::List(errors));
+        }
+        let decoded = CtValue::Struct { type_name: name.to_string(), fields: out_fields };
+        if let Some(validate) = self.methods.get(&(name.to_string(), "validate".to_string())).copied() {
+            let Some(param) = validate.params.first() else {
+                return Err(decode_error("generated validate method has no value parameter"));
+            };
+            let mut frame = std::collections::HashMap::new();
+            frame.insert(param.name.clone(), decoded.clone());
+            match self.call_func(&format!("{name}.validate"), validate, frame) {
+                Ok(CtValue::ResOk(value)) => return Ok(*value),
+                Ok(CtValue::ResErr(error)) => return Err(*error),
+                Ok(other) => return Err(decode_error(format!(
+                    "generated validate method returned {}",
+                    other.jet_show()
+                ))),
+                Err(diagnostic) => return Err(decode_error(diagnostic.what)),
+            }
+        }
+        Ok(decoded)
     }
 
     fn field_default_value(&mut self, f: &Field, _span: Span) -> CtValue {
@@ -752,6 +834,7 @@ impl<'a> Interp<'a> {
         };
         let mut values = Vec::new();
         let mut migration = migration_status_fresh();
+        let mut errors = Vec::new();
         for (i, row) in it.enumerate() {
             let entries: Vec<(CtKey, CtValue)> = header
                 .iter()
@@ -770,9 +853,15 @@ impl<'a> Interp<'a> {
                     values.push(v);
                 }
                 Err(e) => {
-                    return Ok(CtValue::ResErr(Box::new(decode_error_under(&format!("row {}", i + 1), e))));
+                    extend_decode_errors(
+                        &mut errors,
+                        decode_error_under(&format!("row {}", i + 1), e),
+                    );
                 }
             }
+        }
+        if !errors.is_empty() {
+            return Ok(CtValue::ResErr(Box::new(CtValue::List(errors))));
         }
         let value = CtValue::List(values);
         Ok(CtValue::ResOk(Box::new(if method == "decode_traced" {

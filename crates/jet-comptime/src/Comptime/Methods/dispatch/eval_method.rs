@@ -1,5 +1,46 @@
 use super::*;
 
+fn decode_path(path: &str) -> String {
+    if path == "$" {
+        String::new()
+    } else if let Some(path) = path.strip_prefix("$.") {
+        path.to_string()
+    } else {
+        path.strip_prefix('$').unwrap_or(path).to_string()
+    }
+}
+
+fn decode_error_value(error: CtValue, fallback: &str) -> CtValue {
+    let (path, reason) = match error {
+        CtValue::Struct { fields, .. } => {
+            let path = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("path", CtValue::Str(value)) => Some(value.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("");
+            let reason = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("reason", CtValue::Str(value)) => Some(value.as_str()),
+                    _ => None,
+                })
+                .unwrap_or(fallback);
+            (decode_path(path), reason.to_string())
+        }
+        _ => (String::new(), fallback.to_string()),
+    };
+    super::super::super::TypedDecode::decode_error_at(path, reason)
+}
+
+fn decode_xml_error(error: jet_foundation::XmlPull::Error) -> CtValue {
+    super::super::super::TypedDecode::decode_error_at(
+        decode_path(&error.path),
+        format!("XML {:?}: {}", error.kind, error.reason),
+    )
+}
+
 impl<'a> Interp<'a> {
     pub(in super::super::super) fn eval_method(
         &mut self,
@@ -473,11 +514,7 @@ impl<'a> Interp<'a> {
                         ) {
                             Ok(tree) => tree,
                             Err(error) => {
-                                return Ok(CtValue::ResErr(Box::new(
-                                    super::super::super::EncodingLite::xml_source_error_value(
-                                        error,
-                                    ),
-                                )))
+                                return Ok(CtValue::ResErr(Box::new(decode_xml_error(error))))
                             }
                         }
                     } else {
@@ -499,64 +536,23 @@ impl<'a> Interp<'a> {
                         match parsed {
                             Ok(tree) => tree,
                             Err(error) => {
-                                return Ok(CtValue::ResErr(Box::new(
-                                    super::super::super::EncodingLite::xml_error_value(error),
-                                )))
+                                return Ok(CtValue::ResErr(Box::new(decode_xml_error(error))))
                             }
                         }
                     };
                     let projected =
                         match super::super::super::EncodingLite::xml_project_for_decode(&document) {
                             Ok(tree) => tree,
-                            Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+                            Err(error) => {
+                                return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                                    error,
+                                    "XML value cannot be projected for typed decode",
+                                ))))
+                            }
                         };
                     return match self.typed_decode_top(&type_args[0], &projected, span) {
                         Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
-                        Err(error) => {
-                            let (path, reason) = match error {
-                                CtValue::Struct { fields, .. } => {
-                                    let path = fields
-                                        .iter()
-                                        .find_map(|(name, value)| match (name.as_str(), value) {
-                                            ("path", CtValue::Str(value)) => Some(value.clone()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or_else(|| "$".to_string());
-                                    let reason = fields
-                                        .iter()
-                                        .find_map(|(name, value)| match (name.as_str(), value) {
-                                            ("reason", CtValue::Str(value)) => Some(value.clone()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or_else(|| {
-                                            "XML value does not match requested type".to_string()
-                                        });
-                                    (path, reason)
-                                }
-                                _ => (
-                                    "$".to_string(),
-                                    "XML value does not match requested type".to_string(),
-                                ),
-                            };
-                            Ok(CtValue::ResErr(Box::new(CtValue::Struct {
-                                type_name: "XMLError".to_string(),
-                                fields: vec![
-                                    (
-                                        "kind".to_string(),
-                                        CtValue::Enum {
-                                            type_name: "XMLReason".to_string(),
-                                            variant: "Shape".to_string(),
-                                            args: Vec::new(),
-                                        },
-                                    ),
-                                    ("byte_offset".to_string(), CtValue::None(Type::Int)),
-                                    ("line".to_string(), CtValue::None(Type::Int)),
-                                    ("column".to_string(), CtValue::None(Type::Int)),
-                                    ("path".to_string(), CtValue::Str(path)),
-                                    ("reason".to_string(), CtValue::Str(reason)),
-                                ],
-                            })))
-                        }
+                        Err(error) => Ok(CtValue::ResErr(Box::new(error))),
                     };
                 }
                 // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
@@ -596,55 +592,24 @@ impl<'a> Interp<'a> {
                     let options = match super::super::super::EncodingLite::cbor_options(argv.get(1)) {
                         Ok(options) => options,
                         Err(error) => {
-                            return Ok(CtValue::ResErr(Box::new(
-                                super::super::super::EncodingLite::cbor_error_value(error),
-                            )))
+                            return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                                error,
+                                "invalid CBOR options",
+                            ))))
                         }
                     };
                     let tree = match super::super::super::EncodingLite::cbor_decode(&bytes, &options, true) {
                         Ok(tree) => tree,
                         Err(error) => {
-                            return Ok(CtValue::ResErr(Box::new(
-                                super::super::super::EncodingLite::cbor_error_value(error),
-                            )))
+                            return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                                error,
+                                "invalid CBOR input",
+                            ))))
                         }
                     };
                     return match self.typed_decode_top(&type_args[0], &tree, span) {
                         Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
-                        Err(error) => {
-                            let (path, reason) = match error {
-                                CtValue::Struct { fields, .. } => {
-                                    let path = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                                        ("path", CtValue::Str(value)) => Some(value.clone()),
-                                        _ => None,
-                                    }).unwrap_or_default();
-                                    let reason = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                                        ("reason", CtValue::Str(value)) => Some(value.clone()),
-                                        _ => None,
-                                    }).unwrap_or_else(|| "CBOR value does not match requested type".to_string());
-                                    let path = if path.is_empty() {
-                                        "$".to_string()
-                                    } else {
-                                        format!("${path}")
-                                    };
-                                    (path, reason)
-                                }
-                                _ => (String::new(), "CBOR value does not match requested type".to_string()),
-                            };
-                            Ok(CtValue::ResErr(Box::new(CtValue::Struct {
-                                type_name: "CBORError".to_string(),
-                                fields: vec![
-                                    ("kind".to_string(), CtValue::Enum {
-                                        type_name: "CBORErrorKind".to_string(),
-                                        variant: "TypeMismatch".to_string(),
-                                        args: Vec::new(),
-                                    }),
-                                    ("byte_offset".to_string(), CtValue::Int(0)),
-                                    ("path".to_string(), CtValue::Str(path)),
-                                    ("reason".to_string(), CtValue::Str(reason)),
-                                ],
-                            })))
-                        }
+                        Err(error) => Ok(CtValue::ResErr(Box::new(error))),
                     };
                 }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.

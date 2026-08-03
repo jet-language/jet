@@ -10,7 +10,10 @@ fn run() {
     print("bounds:{ok}")
 
     #Unsafe("raw compute kernel contract for audited expert path") {
-        label :: compute.raw_kernel_contract("demo-kernel", 2) ?? panic("raw")
-        print("raw:{compute.raw_kernel_contract_show(label)}")
+        label :: compute.raw_kernel_contract("demo-kernel", 2)
+        if label == {
+            .Ok(contract) -> { print("raw:{compute.raw_kernel_contract_show(contract)}") }
+            .Err(error) -> { print("raw:unsupported:{error}") }
+        }
     }
 }

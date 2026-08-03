@@ -433,13 +433,21 @@ pub(super) fn eval_handle(
         THandleOp::DBValueIsNull => db_value_result(recv, "is_null", span),
         // Runtime-tier only (jet-jit ambient); comptime has no SQLite host.
         THandleOp::DBWithPolicy => Err(unsupported("handle `DBWithPolicy`", span)),
-        THandleOp::ServiceRuntimeSend => Err(unsupported("handle `ServiceRuntimeSend`", span)),
-        THandleOp::ServiceRuntimeRetry => Err(unsupported("handle `ServiceRuntimeRetry`", span)),
+        THandleOp::ServiceRuntimeSend => crate::Comptime::ServicesLite::apply_runtime_method(
+            recv, "send", args, span,
+        ),
+        THandleOp::ServiceRuntimeRetry => crate::Comptime::ServicesLite::apply_runtime_method(
+            recv, "retry", args, span,
+        ),
         THandleOp::ServiceRuntimeDeadLetter => {
-            Err(unsupported("handle `ServiceRuntimeDeadLetter`", span))
+            crate::Comptime::ServicesLite::apply_runtime_method(recv, "dead_letter", args, span)
         }
-        THandleOp::ServiceRuntimeRetain => Err(unsupported("handle `ServiceRuntimeRetain`", span)),
-        THandleOp::ServiceRuntimeCommit => Err(unsupported("handle `ServiceRuntimeCommit`", span)),
+        THandleOp::ServiceRuntimeRetain => crate::Comptime::ServicesLite::apply_runtime_method(
+            recv, "retain", args, span,
+        ),
+        THandleOp::ServiceRuntimeCommit => crate::Comptime::ServicesLite::apply_runtime_method(
+            recv, "commit", args, span,
+        ),
         THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
         THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
         THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),

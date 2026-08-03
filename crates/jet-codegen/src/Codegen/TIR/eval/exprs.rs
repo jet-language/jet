@@ -784,41 +784,32 @@ impl<'a> EvalCtx<'a> {
                 };
                 if let Type::FixedList { len, .. } = ty {
                     if values.len() != *len as usize {
-                        Err(decode_error(
+                        return Ok(CtValue::ResErr(Box::new(decode_error(
                             "",
                             format!("expected a fixed list of length {len}, found {}", values.len()),
-                        ))
-                    } else {
-                        let mut out = Vec::with_capacity(values.len());
-                        for (index, value) in values.iter().cloned().enumerate() {
-                            match self.eval_datatree_decode(value, inner)? {
-                                CtValue::ResOk(value) => out.push(*value),
-                                CtValue::ResErr(error) => {
-                                    return Ok(CtValue::ResErr(Box::new(decode_error_under(
-                                        &format!("[{index}]"),
-                                        *error,
-                                    ))));
-                                }
-                                _ => unreachable!(),
+                        ))));
+                    }
+                }
+                let mut out = Vec::with_capacity(values.len());
+                let mut errors = Vec::new();
+                for (index, value) in values.iter().cloned().enumerate() {
+                    match self.eval_datatree_decode(value, inner)? {
+                        CtValue::ResOk(value) => out.push(*value),
+                        CtValue::ResErr(error) => {
+                            if let CtValue::List(items) = decode_error_under(
+                                &format!("[{index}]"),
+                                *error,
+                            ) {
+                                errors.extend(items);
                             }
                         }
-                        Ok(CtValue::List(out))
+                        _ => unreachable!(),
                     }
-                } else {
-                    let mut out = Vec::with_capacity(values.len());
-                    for (index, value) in values.iter().cloned().enumerate() {
-                        match self.eval_datatree_decode(value, inner)? {
-                            CtValue::ResOk(value) => out.push(*value),
-                            CtValue::ResErr(error) => {
-                                return Ok(CtValue::ResErr(Box::new(decode_error_under(
-                                    &format!("[{index}]"),
-                                    *error,
-                                ))));
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
+                }
+                if errors.is_empty() {
                     Ok(CtValue::List(out))
+                } else {
+                    Err(CtValue::List(errors))
                 }
             }
             Type::Map { key, value: item, .. } if matches!(key.as_ref(), Type::String) => {
@@ -847,21 +838,25 @@ impl<'a> EvalCtx<'a> {
                     }
                 };
                 let mut out = std::collections::BTreeMap::new();
+                let mut errors = Vec::new();
                 for (key, value) in values {
                     match self.eval_datatree_decode(value, item)? {
                         CtValue::ResOk(value) => {
                             out.insert(crate::AST::CtKey::Str(key.clone()), *value);
                         }
                         CtValue::ResErr(error) => {
-                            return Ok(CtValue::ResErr(Box::new(decode_error_under(
-                                &key,
-                                *error,
-                            ))));
+                            if let CtValue::List(items) = decode_error_under(&key, *error) {
+                                errors.extend(items);
+                            }
                         }
                         _ => unreachable!(),
                     }
                 }
-                Ok(CtValue::Map(out))
+                if errors.is_empty() {
+                    Ok(CtValue::Map(out))
+                } else {
+                    Err(CtValue::List(errors))
+                }
             }
             Type::Tagged { inner, .. } => {
                 return self.eval_datatree_decode(tree, inner);

@@ -733,7 +733,7 @@ impl<'a> Checker<'a> {
                     }
                     let t = type_args[0].clone();
                     self.check_decodable(&t, span);
-                    return Some(result_ty(t, Type::Named("XMLError".to_string())));
+                    return Some(result_ty(t, decode_error_ty()));
                 }
                 ("core.encoding.xml", "decode_bytes") if !type_args.is_empty() => {
                     if !(1..=2).contains(&args.len()) {
@@ -747,7 +747,7 @@ impl<'a> Checker<'a> {
                     }
                     let t = type_args[0].clone();
                     self.check_decodable(&t, span);
-                    return Some(result_ty(t, Type::Named("XMLError".to_string())));
+                    return Some(result_ty(t, decode_error_ty()));
                 }
                 ("core.encoding.xml", "expanded_name") => {
                     if args.len() != 1 {
@@ -825,7 +825,7 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
                     let t = type_args[0].clone();
                     self.check_decodable(&t, span);
-                    return Some(result_ty(t, Type::Named("CBORError".to_string())));
+                    return Some(result_ty(t, decode_error_ty()));
                 }
                 ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "reader" | "writer")
                 | ("core.encoding.xml", "reader" | "writer") => {

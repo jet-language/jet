@@ -28,6 +28,11 @@ struct Target {
     members: Vec<Member>,
     identity_members: Vec<(String, String)>,
     input_sha256: String,
+    source_digest: String,
+    build_digest: String,
+    core_abi: String,
+    lock_digest: String,
+    tir_hash: String,
 }
 
 struct FrontEndItem {
@@ -149,16 +154,20 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     };
 
     let identity = crate::ProveReplay::ReplayIdentity {
-        entry: target.root.clone(),
-        source_digest: target.input_sha256.clone(),
+        entry: if target.members.len() == 1 {
+            target.members[0].path.clone()
+        } else {
+            target.root.clone()
+        },
+        source_digest: target.source_digest.clone(),
         execution_adapter: "dev-tir-v1".to_string(),
         target_triple: host_target_triple(),
         abi: "gnu".to_string(),
-        build_digest: target.input_sha256.clone(),
-        core_abi: "1".to_string(),
-        lock_digest: target.input_sha256.clone(),
+        build_digest: target.build_digest.clone(),
+        core_abi: target.core_abi.clone(),
+        lock_digest: target.lock_digest.clone(),
         profile: "dev".to_string(),
-        tir_hash: target.input_sha256.clone(),
+        tir_hash: target.tir_hash.clone(),
         tir_schema: "1".to_string(),
     };
     if (capture.is_some() || replay.is_some()) && target.members.len() != 1 {
@@ -1957,6 +1966,18 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             }
         }
     } else {
+        if let Some(root) = path.parent().and_then(jet::Loader::find_manifest_root) {
+            let mut closure_paths = Vec::new();
+            collect_identity_files(&root, &mut closure_paths)?;
+            for closure_path in closure_paths {
+                let bytes = fs::read(&closure_path)
+                    .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
+                let closure_path = normalized(&closure_path);
+                if !identity_members.iter().any(|(member_path, _)| member_path == &closure_path) {
+                    identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
+                }
+            }
+        }
         // A file target can still import source outside the entry file. Ask
         // the production loader for its resolved dependency closure so replay
         // identity cannot be reused after an imported module changes.
@@ -1989,13 +2010,223 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             format!("{{\"path\":{},\"sha256\":{}}}\n", json(path), json(sha256)).as_bytes(),
         );
     }
+    let source_records = identity_members
+        .iter()
+        .filter(|(member_path, _)| member_path.ends_with(".jet"))
+        .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
+        .collect::<Vec<_>>();
+    let source_digest = proof_digest("jet-proof-source-v2", &source_records);
+    let lock_records = identity_members
+        .iter()
+        .filter(|(member_path, _)| is_lock_identity_path(member_path))
+        .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
+        .collect::<Vec<_>>();
+    let lock_digest = proof_digest_or_none("jet-proof-lock-v2", &lock_records);
+    let build_records = identity_members
+        .iter()
+        .filter(|(member_path, _)| is_build_identity_path(member_path))
+        .map(|(member_path, sha256)| (member_path.clone(), sha256.as_bytes().to_vec()))
+        .collect::<Vec<_>>();
+    let build_inputs = proof_digest_or_none("jet-proof-build-inputs-v2", &build_records);
+    let build_digest = proof_build_digest(&build_inputs, &lock_digest)?;
+    let semantic_bundle = if members.len() == 1 {
+        load_checked_proof_bundle(&members[0].path)
+    } else {
+        None
+    };
+    let core_abi = proof_core_abi(semantic_bundle.as_ref(), &source_digest);
+    let tir_hash = proof_tir_hash(
+        semantic_bundle.as_ref(),
+        &source_digest,
+        &core_abi,
+        &members,
+    );
     Ok(Target {
         kind,
         root: normalized(path),
         identity_members,
         input_sha256: jet::SHA256::sha256_hex(&identity),
+        source_digest,
+        build_digest,
+        core_abi,
+        lock_digest,
+        tir_hash,
         members,
     })
+}
+
+fn append_proof_field(bytes: &mut Vec<u8>, label: &str, value: &[u8]) {
+    bytes.extend_from_slice(&(label.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(label.as_bytes());
+    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(value);
+}
+
+fn proof_digest(schema: &str, fields: &[(String, Vec<u8>)]) -> String {
+    let mut bytes = Vec::new();
+    append_proof_field(&mut bytes, "schema", schema.as_bytes());
+    for (label, value) in fields {
+        append_proof_field(&mut bytes, label, value);
+    }
+    jet::SHA256::sha256_hex(&bytes)
+}
+
+fn proof_digest_or_none(schema: &str, fields: &[(String, Vec<u8>)]) -> String {
+    if fields.is_empty() {
+        proof_digest(schema, &[("none".to_string(), b"<none>".to_vec())])
+    } else {
+        proof_digest(schema, fields)
+    }
+}
+
+fn is_lock_identity_path(path: &str) -> bool {
+    path == ".jet/lock"
+        || path.ends_with("/.jet/lock")
+        || matches!(path.rsplit('/').next(), Some("jet.lock" | "jet.lock.json"))
+}
+
+fn is_build_identity_path(path: &str) -> bool {
+    matches!(
+        path.rsplit('/').next(),
+        Some("package.jet" | "pkg.jet" | "build.jet")
+    )
+}
+
+fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    let compiler_path = PathBuf::from("/proc/self/exe");
+    #[cfg(not(target_os = "linux"))]
+    let compiler_path = std::env::current_exe()
+        .map_err(|error| format!("cannot identify running compiler: {error}"))?;
+    let compiler_digest = jet::SHA256::sha256_file_hex(&compiler_path)
+        .map_err(|error| format!("cannot hash running compiler: {error}"))?;
+    let rustc = Command::new("rustc")
+        .args(["-vV"])
+        .output()
+        .map_err(|error| format!("cannot identify rustc: {error}"))?;
+    if !rustc.status.success() {
+        return Err("cannot identify rustc: `rustc -vV` failed".to_string());
+    }
+    let rustc_identity = String::from_utf8(rustc.stdout)
+        .map_err(|_| "rustc identity is not UTF-8".to_string())?;
+    let fields = vec![
+        (
+            "compiler".to_string(),
+            compiler_digest.as_bytes().to_vec(),
+        ),
+        (
+            "jet_version".to_string(),
+            env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
+        ),
+        (
+            "compiler_build_id".to_string(),
+            option_env!("JET_COMPILER_BUILD_ID")
+                .unwrap_or("unversioned")
+                .as_bytes()
+                .to_vec(),
+        ),
+        (
+            "runner_id".to_string(),
+            option_env!("JET_RUNNER_BUILD_ID")
+                .unwrap_or("unversioned")
+                .as_bytes()
+                .to_vec(),
+        ),
+        (
+            "stdlib_id".to_string(),
+            option_env!("JET_STDLIB_BUILD_ID")
+                .unwrap_or("unversioned")
+                .as_bytes()
+                .to_vec(),
+        ),
+        (
+            "target".to_string(),
+            host_target_triple().as_bytes().to_vec(),
+        ),
+        ("profile".to_string(), b"dev".to_vec()),
+        ("rustc".to_string(), rustc_identity.into_bytes()),
+        ("build_inputs".to_string(), build_inputs.as_bytes().to_vec()),
+        ("lock".to_string(), lock_digest.as_bytes().to_vec()),
+    ];
+    Ok(proof_digest("jet-proof-build-v2", &fields))
+}
+
+fn load_checked_proof_bundle(entry: &str) -> Option<jet::AST::ProgramBundle> {
+    let mut bundle = jet::Loader::load_entry_with_overlay(entry, None, false).ok()?;
+    let diagnostics = jet::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.severity, Severity::Error))
+    {
+        None
+    } else {
+        Some(bundle)
+    }
+}
+
+fn proof_core_abi(bundle: Option<&jet::AST::ProgramBundle>, source_digest: &str) -> String {
+    let emission = bundle
+        .map(|bundle| jet::Codegen::corelib_emission_fingerprint(&bundle.used_core))
+        .unwrap_or_else(|| "unavailable".to_string());
+    proof_digest(
+        "jet-proof-core-abi-v2",
+        &[
+            ("emission".to_string(), emission.into_bytes()),
+            ("source".to_string(), source_digest.as_bytes().to_vec()),
+        ],
+    )
+}
+
+fn proof_tir_hash(
+    bundle: Option<&jet::AST::ProgramBundle>,
+    source_digest: &str,
+    core_abi: &str,
+    members: &[Member],
+) -> String {
+    let mut fields = vec![
+        ("source".to_string(), source_digest.as_bytes().to_vec()),
+        ("core_abi".to_string(), core_abi.as_bytes().to_vec()),
+    ];
+    for member in members {
+        fields.push((member.path.clone(), member.sha256.as_bytes().to_vec()));
+    }
+    if let Some(bundle) = bundle {
+        fields.push((
+            "canonical_ast".to_string(),
+            jet::CanonicalAST::canonical_bytes(bundle),
+        ));
+        if let Some(program) = jet::Codegen::TIR::lower_jit_program(bundle) {
+            fields.push(("lowered".to_string(), b"true".to_vec()));
+            fields.push(("entry".to_string(), program.entry.into_bytes()));
+            fields.push((
+                "function_count".to_string(),
+                program.funcs.len().to_string().into_bytes(),
+            ));
+            for function in program.funcs {
+                fields.push((
+                    format!("function:{}", function.name),
+                    format!(
+                        "params={};ret={:?};body={};main={};unsafe={}",
+                        function.params.len(),
+                        function.ret,
+                        function.body.len(),
+                        function.is_main,
+                        function.is_unsafe
+                    )
+                    .into_bytes(),
+                ));
+            }
+        } else {
+            fields.push(("lowered".to_string(), b"false".to_vec()));
+            fields.push((
+                "lowering_reason".to_string(),
+                jet::Codegen::TIR::lower_jit_program_fail_reason(bundle).into_bytes(),
+            ));
+        }
+    } else {
+        fields.push(("bundle".to_string(), b"unavailable".to_vec()));
+    }
+    proof_digest("jet-proof-tir-v2", &fields)
 }
 
 fn has_proof_manifest(dir: &Path, name: &str) -> Result<bool, String> {
@@ -2056,7 +2287,12 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
         }
         if metadata.is_dir() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            if name == "build" || name.starts_with('.') {
+            let parent_is_jet = path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                == Some(".jet");
+            if name == ".git" || (parent_is_jet && name == "cache") {
                 continue;
             }
             collect_identity_files(&path, out)?;
@@ -2066,10 +2302,14 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             continue;
         }
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        if matches!(
-            name,
-            "package.jet" | "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet"
-        ) {
+        let parent_is_jet = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            == Some(".jet");
+        if matches!(name, "package.jet" | "pkg.jet" | "jet.lock" | "jet.lock.json" | "build.jet")
+            || (parent_is_jet && name == "lock")
+        {
             out.push(path);
         }
     }

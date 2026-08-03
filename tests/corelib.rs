@@ -2806,11 +2806,11 @@ fn run() {
     }
     if cbor.decode<[Int]>([129, 97, 120], strict_decode) == {
         .Ok(_) -> print("unexpected success")
-        .Err(error) -> print("{error.byte_offset}|{error.path}|{error.reason}")
+        .Err(error) -> print("{error.path}|{error.reason}")
     }
     if cbor.decode<Int>([65, 0]) == {
         .Ok(_) -> print("unexpected success")
-        .Err(error) -> print("{error.byte_offset}|{error.path}|{error.reason}")
+        .Err(error) -> print("{error.path}|{error.reason}")
     }
 }
 "#;
@@ -2818,7 +2818,7 @@ fn run() {
     assert_eq!(code, 0, "CBOR whole-value program failed: {stderr}");
     assert_eq!(
         stdout,
-        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n0|$[0]|expected Int, found text \"x\"\n0|$|expected Int, found Bytes\n"
+        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n[0]|expected Int, found text \"x\"\n|expected Int, found Bytes\n"
     );
     let path = dir.join("cbor_whole.jet");
     fs::write(&path, source).unwrap();
@@ -3130,7 +3130,7 @@ fn run() {
     }
     if cbor.decode<[Int]>([129, 97, 120], roomy) == {
         Ok(_) -> panic("typed mismatch accepted")
-        Err(e) -> print(e.path == "$[0]" && e.reason.contains("expected Int"))
+        Err(e) -> print(e.path == "[0]" && e.reason.contains("expected Int"))
     }
     print(true)
 }
@@ -3194,7 +3194,7 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
     assert!(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}");
     result
 }
-fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, jet_std::CBORError> {
+fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
     let ceiling = options.max_bytes as usize;
     jet_cbor_alloc_probe::begin();
     let result = jet_enc_cbor_decode_inner(bytes, options);

@@ -10515,7 +10515,7 @@ impl LowerCtx<'_, '_> {
                                     &parse_args,
                                     ok,
                                     self.host.encoding.cbor_decode_tree,
-                                    Some(self.host.encoding.cbor_project_decode_error),
+                                    None,
                                 );
                             }
                             let parse_args =
@@ -10524,7 +10524,7 @@ impl LowerCtx<'_, '_> {
                                 &parse_args,
                                 ok,
                                 self.host.encoding.cbor_decode_tree_options,
-                                Some(self.host.encoding.cbor_project_decode_error),
+                                None,
                             );
                         }
                     }
