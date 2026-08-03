@@ -22,8 +22,9 @@ satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
 ## Differential conformance
 
 1. Sema records the reachable Core closure and its source/ABI classification.
-2. AOT, JIT, and deopt marshal into the same canonical Core/ABI `jet_*`
-   symbols; no engine adds a second policy or failure meaning.
+2. AOT, JIT, and deopt preserve the same canonical Core meaning and ABI
+   behavior where a bridge applies; no engine adds a second policy or failure
+   meaning.
 3. Native cache identity includes the SHA-256 R10 source/closure descriptor
    (`jet-corelib-r10`) and length-delimited toolchain, dependency, target, mode,
    and instance facts, so a changed source package or ABI kernel cannot reuse a
@@ -51,5 +52,5 @@ Hostile closure checks:
   project manifest also disables cache reuse instead of becoming an empty
   identity.
 
-AOT and default `jet run` (Cranelift / deopt) share the same reachable Core ABI
-symbols for every applicable module in the table above (I9).
+AOT and default `jet run` (Cranelift / deopt) preserve the same reachable Core
+meaning for every applicable module in the table above (I9).
