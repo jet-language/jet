@@ -75,6 +75,9 @@ enum ChildOutcome {
 }
 
 pub(crate) fn run_prove(args: &[String], json: bool) {
+    // A caller cannot smuggle a stale authority into this production path.
+    // Capture/replay are the only owners allowed to install this adapter.
+    std::env::remove_var("JET_PROVE_REPLAY_TIME_MS");
     let mut positional = Vec::new();
     let mut lenses = Vec::new();
     let mut capture: Option<crate::ProveReplay::CaptureOpts> = None;
@@ -150,7 +153,35 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         source_digest: target.input_sha256.clone(),
         execution_adapter: "dev-tir-v1".to_string(),
         target_triple: host_target_triple(),
+        abi: "gnu".to_string(),
+        build_digest: target.input_sha256.clone(),
+        core_abi: "1".to_string(),
+        lock_digest: target.input_sha256.clone(),
+        profile: "dev".to_string(),
+        tir_hash: target.input_sha256.clone(),
+        tir_schema: "1".to_string(),
     };
+    if (capture.is_some() || replay.is_some()) && target.members.len() != 1 {
+        let paths = target
+            .members
+            .iter()
+            .map(|member| member.path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::ProveReplay::emit_diag(
+            "E3624",
+            "replay target cardinality is not one",
+            &format!(
+                "the selected {} resolved {} runnable targets: {}",
+                target.kind,
+                target.members.len(),
+                if paths.is_empty() { "none" } else { paths.as_str() }
+            ),
+            "select one runnable file or package target before capture or replay",
+            json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
     if let Some(opts) = capture.as_ref() {
         if let Err(status) = preflight_capture_target(&target, opts, json) {
             exit(status);
@@ -164,15 +195,43 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         None
     };
-    let replay_authority = if let Some(path) = replay {
+    let mut replay_authority = if let Some(path) = replay {
         match crate::ProveReplay::prepare_replay(&identity, &path) {
             Ok(authority) => {
-                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
-                eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+                let mut authority = authority;
+                let time_ms = match authority.consume_time() {
+                    Ok(time_ms) => time_ms,
+                    Err(why) => {
+                        crate::ProveReplay::emit_diag(
+                            "E3623",
+                            "replay diverged from captured authority",
+                            &why,
+                            "recapture with `--capture` so the normal producer result is authoritative",
+                            json,
+                        );
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                };
+                std::env::set_var("JET_PROVE_REPLAY_TIME_MS", time_ms.to_string());
+                if !json {
+                    eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+                }
                 Some(authority)
             }
             Err((code, why)) => {
-                eprintln!("Error [{code}]: {why}");
+                let what = match code {
+                    "E3620" => "replay schema version is incompatible",
+                    "E3621" => "replay semantic identity does not match",
+                    "E3628" => "replay capture exceeded its artifact limit",
+                    _ => "replay artifact is corrupt",
+                };
+                let fix = match code {
+                    "E3620" => "use a reader for the artifact schema, or recapture with this Jet",
+                    "E3621" => "replay the exact target identity that produced the artifact",
+                    "E3628" => "recapture a bounded artifact with a recorded Time authority",
+                    _ => "recapture the target and keep the complete `.jetproof-replay` artifact",
+                };
+                crate::ProveReplay::emit_diag(code, what, &why, fix, json);
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -269,17 +328,32 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         ExitCodes::OK
     };
     if let Some(authority) = replay_authority.as_ref() {
+        if let Err(why) = authority.finish() {
+            crate::ProveReplay::emit_diag(
+                "E3623",
+                "replay diverged from captured authority",
+                &why,
+                "recapture with `--capture` so the normal producer result is authoritative",
+                json,
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
         let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
             "panic"
         } else {
             "exit"
         };
         if authority.expected_status != exit_code || authority.expected_outcome != outcome {
-            eprintln!(
-                "Error [E3623]: replay diverged: captured outcome={} status={}, current outcome={} status={}",
-                authority.expected_outcome, authority.expected_status, outcome, exit_code
+            crate::ProveReplay::emit_diag(
+                "E3623",
+                "replay diverged from captured authority",
+                &format!(
+                    "captured outcome={} status={}, current outcome={} status={}",
+                    authority.expected_outcome, authority.expected_status, outcome, exit_code
+                ),
+                "recapture with `--capture` so the normal producer result is authoritative",
+                json,
             );
-            eprintln!(" Fix: recapture with `--capture` so the normal producer result is authoritative");
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -323,10 +397,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         let show = |facet: &str| lens_shows(&lenses, facet);
         if !lenses.is_empty() {
-            let mut uniq = lenses.clone();
-            uniq.sort();
-            uniq.dedup();
-            println!("LENSES   {}", uniq.join(", "));
+            println!("LENSES   {}", canonical_lens_names(&lenses).join(", "));
         }
         if show("refinements") || show("all") || show("effects") || show("taint") || lenses.is_empty() {
             println!("CHECKED  front end: {proved} proved, {failed} failed");
@@ -347,11 +418,14 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
         }
         if show("budgets") || lenses.is_empty() {
-            if !budgets.facts.is_empty() {
+            if !budgets.facts.is_empty() || !budgets.rejected.is_empty() {
                 let met = budgets.facts.iter().filter(|fact| fact.outcome == "pass").count();
                 let failed = budgets.facts.iter().filter(|fact| fact.outcome == "fail").count();
                 let warned = budgets.facts.len() - met - failed;
-                println!("BUDGETS  {met} met, {failed} failed, {warned} warned · verified canonical reports");
+                println!("BUDGETS  {met} met, {failed} failed, {warned} warned, {} unavailable · verified canonical reports", budgets.rejected.len());
+                for reason in &budgets.rejected {
+                    println!("  unavailable: {reason}");
+                }
             }
         }
         if replay_time_ms.is_some() && (show("replay") || lenses.is_empty()) {
@@ -384,11 +458,14 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
         }
         let unavailable = tests.iter().filter(|item| item.state == 3).count();
+        let budget_incomplete = !budgets.rejected.is_empty()
+            || budgets.facts.iter().any(|fact| fact.evidence == "unavailable");
         println!(
             "RESULT   {}",
             if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
                 "fail"
             } else if unavailable > 0
+                || budget_incomplete
                 || solver.iter().any(|item| {
                     matches!(item.outcome, crate::ProveSolver::SolverOutcome::Unknown { .. })
                 })
@@ -410,6 +487,14 @@ fn lens_shows(lenses: &[String], facet: &str) -> bool {
         return facet != "solver";
     }
     lenses.iter().any(|lens| lens == facet)
+}
+
+fn canonical_lens_names(lenses: &[String]) -> Vec<&'static str> {
+    PROOF_LENSES
+        .iter()
+        .copied()
+        .filter(|candidate| lenses.iter().any(|lens| lens == candidate))
+        .collect()
 }
 
 fn outside_selected_lenses(
@@ -465,6 +550,11 @@ fn outside_selected_lenses(
                 "  budget {}: {} ({})",
                 fact.budget_id, fact.outcome, fact.evidence
             ));
+        }
+    }
+    for reason in &budgets.rejected {
+        if !lens_shows(lenses, "budgets") {
+            rows.push(format!("  budget unavailable: {reason}"));
         }
     }
     if rows.is_empty() {
@@ -1197,23 +1287,33 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                 }
                 match read_test_report(&report_path) {
                     Ok(records) => {
-                        if records.iter().any(|record| record.kind == 2 || (record.kind == 1 && record.state == 1))
-                            && highest_exit != ExitCodes::ICE
-                        {
-                            highest_exit = ExitCodes::RUNTIME_PANIC;
-                        }
-                        for record in records {
-                            let claim = format!("{}:{}:{}", record.kind, record.name, record.message);
-                            items.push(TestItem {
-                                id: evidence_id(target, if record.kind == 1 { "contract" } else { "unit" }, &member.path, "0:0-0:0", &claim),
-                                path: if record.kind == 3 || record.file.is_empty() { member.path.clone() } else { record.file.clone() },
-                                state: record.state,
-                                kind: record.kind,
-                                message: record.message,
-                                line: record.line,
-                                name: record.name,
-                                seed: if record.kind == 3 { record.file } else { String::new() },
+                        let invalid_records = records.is_empty()
+                            || records.iter().any(|record| {
+                            record.kind != 3
+                                && !record.file.is_empty()
+                                && !producer_path_is_member(target, &record.file)
                             });
+                        if invalid_records {
+                            highest_exit = ExitCodes::ICE;
+                        } else {
+                            if records.iter().any(|record| record.kind == 2 || (record.kind == 1 && record.state == 1))
+                                && highest_exit != ExitCodes::ICE
+                            {
+                                highest_exit = ExitCodes::RUNTIME_PANIC;
+                            }
+                            for record in records {
+                                let claim = format!("{}:{}:{}", record.kind, record.name, record.message);
+                                items.push(TestItem {
+                                    id: evidence_id(target, if record.kind == 1 { "contract" } else { "unit" }, &member.path, "0:0-0:0", &claim),
+                                    path: if record.kind == 3 || record.file.is_empty() { member.path.clone() } else { record.file.clone() },
+                                    state: record.state,
+                                    kind: record.kind,
+                                    message: record.message,
+                                    line: record.line,
+                                    name: record.name,
+                                    seed: if record.kind == 3 { record.file } else { String::new() },
+                                });
+                            }
                         }
                     }
                     Err(_) => highest_exit = ExitCodes::ICE,
@@ -1240,12 +1340,20 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
     (items, highest_exit)
 }
 
+fn producer_path_is_member(target: &Target, path: &str) -> bool {
+    let normalized = path.trim_start_matches("./").replace('\\', "/");
+    target.members.iter().any(|member| {
+        member.path.trim_start_matches("./").replace('\\', "/") == normalized
+    })
+}
+
 fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
     // Keep the producer's stdout/stderr out of the user's proof stdout, but
     // drain both pipes concurrently so a noisy child cannot deadlock on a full
     // OS pipe. The privacy policy intentionally does not persist these
     // transcripts in ProofReport; they are bounded diagnostic material for the
     // supervising process only.
+    configure_child_process_group(command);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -1274,11 +1382,13 @@ fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Ok(None) => {
+                terminate_child_process_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 return finish(ChildOutcome::TimedOut);
             }
             Err(_) => {
+                terminate_child_process_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 return finish(ChildOutcome::Exited(None));
@@ -1286,6 +1396,39 @@ fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
         }
     }
 }
+
+#[cfg(unix)]
+fn configure_child_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(|| {
+            extern "C" {
+                fn setpgid(pid: i32, pgid: i32) -> i32;
+            }
+            if unsafe { setpgid(0, 0) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_child_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate_child_process_group(pid: u32) {
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    unsafe {
+        let _ = kill(-(pid as i32), 9);
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_child_process_group(_pid: u32) {}
 
 fn capture_child_stream(stream: &mut impl std::io::Read) -> Vec<u8> {
     const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
@@ -1322,8 +1465,15 @@ fn read_test_report_bytes(bytes: &[u8]) -> Result<Vec<ProducerRecord>, String> {
         if records.len() == 10_000 { return Err("too many test producer records".into()); }
         let kind = *bytes.get(at).ok_or("truncated test producer report")?;
         let state = *bytes.get(at + 1).ok_or("truncated test producer report")?;
+        if kind > 4 {
+            return Err("unknown test producer record kind".into());
+        }
+        if state > 3 {
+            return Err("unknown test producer record state".into());
+        }
         at += 2;
-        let line = read_u64(&bytes, &mut at)? as u32;
+        let line = u32::try_from(read_u64(&bytes, &mut at)?)
+            .map_err(|_| "test producer source line is too large")?;
         let name = read_string(&bytes, &mut at)?;
         let message = read_string(&bytes, &mut at)?;
         let file = read_string(&bytes, &mut at)?;
@@ -1379,6 +1529,19 @@ mod protocol_tests {
         let mut trailing = b"JETTEST2".to_vec();
         trailing.push(0);
         assert!(read_test_report_bytes(&trailing).is_err());
+
+        let mut unknown_kind = b"JETTEST2".to_vec();
+        unknown_kind.extend_from_slice(&[9, 0]);
+        assert!(read_test_report_bytes(&unknown_kind).is_err());
+
+        let mut unknown_state = b"JETTEST2".to_vec();
+        unknown_state.extend_from_slice(&[0, 9]);
+        assert!(read_test_report_bytes(&unknown_state).is_err());
+
+        let mut oversized_line = b"JETTEST2".to_vec();
+        oversized_line.extend_from_slice(&[0, 0]);
+        oversized_line.extend_from_slice(&(u64::from(u32::MAX) + 1).to_be_bytes());
+        assert!(read_test_report_bytes(&oversized_line).is_err());
     }
 }
 
@@ -1515,6 +1678,31 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
                 identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
             }
         }
+    } else {
+        // A file target can still import source outside the entry file. Ask
+        // the production loader for its resolved dependency closure so replay
+        // identity cannot be reused after an imported module changes.
+        let (_, dependencies) = jet::Loader::load_entry_with_overlays_and_dependencies(
+            raw,
+            &[],
+            true,
+        );
+        for dependency in dependencies {
+            let dependency_metadata = fs::symlink_metadata(&dependency)
+                .map_err(|e| format!("couldn't inspect proof dependency `{}`: {e}", dependency.display()))?;
+            if dependency_metadata.file_type().is_symlink() {
+                return Err(format!("proof target contains symlink `{}`", dependency.display()));
+            }
+            if !dependency_metadata.is_file() {
+                continue;
+            }
+            let bytes = fs::read(&dependency)
+                .map_err(|e| format!("couldn't read proof dependency `{}`: {e}", dependency.display()))?;
+            let dependency_path = normalized(&dependency);
+            if !identity_members.iter().any(|(member_path, _)| member_path == &dependency_path) {
+                identity_members.push((dependency_path, jet::SHA256::sha256_hex(&bytes)));
+            }
+        }
     }
     identity_members.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let mut identity = Vec::new();
@@ -1553,6 +1741,9 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         if metadata.file_type().is_symlink() {
             return Err(format!("proof target contains symlink `{}`", path.display()));
         }
+        if path.file_name().and_then(|name| name.to_str()).is_none() {
+            return Err(format!("proof target contains a non-UTF-8 path `{}`", path.display()));
+        }
         if metadata.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name == "build" || name.starts_with('.') {
@@ -1581,6 +1772,9 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
         if metadata.file_type().is_symlink() {
             return Err(format!("proof target contains symlink `{}`", path.display()));
+        }
+        if path.file_name().and_then(|name| name.to_str()).is_none() {
+            return Err(format!("proof target contains a non-UTF-8 path `{}`", path.display()));
         }
         if metadata.is_dir() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
@@ -1769,6 +1963,16 @@ fn render_report(
         let budget = format!("{{\"budgetId\":{},\"enforcement\":{},\"evidenceId\":{},\"reportId\":{},\"statistical\":{}}}", json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence_id), json(&fact.report_id), fact.statistical);
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
     }
+    for (index, reason) in budgets.rejected.iter().enumerate() {
+        let claim = format!("canonical budget report unavailable: {reason}");
+        let id = evidence_id(target, "budget", &target.root, &format!("0:0-0:{index}"), &claim);
+        evidence_rows.push(format!(
+            "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{},\"kind\":\"deterministic_budget\",\"outcome\":\"unavailable\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":{},\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"unavailable\"}}",
+            json(&id),
+            json(reason),
+            json(&target.root)
+        ));
+    }
     for item in solver {
         let diagnostic_indexes = if let crate::ProveSolver::SolverOutcome::Disproved {
             assignment,
@@ -1837,7 +2041,8 @@ fn render_report(
     let deterministic_selected = budgets.facts.iter().filter(|fact| !fact.statistical).count();
     let deterministic_failed = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "fail").count();
     let deterministic_met = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "pass").count();
-    let deterministic_unavailable = budgets.facts.iter().filter(|fact| !fact.statistical && fact.evidence == "unavailable").count();
+    let deterministic_unavailable = budgets.facts.iter().filter(|fact| !fact.statistical && fact.evidence == "unavailable").count()
+        + budgets.rejected.len();
     let statistical_selected = budgets.facts.iter().filter(|fact| fact.statistical).count();
     let statistical_failed = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "fail").count();
     let statistical_met = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "pass").count();

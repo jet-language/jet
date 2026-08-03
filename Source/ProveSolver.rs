@@ -256,7 +256,11 @@ pub(crate) fn run_solver_producer(
             });
             continue;
         }
-        let outcome = prove_obligation(&obligation.formula)
+        let outcome = if obligation.kind == "fixed_index_bounds" {
+            prove_finite_obligation(&obligation.formula)
+        } else {
+            prove_obligation(&obligation.formula)
+        }
             .map_err(|reason| format!("solver certificate failure: {reason}"))?;
         let tag = match &outcome {
             SolverOutcome::Proved { .. } => "proved",
@@ -406,10 +410,11 @@ fn walk_items(
                         origin: path.to_string(),
                         span: span_text,
                         formula,
-                        // The declaration bounds are assumptions, not an
-                        // index use site. Claiming the same inequalities is a
-                        // tautology and does not prove the access operation.
-                        unsupported_reason: Some("unsupported_formula"),
+                        // The checked distinct range is a finite domain. The
+                        // finite backend re-enumerates that domain and checks
+                        // the exact normalized claim before accepting its
+                        // certificate.
+                        unsupported_reason: None,
                     });
                 }
             }
@@ -1130,6 +1135,195 @@ fn inclusive_bounds(lower: i64, upper: i64) -> Vec<Inequality> {
     ]
 }
 
+fn prove_finite_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
+    let Some((variable, lower, upper)) = finite_domain(formula) else {
+        return Ok(SolverOutcome::Unknown {
+            reason: "unsupported_formula",
+            steps: 0,
+        });
+    };
+    let span = upper
+        .checked_sub(lower)
+        .and_then(|span| span.checked_add(1))
+        .ok_or_else(|| "finite domain size overflow".to_string())?;
+    if span <= 0 {
+        return Ok(SolverOutcome::Unknown {
+            reason: "structural_limit",
+            steps: 0,
+        });
+    }
+    if u128::try_from(span).unwrap_or(u128::MAX) > u128::from(MAX_STEPS) {
+        return Ok(SolverOutcome::Unknown {
+            reason: "step_limit",
+            steps: 0,
+        });
+    }
+
+    let mut records = Vec::new();
+    let mut steps = 0u64;
+    let mut value = lower;
+    loop {
+        if steps >= MAX_STEPS {
+            return Ok(SolverOutcome::Unknown {
+                reason: "step_limit",
+                steps,
+            });
+        }
+        steps += 1;
+        let mut assignment = BTreeMap::new();
+        assignment.insert(variable.clone(), value);
+        if !satisfies(&formula.assumptions, &assignment) {
+            return Ok(SolverOutcome::Unknown {
+                reason: "structural_limit",
+                steps,
+            });
+        }
+        if !satisfies(&formula.claim, &assignment) {
+            return Ok(SolverOutcome::Disproved { assignment, steps });
+        }
+        records.extend_from_slice(finite_result_record(&variable, value).as_bytes());
+        if value == upper {
+            break;
+        }
+        value = value
+            .checked_add(1)
+            .ok_or_else(|| "finite domain cursor overflow".to_string())?;
+    }
+
+    let certificate = format!(
+        "{{\"assignmentCount\":{steps},\"domainManifest\":[{{\"lower\":\"{lower}\",\"name\":{},\"upper\":\"{upper}\"}}],\"rollingResultSha256\":{}}}",
+        json_str(&variable),
+        json_str(&SHA256::sha256_hex(&records)),
+    );
+    let certificate_sha256 = SHA256::sha256_hex(format!("{certificate}\n").as_bytes());
+    if let Err(reason) = check_finite_certificate(formula, &certificate) {
+        return match reason {
+            "coefficient_overflow" | "structural_limit" | "step_limit" => {
+                Ok(SolverOutcome::Unknown { reason, steps })
+            }
+            _ => Err(format!("invalid finite certificate: {reason}")),
+        };
+    }
+    Ok(SolverOutcome::Proved {
+        certificate,
+        certificate_sha256,
+        steps,
+    })
+}
+
+fn finite_domain(formula: &Formula) -> Option<(String, i128, i128)> {
+    let mut variable = None;
+    let mut lower = None;
+    let mut upper = None;
+    for inequality in &formula.assumptions {
+        if inequality.affine.terms.len() != 1 {
+            return None;
+        }
+        let (name, coefficient) = inequality.affine.terms.iter().next()?;
+        if *coefficient != -1 && *coefficient != 1 {
+            return None;
+        }
+        if let Some(existing) = &variable {
+            if existing != name {
+                return None;
+            }
+        } else {
+            variable = Some(name.clone());
+        }
+        if *coefficient == -1 {
+            lower = Some(lower.map_or(inequality.affine.constant, |old: i128| {
+                old.max(inequality.affine.constant)
+            }));
+        } else {
+            let bound = inequality.affine.constant.checked_neg()?;
+            upper = Some(upper.map_or(bound, |old: i128| old.min(bound)));
+        }
+    }
+    Some((variable?, lower?, upper?))
+}
+
+fn finite_result_record(variable: &str, value: i128) -> String {
+    format!(
+        "{{\"assignment\":{{{}:\"{value}\"}},\"result\":\"proved\"}}\n",
+        json_str(variable)
+    )
+}
+
+fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), &'static str> {
+    let root = parse_json(certificate).map_err(|_| "certificate_invalid")?;
+    if canonical_json_value(&root).map_err(|_| "certificate_invalid")? != certificate {
+        return Err("certificate_invalid");
+    }
+    let object = as_object(&root)?;
+    exact_certificate_keys(
+        object,
+        &["assignmentCount", "domainManifest", "rollingResultSha256"],
+    )?;
+    let count = json_usize(object.get("assignmentCount"))?;
+    let manifest = match object.get("domainManifest") {
+        Some(JSONValue::Array(values)) if values.len() == 1 => as_object(&values[0])?,
+        _ => return Err("certificate_invalid"),
+    };
+    exact_certificate_keys(manifest, &["lower", "name", "upper"])?;
+    let Some((variable, lower, upper)) = finite_domain(formula) else {
+        return Err("structural_limit");
+    };
+    let manifest_name = match manifest.get("name") {
+        Some(JSONValue::String(name)) => name,
+        _ => return Err("certificate_invalid"),
+    };
+    let manifest_lower = json_i128(manifest.get("lower"))?;
+    let manifest_upper = json_i128(manifest.get("upper"))?;
+    if manifest_name != variable.as_str() || manifest_lower != lower || manifest_upper != upper {
+        return Err("certificate_invalid");
+    }
+    let claimed_hash = match object.get("rollingResultSha256") {
+        Some(JSONValue::String(value))
+            if value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) =>
+        {
+            value
+        }
+        _ => return Err("certificate_invalid"),
+    };
+    let span = upper
+        .checked_sub(lower)
+        .and_then(|span| span.checked_add(1))
+        .ok_or("coefficient_overflow")?;
+    if span <= 0 {
+        return Err("structural_limit");
+    }
+    if u128::try_from(span).unwrap_or(u128::MAX) > u128::from(MAX_STEPS) {
+        return Err("step_limit");
+    }
+    if count != usize::try_from(span).map_err(|_| "structural_limit")? {
+        return Err("certificate_invalid");
+    }
+    let mut records = Vec::new();
+    let mut value = lower;
+    loop {
+        let mut assignment = BTreeMap::new();
+        assignment.insert(variable.clone(), value);
+        if !satisfies(&formula.assumptions, &assignment)
+            || !satisfies(&formula.claim, &assignment)
+        {
+            return Err("certificate_invalid");
+        }
+        records.extend_from_slice(finite_result_record(&variable, value).as_bytes());
+        if value == upper {
+            break;
+        }
+        value = value.checked_add(1).ok_or("coefficient_overflow")?;
+    }
+    if SHA256::sha256_hex(&records) == claimed_hash.as_str() {
+        Ok(())
+    } else {
+        Err("certificate_invalid")
+    }
+}
+
 fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
     // Prove assumptions => claim by showing assumptions ∧ ¬claim is unsat.
     let mut negated_claim = Vec::new();
@@ -1165,7 +1359,12 @@ fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
         let mut branch = formula.assumptions.clone();
         branch.push(neg.clone());
         if let Some(assignment) = find_counterexample(&branch) {
-            charge(&mut steps).map_err(|_| "step_limit".to_string())?;
+            if charge(&mut steps).is_err() {
+                return Ok(SolverOutcome::Unknown {
+                    reason: "step_limit",
+                    steps,
+                });
+            }
             return Ok(SolverOutcome::Disproved { assignment, steps });
         }
         match search_unsat(&branch, &mut steps) {
@@ -1180,7 +1379,7 @@ fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
     }
 
     let cert = format!(
-        "{{\"kind\":\"and_intro\",\"children\":[{}]}}",
+        "{{\"children\":[{}],\"kind\":\"and_intro\"}}",
         certificates
             .iter()
             .map(|(branch_index, proof)| {
@@ -1302,8 +1501,8 @@ fn search_unsat(ineqs: &[Inequality], steps: &mut u64) -> Result<String, SearchE
         let (lo, hi) = domains[first];
         let pivot = lo + (hi - lo) / 2;
         Ok(format!(
-            "{{\"kind\":\"split\",\"variable\":{},\"pivot\":\"{pivot}\",\"left\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}},\"right\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}}}}",
-            json_str(first)
+            "{{\"kind\":\"split\",\"left\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}},\"pivot\":\"{pivot}\",\"right\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}},\"variable\":{}}}",
+            json_str(first),
         ))
     } else {
         Ok("{\"kind\":\"linear_contradiction\",\"multipliers\":[]}".into())
@@ -1476,6 +1675,9 @@ fn charge(steps: &mut u64) -> Result<(), SearchErr> {
 
 fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'static str> {
     let root = parse_json(certificate).map_err(|_| "certificate_invalid")?;
+    if canonical_json_value(&root).map_err(|_| "certificate_invalid")? != certificate {
+        return Err("certificate_invalid");
+    }
     let mut negated = Vec::new();
     for ineq in &formula.claim {
         let affine = ineq
@@ -1492,6 +1694,7 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
     match object_kind(&root)? {
         "and_intro" => {
             let object = as_object(&root)?;
+            exact_certificate_keys(object, &["children", "kind"])?;
             let children = match object.get("children") {
                 Some(JSONValue::Array(children)) => children,
                 _ => return Err("certificate_invalid"),
@@ -1502,6 +1705,7 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
             let mut seen = BTreeSet::new();
             for child in children {
                 let child = as_object(child)?;
+                exact_certificate_keys(child, &["branchIndex", "proof"])?;
                 let branch_index = json_usize(child.get("branchIndex"))?;
                 if branch_index >= negated.len() || !seen.insert(branch_index) {
                     return Err("certificate_invalid");
@@ -1548,6 +1752,19 @@ fn as_object(value: &JSONValue) -> Result<&std::collections::HashMap<String, JSO
     }
 }
 
+fn exact_certificate_keys(
+    object: &std::collections::HashMap<String, JSONValue>,
+    keys: &[&str],
+) -> Result<(), &'static str> {
+    if object.len() != keys.len()
+        || object.keys().any(|key| !keys.contains(&key.as_str()))
+        || keys.iter().any(|key| !object.contains_key(*key))
+    {
+        return Err("certificate_invalid");
+    }
+    Ok(())
+}
+
 fn object_kind(value: &JSONValue) -> Result<&str, &'static str> {
     let object = as_object(value)?;
     match object.get("kind") {
@@ -1567,7 +1784,43 @@ fn json_i128(value: Option<&JSONValue>) -> Result<i128, &'static str> {
     let Some(JSONValue::String(value)) = value else {
         return Err("certificate_invalid");
     };
-    value.parse::<i128>().map_err(|_| "certificate_invalid")
+    let parsed = value.parse::<i128>().map_err(|_| "certificate_invalid")?;
+    if parsed.to_string() != value.as_str() {
+        return Err("certificate_invalid");
+    }
+    Ok(parsed)
+}
+
+fn canonical_json_value(value: &JSONValue) -> Result<String, &'static str> {
+    match value {
+        JSONValue::Null => Ok("null".into()),
+        JSONValue::Bool(value) => Ok(value.to_string()),
+        JSONValue::Number(value) => Ok(value.to_string()),
+        JSONValue::Flt(value) if value.is_finite() => Ok(value.to_string()),
+        JSONValue::Flt(_) => Err("certificate_invalid"),
+        JSONValue::String(value) => Ok(json_str(value)),
+        JSONValue::Array(values) => Ok(format!(
+            "[{}]",
+            values
+                .iter()
+                .map(canonical_json_value)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",")
+        )),
+        JSONValue::Object(object) => {
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort();
+            let mut fields = Vec::with_capacity(keys.len());
+            for key in keys {
+                fields.push(format!(
+                    "{}:{}",
+                    json_str(key),
+                    canonical_json_value(&object[key])?
+                ));
+            }
+            Ok(format!("{{{}}}", fields.join(",")))
+        }
+    }
 }
 
 fn check_certificate_node(
@@ -1577,6 +1830,7 @@ fn check_certificate_node(
     match object_kind(value)? {
         "linear_contradiction" => {
             let object = as_object(value)?;
+            exact_certificate_keys(object, &["kind", "multipliers"])?;
             let entries = match object.get("multipliers") {
                 Some(JSONValue::Array(entries)) => entries,
                 _ => return Err("certificate_invalid"),
@@ -1590,14 +1844,16 @@ fn check_certificate_node(
                 };
             }
             let mut sum = Affine::constant(0);
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let entry = as_object(entry)?;
+                exact_certificate_keys(entry, &["inequalityIndex", "multiplier"])?;
                 let index = json_usize(entry.get("inequalityIndex"))?;
-                if index >= inequalities.len() {
+                if index >= inequalities.len() || !seen.insert(index) {
                     return Err("certificate_invalid");
                 }
                 let multiplier = json_i128(entry.get("multiplier"))?;
-                if multiplier < 0 {
+                if multiplier <= 0 {
                     return Err("certificate_invalid");
                 }
                 sum = sum
@@ -1612,6 +1868,7 @@ fn check_certificate_node(
         }
         "split" => {
             let object = as_object(value)?;
+            exact_certificate_keys(object, &["kind", "left", "pivot", "right", "variable"])?;
             let variable = match object.get("variable") {
                 Some(JSONValue::String(variable)) if !variable.is_empty() => variable,
                 _ => return Err("certificate_invalid"),
@@ -1771,6 +2028,26 @@ mod tests {
             prove_obligation(&formula),
             Ok(SolverOutcome::Disproved { assignment, .. })
                 if assignment.get("value").is_some_and(|value| *value >= 1)
+        ));
+    }
+
+    #[test]
+    fn finite_distinct_range_emits_a_rechecked_certificate() {
+        let evidence = run_solver_producer(
+            &[(
+                "bounded.jet".into(),
+                "Index :: distinct Int(0..3);\n".into(),
+            )],
+            "target",
+            true,
+        )
+        .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(matches!(
+            &evidence[0].outcome,
+            SolverOutcome::Proved { certificate, .. }
+                if certificate.contains("domainManifest")
+                    && certificate.contains("rollingResultSha256")
         ));
     }
 

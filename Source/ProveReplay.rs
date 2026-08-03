@@ -31,6 +31,13 @@ pub(crate) struct ReplayIdentity {
     pub source_digest: String,
     pub execution_adapter: String,
     pub target_triple: String,
+    pub abi: String,
+    pub build_digest: String,
+    pub core_abi: String,
+    pub lock_digest: String,
+    pub profile: String,
+    pub tir_hash: String,
+    pub tir_schema: String,
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +51,38 @@ pub(crate) struct ReplayAuthority {
     pub time_ms: i64,
     pub expected_outcome: String,
     pub expected_status: i32,
+    time_values: Vec<i64>,
+    next_time: usize,
+}
+
+impl ReplayAuthority {
+    /// Install one recorded Time value at a time. The proof command has one
+    /// bounded Time adapter today; keeping a cursor makes extra, reordered, or
+    /// silently ignored records a divergence instead of harmless metadata.
+    pub(crate) fn consume_time(&mut self) -> Result<i64, String> {
+        let value = self
+            .time_values
+            .get(self.next_time)
+            .copied()
+            .ok_or_else(|| "replay requested Time after the artifact was exhausted".to_string())?;
+        self.next_time = self
+            .next_time
+            .checked_add(1)
+            .ok_or_else(|| "replay Time record cursor overflowed".to_string())?;
+        self.time_ms = value;
+        Ok(value)
+    }
+
+    pub(crate) fn finish(&self) -> Result<(), String> {
+        if self.next_time == self.time_values.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "replay stopped with {} unconsumed Time record(s)",
+                self.time_values.len() - self.next_time
+            ))
+        }
+    }
 }
 
 pub(crate) fn parse_capture_flag(arg: &str) -> Option<CaptureOpts> {
@@ -104,7 +143,9 @@ pub(crate) fn prepare_safe_capture(
         );
         return Err(ExitCodes::USER_ERROR);
     }
-    eprintln!("capture preflight: safe Time only; normal producer will run under this authority");
+    if !json_mode {
+        eprintln!("capture preflight: safe Time only; normal producer will run under this authority");
+    }
     let unix_ns = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => match u64::try_from(duration.as_nanos()) {
             Ok(value) => value,
@@ -173,7 +214,9 @@ pub(crate) fn prepare_safe_capture(
     // The environment variable is the narrow authority adapter consumed by
     // every execution tier during that producer run.
     std::env::set_var("JET_PROVE_REPLAY_TIME_MS", time_ms.to_string());
-    eprintln!("capture: Time authority prepared");
+    if !json_mode {
+        eprintln!("capture: Time authority prepared");
+    }
     Ok(CaptureAuthority {
         unix_ns,
         explicit_path,
@@ -186,6 +229,16 @@ pub(crate) fn finalize_safe_capture(
     exit_code: i32,
     json_mode: bool,
 ) -> Result<(), i32> {
+    if let Err(message) = validate_identity_for_capture(identity) {
+        emit_diag(
+            "E3629",
+            "replay artifact could not be finalized",
+            &message,
+            "retry capture with a project-relative, supported target identity",
+            json_mode,
+        );
+        return Err(ExitCodes::USER_ERROR);
+    }
     let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
         "panic"
     } else {
@@ -221,7 +274,7 @@ pub(crate) fn finalize_safe_capture(
             }
         },
     };
-    if let Err(message) = finalize_artifact(&dest, &bytes) {
+    if let Err(message) = finalize_artifact(&dest, &bytes, json_mode) {
         emit_diag(
             "E3629",
             "replay artifact could not be finalized",
@@ -232,8 +285,10 @@ pub(crate) fn finalize_safe_capture(
         return Err(ExitCodes::USER_ERROR);
     }
     let rel = dest.display().to_string();
-    eprintln!("capture: finalized outcome={outcome} status={status}");
-    eprintln!("artifact: {rel}");
+    if !json_mode {
+        eprintln!("capture: finalized outcome={outcome} status={status}");
+        eprintln!("artifact: {rel}");
+    }
     Ok(())
 }
 
@@ -244,7 +299,10 @@ pub(crate) fn prepare_replay(
     identity: &ReplayIdentity,
     artifact_path: &str,
 ) -> Result<ReplayAuthority, (&'static str, String)> {
-    let path = Path::new(artifact_path);
+    let path = validate_replay_path(artifact_path)
+        .map_err(|message| ("E3622", message))?;
+    ensure_read_parent(&path)
+        .map_err(|message| ("E3622", message))?;
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         ("E3622", format!("could not inspect `{artifact_path}`: {error}"))
     })?;
@@ -271,7 +329,11 @@ pub(crate) fn prepare_replay(
     let header = parse_and_verify(&bytes)?;
     identity_matches(&header, identity)
         .map_err(|field| ("E3621", format!("identity field `{field}` differs from the current target")))?;
-    let time_ms = extract_first_time_ms(&bytes).map_err(|why| ("E3628", why))?;
+    let time_values = extract_time_ms(&bytes).map_err(|why| ("E3628", why))?;
+    let time_ms = time_values
+        .first()
+        .copied()
+        .ok_or(("E3628", "replay artifact contains no Time authority".to_string()))?;
     let expected_outcome = header
         .get("run_outcome")
         .cloned()
@@ -285,6 +347,8 @@ pub(crate) fn prepare_replay(
         time_ms,
         expected_outcome,
         expected_status,
+        time_values,
+        next_time: 0,
     })
 }
 
@@ -311,6 +375,12 @@ fn validate_capture_path(path: &str) -> Result<PathBuf, String> {
     if path.is_empty() {
         return Err("explicit capture path is empty".into());
     }
+    if path.contains('\0') {
+        return Err("capture path contains NUL".into());
+    }
+    if path.contains('\\') || path.split('/').any(|part| part.is_empty()) {
+        return Err("capture path must use non-empty forward-slash components".into());
+    }
     let path = Path::new(path);
     if path.is_absolute()
         || path.components().any(|component| {
@@ -327,6 +397,71 @@ fn validate_capture_path(path: &str) -> Result<PathBuf, String> {
     }
     if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay") {
         return Err("capture path must end in `.jetproof-replay`".into());
+    }
+    Ok(path.to_path_buf())
+}
+
+fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String> {
+    let entry = Path::new(&identity.entry);
+    if identity.entry.is_empty()
+        || entry.is_absolute()
+        || entry.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("entry identity must be a project-relative path".into());
+    }
+    if !matches!(identity.execution_adapter.as_str(), "dev-tir-v1" | "aot-native-v1") {
+        return Err(format!(
+            "unsupported execution adapter `{}`",
+            identity.execution_adapter
+        ));
+    }
+    for (name, value) in [
+        ("source_digest", identity.source_digest.as_str()),
+        ("build_digest", identity.build_digest.as_str()),
+        ("lock_digest", identity.lock_digest.as_str()),
+        ("tir_hash", identity.tir_hash.as_str()),
+    ] {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(format!(
+                "identity field `{name}` is not a lowercase SHA-256 digest"
+            ));
+        }
+    }
+    if identity.abi.is_empty()
+        || identity.core_abi.is_empty()
+        || identity.profile.is_empty()
+        || identity.target_triple.is_empty()
+        || identity.tir_schema.is_empty()
+    {
+        return Err("identity contains an empty required field".into());
+    }
+    Ok(())
+}
+
+fn validate_replay_path(path: &str) -> Result<PathBuf, String> {
+    if path.is_empty() {
+        return Err("replay artifact path is empty".into());
+    }
+    let path = Path::new(path);
+    if path.components().any(|component| {
+        matches!(component, Component::CurDir | Component::ParentDir | Component::Prefix(_))
+    }) {
+        return Err("replay artifact path contains an unsafe component".into());
+    }
+    if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay") {
+        return Err("replay artifact path must end in `.jetproof-replay`".into());
     }
     Ok(path.to_path_buf())
 }
@@ -353,7 +488,7 @@ fn sanitize_entry(entry: &str) -> String {
     }
 }
 
-fn finalize_artifact(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn finalize_artifact(path: &Path, bytes: &[u8], json_mode: bool) -> Result<(), String> {
     ensure_safe_parent(path)?;
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if !metadata.file_type().is_file() {
@@ -361,7 +496,9 @@ fn finalize_artifact(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
         let existing = fs::read(path).map_err(|e| e.to_string())?;
         if existing == bytes {
-            eprintln!("already captured");
+            if !json_mode {
+                eprintln!("already captured");
+            }
             return Ok(());
         }
         return Err(format!(
@@ -441,6 +578,34 @@ fn ensure_safe_parent(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_read_parent(path: &Path) -> Result<(), String> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut current = if parent.is_absolute() {
+        PathBuf::from(Path::new("/"))
+    } else {
+        PathBuf::from(".")
+    };
+    for component in parent.components() {
+        match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => current.push(name),
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err("replay artifact parent contains an unsafe component".into())
+            }
+        }
+        let metadata = fs::symlink_metadata(&current).map_err(|error| {
+            format!("could not inspect replay artifact parent `{}`: {error}", current.display())
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("replay artifact parent is a symlink: {}", current.display()));
+        }
+        if !metadata.is_dir() {
+            return Err(format!("replay artifact parent is not a directory: {}", current.display()));
+        }
+    }
+    Ok(())
+}
+
 fn build_safe_time_artifact(
     identity: &ReplayIdentity,
     unix_ns: u64,
@@ -503,12 +668,12 @@ fn header_json(
         (
             "identity",
             Json::Obj(vec![
-                ("abi".into(), Json::Str("gnu".into())),
+                ("abi".into(), Json::Str(identity.abi.clone())),
                 (
                     "build_digest".into(),
-                    Json::Str(identity.source_digest.clone()),
+                    Json::Str(identity.build_digest.clone()),
                 ),
-                ("core_abi".into(), Json::Str("1".into())),
+                ("core_abi".into(), Json::Str(identity.core_abi.clone())),
                 ("entry".into(), Json::Str(identity.entry.clone())),
                 (
                     "execution_adapter".into(),
@@ -516,9 +681,9 @@ fn header_json(
                 ),
                 (
                     "lock_digest".into(),
-                    Json::Str(identity.source_digest.clone()),
+                    Json::Str(identity.lock_digest.clone()),
                 ),
-                ("profile".into(), Json::Str("dev".into())),
+                ("profile".into(), Json::Str(identity.profile.clone())),
                 (
                     "source_digest".into(),
                     Json::Str(identity.source_digest.clone()),
@@ -529,9 +694,9 @@ fn header_json(
                 ),
                 (
                     "tir_hash".into(),
-                    Json::Str(identity.source_digest.clone()),
+                    Json::Str(identity.tir_hash.clone()),
                 ),
-                ("tir_schema".into(), Json::Str("1".into())),
+                ("tir_schema".into(), Json::Str(identity.tir_schema.clone())),
             ]),
         ),
         (
@@ -640,8 +805,10 @@ fn parse_and_verify(
     let header_bytes = &bytes[16..header_end];
     let header_text = std::str::from_utf8(header_bytes)
         .map_err(|_| ("E3622", "header is not UTF-8".into()))?;
-    let flat = flatten_identity_fields(header_text)
-        .map_err(|why| ("E3622", why))?;
+    let flat = flatten_identity_fields(header_text).map_err(|why| {
+        let code = if header_schema_error(&why) { "E3620" } else { "E3622" };
+        (code, why)
+    })?;
     let jend = bytes
         .len()
         .checked_sub(52)
@@ -726,7 +893,13 @@ fn parse_and_verify(
         off = frame_end;
     }
     if frame_count == 0 {
-        return Err(("E3622", "replay artifact contains no Time frames".into()));
+        return Err(("E3628", "replay artifact contains no Time authority".into()));
+    }
+    if frame_count > 1 {
+        return Err((
+            "E3622",
+            "safe replay must contain exactly one consumed Time frame".into(),
+        ));
     }
     let footer_frames = u64::from_le_bytes(
         bytes[jend + 4..jend + 12]
@@ -766,7 +939,14 @@ fn parse_and_verify(
     Ok(flat)
 }
 
-fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
+fn header_schema_error(message: &str) -> bool {
+    message.contains("unknown field")
+        || message.contains("version is incompatible")
+        || message.contains("version must be")
+        || message.contains("missing version")
+}
+
+fn extract_time_ms(bytes: &[u8]) -> Result<Vec<i64>, String> {
     if bytes.len() < 16 {
         return Err("artifact too short for Time root".into());
     }
@@ -777,7 +957,6 @@ fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
     if header_end > bytes.len() {
         return Err("replay header is truncated".into());
     }
-    let off = header_end;
     let jend = bytes
         .len()
         .checked_sub(52)
@@ -785,49 +964,72 @@ fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
     if &bytes[jend..jend + 4] != b"JEND" {
         return Err("missing JEND while reading Time".to_string());
     }
-    let header_frame_end = off
-        .checked_add(15)
-        .ok_or_else(|| "Time frame header length overflow".to_string())?;
-    if header_frame_end > jend {
-        return Err("no Time frame present in replay artifact".into());
+    let mut values = Vec::new();
+    let mut off = header_end;
+    while off < jend {
+        let frame_header_end = off
+            .checked_add(15)
+            .ok_or_else(|| "Time frame header length overflow".to_string())?;
+        if frame_header_end > jend {
+            return Err("Time frame header is truncated".into());
+        }
+        let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
+        if kind != KIND_TIME_WALL {
+            return Err(format!("frame kind {kind:#06x} is not Time"));
+        }
+        let plen = u32::from_le_bytes([
+            bytes[off + 11],
+            bytes[off + 12],
+            bytes[off + 13],
+            bytes[off + 14],
+        ]) as usize;
+        let payload_end = frame_header_end
+            .checked_add(plen)
+            .ok_or_else(|| "Time payload length overflow".to_string())?;
+        let frame_end = payload_end
+            .checked_add(32)
+            .ok_or_else(|| "Time frame length overflow".to_string())?;
+        if frame_end > jend {
+            return Err("Time frame is truncated".into());
+        }
+        let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
+            .map_err(|_| "Time payload is not UTF-8".to_string())?;
+        values.push(time_ms_from_payload(payload)?);
+        off = frame_end;
     }
-    let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
-    if kind != KIND_TIME_WALL {
-        return Err(format!("first frame kind {kind:#06x} is not Time"));
+    if values.is_empty() {
+        return Err("replay artifact contains no Time frames".into());
     }
-    let plen = u32::from_le_bytes([
-        bytes[off + 11],
-        bytes[off + 12],
-        bytes[off + 13],
-        bytes[off + 14],
-    ]) as usize;
-    let frame_end = off
-        .checked_add(15)
-        .and_then(|end| end.checked_add(plen))
-        .ok_or_else(|| "Time payload length overflow".to_string())?;
-    if frame_end > jend {
-        return Err("Time payload is truncated".into());
-    }
-    let payload_end = off
-        .checked_add(15)
-        .and_then(|end| end.checked_add(plen))
-        .ok_or_else(|| "Time payload length overflow".to_string())?;
-    let payload = std::str::from_utf8(&bytes[payload_end - plen..payload_end])
-        .map_err(|_| "Time payload is not UTF-8".to_string())?;
-    let value = extract_nested_hex_v(payload).ok_or_else(|| {
-        "Time payload missing unix_ns.v field".to_string()
-    })?;
-    let ns = parse_canonical_u64(&value)?;
-    let millis = ns / 1_000_000;
-    i64::try_from(millis).map_err(|_| "Time value exceeds the signed millisecond range".into())
+    Ok(values)
 }
 
-fn extract_nested_hex_v(payload: &str) -> Option<String> {
-    // payload shape: {"call_id":0,...,"unix_ns":{"bits":64,"t":"int","v":"<integer>"}}
-    let key = "\"v\":\"";
-    let start = payload.find(key)? + key.len();
-    let end = payload[start..].find('"')? + start;
-    Some(payload[start..end].to_string())
+fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
+    extract_time_ms(bytes)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "replay artifact contains no Time authority".into())
+}
+
+fn time_ms_from_payload(payload: &str) -> Result<i64, String> {
+    let value = parse_json(payload).map_err(|_| "Time payload is not valid JSON".to_string())?;
+    let JSONValue::Object(root) = value else {
+        return Err("Time payload must be an object".into());
+    };
+    let JSONValue::Object(unix_ns) = root
+        .get("unix_ns")
+        .ok_or_else(|| "Time payload is missing unix_ns".to_string())?
+    else {
+        return Err("Time payload unix_ns must be an object".into());
+    };
+    let JSONValue::String(value) = unix_ns
+        .get("v")
+        .ok_or_else(|| "Time payload unix_ns value is missing".to_string())?
+    else {
+        return Err("Time payload unix_ns value is invalid".into());
+    };
+    let ns = parse_canonical_u64(value)?;
+    i64::try_from(ns / 1_000_000)
+        .map_err(|_| "Time value exceeds the signed millisecond range".into())
 }
 
 fn validate_time_payload(payload: &str) -> Result<(), String> {
@@ -1058,7 +1260,53 @@ fn flatten_identity_fields(
     ] {
         let _ = string_field(identity, key)?;
     }
+    for key in ["build_digest", "lock_digest", "source_digest", "tir_hash"] {
+        let value = string_field(identity, key)?;
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(format!("header identity `{key}` is not lowercase SHA-256 hex"));
+        }
+    }
+    let entry = string_field(identity, "entry")?;
+    let entry_path = Path::new(&entry);
+    if entry.is_empty()
+        || entry_path.is_absolute()
+        || entry_path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("header identity entry is not project-relative".into());
+    }
+    let adapter = string_field(identity, "execution_adapter")?;
+    if !matches!(adapter.as_str(), "dev-tir-v1" | "aot-native-v1") {
+        return Err(format!("header execution adapter `{adapter}` is unsupported"));
+    }
+    for key in ["abi", "core_abi", "profile", "target_triple", "tir_schema"] {
+        if string_field(identity, key)?.is_empty() {
+            return Err(format!("header identity field `{key}` is empty"));
+        }
+    }
     for key in ["entry", "source_digest", "execution_adapter", "target_triple"] {
+        out.insert(key.to_string(), string_field(identity, key)?);
+    }
+    for key in [
+        "abi",
+        "build_digest",
+        "core_abi",
+        "lock_digest",
+        "profile",
+        "tir_hash",
+        "tir_schema",
+    ] {
         out.insert(key.to_string(), string_field(identity, key)?);
     }
     let JSONValue::String(producer) = root
@@ -1113,10 +1361,17 @@ fn flatten_identity_fields(
         return Err("header run must be an object".into());
     };
     require_object_keys(run, "header run", &["outcome", "status"], &["outcome", "status"])?;
-    if !matches!(run.get("outcome"), Some(JSONValue::String(outcome)) if matches!(outcome.as_str(), "exit" | "panic" | "timeout" | "unavailable"))
+    if !matches!(run.get("outcome"), Some(JSONValue::String(outcome)) if matches!(outcome.as_str(), "exit" | "panic"))
         || !matches!(run.get("status"), Some(JSONValue::Number(status)) if (0..=255).contains(status))
     {
         return Err("header run fields are invalid".into());
+    }
+    if let (Some(JSONValue::String(outcome)), Some(JSONValue::Number(status))) =
+        (run.get("outcome"), run.get("status"))
+    {
+        if (outcome == "panic") != (*status == 70) {
+            return Err("header run outcome and status disagree".into());
+        }
     }
     if let Some(JSONValue::String(outcome)) = run.get("outcome") {
         out.insert("run_outcome".to_string(), outcome.clone());
@@ -1130,6 +1385,12 @@ fn flatten_identity_fields(
     else {
         return Err("header version must be an object".into());
     };
+    require_object_keys(
+        version,
+        "header version",
+        &["major", "minor"],
+        &["major", "minor"],
+    )?;
     if !matches!(version.get("major"), Some(JSONValue::Number(1)))
         || !matches!(version.get("minor"), Some(JSONValue::Number(0)))
     {
@@ -1191,10 +1452,21 @@ fn identity_matches(
             None => Err(key.to_string()),
         }
     };
-    check("entry", &identity.entry)?;
-    check("source_digest", &identity.source_digest)?;
-    check("execution_adapter", &identity.execution_adapter)?;
-    check("target_triple", &identity.target_triple)?;
+    for (key, expected) in [
+        ("entry", identity.entry.as_str()),
+        ("source_digest", identity.source_digest.as_str()),
+        ("build_digest", identity.build_digest.as_str()),
+        ("lock_digest", identity.lock_digest.as_str()),
+        ("tir_hash", identity.tir_hash.as_str()),
+        ("abi", identity.abi.as_str()),
+        ("core_abi", identity.core_abi.as_str()),
+        ("profile", identity.profile.as_str()),
+        ("tir_schema", identity.tir_schema.as_str()),
+        ("execution_adapter", identity.execution_adapter.as_str()),
+        ("target_triple", identity.target_triple.as_str()),
+    ] {
+        check(key, expected)?;
+    }
     Ok(())
 }
 
@@ -1356,9 +1628,16 @@ mod tests {
     fn identity() -> ReplayIdentity {
         ReplayIdentity {
             entry: "examples/prove.jet".into(),
-            source_digest: "source-digest".into(),
+            source_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             execution_adapter: "dev-tir-v1".into(),
             target_triple: "x86_64-unknown-linux-gnu".into(),
+            abi: "gnu".into(),
+            build_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            core_abi: "1".into(),
+            lock_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            profile: "dev".into(),
+            tir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            tir_schema: "1".into(),
         }
     }
 
@@ -1416,5 +1695,22 @@ mod tests {
         let result = prepare_replay(&different, &path.to_string_lossy());
         fs::remove_file(&path).unwrap();
         assert!(matches!(result, Err(("E3621", _))));
+    }
+
+    #[test]
+    fn replay_rejects_identity_changes_beyond_source_digest() {
+        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let header = parse_and_verify(&bytes).unwrap();
+        let mut different = identity();
+        different.core_abi = "2".into();
+        assert_eq!(header.get("core_abi").map(String::as_str), Some("1"));
+        assert!(identity_matches(&header, &different).is_err());
+    }
+
+    #[test]
+    fn capture_paths_reject_empty_or_hostile_components() {
+        assert!(validate_capture_path("traces//run.jetproof-replay").is_err());
+        assert!(validate_capture_path("traces\\run.jetproof-replay").is_err());
+        assert!(validate_capture_path("traces/run.jetproof-replay").is_ok());
     }
 }
