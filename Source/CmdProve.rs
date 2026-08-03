@@ -201,6 +201,13 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         None
     };
+    if let Some(authority) = capture_authority.as_ref() {
+        // The capture authority is the value the real producer observes. The
+        // finalized artifact records this same value, so capture and replay
+        // cannot drift merely because wall time advanced between setup and
+        // serialization.
+        std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms().to_string());
+    }
     if let Some(opts) = capture_opts.as_ref() {
         if let Err(status) = preflight_capture_target(&target, opts, json) {
             exit(status);
@@ -2554,11 +2561,17 @@ fn render_report(
             continue;
         }
         if item.kind == 2 {
-            // Runtime panics are diagnostics, not a fifth evidence kind. The
-            // existing producer record still controls exit precedence.
+            // A panic is a failed unit execution. Keep its diagnostic and
+            // evidence row linked so the report does not hide the selected
+            // test behind a producer-level exit code.
             let diagnostic_index = diagnostics.len();
             diagnostics.push(runtime_item_diagnostic(item));
-            let _ = diagnostic_index;
+            evidence_rows.push(format!(
+                "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"tests\",\"id\":{},\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"executed\"}}",
+                json(&item.id),
+                item.line.max(1),
+                json(&item.path)
+            ));
             continue;
         }
         let (kind, facet, producer) = match item.kind {
@@ -2637,10 +2650,10 @@ fn render_report(
     let evidence = evidence_rows.join(",");
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
-    let unit_passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
-    let unit_failed = tests.iter().filter(|item| item.kind == 0 && item.state == 1).count();
-    let unit_skipped = tests.iter().filter(|item| item.kind == 0 && item.state >= 2).count();
-    let unit_unavailable = tests.iter().filter(|item| item.kind == 0 && item.state == 3).count();
+    let unit_passed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 0).count();
+    let unit_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 1).count();
+    let unit_skipped = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state >= 2).count();
+    let unit_unavailable = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3).count();
     let contract_selected = declarations.len();
     let (contract_passed, contract_failed, contract_not_observed, contract_skipped) =
         contract_summary(declarations, tests);
