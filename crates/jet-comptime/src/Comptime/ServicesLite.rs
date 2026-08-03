@@ -163,12 +163,8 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
     {
         return Err(unsupported("ServiceEndpoint value", span));
     }
-    Ok(JetServiceEndpoint {
-        tree,
-        worker,
-        generation,
-        authority,
-    })
+    jet_services_authority_endpoint(tree, worker, generation, authority)
+        .map_err(|_| unsupported("ServiceEndpoint value", span))
 }
 
 fn mailbox_to_ct(m: &JetServiceMailbox) -> CtValue {
@@ -299,6 +295,71 @@ fn ct_to_state_adapter(v: &CtValue, span: Span) -> Result<JetServiceStateAdapter
     }
 }
 
+fn state_authority_to_ct(authority: &JetServiceStateAuthority) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceStateAuthority".to_string(),
+        fields: vec![
+            ("store".to_string(), CtValue::Str(authority.store.clone())),
+            ("schema".to_string(), CtValue::Str(authority.schema.clone())),
+            ("version".to_string(), CtValue::Int(authority.version)),
+            (
+                "migration".to_string(),
+                CtValue::Str(authority.migration.clone()),
+            ),
+            (
+                "adapter".to_string(),
+                state_adapter_to_ct(authority.adapter.clone()),
+            ),
+        ],
+    }
+}
+
+fn ct_to_state_authority(
+    value: &CtValue,
+    span: Span,
+) -> Result<JetServiceStateAuthority, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ServiceStateAuthority", span));
+    };
+    if type_name != "ServiceStateAuthority" {
+        return Err(unsupported("ServiceStateAuthority", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, value)| value)
+            .ok_or_else(|| unsupported("ServiceStateAuthority field", span))
+    };
+    let candidate = JetServiceStateAuthority {
+        store: ct_to_service_string(
+            field("store")?,
+            MAX_SERVICE_STATE_STORE,
+            "service state store",
+            span,
+        )?,
+        schema: ct_to_service_string(
+            field("schema")?,
+            MAX_SERVICE_STATE_SCHEMA,
+            "service state schema",
+            span,
+        )?,
+        version: match field("version")? {
+            CtValue::Int(version) => *version,
+            _ => return Err(unsupported("service state version", span)),
+        },
+        migration: ct_to_service_string(
+            field("migration")?,
+            MAX_SERVICE_STATE_SCHEMA,
+            "service state migration",
+            span,
+        )?,
+        adapter: ct_to_state_adapter(field("adapter")?, span)?,
+    };
+    jet_services_attach_state_authority(&candidate, candidate.adapter.clone())
+        .map_err(|error| unsupported(&error.jet_show(), span))
+}
+
 fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceWorkflow".to_string(),
@@ -404,6 +465,13 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 state_adapter_to_ct(tree.state_adapter.clone()),
             ),
             (
+                "state_authority".to_string(),
+                tree.state_authority.as_ref().map_or_else(
+                    || CtValue::None(Type::Named("ServiceStateAuthority".to_string())),
+                    |authority| CtValue::Some(Box::new(state_authority_to_ct(authority))),
+                ),
+            ),
+            (
                 "snapshot".to_string(),
                 match &tree.snapshot {
                     Some(s) => CtValue::Str(s.clone()),
@@ -455,6 +523,10 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
             (
                 "draining".to_string(),
                 CtValue::List(tree.draining.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "partitioned".to_string(),
+                CtValue::List(tree.partitioned.iter().cloned().map(CtValue::Str).collect()),
             ),
             (
                 "workflows".to_string(),
@@ -623,6 +695,15 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             (!value.is_empty()).then_some(value)
         }
     };
+    let state_authority = match fields.iter().find(|(name, _)| name == "state_authority") {
+        None | Some((_, CtValue::None(_))) => None,
+        Some((_, CtValue::Some(value))) => Some(ct_to_state_authority(value, span)?),
+        Some(_) => return Err(unsupported("service state authority", span)),
+    };
+    let partitioned = match fields.iter().find(|(name, _)| name == "partitioned") {
+        Some((_, value)) => ct_str_list(value, span)?,
+        None => Vec::new(),
+    };
     let idempotency_seen = match field("idempotency_seen")? {
         CtValue::List(entries) => {
             if entries.len() > MAX_SERVICE_IDEMPOTENCY {
@@ -684,6 +765,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             _ => return Err(unsupported("tree started state", span)),
         },
         state_adapter: ct_to_state_adapter(field("state_adapter")?, span)?,
+        state_authority,
         snapshot,
         event_log: ct_str_list(field("event_log")?, span)?,
         dead_letters: ct_str_list(field("dead_letters")?, span)?,
@@ -691,6 +773,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         directory,
         directory_key: ct_to_bytes(field("directory_key")?, span)?,
         draining: ct_str_list(field("draining")?, span)?,
+        partitioned,
         workflows,
         task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
         chaos_fails: match field("chaos_fails")? {
@@ -715,6 +798,10 @@ fn map_err(err: JetServiceError) -> CtValue {
         JetServiceError::NotStarted(m) => ("NotStarted", m),
         JetServiceError::Policy(m) => ("Policy", m),
         JetServiceError::Unavailable(m) => ("Unavailable", m),
+        JetServiceError::Partitioned(m)
+        | JetServiceError::Revoked(m)
+        | JetServiceError::Stale(m)
+        | JetServiceError::Expired(m) => ("Unavailable", m),
     };
     CtValue::Enum {
         type_name: "ServiceError".to_string(),
@@ -966,8 +1053,14 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let mut tree = ct_to_tree(one(0)?, span)?;
             let result = match method {
                 "set_state_empty" => jet_services_set_state_empty(&mut tree),
-                "set_state_snapshot" => jet_services_set_state_snapshot(&mut tree),
-                _ => jet_services_set_state_event_log(&mut tree),
+                "set_state_snapshot" => {
+                    let authority = ct_to_state_authority(one(1)?, span)?;
+                    jet_services_set_state_snapshot(&mut tree, authority)
+                }
+                _ => {
+                    let authority = ct_to_state_authority(one(1)?, span)?;
+                    jet_services_set_state_event_log(&mut tree, authority)
+                }
             };
             Ok(match result {
                 Ok(()) => CtValue::ResOk(Box::new(mutate_ok(tree, CtValue::Unit))),
