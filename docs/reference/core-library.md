@@ -3088,12 +3088,15 @@ the capability. Cleanup stays on `Close` via `close(...)`.
 
 ---
 
-## `core.compute` — Tensor CPU oracle
+## `core.compute` — Tensor storage and backend receipts
 
-D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns ranked
-multidimensional storage. `Tensor` is the owner type; `vec` and `matrix` are
-rank-1 / rank-2 aliases over the same substrate. Placement defaults to the CPU
-oracle and emits an inspectable receipt (`device` / `placement`).
+D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
+ranked Tensor operation family. Tensor views retain the owner allocation and
+strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
+`Auto` selects the compiled CPU backend because its checked capability is
+present. The placement receipt records backend, version, profile, cache, and
+capabilities. A same-backend transfer is a recorded zero-byte no-op, not a
+fabricated copy or fallback.
 
 ```jet
 use core.compute as compute
@@ -3120,7 +3123,7 @@ fn run() {
 | `value_and_grad_mul` / `jvp_*` / `vjp_*` / `grad_*` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
-| `stream_new` / `transfer` / `kernel_bounds_ok` / `raw_kernel_contract` / `raw_kernel_contract_show` | stream, transfer, bounds check, and typed audited raw-kernel obligation descriptor |
+| `stream_new` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
 | `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
@@ -3129,13 +3132,13 @@ Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
 symbols (I9). Accelerator backends beyond the CPU oracle are Epoch 6.
 
-Tensor serialization is the canonical wire shape=axis,...;data=value,... .
+Tensor serialization is the canonical wire `shape=axis,...;data=value,...`.
 The serializer uses shortest round-tripping finite f64 text. The decoder
 rejects duplicate or unknown fields, non-canonical axes or values, non-finite
 data, and storage-length mismatches before constructing a Tensor.
 
-`#Kernel(.parallel) fn` is the explicit safe-kernel declaration selected by
-`D-COMPUTE-KERNEL-SURFACE1=B`. Sema accepts the marker only after proving the
+`D-COMPUTE-KERNEL1=D` / `D-COMPUTE-KERNEL-SURFACE1=B`: `#Kernel(.parallel) fn`
+is the explicit safe-kernel declaration. Sema accepts the marker only after proving the
 current conservative kernel subset: read-only parameters, no reachable
 effects or opaque calls, straight-line control flow, and checked Core compute
 operations. The resulting bounds/alias/capture/race/barrier/control proof is
@@ -3143,9 +3146,23 @@ attached to TIR and carried unchanged by AOT, default `jet run`, and the
 interpreter. Unsupported indexed writes, loops, captures, and provider calls
 are rejected; they do not silently fall back to an unproved kernel.
 
-`raw_kernel_contract` remains an audited `#Unsafe` boundary descriptor. Its
-fields state the obligations a raw provider must satisfy; they are not
-compiler proof that the raw body is bounds-safe, race-free, or barrier-uniform.
+`D-COMPUTE-AUTODIFF1=D`: reverse-mode VJP is the scalar-loss default;
+`jvp_*` and `vjp_*` are composable explicit transforms. Tangent/cotangent
+shapes are checked, broadcast gradients reduce to the input shape, and
+`value_and_grad_mul` rejects non-scalar outputs. Gradient receipts inherit the
+primal placement and profile.
+
+`D-COMPUTE-BACKEND1=D`: the built-in CPU backend publishes a stable backend,
+version, precision/determinism profile, cache identity, and capability list in
+placement receipts. The blocked f32 tiled path records its actual arithmetic
+and reduction algorithm; unsupported raw/provider capabilities fail before
+launch.
+
+The legacy `raw_kernel_contract(reason, arity)` entry point fails closed:
+reason and arity cannot prove address spaces, read/write sets, effects, races,
+or barriers. A provider-issued typed `#Unsafe` boundary proof is required
+before raw code can be launched; no ambient descriptor or display label can
+stand in for that proof.
 
 Backend facts for Core modules (ownership/effects/failure/platform) live in
 [core-backend-facts.md](core-backend-facts.md).

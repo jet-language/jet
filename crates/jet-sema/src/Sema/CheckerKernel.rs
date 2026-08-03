@@ -19,7 +19,6 @@ const SAFE_COMPUTE_CALLS: &[&str] = &[
     "fft",
     "full",
     "from_list",
-    "get",
     "inv",
     "matmul",
     "maximum",

@@ -70,6 +70,21 @@ fn receipt_to_ct(receipt: &JetComputePlacementReceipt) -> CtValue {
         fields: vec![
             ("requested".to_string(), device_to_ct(receipt.requested)),
             ("selected".to_string(), device_to_ct(receipt.selected)),
+            ("backend".to_string(), CtValue::Str(receipt.backend.clone())),
+            ("version".to_string(), CtValue::Str(receipt.version.clone())),
+            ("profile".to_string(), CtValue::Str(receipt.profile.clone())),
+            ("cache".to_string(), CtValue::Str(receipt.cache.clone())),
+            (
+                "capabilities".to_string(),
+                CtValue::List(
+                    receipt
+                        .capabilities
+                        .iter()
+                        .cloned()
+                        .map(CtValue::Str)
+                        .collect(),
+                ),
+            ),
             ("reason".to_string(), CtValue::Str(receipt.reason.clone())),
         ],
     }
@@ -91,13 +106,34 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
     };
     let requested = ct_to_device(field("requested")?, span)?;
     let selected = ct_to_device(field("selected")?, span)?;
+    let text = |name: &str| match field(name)? {
+        CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => Ok(s.clone()),
+        _ => Err(unsupported("ComputePlacement text field", span)),
+    };
+    let capabilities = match field("capabilities")? {
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => {
+                    Ok(s.clone())
+                }
+                _ => Err(unsupported("ComputePlacement capability", span)),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(unsupported("ComputePlacement capabilities", span)),
+    };
     let reason = match field("reason")? {
-        CtValue::Str(s) => s.clone(),
+        CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
         _ => return Err(unsupported("placement reason", span)),
     };
     Ok(JetComputePlacementReceipt {
         requested,
         selected,
+        backend: text("backend")?,
+        version: text("version")?,
+        profile: text("profile")?,
+        cache: text("cache")?,
+        capabilities,
         reason,
     })
 }
@@ -146,24 +182,10 @@ fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferRecei
     })
 }
 
-fn raw_kernel_to_ct(contract: &JetRawKernelContract) -> CtValue {
+fn raw_kernel_to_ct(_contract: &JetRawKernelContract) -> CtValue {
     CtValue::Struct {
         type_name: "RawKernelContract".to_string(),
-        fields: vec![
-            ("reason".to_string(), CtValue::Str(contract.reason.clone())),
-            ("arity".to_string(), CtValue::Int(contract.arity)),
-            ("bounds".to_string(), CtValue::Bool(contract.bounds)),
-            ("alias_free".to_string(), CtValue::Bool(contract.alias_free)),
-            ("race_free".to_string(), CtValue::Bool(contract.race_free)),
-            (
-                "barrier_uniform".to_string(),
-                CtValue::Bool(contract.barrier_uniform),
-            ),
-            (
-                "differential".to_string(),
-                CtValue::Str(contract.differential.clone()),
-            ),
-        ],
+        fields: Vec::new(),
     }
 }
 
@@ -171,46 +193,16 @@ fn ct_to_raw_kernel_contract(
     value: &CtValue,
     span: Span,
 ) -> Result<JetRawKernelContract, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return Err(unsupported("RawKernelContract", span));
-    };
-    if type_name != "RawKernelContract" && type_name != "JetRawKernelContract" {
-        return Err(unsupported("RawKernelContract", span));
-    }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(field, _)| field == name)
-            .map(|(_, value)| value)
-            .ok_or_else(|| unsupported("RawKernelContract field", span))
-    };
-    let text = |name: &str| match field(name)? {
-        CtValue::Str(value) => Ok(value.clone()),
-        _ => Err(unsupported("RawKernelContract text field", span)),
-    };
-    let boolean = |name: &str| match field(name)? {
-        CtValue::Bool(value) => Ok(*value),
-        _ => Err(unsupported("RawKernelContract bool field", span)),
-    };
-    let arity = match field("arity")? {
-        CtValue::Int(value) => *value,
-        _ => return Err(unsupported("RawKernelContract arity", span)),
-    };
-    Ok(JetRawKernelContract {
-        reason: text("reason")?,
-        arity,
-        bounds: boolean("bounds")?,
-        alias_free: boolean("alias_free")?,
-        race_free: boolean("race_free")?,
-        barrier_uniform: boolean("barrier_uniform")?,
-        differential: text("differential")?,
-    })
+    let _ = value;
+    Err(unsupported(
+        "provider-issued raw-kernel contract (not forgeable in ambient)",
+        span,
+    ))
 }
 
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
-    // CtValue owns lists, not Arc-backed borrowed views.  Marshal the logical
-    // view and rebase its offset; Prelude remains authority for validation and
-    // logical element selection.
+    // CtValue owns lists; Prelude remains authority for validation and logical
+    // element selection at this engine boundary.
     if let Err(error) = jet_compute_validate_tensor(tensor) {
         jet_panic(
             "ComputeLite::tensor_to_ct",
@@ -218,8 +210,10 @@ fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
             &format!("invalid Tensor result: {}", error.jet_show()),
         );
     }
-    let (strides, _) = match jet_compute_view_metadata(tensor) {
-        Ok(metadata) => metadata,
+    // CtValue owns lists, not borrowed strided allocations. Marshal the
+    // logical projection as a fresh contiguous value at this engine boundary.
+    let strides = match jet_compute_row_major_strides(&tensor.shape) {
+        Ok(strides) => strides,
         Err(error) => jet_panic(
             "ComputeLite::tensor_to_ct",
             line!(),
@@ -318,21 +312,9 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
     };
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
-    if tensor.device != tensor.last_placement.selected
-        || tensor.last_placement.selected != JetComputeDevice::Cpu
-        || tensor.last_placement.reason.is_empty()
-    {
-        return Err(unsupported("Tensor placement metadata", span));
-    }
     if let Some(receipt) = &tensor.last_transfer {
-        let expected_bytes = jet_compute_tensor_values(&tensor)
-            .len()
-            .checked_mul(std::mem::size_of::<f64>())
-            .and_then(|bytes| i64::try_from(bytes).ok())
-            .ok_or_else(|| unsupported("Tensor transfer byte count", span))?;
-        if receipt.bytes != expected_bytes || receipt.to != tensor.device {
-            return Err(unsupported("Tensor transfer metadata", span));
-        }
+        jet_compute_validate_transfer_receipt(&tensor, receipt)
+            .map_err(|error| unsupported(&format!("Tensor transfer metadata: {}", error.jet_show()), span))?;
     }
     Ok(tensor)
 }
@@ -416,13 +398,11 @@ pub fn tensor_replace_data(
 ) -> Result<CtValue, Diagnostic> {
     let mut tensor = ct_to_tensor(value, span)?;
     let values = as_f64_list(&CtValue::List(items), span)?;
-    let logical_strides = jet_compute_view_metadata(&tensor)
-        .map(|(strides, _)| strides.to_vec())
-        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
     if values.len() != jet_compute_tensor_values(&tensor).len() {
         return Err(unsupported("Tensor write-back length", span));
     }
-    tensor.strides = logical_strides;
+    tensor.strides = jet_compute_row_major_strides(&tensor.shape)
+        .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
     tensor.data = std::sync::Arc::new(values);
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;

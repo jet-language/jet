@@ -1,7 +1,8 @@
 // ── D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443) ─────────────
 // One Core compute family. `Tensor` owns ranked multidimensional storage on the
-// CPU oracle; reshapes and placement aliases share that storage, while mutation
-// uses copy-on-write so an immutable alias cannot observe an unsafe write.
+// CPU backend; views retain the backing allocation and its strides. Mutable
+// access requires the sema-proved exclusive ViewMut path; shared writes fail
+// closed instead of copying or pretending to update an alias.
 // Engines only marshal into these Prelude symbols (I9).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +17,11 @@ const MAX_TENSOR_ELEMENTS: usize = 16 * 1024 * 1024;
 struct JetComputePlacementReceipt {
     requested: JetComputeDevice,
     selected: JetComputeDevice,
+    backend: String,
+    version: String,
+    profile: String,
+    cache: String,
+    capabilities: Vec<String>,
     reason: String,
 }
 
@@ -66,9 +72,14 @@ impl JetShow for JetComputeDevice {
 impl JetShow for JetComputePlacementReceipt {
     fn jet_show(&self) -> String {
         format!(
-            "Placement(requested={}, selected={}, reason={})",
+            "Placement(requested={}, selected={}, backend={}, version={}, profile={}, cache={}, capabilities={:?}, reason={})",
             self.requested.jet_show(),
             self.selected.jet_show(),
+            self.backend,
+            self.version,
+            self.profile,
+            self.cache,
+            self.capabilities,
             self.reason
         )
     }
@@ -165,14 +176,6 @@ fn jet_compute_view_metadata(
     Ok((&tensor.strides[..rank], offset))
 }
 
-fn jet_compute_view_offset(tensor: &JetTensor) -> usize {
-    tensor
-        .strides
-        .get(tensor.shape.len())
-        .and_then(|offset| usize::try_from(*offset).ok())
-        .unwrap_or(0)
-}
-
 fn jet_compute_view_strides(
     shape: &[i64],
     offset: usize,
@@ -191,6 +194,13 @@ fn jet_compute_tensor_view_bounds(
     offset: usize,
     expected_len: usize,
 ) -> Result<std::ops::Range<usize>, JetComputeError> {
+    let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
+    let (strides, metadata_offset) = jet_compute_view_metadata(tensor)?;
+    if strides != expected_strides || metadata_offset != offset {
+        return Err(JetComputeError::Unsupported(
+            "this operation requires a contiguous Tensor view".to_string(),
+        ));
+    }
     let end = offset.checked_add(expected_len).ok_or_else(|| {
         JetComputeError::InvalidShape("Tensor view end overflows backing storage".to_string())
     })?;
@@ -202,28 +212,149 @@ fn jet_compute_tensor_view_bounds(
     Ok(offset..end)
 }
 
-fn jet_compute_tensor_values(tensor: &JetTensor) -> &[f64] {
+fn jet_compute_view_storage_end(
+    tensor: &JetTensor,
+    strides: &[i64],
+    offset: usize,
+) -> Result<usize, JetComputeError> {
+    let mut relative_end = 0usize;
+    for (&dim, &stride) in tensor.shape.iter().zip(strides.iter()) {
+        if dim == 0 {
+            continue;
+        }
+        let dim = usize::try_from(dim).map_err(|_| {
+            JetComputeError::InvalidShape("Tensor shape axis is too large".to_string())
+        })?;
+        let stride = usize::try_from(stride).map_err(|_| {
+            JetComputeError::InvalidShape(
+                "Tensor view strides must be non-negative and representable".to_string(),
+            )
+        })?;
+        let extent = dim.checked_sub(1).and_then(|last| last.checked_mul(stride)).ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor view extent overflows backing storage".to_string())
+        })?;
+        relative_end = relative_end.checked_add(extent).ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor view extent overflows backing storage".to_string())
+        })?;
+    }
+    offset.checked_add(relative_end).and_then(|end| end.checked_add(1)).ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor view end overflows backing storage".to_string())
+    })
+}
+
+fn jet_compute_tensor_values(tensor: &JetTensor) -> Vec<f64> {
     let Ok(expected_len) = jet_compute_storage_len(&tensor.shape) else {
-        return &[];
+        return Vec::new();
     };
-    let offset = jet_compute_view_offset(tensor);
-    let Some(end) = offset.checked_add(expected_len) else {
-        return &[];
+    let Ok((strides, offset)) = jet_compute_view_metadata(tensor) else {
+        return Vec::new();
     };
-    tensor.data.get(offset..end).unwrap_or(&[])
+    let data = tensor.data.as_ref();
+    if expected_len == 0 {
+        return Vec::new();
+    }
+    let mut values = Vec::with_capacity(expected_len);
+    for flat in 0..expected_len {
+        let mut remainder = flat;
+        let mut relative_offset = 0usize;
+        for axis in (0..tensor.shape.len()).rev() {
+            let dim = match usize::try_from(tensor.shape[axis]) {
+                Ok(dim) if dim != 0 => dim,
+                _ => return Vec::new(),
+            };
+            let index = remainder % dim;
+            remainder /= dim;
+            let stride = match usize::try_from(strides[axis]) {
+                Ok(stride) => stride,
+                Err(_) => return Vec::new(),
+            };
+            let term = match index.checked_mul(stride) {
+                Some(term) => term,
+                None => return Vec::new(),
+            };
+            relative_offset = match relative_offset.checked_add(term) {
+                Some(offset) => offset,
+                None => return Vec::new(),
+            };
+        }
+        let physical_offset = match offset.checked_add(relative_offset) {
+            Some(offset) => offset,
+            None => return Vec::new(),
+        };
+        let Some(value) = data.get(physical_offset).copied() else {
+            return Vec::new();
+        };
+        values.push(value);
+    }
+    values
+}
+
+fn jet_compute_validate_placement(
+    device: JetComputeDevice,
+    receipt: &JetComputePlacementReceipt,
+) -> Result<(), JetComputeError> {
+    if device == JetComputeDevice::Auto || receipt.selected == JetComputeDevice::Auto {
+        return Err(JetComputeError::Device(
+            "Tensor placement must name a concrete selected backend".to_string(),
+        ));
+    }
+    if device != receipt.selected
+        || receipt.backend != "cpu"
+        || receipt.version != "builtin"
+        || receipt.cache != "builtin"
+        || receipt.profile.is_empty()
+        || receipt.reason.is_empty()
+        || !receipt
+            .capabilities
+            .iter()
+            .any(|capability| capability == "checked-bounds")
+    {
+        return Err(JetComputeError::Device(
+            "Tensor placement receipt does not match a registered backend capability".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError> {
-    let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
+    jet_compute_validate_placement(tensor.device, &tensor.last_placement)?;
     let expected_len = jet_compute_storage_len(&tensor.shape)?;
     let (strides, offset) = jet_compute_view_metadata(tensor)?;
-    if strides != expected_strides {
+    if strides.iter().any(|stride| *stride < 0) {
         return Err(JetComputeError::InvalidShape(
-            "Tensor storage and shape metadata disagree".to_string(),
+            "Tensor view strides must be non-negative".to_string(),
         ));
     }
-    let bounds = jet_compute_tensor_view_bounds(tensor, offset, expected_len)?;
-    if tensor.data[bounds].iter().any(|value| !value.is_finite()) {
+    if strides
+        .iter()
+        .zip(tensor.shape.iter())
+        .any(|(stride, dim)| *dim > 1 && *stride == 0)
+    {
+        return Err(JetComputeError::Unsupported(
+            "zero-stride Tensor views are not writable aliases".to_string(),
+        ));
+    }
+    if expected_len == 0 {
+        if offset > tensor.data.len() {
+            return Err(JetComputeError::InvalidShape(
+                "empty Tensor view starts outside backing storage".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+    let storage_end = jet_compute_view_storage_end(tensor, strides, offset)?;
+    if storage_end > tensor.data.len() {
+        return Err(JetComputeError::InvalidShape(
+            "Tensor view exceeds backing storage".to_string(),
+        ));
+    }
+    let values = jet_compute_tensor_values(tensor);
+    if values.len() != expected_len {
+        return Err(JetComputeError::InvalidShape(
+            "Tensor view metadata does not address its logical storage".to_string(),
+        ));
+    }
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(JetComputeError::Arithmetic(
             "Tensor values must be finite".to_string(),
         ));
@@ -232,18 +363,35 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
 }
 
 fn jet_compute_place(requested: JetComputeDevice) -> JetComputePlacementReceipt {
-    // D-COMPUTE-PLACE1=D: `.Auto` may select an accelerator later; CPU oracle is
-    // the shipped default and the differential reference.
+    // The only compiled backend in this slice is the checked CPU backend. Auto
+    // resolves to it as a capability decision, not as a fallback receipt.
     let selected = JetComputeDevice::Cpu;
     let reason = match requested {
-        JetComputeDevice::Auto => "Auto selected CPU oracle (default profile)".to_string(),
-        JetComputeDevice::Cpu => "explicit CPU placement".to_string(),
+        JetComputeDevice::Auto => "policy=Auto; capability=cpu.checked".to_string(),
+        JetComputeDevice::Cpu => "policy=explicit; capability=cpu.checked".to_string(),
     };
     JetComputePlacementReceipt {
         requested,
         selected,
+        backend: "cpu".to_string(),
+        version: "builtin".to_string(),
+        profile: "F64Strict+Reproducible".to_string(),
+        cache: "builtin".to_string(),
+        capabilities: vec![
+            "ranked-storage".to_string(),
+            "strided-view".to_string(),
+            "checked-bounds".to_string(),
+            "reproducible-reduction".to_string(),
+        ],
         reason,
     }
+}
+
+fn jet_compute_inherit_placement(mut tensor: JetTensor, source: &JetTensor) -> JetTensor {
+    tensor.device = source.device;
+    tensor.last_placement = source.last_placement.clone();
+    tensor.last_transfer = None;
+    tensor
 }
 
 fn jet_compute_tensor_from_shape(
@@ -316,7 +464,13 @@ fn jet_compute_window_bounds(
     exclusive: bool,
 ) -> Result<std::ops::Range<usize>, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let (_, offset) = jet_compute_view_metadata(tensor)?;
+    let (strides, offset) = jet_compute_view_metadata(tensor)?;
+    let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
+    if strides != expected_strides {
+        return Err(JetComputeError::Unsupported(
+            "Tensor window is non-contiguous; use the strided View projection".to_string(),
+        ));
+    }
     let axis_len = tensor.shape.first().copied().ok_or_else(|| {
         JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
     })?;
@@ -332,7 +486,7 @@ fn jet_compute_window_bounds(
     // In row-major storage the first stride is the number of scalar values in
     // one first-axis slab.  For an empty first axis the selected range is also
     // empty, so the stride is still safe to use.
-    let slab = tensor.strides.first().copied().ok_or_else(|| {
+    let slab = strides.first().copied().ok_or_else(|| {
         JetComputeError::InvalidShape("Tensor is missing its first-axis stride".to_string())
     })?;
     let flat_start = axis_start.checked_mul(slab).ok_or_else(|| {
@@ -367,23 +521,51 @@ fn jet_compute_slice_checked(
     end: i64,
     exclusive: bool,
 ) -> Result<JetTensor, JetComputeError> {
-    let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)?;
+    jet_compute_validate_tensor(tensor)?;
+    let axis_len = tensor.shape.first().copied().ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+    })?;
+    let Some((axis_start, axis_end)) = jet_range_bounds(start, end, exclusive, axis_len) else {
+        return Err(JetComputeError::OutOfBounds(format!(
+            "Tensor range {}{}{} is outside first axis of extent {}",
+            start,
+            if exclusive { "..<" } else { ".." },
+            end,
+            axis_len
+        )));
+    };
     let mut shape = tensor.shape.clone();
-    let first_axis_end = if exclusive { end } else { end.checked_add(1).ok_or_else(|| {
-        JetComputeError::OutOfBounds("Tensor slice end overflows".to_string())
-    })? };
-    shape[0] = first_axis_end.checked_sub(start).ok_or_else(|| {
+    shape[0] = axis_end.checked_sub(axis_start).ok_or_else(|| {
         JetComputeError::OutOfBounds("Tensor slice has a negative extent".to_string())
     })?;
-    let strides = jet_compute_view_strides(&shape, bounds.start)?;
-    Ok(JetTensor {
+    let (source_strides, base_offset) = jet_compute_view_metadata(tensor)?;
+    let first_stride = source_strides.first().copied().ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor is missing its first-axis stride".to_string())
+    })?;
+    let first_stride = usize::try_from(first_stride).map_err(|_| {
+        JetComputeError::InvalidShape("Tensor view stride is not representable".to_string())
+    })?;
+    let start_offset = base_offset
+        .checked_add(axis_start.checked_mul(first_stride).ok_or_else(|| {
+            JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string())
+        })?)
+        .ok_or_else(|| JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string()))?;
+    let mut strides = source_strides.to_vec();
+    if start_offset != 0 {
+        strides.push(i64::try_from(start_offset).map_err(|_| {
+            JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
+        })?);
+    }
+    let slice = JetTensor {
         shape,
         strides,
         data: tensor.data.clone(),
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
         last_transfer: tensor.last_transfer.clone(),
-    })
+    };
+    jet_compute_validate_tensor(&slice)?;
+    Ok(slice)
 }
 
 fn jet_compute_slice(
@@ -445,7 +627,14 @@ fn jet_compute_view_mut<'a>(
         Ok(bounds) => bounds,
         Err(error) => jet_panic(file, line, &error.jet_show()),
     };
-    &mut std::sync::Arc::make_mut(&mut tensor.data)[bounds]
+    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+        return jet_panic(
+            file,
+            line,
+            "Tensor mutable view requires exclusive backing storage",
+        );
+    };
+    &mut data[bounds]
 }
 
 fn jet_compute_view_mut_range<'a>(
@@ -478,7 +667,7 @@ fn jet_compute_tensor_placement(tensor: &JetTensor) -> String {
 }
 
 fn jet_compute_tensor_to_list(tensor: &JetTensor) -> Vec<f64> {
-    jet_compute_tensor_values(tensor).to_vec()
+    jet_compute_tensor_values(tensor)
 }
 
 fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetComputeError> {
@@ -490,10 +679,11 @@ fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetC
             indices.len()
         )));
     }
-    let mut offset = 0i64;
+    let (strides, base_offset) = jet_compute_view_metadata(tensor)?;
+    let mut relative_offset = 0i64;
     for (i, (&idx, (&dim, &stride))) in indices
         .iter()
-        .zip(tensor.shape.iter().zip(tensor.strides.iter()))
+        .zip(tensor.shape.iter().zip(strides.iter()))
         .enumerate()
     {
         if idx < 0 || idx >= dim {
@@ -505,28 +695,22 @@ fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetC
         let term = idx.checked_mul(stride).ok_or_else(|| {
             JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
         })?;
-        offset = offset.checked_add(term).ok_or_else(|| {
+        relative_offset = relative_offset.checked_add(term).ok_or_else(|| {
             JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
         })?;
     }
-    let (_, base_offset) = jet_compute_view_metadata(tensor)?;
-    let view_end = base_offset.checked_add(
-        usize::try_from(jet_compute_numel(&tensor.shape)?).map_err(|_| {
-            JetComputeError::OutOfBounds("tensor view length is too large".to_string())
-        })?,
-    ).ok_or_else(|| {
-        JetComputeError::OutOfBounds("tensor view end overflows storage".to_string())
-    })?;
-    usize::try_from(offset)
+    usize::try_from(relative_offset)
         .ok()
         .and_then(|relative| base_offset.checked_add(relative))
-        .filter(|index| *index >= base_offset && *index < view_end)
+        .filter(|index| *index < tensor.data.len())
         .ok_or_else(|| JetComputeError::OutOfBounds("tensor index is outside storage".to_string()))
 }
 
 fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
     let offset = jet_compute_offset(tensor, indices)?;
-    Ok(tensor.data[offset])
+    tensor.data.get(offset).ok_or_else(|| {
+        JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
+    })
 }
 
 fn jet_compute_set(
@@ -540,7 +724,17 @@ fn jet_compute_set(
         ));
     }
     let offset = jet_compute_offset(tensor, indices)?;
-    std::sync::Arc::make_mut(&mut tensor.data)[offset] = value;
+    let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+        return Err(JetComputeError::Unsupported(
+            "Tensor write requires an exclusive ViewMut borrow".to_string(),
+        ));
+    };
+    let Some(slot) = data.get_mut(offset) else {
+        return Err(JetComputeError::OutOfBounds(
+            "tensor index is outside storage".to_string(),
+        ));
+    };
+    *slot = value;
     Ok(())
 }
 
@@ -566,15 +760,26 @@ fn jet_compute_reshape(
             tensor_n
         )));
     }
-    let (_, offset) = jet_compute_view_metadata(tensor)?;
-    let strides = jet_compute_view_strides(shape, offset)?;
+    let (source_strides, offset) = jet_compute_view_metadata(tensor)?;
+    let source_row_major = jet_compute_row_major_strides(&tensor.shape)?;
+    let (strides, data) = if source_strides == source_row_major {
+        (jet_compute_view_strides(shape, offset)?, tensor.data.clone())
+    } else {
+        // Reshape is an explicit rank/layout conversion. A non-contiguous view
+        // cannot be relabeled as contiguous storage, so materialize its logical
+        // order into a new owner.
+        (
+            jet_compute_row_major_strides(shape)?,
+            std::sync::Arc::new(jet_compute_tensor_values(tensor)),
+        )
+    };
     Ok(JetTensor {
         shape: shape.clone(),
         strides,
-        data: tensor.data.clone(),
+        data,
         device: tensor.device,
         last_placement: tensor.last_placement.clone(),
-        last_transfer: tensor.last_transfer.clone(),
+        last_transfer: None,
     })
 }
 
@@ -750,38 +955,28 @@ fn jet_compute_materialize_broadcast(
             last_transfer: None,
         });
     }
-    let mut aligned_strides = vec![0i64; dst_rank];
-    for i in 0..src_rank {
-        let dst_i = dst_rank - src_rank + i;
-        aligned_strides[dst_i] = if tensor.shape[i] == 1 {
-            0
-        } else {
-            tensor.strides[i]
-        };
-    }
-    let values = jet_compute_tensor_values(tensor);
     let mut data = Vec::with_capacity(n);
     for flat in 0..n {
         let mut rem = i64::try_from(flat).map_err(|_| {
             JetComputeError::InvalidShape("broadcast index is too large".to_string())
         })?;
-        let mut offset = 0i64;
-        for i in 0..dst_rank {
-            let dim = shape[dst_rank - 1 - i];
-            let idx = if dim == 0 { 0 } else { rem % dim };
+        let mut destination_coords = vec![0i64; dst_rank];
+        for axis in (0..dst_rank).rev() {
+            let dim = shape[axis];
+            destination_coords[axis] = if dim == 0 { 0 } else { rem % dim };
             rem = if dim == 0 { 0 } else { rem / dim };
-            let src_i = dst_rank - 1 - i;
-            let term = idx.checked_mul(aligned_strides[src_i]).ok_or_else(|| {
-                JetComputeError::InvalidShape("broadcast offset overflow".to_string())
-            })?;
-            offset = offset.checked_add(term).ok_or_else(|| {
-                JetComputeError::InvalidShape("broadcast offset overflow".to_string())
-            })?;
         }
-        let index = usize::try_from(offset).ok().filter(|i| *i < values.len()).ok_or_else(|| {
-            JetComputeError::InvalidShape("broadcast source index is outside storage".to_string())
-        })?;
-        data.push(values[index]);
+        let rank_delta = dst_rank - src_rank;
+        let source_coords = (0..src_rank)
+            .map(|axis| {
+                if tensor.shape[axis] == 1 {
+                    0
+                } else {
+                    destination_coords[rank_delta + axis]
+                }
+            })
+            .collect::<Vec<_>>();
+        data.push(jet_compute_get(tensor, &source_coords)?);
     }
     let receipt = jet_compute_place(JetComputeDevice::Auto);
     Ok(JetTensor {
@@ -815,14 +1010,22 @@ fn jet_compute_transpose(tensor: &JetTensor) -> Result<JetTensor, JetComputeErro
             "transpose requires rank-2 tensor".to_string(),
         ));
     }
-    let (rows, cols) = (tensor.shape[0], tensor.shape[1]);
-    let mut out = jet_compute_tensor_from_shape(vec![cols, rows], 0.0, JetComputeDevice::Auto)?;
-    for i in 0..rows {
-        for j in 0..cols {
-            let v = jet_compute_get(tensor, &vec![i, j])?;
-            jet_compute_set(&mut out, &vec![j, i], v)?;
-        }
+    let (source_strides, offset) = jet_compute_view_metadata(tensor)?;
+    let mut strides = vec![source_strides[1], source_strides[0]];
+    if offset != 0 {
+        strides.push(i64::try_from(offset).map_err(|_| {
+            JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
+        })?);
     }
+    let out = JetTensor {
+        shape: vec![tensor.shape[1], tensor.shape[0]],
+        strides,
+        data: tensor.data.clone(),
+        device: tensor.device,
+        last_placement: tensor.last_placement.clone(),
+        last_transfer: None,
+    };
+    jet_compute_validate_tensor(&out)?;
     Ok(out)
 }
 
@@ -895,16 +1098,16 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
     let mut data = Vec::with_capacity(values.len());
     for value in values {
         let output = match op {
-            "negate" => -*value,
+            "negate" => -value,
             "abs" => value.abs(),
             "exp" => value.exp(),
-            "log" if *value > 0.0 => value.ln(),
+            "log" if value > 0.0 => value.ln(),
             "log" => {
                 return Err(JetComputeError::Arithmetic(
                     "log requires strictly positive values".to_string(),
                 ));
             }
-            "sqrt" if *value >= 0.0 => value.sqrt(),
+            "sqrt" if value >= 0.0 => value.sqrt(),
             "sqrt" => {
                 return Err(JetComputeError::Arithmetic(
                     "sqrt requires non-negative values".to_string(),
@@ -957,7 +1160,9 @@ fn jet_compute_binary(
     let right_values = jet_compute_tensor_values(&right);
     let mut data = Vec::with_capacity(left_values.len());
     for (x, y) in left_values.iter().zip(right_values.iter()) {
-        if op == "div" && *y == 0.0 {
+        let x = *x;
+        let y = *y;
+        if op == "div" && y == 0.0 {
             return Err(JetComputeError::Arithmetic(
                 "division by zero in compute operation".to_string(),
             ));
@@ -965,8 +1170,8 @@ fn jet_compute_binary(
         let output = match op {
             "sub" => x - y,
             "div" => x / y,
-            "maximum" => x.max(*y),
-            "minimum" => x.min(*y),
+            "maximum" => x.max(y),
+            "minimum" => x.min(y),
             "add" => x + y,
             "mul" => x * y,
             _ => unreachable!("unvalidated binary operation"),
@@ -1309,6 +1514,41 @@ struct JetComputeTransferReceipt {
     fallback: String,
 }
 
+fn jet_compute_validate_transfer_receipt(
+    tensor: &JetTensor,
+    receipt: &JetComputeTransferReceipt,
+) -> Result<(), JetComputeError> {
+    if receipt.from == JetComputeDevice::Auto || receipt.to == JetComputeDevice::Auto {
+        return Err(JetComputeError::Device(
+            "transfer receipt must name concrete source and destination devices".to_string(),
+        ));
+    }
+    if receipt.to != tensor.device {
+        return Err(JetComputeError::Device(
+            "transfer receipt destination does not match Tensor placement".to_string(),
+        ));
+    }
+    let logical_bytes = jet_compute_tensor_values(tensor)
+        .len()
+        .checked_mul(std::mem::size_of::<f64>())
+        .and_then(|bytes| i64::try_from(bytes).ok())
+        .ok_or_else(|| JetComputeError::Device("transfer byte count overflow".to_string()))?;
+    let expected_bytes = if receipt.from == receipt.to {
+        0
+    } else {
+        logical_bytes
+    };
+    if receipt.bytes != expected_bytes
+        || (receipt.from == receipt.to && receipt.fallback != "none")
+        || (receipt.from != receipt.to && receipt.fallback == "none")
+    {
+        return Err(JetComputeError::Device(
+            "transfer receipt does not match the selected backend operation".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl JetShow for JetComputeStream {
     fn jet_show(&self) -> String {
         format!("ComputeStream(id={}, device={})", self.id, self.device.jet_show())
@@ -1328,8 +1568,10 @@ impl JetShow for JetComputeTransferReceipt {
 }
 
 fn jet_compute_stream_new() -> JetComputeStream {
+    static NEXT_STREAM_ID: std::sync::atomic::AtomicI64 =
+        std::sync::atomic::AtomicI64::new(1);
     JetComputeStream {
-        id: 1,
+        id: NEXT_STREAM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         device: JetComputeDevice::Cpu,
     }
 }
@@ -1357,21 +1599,20 @@ fn jet_compute_transfer(
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let byte_count = jet_compute_tensor_values(tensor)
+    let logical_byte_count = jet_compute_tensor_values(tensor)
         .len()
         .checked_mul(std::mem::size_of::<f64>())
         .and_then(|bytes| i64::try_from(bytes).ok())
         .ok_or_else(|| JetComputeError::Device("transfer byte count overflow".to_string()))?;
-    let bytes = byte_count;
     let from = tensor.device;
     let mut out = jet_compute_on_device(tensor, device)?;
-    let fallback = if from == out.device {
-        "none".to_string()
+    let (bytes, transfer_kind) = if from == out.device {
+        (0, "no-op; same backend and allocation".to_string())
     } else {
-        "cpu-oracle-copy".to_string()
+        (logical_byte_count, "copy; selected backend".to_string())
     };
     out.last_placement.reason = format!(
-        "transfer bytes={bytes} fallback={fallback} from={} to={}",
+        "transfer kind={transfer_kind} bytes={bytes} from={} to={}",
         from.jet_show(),
         out.device.jet_show()
     );
@@ -1379,7 +1620,11 @@ fn jet_compute_transfer(
         from,
         to: out.device,
         bytes,
-        fallback,
+        fallback: if from == out.device {
+            "none".to_string()
+        } else {
+            "not-applicable".to_string()
+        },
     });
     Ok(out)
 }
@@ -1418,29 +1663,15 @@ fn jet_compute_kernel_bounds_ok(
     Ok(true)
 }
 
+/// Opaque proof token reserved for a provider-generated raw-kernel boundary.
+/// The safe Prelude cannot mint one from a reason string and an arity: those
+/// values do not prove address spaces, read/write sets, effects, or barriers.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetRawKernelContract {
-    reason: String,
-    arity: i64,
-    bounds: bool,
-    alias_free: bool,
-    race_free: bool,
-    barrier_uniform: bool,
-    differential: String,
-}
+struct JetRawKernelContract;
 
 impl JetShow for JetRawKernelContract {
     fn jet_show(&self) -> String {
-        format!(
-            "RawKernelContract(reason={}, arity={}, bounds={}, alias_free={}, race_free={}, barrier_uniform={}, differential={})",
-            self.reason,
-            self.arity,
-            self.bounds,
-            self.alias_free,
-            self.race_free,
-            self.barrier_uniform,
-            self.differential
-        )
+        "RawKernelContract(provider-issued opaque proof)".to_string()
     }
 }
 
@@ -1448,11 +1679,9 @@ fn jet_compute_raw_kernel_contract_show(contract: &JetRawKernelContract) -> Stri
     contract.jet_show()
 }
 
-/// Construct the typed audited boundary for raw device code. The raw body is
-/// outside this safe Prelude; this value is the required contract that a
-/// `#Unsafe` caller must carry to the eventual provider bridge. Keeping the
-/// obligations as fields makes the boundary inspectable and prevents a plain
-/// display label from masquerading as an audit record.
+/// A reason and an arity are not a typed raw-kernel boundary contract. Refuse
+/// this legacy convenience entry point until an explicit provider bridge can
+/// supply the proof token and its differential receipt.
 fn jet_compute_raw_kernel_contract(
     reason: String,
     arity: i64,
@@ -1477,20 +1706,10 @@ fn jet_compute_raw_kernel_contract(
             "raw kernel contract reason must not contain control characters".to_string(),
         ));
     }
-    Ok(JetRawKernelContract {
-        reason,
-        arity,
-        // This constructor records the obligations at the unsafe boundary. It
-        // cannot prove the provider body: no provider body reaches Prelude.
-        // Keep the receipt honest so a typed descriptor is not mistaken for a
-        // compiler proof. A provider bridge must replace these fields with its
-        // independently checked contract before launch.
-        bounds: false,
-        alias_free: false,
-        race_free: false,
-        barrier_uniform: false,
-        differential: "required; not verified by Jet".to_string(),
-    })
+    let _ = (reason, arity);
+    Err(JetComputeError::Unsupported(
+        "raw kernel contracts require a provider-issued typed boundary proof; reason and arity alone cannot certify launch safety".to_string(),
+    ))
 }
 
 // ── #1141 / D-COMPUTE-AUTODIFF1: reverse-mode VJP + JVP for dense ops ────────
@@ -1556,9 +1775,18 @@ fn jet_compute_reduce_to_shape(
             };
         }
         let target_offset = jet_compute_offset(&out, &target_coords)?;
-        let accumulated = std::sync::Arc::make_mut(&mut out.data);
-        accumulated[target_offset] += values[flat];
-        if !out.data[target_offset].is_finite() {
+        let Some(data) = std::sync::Arc::get_mut(&mut out.data) else {
+            return Err(JetComputeError::Unsupported(
+                "gradient accumulation requires exclusive output storage".to_string(),
+            ));
+        };
+        let Some(slot) = data.get_mut(target_offset) else {
+            return Err(JetComputeError::OutOfBounds(
+                "gradient accumulation is outside storage".to_string(),
+            ));
+        };
+        *slot += values[flat];
+        if !slot.is_finite() {
             return Err(JetComputeError::Arithmetic(
                 "gradient accumulation produced a non-finite value".to_string(),
             ));
@@ -1582,8 +1810,14 @@ fn jet_compute_vjp_add(
         ));
     }
     Ok((
-        jet_compute_reduce_to_shape(cot, &a.shape)?,
-        jet_compute_reduce_to_shape(cot, &b.shape)?,
+        jet_compute_inherit_placement(
+            jet_compute_reduce_to_shape(cot, &a.shape)?,
+            a,
+        ),
+        jet_compute_inherit_placement(
+            jet_compute_reduce_to_shape(cot, &b.shape)?,
+            b,
+        ),
     ))
 }
 
@@ -1604,8 +1838,14 @@ fn jet_compute_vjp_mul(
     let grad_a = jet_compute_binary("mul", b, cot)?;
     let grad_b = jet_compute_binary("mul", a, cot)?;
     Ok((
-        jet_compute_reduce_to_shape(&grad_a, &a.shape)?,
-        jet_compute_reduce_to_shape(&grad_b, &b.shape)?,
+        jet_compute_inherit_placement(
+            jet_compute_reduce_to_shape(&grad_a, &a.shape)?,
+            a,
+        ),
+        jet_compute_inherit_placement(
+            jet_compute_reduce_to_shape(&grad_b, &b.shape)?,
+            b,
+        ),
     ))
 }
 
@@ -1630,7 +1870,10 @@ fn jet_compute_vjp_matmul(
     }
     let b_t = jet_compute_transpose(b)?;
     let a_t = jet_compute_transpose(a)?;
-    Ok((jet_compute_matmul(cot, &b_t)?, jet_compute_matmul(&a_t, cot)?))
+    Ok((
+        jet_compute_inherit_placement(jet_compute_matmul(cot, &b_t)?, a),
+        jet_compute_inherit_placement(jet_compute_matmul(&a_t, cot)?, b),
+    ))
 }
 
 fn jet_compute_vjp_add_value(
@@ -1692,7 +1935,7 @@ fn jet_compute_jvp_add(
             "add tangents must match their primal tensor shapes".to_string(),
         ));
     }
-    jet_compute_add(t_a, t_b)
+    Ok(jet_compute_inherit_placement(jet_compute_add(t_a, t_b)?, a))
 }
 
 /// Forward-mode JVP of matrix multiplication:
@@ -1714,7 +1957,7 @@ fn jet_compute_jvp_matmul(
     }
     let left = jet_compute_matmul(t_a, b)?;
     let right = jet_compute_matmul(a, t_b)?;
-    jet_compute_add(&left, &right)
+    Ok(jet_compute_inherit_placement(jet_compute_add(&left, &right)?, a))
 }
 
 /// Forward-mode JVP of elementwise mul: `t_a * b + a * t_b`.
@@ -1735,7 +1978,7 @@ fn jet_compute_jvp_mul(
     }
     let left = jet_compute_mul(t_a, b)?;
     let right = jet_compute_mul(a, t_b)?;
-    jet_compute_add(&left, &right)
+    Ok(jet_compute_inherit_placement(jet_compute_add(&left, &right)?, a))
 }
 
 /// Scalar-loss convenience: value + ∂/∂a + ∂/∂b of `sum(a * b)`.
@@ -1744,10 +1987,16 @@ fn jet_compute_value_and_grad_mul(
     b: &JetTensor,
 ) -> Result<JetComputeGradTriple, JetComputeError> {
     let value = jet_compute_mul(a, b)?;
+    if jet_compute_tensor_numel(&value) != 1 {
+        return Err(JetComputeError::RankMismatch(
+            "value_and_grad_mul requires a scalar loss; use vjp_mul for tensor outputs"
+                .to_string(),
+        ));
+    }
     let ones = jet_compute_ones(&value.shape)?;
     let (ga, gb) = jet_compute_vjp_mul(a, b, &ones)?;
     Ok(JetComputeGradTriple {
-        value,
+        value: jet_compute_inherit_placement(value, a),
         grad_a: ga,
         grad_b: gb,
     })
@@ -1783,7 +2032,7 @@ fn jet_compute_mse_loss(pred: &JetTensor, target: &JetTensor) -> Result<f64, Jet
     let sum = jet_compute_tensor_values(&sq)
         .iter()
         .try_fold(0.0, |sum, value| {
-            let next = sum + value;
+            let next = sum + *value;
             next.is_finite().then_some(next)
         })
         .ok_or_else(|| {
@@ -1823,6 +2072,13 @@ fn jet_compute_sgd_step(
 }
 
 fn jet_compute_serialize(tensor: &JetTensor) -> String {
+    if let Err(error) = jet_compute_validate_tensor(tensor) {
+        jet_panic(
+            "core.compute.serialize",
+            line!(),
+            &format!("cannot serialize invalid Tensor: {}", error.jet_show()),
+        );
+    }
     let shape = tensor
         .shape
         .iter()
@@ -2134,15 +2390,22 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
         }
         i0 = i1;
     }
+    out.last_placement.profile = "F32Strict+Reproducible".to_string();
+    out.last_placement.capabilities = vec![
+        "ranked-storage".to_string(),
+        "strided-view".to_string(),
+        "checked-bounds".to_string(),
+        "f32-arithmetic".to_string(),
+        "blocked-matmul".to_string(),
+    ];
     out.last_placement.reason = format!(
-        "matmul_f32_tile TILE={TILE} profile={}",
-        jet_compute_profile_f32_strict()
+        "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered"
     );
     Ok(out)
 }
 
 fn jet_compute_profile_f32_strict() -> String {
-    "F32Strict+Reproducible+Tile8".to_string()
+    "backend=cpu;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;cache=builtin".to_string()
 }
 
 fn jet_compute_profile_show() -> String {
