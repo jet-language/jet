@@ -1371,7 +1371,7 @@ fn monitor_service(
     let mut stamps = match watch_stamps(&project_dir, &watched) {
         Ok(stamps) => stamps,
         Err(error) => {
-            finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+            finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
             return;
         }
     };
@@ -1383,7 +1383,7 @@ fn monitor_service(
                 finish_supervisor(
                     &project_dir,
                     &plan,
-                    started.state.pid,
+                    &started.state,
                     Some(&format!("supervisor could not inspect service: {error}")),
                 );
                 return;
@@ -1400,7 +1400,7 @@ fn monitor_service(
                 if !restart || restarts >= max_restarts || stopping {
                     let error = (restart && !stopping && restarts >= max_restarts)
                         .then_some("service restart limit exhausted");
-                    finish_supervisor(&project_dir, &plan, started.state.pid, error);
+                    finish_supervisor(&project_dir, &plan, &started.state, error);
                     return;
                 }
                 restarts += 1;
@@ -1414,7 +1414,7 @@ fn monitor_service(
                                 finish_supervisor(
                                     &project_dir,
                                     &plan,
-                                    started.state.pid,
+                                    &started.state,
                                     Some(&error),
                                 );
                                 return;
@@ -1425,13 +1425,13 @@ fn monitor_service(
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            started.state.pid,
+                            &started.state,
                             Some("service restart did not produce a running process"),
                         );
                         return;
                     }
                     Err(error) => {
-                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                         return;
                     }
                 }
@@ -1443,7 +1443,7 @@ fn monitor_service(
         }) {
             Some(Ok(changed)) => changed,
             Some(Err(error)) => {
-                finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                 return;
             }
             None => false,
@@ -1453,21 +1453,21 @@ fn monitor_service(
             if restarts >= max_restarts || stopping {
                 let error = (!stopping && restarts >= max_restarts)
                     .then_some("service watch restart limit exhausted");
-                finish_supervisor(&project_dir, &plan, started.state.pid, error);
+                finish_supervisor(&project_dir, &plan, &started.state, error);
                 return;
             }
             if let Err(error) = stop_process(&started.state, plan.shutdown.as_ref()) {
                 match started.child.try_wait() {
                     Ok(Some(_)) => {}
                     Ok(None) => {
-                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                         return;
                     }
                     Err(wait_error) => {
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            started.state.pid,
+                            &started.state,
                             Some(&format!("{error}; couldn't reap service: {wait_error}")),
                         );
                         return;
@@ -1486,7 +1486,7 @@ fn monitor_service(
                             finish_supervisor(
                                 &project_dir,
                                 &plan,
-                                started.state.pid,
+                                &started.state,
                                 Some(&error),
                             );
                             return;
@@ -1497,13 +1497,13 @@ fn monitor_service(
                     finish_supervisor(
                         &project_dir,
                         &plan,
-                        started.state.pid,
+                        &started.state,
                         Some("service watch restart did not produce a running process"),
                     );
                     return;
                 }
                 Err(error) => {
-                    finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                    finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                     return;
                 }
             }
@@ -1552,20 +1552,12 @@ fn stopping_requested(project_dir: &Path, plan: &DevServicePlan) -> bool {
     service_dir(project_dir, &plan.name).join(".stopping").is_file()
 }
 
-fn best_effort_kill_process_group(pid: u32) {
-    let _ = run_stop_action(pid, StopAction::Kill);
-}
-
 fn finish_supervisor(
     project_dir: &Path,
     plan: &DevServicePlan,
-    pid: u32,
+    state: &ProcessState,
     error: Option<&str>,
 ) {
-    // The service owns a process group whose leader was pid. Kill the group
-    // before dropping state so reparented foreground children cannot survive
-    // a restart limit, crash, or normal supervisor shutdown.
-    best_effort_kill_process_group(pid);
     let dir = service_dir(project_dir, &plan.name);
     let Ok(_guard) = super::RuntimePolicy::acquire_lock(
         &super::Store::managed_dir(project_dir),
@@ -1576,6 +1568,21 @@ fn finish_supervisor(
         // user-issued shutdown and claiming cleanup that did not happen.
         return;
     };
+
+    // The service owns a process group whose leader was state.pid. Recheck
+    // the recorded start identity before signaling it. If the process has
+    // already exited, there is nothing to kill. If the identity probe or the
+    // kill fails, preserve the PID and ports as live evidence instead of
+    // claiming cleanup and risking a PID-reuse signal or an orphan.
+    let cleanup_error = stop_process(state, Some(&ShutdownPolicy::Kill)).err();
+    if let Some(cleanup_error) = cleanup_error {
+        let message = match error {
+            Some(error) => format!("{error}; supervisor cleanup failed: {cleanup_error}"),
+            None => format!("supervisor cleanup failed: {cleanup_error}"),
+        };
+        let _ = write_atomic(&supervisor_error_path(&dir), message.as_bytes());
+        return;
+    }
     if let Some(error) = error {
         let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
     } else {
@@ -2058,13 +2065,34 @@ pub fn wait_healthy_with_env(
     if !plan.enable {
         return true;
     }
+    // A service without a readiness probe is healthy only after it remains
+    // alive for one bounded observation window. This closes the race where a
+    // detached reaper has not yet observed a fast child exit and a single
+    // process-liveness check would report false green.
+    let needs_stability = resolve(project_dir, plan)
+        .map(|resolved| {
+            resolved.ready.is_none()
+                && resolved.ready_probe.is_none()
+                && resolved.ports.is_empty()
+        })
+        .unwrap_or(false);
+    const NO_PROBE_STABILITY: Duration = Duration::from_millis(300);
+    let mut stable_since = None;
     let deadline = Instant::now() + timeout;
     loop {
         if supervisor_failure(project_dir, plan).is_some() {
             return false;
         }
         if matches!(health_one_with_env(project_dir, env, plan), Health::Healthy) {
-            return true;
+            if !needs_stability {
+                return true;
+            }
+            let started = stable_since.get_or_insert_with(Instant::now);
+            if started.elapsed() >= NO_PROBE_STABILITY {
+                return true;
+            }
+        } else {
+            stable_since = None;
         }
         if Instant::now() >= deadline {
             return false;
@@ -2627,6 +2655,16 @@ mod tests {
         up_one(&dir, &env(), &p).unwrap();
         assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
         assert!(matches!(health_one(&dir, &p), Health::Disabled));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fast_exit_without_probe_is_not_reported_healthy() {
+        let dir = scratch("fast-exit-no-probe");
+        let service = plan("fixture", "exit 7;");
+        up_one(&dir, &env(), &service).unwrap();
+        assert!(!wait_healthy(&dir, &service, Duration::from_secs(2)));
+        assert!(matches!(health_one(&dir, &service), Health::NotRunning));
         fs::remove_dir_all(&dir).ok();
     }
 

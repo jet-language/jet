@@ -100,6 +100,17 @@ pub fn export_archive(
     Ok((bytes, report))
 }
 
+/// Export a closure without a signer secret for an authenticated broker
+/// request. The broker verifies the contents and applies its own store
+/// signature before promotion.
+pub fn export_unsigned_archive(
+    roots: &Roots,
+    target: &str,
+    include_closure: bool,
+) -> io::Result<Vec<u8>> {
+    build_archive(roots, target, include_closure)?.encode_unsigned()
+}
+
 /// Import a complete archive.  Objects are decoded and hashed in a private
 /// staging directory before the closure WAL and package projections are
 /// touched.  Existing identical objects are reused; conflicting objects fail
@@ -120,6 +131,45 @@ pub fn import_archive(
         import_archive_unlocked(roots, archive)
     })?;
     Ok(report)
+}
+
+/// Import an archive returned by an authenticated shared-store broker.
+///
+/// The broker has already authenticated the peer, checked writer authority,
+/// and verified the archive with its private signing key. The client repeats
+/// the bounded decode, content hash, and metadata checks before importing, but
+/// never reads the administrator's signing secret.
+pub fn import_broker_archive(roots: &Roots, bytes: &[u8]) -> io::Result<ArchiveReport> {
+    if bytes.len() > MAX_ARCHIVE_BYTES {
+        return Err(invalid("archive exceeds the 1 GiB limit"));
+    }
+    let archive = Archive::decode(bytes)?;
+    if archive.signature.is_none() {
+        return Err(invalid("shared-store broker returned an unsigned archive"));
+    }
+    verify_archive_contents(roots, &archive)?;
+    let report = archive.report();
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        import_archive_unlocked(roots, archive)
+    })?;
+    Ok(report)
+}
+
+/// Have the shared-store broker sign a bounded, content-verified archive.
+/// This keeps the administrator's signing secret inside the broker process.
+pub fn attest_archive(roots: &Roots, bytes: &[u8], key: &str) -> io::Result<Vec<u8>> {
+    if bytes.len() > MAX_ARCHIVE_BYTES {
+        return Err(invalid("archive exceeds the 1 GiB limit"));
+    }
+    let archive = Archive::decode(bytes)?;
+    if archive.signature.is_some() {
+        return Err(invalid(
+            "shared-store write archive must not carry a client signature",
+        ));
+    }
+    verify_archive_contents(roots, &archive)?;
+    let signer = signing_key(roots, Some(key), false)?;
+    sign_decoded(archive, &signer)?.encode()
 }
 
 /// Read a bounded archive file for a CLI or connector caller.
@@ -1625,5 +1675,47 @@ mod tests {
             .verify_signature(&root, Some(key_path.to_str().unwrap()), false)
             .unwrap();
         let _ = remove_tree(&root.root);
+    }
+
+    #[test]
+    fn broker_attestation_signs_only_content_checked_unsigned_archive() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-archive-broker-attestation-{}",
+            std::process::id()
+        ));
+        let _ = remove_tree(&root);
+        let source = root.join("source");
+        fs::create_dir_all(source.join("bin")).unwrap();
+        fs::write(source.join("bin/tool"), b"verified\n").unwrap();
+        let digest = Envelope::try_output_hash_of(&source.to_string_lossy()).unwrap();
+        let archive = Archive {
+            root_id: digest.clone(),
+            objects: vec![ArchiveObject {
+                id: digest.clone(),
+                digest,
+                meta: String::new(),
+                root_mode: mode_of(&fs::symlink_metadata(&source).unwrap()),
+                nodes: collect_nodes(&source).unwrap(),
+            }],
+            signature: None,
+        };
+        let bytes = archive.encode().unwrap();
+        let key_path = root.join("trust/broker.key");
+        fs::create_dir_all(key_path.parent().unwrap()).unwrap();
+        fs::write(&key_path, vec![9; 32]).unwrap();
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+
+        let attested = attest_archive(&roots, &bytes, key_path.to_str().unwrap()).unwrap();
+        let decoded = Archive::decode(&attested).unwrap();
+        assert!(decoded.signature.is_some());
+        decoded
+            .verify_signature(&roots, Some(key_path.to_str().unwrap()), false)
+            .unwrap();
+        let error = attest_archive(&roots, &attested, key_path.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("must not carry a client signature"));
+        let _ = remove_tree(&root);
     }
 }

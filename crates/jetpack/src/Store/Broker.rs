@@ -48,30 +48,60 @@ struct BrokerLayout {
     grants: PathBuf,
 }
 
-fn broker_layout(roots: &Roots) -> BrokerLayout {
-    if roots.dev_mode {
-        let base = PathBuf::from(ADMIN_BASE);
-        BrokerLayout {
-            admin: true,
-            config: PathBuf::from(ADMIN_CONFIG),
-            socket: PathBuf::from(ADMIN_SOCKET),
-            shared_root: base.join("root"),
-            trust_key: base.join("trust/hangar.key"),
-            grants: base.join("users"),
-            base,
-        }
-    } else {
-        let base = absolute_path(&roots.root).join(SHARED_DIR);
-        BrokerLayout {
-            admin: false,
-            config: base.join("config"),
-            socket: base.join("broker.sock"),
-            shared_root: base.join("root"),
-            trust_key: base.join("trust/hangar.key"),
-            grants: base.join("users"),
-            base,
-        }
+fn user_broker_layout(roots: &Roots) -> BrokerLayout {
+    let base = absolute_path(&roots.root).join(SHARED_DIR);
+    BrokerLayout {
+        admin: false,
+        config: base.join("config"),
+        socket: base.join("broker.sock"),
+        shared_root: base.join("root"),
+        trust_key: base.join("trust/hangar.key"),
+        grants: base.join("users"),
+        base,
     }
+}
+
+fn admin_broker_layout() -> BrokerLayout {
+    let base = PathBuf::from(ADMIN_BASE);
+    BrokerLayout {
+        admin: true,
+        config: PathBuf::from(ADMIN_CONFIG),
+        socket: PathBuf::from(ADMIN_SOCKET),
+        shared_root: base.join("root"),
+        trust_key: base.join("trust/hangar.key"),
+        grants: base.join("users"),
+        base,
+    }
+}
+
+/// The explicit install command is administrator-owned. A normal process
+/// always resolves its private root, even when that root came from the
+/// default development fallback. The broker service itself runs as root and
+/// therefore resolves the administrator layout.
+fn broker_layout(roots: &Roots) -> BrokerLayout {
+    if roots.dev_mode && is_effective_root() {
+        admin_broker_layout()
+    } else {
+        user_broker_layout(roots)
+    }
+}
+
+#[cfg(unix)]
+fn is_effective_root() -> bool {
+    fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let values = line.strip_prefix("Uid:")?.split_whitespace();
+                values.skip(1).next()?.parse::<u32>().ok()
+            })
+        })
+        == Some(0)
+}
+
+#[cfg(not(unix))]
+fn is_effective_root() -> bool {
+    false
 }
 
 fn absolute_path(path: &Path) -> PathBuf {
@@ -86,6 +116,18 @@ fn absolute_path(path: &Path) -> PathBuf {
 
 pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig>> {
     let layout = broker_layout(roots);
+    if !layout.admin {
+        // A user may consume an administrator-installed broker, but the
+        // absence of its descriptor must fall back to the caller's private
+        // broker. A malformed administrator descriptor is not ignored.
+        if let Some(config) = read_shared_store_config(&admin_broker_layout())? {
+            return Ok(Some(config));
+        }
+    }
+    read_shared_store_config(&layout)
+}
+
+fn read_shared_store_config(layout: &BrokerLayout) -> io::Result<Option<SharedStoreConfig>> {
     let path = layout.config.clone();
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
@@ -138,7 +180,7 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
         trust_key: decode("trust_key")?,
         grants: decode("grants")?,
     };
-    validate_config_paths(roots, &config)?;
+    validate_config_paths(layout, &config)?;
     Ok(Some(config))
 }
 
@@ -148,6 +190,11 @@ pub fn shared_store_config(roots: &Roots) -> io::Result<Option<SharedStoreConfig
 /// continue to use their per-user Hangar when this configuration is absent.
 pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     let mut layout = broker_layout(roots);
+    if !layout.admin {
+        return Err(invalid(
+            "shared-store install requires administrator authority; run `sudo jetpack shared-store install`",
+        ));
+    }
     if layout.admin {
         ensure_system_dir(layout.base.parent().unwrap_or(Path::new("/")))?;
         // The administrator boundary itself is private. Only its parent and
@@ -236,7 +283,11 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
         // identity. It receives only the AF_UNIX request and the narrow
         // staging/promotion paths below.
         let service_identity = if layout.admin {
-            "User=root\nPrivateUsers=yes\n"
+            // PrivateUsers=yes would map host-owned trust and staging paths to
+            // an unmapped uid. The admin unit is already bounded by the
+            // transient oneshot, ProtectSystem, NoNewPrivileges, and the
+            // narrow ReadWritePaths below.
+            "User=root\n"
         } else {
             "PrivateUsers=yes\n"
         };
@@ -301,8 +352,7 @@ pub fn reuse_shared_entry(
         let Some(bytes) = read_archive_response(&mut stream)? else {
             return Ok(None);
         };
-        let key = config.trust_key.to_string_lossy().to_string();
-        Archive::import_archive(roots, &bytes, Some(&key), false)?;
+        Archive::import_broker_archive(roots, &bytes)?;
         let Some(candidate) = super::find_by_reference(roots, reference) else {
             return Err(invalid("shared-store broker returned no matching entry"));
         };
@@ -331,8 +381,7 @@ pub fn promote_shared_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<boo
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
-        let key = config.trust_key.to_string_lossy().to_string();
-        let (archive, _) = Archive::export_archive(roots, &entry.id, true, Some(&key))?;
+        let archive = Archive::export_unsigned_archive(roots, &entry.id, true)?;
         let mut stream = match UnixStream::connect(&config.socket) {
             Ok(stream) => stream,
             Err(error)
@@ -415,9 +464,10 @@ fn promote_staged_archive(
     };
     let result = (|| {
         // Admission happens in an ephemeral root first. The archive is
-        // bounded, signed, and digest-checked before the shared root is
-        // reachable by the promotion step.
-        Archive::import_archive(&staged, archive, Some(key), false)?;
+        // bounded and digest-checked, then signed by the broker before the
+        // shared root is reachable by the promotion step.
+        let attested = Archive::attest_archive(&staged, archive, key)?;
+        Archive::import_archive(&staged, &attested, Some(key), false)?;
         let entries = super::list_checked(&staged)?;
         if entries.is_empty() {
             return Err(invalid("shared-store archive contains no verified entry"));
@@ -427,7 +477,7 @@ fn promote_staged_archive(
                 .map_err(|error| io::Error::other(error.what()))?;
         }
         crate::RuntimePolicy::with_lock(&shared.root, "shared-store-promote", || {
-            Archive::import_archive(shared, archive, Some(key), false)?;
+            Archive::import_archive(shared, &attested, Some(key), false)?;
             Ok(())
         })
     })();
@@ -859,8 +909,10 @@ fn read_archive_response(stream: &mut impl Read) -> io::Result<Option<Vec<u8>>> 
     }
 }
 
-fn validate_config_paths(roots: &Roots, config: &SharedStoreConfig) -> io::Result<()> {
-    let layout = broker_layout(roots);
+fn validate_config_paths(
+    layout: &BrokerLayout,
+    config: &SharedStoreConfig,
+) -> io::Result<()> {
     let base = layout
         .base
         .canonicalize()
@@ -1217,7 +1269,8 @@ mod tests {
             dev_mode: false,
         };
 
-        let error = validate_config_paths(&roots, &config).unwrap_err();
+        let layout = user_broker_layout(&roots);
+        let error = validate_config_paths(&layout, &config).unwrap_err();
         assert!(error.to_string().contains("outside the installed private boundary"));
         let _ = fs::remove_dir_all(root);
     }

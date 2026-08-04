@@ -284,7 +284,22 @@ fn environment_image_service_projection_is_e1336() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "service projection must fail: {stderr}");
-    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    let diagnostic = stderr
+        .split("\n\n")
+        .find(|block| block.contains("error[E1336]"))
+        .map(|block| {
+            block
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(str::trim)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .expect("E1336 diagnostic block");
+    assert_eq!(diagnostic, include_str!("cli/image_service_projection_e1336.txt").trim());
+    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
+        .expect("rejected image projection report");
+    assert!(report.contains("\"rejected\":[\"services\"]"), "projection: {report}");
 }
 
 /// `jetpack image <name>` when the package hasn't been built yet (no

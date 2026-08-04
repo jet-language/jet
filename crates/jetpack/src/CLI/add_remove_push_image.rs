@@ -525,7 +525,17 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     // project-local `build/<name>` output. Environment images below consume
     // verified Hangar package outputs instead.
     let roots = Store::resolve();
+    let out_dir = dir.join(".jet").join("images").join(name);
+    let mut projection = Image::ProjectionReport::default();
     if !image.services.is_empty() {
+        projection.rejected.push("services".to_string());
+        if let Err(error) = write_rejected_projection(&out_dir, &projection) {
+            theme.error(
+                &format!("couldn't write image {name} rejection projection"),
+                &error.to_string(),
+                "check that the image output directory is writable.",
+            );
+        }
         theme.error_coded(
             "E1336",
             &format!("environment image {name} cannot project services"),
@@ -559,7 +569,6 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             mode: 0o755,
         }]
     };
-    let mut projection = Image::ProjectionReport::default();
     if image.from_environment {
         projection
             .included
@@ -623,12 +632,22 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         projection.changed.push("entrypoint".to_string());
     }
     if files.is_empty() {
+        projection.rejected.push("environment.package-output".to_string());
+        if let Err(error) = write_rejected_projection(&out_dir, &projection) {
+            theme.error(
+                &format!("couldn't write image {name} rejection projection"),
+                &error.to_string(),
+                "check that the image output directory is writable.",
+            );
+        }
         return 2;
     }
     for rel in &image.files {
         let data = match read_project_image_file(&dir, rel) {
             Ok(data) => data,
             Err(error) => {
+                projection.rejected.push(format!("file:{rel}"));
+                let _ = write_rejected_projection(&out_dir, &projection);
                 theme.error(
                     &format!("image file {rel} cannot be projected"),
                     &error,
@@ -659,7 +678,6 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         user: image.user.unwrap_or(10_001),
         healthcheck: image.health.clone(),
     };
-    let out_dir = dir.join(".jet").join("images").join(name);
     match Image::build_with_base(&spec, &out_dir, name, base_directory.as_deref()) {
         Ok(built) => {
             if let Err(error) =
@@ -785,6 +803,15 @@ fn environment_image_files(
             );
             return Vec::new();
         };
+        if let Err(error) = verify_realized_hangar_package(roots, &entry) {
+            theme.error_coded(
+                "E1336",
+                &format!("environment package `{reference}` failed Hangar verification"),
+                &error,
+                &format!("realize a verified executable package for `{reference}`, then run `jet image {name}`"),
+            );
+            return Vec::new();
+        }
         let binaries = match read_realized_package_binaries(&entry) {
             Ok(binaries) => binaries,
             Err(error) => {
@@ -838,6 +865,52 @@ fn environment_image_files(
         mode: 0o755,
     });
     files
+}
+
+fn write_rejected_projection(
+    out_dir: &Path,
+    projection: &Image::ProjectionReport,
+) -> std::io::Result<()> {
+    fs::create_dir_all(out_dir)?;
+    Image::write_projection_report(out_dir, "", projection)
+}
+
+fn verify_realized_hangar_package(
+    roots: &Store::Roots,
+    entry: &Store::StoreEntry,
+) -> Result<(), String> {
+    Store::verify_hangar_object(roots, entry).map_err(|error| format!("{error:?}"))?;
+    if entry.envelope.output_hash.is_empty() {
+        return Err("the Hangar entry has no canonical output digest".to_string());
+    }
+    let expected = fs::canonicalize(
+        roots
+            .hangar_dir()
+            .join("objects")
+            .join(&entry.envelope.output_hash),
+    )
+    .map_err(|error| format!("the Hangar object cannot be opened: {error}"))?;
+    let output_metadata = fs::symlink_metadata(&entry.out)
+        .map_err(|error| format!("the Hangar output cannot be opened: {error}"))?;
+    if output_metadata.file_type().is_symlink() {
+        return Err("the Hangar output is a symlink".to_string());
+    }
+    let output = fs::canonicalize(&entry.out)
+        .map_err(|error| format!("the Hangar output cannot be resolved: {error}"))?;
+    if output != expected {
+        return Err("the Hangar entry output is not its verified content-addressed object".to_string());
+    }
+    let bin_metadata = fs::symlink_metadata(&entry.bin)
+        .map_err(|error| format!("the Hangar bin projection cannot be opened: {error}"))?;
+    if bin_metadata.file_type().is_symlink() {
+        return Err("the Hangar bin projection is a symlink".to_string());
+    }
+    let bin = fs::canonicalize(&entry.bin)
+        .map_err(|error| format!("the Hangar bin projection cannot be resolved: {error}"))?;
+    if !bin.starts_with(&output) {
+        return Err("the Hangar bin projection escapes its verified output".to_string());
+    }
+    Ok(())
 }
 
 fn read_realized_package_binaries(entry: &Store::StoreEntry) -> Result<Vec<(String, Vec<u8>)>, String> {
