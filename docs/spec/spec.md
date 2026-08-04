@@ -3317,6 +3317,7 @@ CLI flag per feature.
 ```
 jet inspect expand --facts <lens> <file.jet>   # one lens's facts
 jet inspect expand <file.jet>                  # every lens, grouped, empty ones skipped
+jet inspect expand --facts inline --json <file.jet>  # canonical semindex + inline projection
 ```
 
 Facts are read straight off the ordinary check pass — never a second
@@ -3343,6 +3344,17 @@ file that fails to compile prints the ordinary front-end diagnostics and
 exits nonzero: facts require a clean check, same as `jet inspect semindex`/
 `jet inspect impact`. A clean program with no facts for a lens (or for every lens,
 bare form) exits 0 — absence of facts is not a failure.
+
+`--json` keeps the canonical semantic-index document and adds one additive
+`expand` projection. The projection records the requested selection (`all` for
+the bare form), the registered lens name and summary, and structured facts with
+source paths, byte spans, and line/column positions where a lens has a source
+location. The checked bundle and sema facts are shared with human output; JSON
+does not create a second schema or analysis path.
+Usage errors such as an unknown lens stay outside the diagnostic-code table and
+use a small versioned `error.kind = "usage"` object; a source that fails the
+ordinary check uses one versioned document whose `diagnostics` entries are
+serialized by the shared machine-diagnostic renderer.
 
 **Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`
 (name, one-line summary, renderer) — adding a lens for a future ratified

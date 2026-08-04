@@ -6,6 +6,33 @@ use jet_foundation::Diagnostics::Span;
 /// fact shape changes incompatibly.
 pub const SCHEMA_VERSION: u32 = 12;
 
+/// Canonical JSON values for additive tooling projections. Keeping this small
+/// value model in the semantic-index crate prevents CLI consumers from
+/// inventing a second serializer or passing unvalidated JSON fragments into
+/// the index document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpandValue {
+    Null,
+    Bool(bool),
+    Number(usize),
+    String(String),
+    Array(Vec<ExpandValue>),
+    Object(Vec<(String, ExpandValue)>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandLens {
+    pub name: String,
+    pub summary: String,
+    pub facts: Vec<ExpandValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandProjection {
+    pub selection: String,
+    pub lenses: Vec<ExpandLens>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewSourceFact {
     Receiver,

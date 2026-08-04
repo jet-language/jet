@@ -14,6 +14,7 @@ use std::process::exit;
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
 use jet::AST::{Item, ProgramBundle};
+use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue};
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
 /// listings and the bare-form group header, and the renderer that turns a
@@ -25,6 +26,7 @@ struct Lens {
     name: &'static str,
     summary: &'static str,
     render: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<String>,
+    render_json: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<ExpandValue>,
 }
 
 const LENSES: &[Lens] = &[
@@ -32,20 +34,23 @@ const LENSES: &[Lens] = &[
         name: "inline",
         summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)",
         render: render_inline,
+        render_json: render_inline_json,
     },
     Lens {
         name: "memory",
         summary: "transitive no_alloc / zero_rc / arena_bounded facts (D-MEM-FACTS1)",
         render: render_memory,
+        render_json: render_memory_json,
     },
     Lens {
         name: "web",
         summary: "D-WEBAPP1 application graph facts (routes/actions/policy)",
         render: render_web,
+        render_json: render_web_json,
     },
 ];
 
-pub(crate) fn run_expand(args: &[String], _json: bool) {
+pub(crate) fn run_expand(args: &[String], json: bool) {
     let mut lens_name: Option<String> = None;
     let mut positional: Vec<&str> = Vec::new();
     let mut it = args.iter();
@@ -56,6 +61,13 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
             match it.next() {
                 Some(v) => lens_name = Some(v.clone()),
                 None => {
+                    if json {
+                        print_json_cli_error(
+                            "`--facts` needs a lens name",
+                            "the expand command must know which registered lens to project",
+                            "pass `--facts inline`, `--facts memory`, or `--facts web`",
+                        );
+                    }
                     eprintln!("error: `--facts` needs a lens name");
                     print_available_lenses();
                     exit(ExitCodes::USER_ERROR);
@@ -67,6 +79,13 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
     }
 
     let Some(path) = positional.first().copied() else {
+        if json {
+            print_json_cli_error(
+                "`jet inspect expand` needs an entry file",
+                "expand facts come from one checked Jet entry file",
+                "run `jet inspect expand --facts inline examples/features/basics/hello.jet`",
+            );
+        }
         eprintln!("error: `jet inspect expand` needs an entry file");
         eprintln!(" Fix: jet inspect expand examples/features/basics/hello.jet");
         eprintln!(" Fix: jet inspect expand --facts inline examples/features/basics/hello.jet");
@@ -77,6 +96,13 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
         Some(name) => match LENSES.iter().find(|l| l.name == name) {
             Some(l) => vec![l],
             None => {
+                if json {
+                    print_json_cli_error(
+                        &format!("unknown expand lens `{name}`"),
+                        "only registered lenses have checked semantic facts",
+                        "use `inline`, `memory`, or `web`",
+                    );
+                }
                 eprintln!("error: unknown lens `{}`", name);
                 print_available_lenses();
                 exit(ExitCodes::USER_ERROR);
@@ -92,6 +118,10 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
         .iter()
         .any(|d| d.severity == jet::Diagnostics::Severity::Error);
     let Some(bundle) = (if has_errors { None } else { bundle }) else {
+        if json {
+            let source = std::fs::read_to_string(&abs).unwrap_or_default();
+            print_json_frontend_diagnostics(&entry, &source, &diags);
+        }
         for d in &diags {
             eprintln!(
                 "{}",
@@ -100,6 +130,28 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
         }
         exit(ExitCodes::USER_ERROR);
     };
+
+    // JSON is the canonical semantic-index document with one additive
+    // `expand` projection. The checked bundle and effect facts above are the
+    // only inputs: this path never re-checks or asks rustc for an answer.
+    if json {
+        let index = jet_semindex::from_checked(&bundle, &facts);
+        let selection = lens_name.as_deref().unwrap_or("all");
+        let lenses = selected
+            .iter()
+            .map(|lens| ExpandLens {
+                name: lens.name.to_string(),
+                summary: lens.summary.to_string(),
+                facts: (lens.render_json)(&bundle, &facts),
+            })
+            .collect();
+        let expand = ExpandProjection {
+            selection: selection.to_string(),
+            lenses,
+        };
+        println!("{}", index.to_json_with_expand(&expand));
+        exit(ExitCodes::OK);
+    }
 
     // Bare form (`lens_name` is `None`): magic default, every lens, grouped
     // under a header, empty lenses skipped entirely so the output stays
@@ -136,11 +188,82 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
     exit(ExitCodes::OK);
 }
 
+fn print_json_cli_error(what: &str, why: &str, fix: &str) -> ! {
+    println!(
+        "{{\"schema_version\":1,\"error\":{{\"kind\":\"usage\",\"message\":{},\"why\":{},\"fix\":{}}}}}",
+        json_string(what),
+        json_string(why),
+        json_string(fix)
+    );
+    exit(ExitCodes::USER_ERROR);
+}
+
+fn print_json_frontend_diagnostics(file: &str, source: &str, diags: &[jet::Diagnostics::Diagnostic]) -> ! {
+    let entries = diags
+        .iter()
+        .map(|diagnostic| diagnostic.to_json(file, source))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!("{{\"schema_version\":1,\"diagnostics\":[{}]}}", entries);
+    exit(ExitCodes::USER_ERROR);
+}
+
 fn print_available_lenses() {
     eprintln!(" available lenses:");
     for l in LENSES {
         eprintln!("   {:<8} {}", l.name, l.summary);
     }
+}
+
+/// Quote CLI usage text with the same std-only JSON escaping used by the
+/// semantic-index serializer.
+fn json_string(value: &str) -> String {
+    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
+}
+
+fn expand_string(value: impl Into<String>) -> ExpandValue {
+    ExpandValue::String(value.into())
+}
+
+fn expand_object(fields: Vec<(&str, ExpandValue)>) -> ExpandValue {
+    ExpandValue::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
+fn expand_string_list(values: &[String]) -> ExpandValue {
+    ExpandValue::Array(values.iter().cloned().map(ExpandValue::String).collect())
+}
+
+fn expand_span(span: jet::Diagnostics::Span, location: Option<(usize, usize)>) -> ExpandValue {
+    let mut fields = vec![
+        ("start", ExpandValue::Number(span.start)),
+        ("end", ExpandValue::Number(span.end)),
+    ];
+    add_location(&mut fields, location);
+    expand_object(fields)
+}
+
+fn add_location(fields: &mut Vec<(&str, ExpandValue)>, location: Option<(usize, usize)>) {
+    if let Some((line, column)) = location {
+        fields.push(("line", ExpandValue::Number(line)));
+        fields.push(("column", ExpandValue::Number(column)));
+    }
+}
+
+fn source_location(
+    bundle: &ProgramBundle,
+    source: &str,
+    offset: usize,
+) -> Option<(usize, usize)> {
+    bundle
+        .modules
+        .iter()
+        .find(|module| module.display == source || module.path.to_string_lossy() == source)
+        .map(|module| jet::Diagnostics::span_line_col(&module.source, offset))
 }
 
 fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
@@ -176,6 +299,50 @@ fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<St
     lines
 }
 
+fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+    let mut rows = Vec::new();
+    for declaration in &facts.memory_declarations {
+        for root in &declaration.roots {
+            let location = source_location(bundle, &declaration.source, declaration.span.start);
+            let status = match facts
+                .memory_projections
+                .get(&(root.clone(), declaration.fact))
+            {
+                Some(jet::Sema::MemoryProjection::Proven) => {
+                    expand_object(vec![("kind", expand_string("proven"))])
+                }
+                Some(jet::Sema::MemoryProjection::Violated { call_path, operation }) => {
+                    expand_object(vec![
+                        ("kind", expand_string("violated")),
+                        ("operation", expand_string(operation)),
+                        ("call_path", expand_string_list(call_path)),
+                    ])
+                }
+                Some(jet::Sema::MemoryProjection::OpenWorld { call_path, reason }) => {
+                    expand_object(vec![
+                        ("kind", expand_string("open_world")),
+                        ("reason", expand_string(reason)),
+                        ("call_path", expand_string_list(call_path)),
+                    ])
+                }
+                None => expand_object(vec![("kind", expand_string("not_projected"))]),
+            };
+            let mut fields = vec![
+                ("fact", expand_string(declaration.fact.display())),
+                ("root", expand_string(root)),
+                ("source", expand_string(&declaration.source)),
+                ("span", expand_span(declaration.span, location)),
+                ("provenance", expand_string(&declaration.provenance)),
+                ("status", status),
+            ];
+            add_location(&mut fields, location);
+            rows.push(expand_object(fields));
+        }
+    }
+    rows.sort_by_key(|row| format!("{row:?}"));
+    rows
+}
+
 fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
     let Some(graph) = facts.web_app.as_ref() else {
         return Vec::new();
@@ -189,6 +356,97 @@ fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<Strin
         return Vec::new();
     }
     graph.explain_lines()
+}
+
+fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+    let Some(graph) = facts.web_app.as_ref() else {
+        return Vec::new();
+    };
+    let routes = graph
+        .routes
+        .iter()
+        .map(|route| {
+            let location = source_location(bundle, &graph.entry_file, route.span_start);
+            let mut fields = vec![
+                ("path", expand_string(&route.path)),
+                ("handler", expand_string(&route.handler)),
+                ("render", expand_string(route.render.as_str())),
+                ("provenance", expand_string(&route.provenance)),
+                ("source", expand_string(&graph.entry_file)),
+                ("span", expand_span(jet::Diagnostics::Span::new(route.span_start, route.span_end), location)),
+            ];
+            add_location(&mut fields, location);
+            expand_object(fields)
+        })
+        .collect();
+    let actions = graph
+        .actions
+        .iter()
+        .map(|action| {
+            let location = source_location(bundle, &graph.entry_file, action.span_start);
+            let mut fields = vec![
+                ("name", expand_string(&action.name)),
+                ("handler", expand_string(&action.handler)),
+                ("kind", expand_string(&action.kind)),
+                ("provenance", expand_string(&action.provenance)),
+                ("source", expand_string(&graph.entry_file)),
+                ("span", expand_span(jet::Diagnostics::Span::new(action.span_start, action.span_end), location)),
+            ];
+            add_location(&mut fields, location);
+            expand_object(fields)
+        })
+        .collect();
+    let mounts = graph
+        .mounts
+        .iter()
+        .map(|mount| {
+            let location = source_location(bundle, &graph.entry_file, mount.span_start);
+            let mut fields = vec![
+                ("prefix", expand_string(&mount.prefix)),
+                ("handler", expand_string(&mount.handler)),
+                ("effects", expand_string_list(&mount.effects)),
+                ("security", expand_string_list(&mount.security)),
+                ("provenance", expand_string(&mount.provenance)),
+                ("source", expand_string(&graph.entry_file)),
+                ("span", expand_span(jet::Diagnostics::Span::new(mount.span_start, mount.span_end), location)),
+            ];
+            add_location(&mut fields, location);
+            expand_object(fields)
+        })
+        .collect();
+    let routes_from = graph
+        .routes_from
+        .iter()
+        .map(|root| {
+            let location = source_location(bundle, &graph.entry_file, root.span_start);
+            let mut fields = vec![
+                ("root", expand_string(&root.root)),
+                ("source", expand_string(&graph.entry_file)),
+                ("span", expand_span(jet::Diagnostics::Span::new(root.span_start, root.span_end), location)),
+            ];
+            add_location(&mut fields, location);
+            expand_object(fields)
+        })
+        .collect();
+    vec![expand_object(vec![
+        ("kind", expand_string("web_graph")),
+        ("source", expand_string(&graph.entry_file)),
+        ("entry", expand_string(&graph.entry_file)),
+        ("hydration", expand_string(&graph.hydration)),
+        ("shared_tir", ExpandValue::Bool(graph.shared_tir)),
+        ("routes", ExpandValue::Array(routes)),
+        ("actions", ExpandValue::Array(actions)),
+        ("mounts", ExpandValue::Array(mounts)),
+        ("routes_from", ExpandValue::Array(routes_from)),
+        ("policy", expand_object(vec![
+            ("security", expand_string_list(&graph.policy.security)),
+            ("assets", expand_string_list(&graph.policy.assets)),
+            ("split", expand_string_list(&graph.policy.split)),
+            ("cache", expand_string_list(&graph.policy.cache)),
+            ("a11y", expand_string_list(&graph.policy.a11y)),
+            ("adapters", expand_string_list(&graph.policy.adapters)),
+        ])),
+    ])]
 }
 
 /// D-METHODMACRO1=A: every `#Inline`/`#Inline(Always)` fn or method in the
@@ -208,6 +466,30 @@ fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<St
         }
     }
     out
+}
+
+fn render_inline_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+    let mut rows = Vec::new();
+    for module in &bundle.modules {
+        for (qualified, span, contract, attr) in collect_inline_facts(&module.items, None) {
+            let location = Some(jet::Diagnostics::span_line_col(&module.source, span.start));
+            let qualified_value = qualified.clone();
+            rows.push((
+                module.display.clone(),
+                span.start,
+                qualified,
+                expand_object(vec![
+                    ("name", expand_string(qualified_value)),
+                    ("source", expand_string(&module.display)),
+                    ("span", expand_span(span, location)),
+                    ("contract", expand_string(contract)),
+                    ("rust_attribute", expand_string(attr)),
+                ]),
+            ));
+        }
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    rows.into_iter().map(|(_, _, _, row)| row).collect()
 }
 
 /// Walk one item list for `#Inline`/`#Inline(Always)` functions and methods,

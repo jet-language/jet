@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
 
+use jet_foundation::JSON::parse_json;
+
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -4477,6 +4479,124 @@ fn expand_inline_golden() {
     );
     let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
     check_snapshot("expand_inline.txt", &s);
+}
+
+#[test]
+fn expand_json_is_canonical_and_lens_scoped() {
+    let p = expand_fixture();
+    let run = || {
+        Command::new(jet())
+            .args(["inspect", "expand", "--facts", "inline", "--json"])
+            .arg(&p)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(first.stdout, second.stdout, "expand JSON must be byte-stable");
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.starts_with('{'), "JSON mode must not print human headers: {stdout}");
+    assert!(stdout.contains("\"schema_version\":12"), "must reuse semindex schema: {stdout}");
+    assert!(stdout.contains("\"expand\":{\"selection\":\"inline\""), "missing expand projection: {stdout}");
+    assert!(stdout.contains("\"contract\":\"#Inline"), "inline facts missing: {stdout}");
+    assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");
+}
+
+#[test]
+fn expand_json_bare_projects_every_lens() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(parse_json(&stdout).is_ok(), "bare expand JSON must parse: {stdout}");
+    assert!(stdout.contains("\"selection\":\"all\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"inline\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"memory\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"web\""), "{stdout}");
+    assert!(!stdout.contains("inline —"), "human output leaked into JSON: {stdout}");
+}
+
+#[test]
+fn expand_json_selected_empty_and_positions_are_proved() {
+    let fixture = expand_fixture();
+    let empty = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "memory", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(empty.status.code(), Some(0));
+    let empty_json = String::from_utf8_lossy(&empty.stdout);
+    assert!(parse_json(&empty_json).is_ok(), "selected empty JSON must parse: {empty_json}");
+    assert!(empty_json.contains("\"selection\":\"memory\""));
+    assert!(empty_json.contains("\"facts\":[]"), "selected empty lens must be explicit: {empty_json}");
+
+    let memory = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "memory", "--json"])
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/memory/no_alloc_policy.jet"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(memory.status.code(), Some(0));
+    let memory_json = String::from_utf8_lossy(&memory.stdout);
+    assert!(parse_json(&memory_json).is_ok());
+    assert!(memory_json.contains("\"fact\":\"no_alloc\""));
+    assert!(memory_json.contains("\"line\":5"), "memory fact location missing: {memory_json}");
+
+    let web = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "web", "--json"])
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/web/web_app.jet"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(web.status.code(), Some(0));
+    let web_json = String::from_utf8_lossy(&web.stdout);
+    assert!(parse_json(&web_json).is_ok());
+    assert!(web_json.contains("\"kind\":\"web_graph\""));
+    assert!(web_json.contains("\"span\":{"), "web fact positions missing: {web_json}");
+}
+
+#[test]
+fn expand_json_compile_error_uses_machine_diagnostics() {
+    let p = bad_file(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "JSON diagnostics must be one document on stdout: {stdout}");
+    assert!(stdout.contains("\"code\":\"E0102\""), "missing registered diagnostic: {stdout}");
+    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON must parse as one document: {stdout}");
+    assert!(!stdout.contains("Error ["), "human diagnostic leaked into JSON: {stdout}");
+    assert!(stderr.is_empty(), "JSON mode should keep stderr quiet: {stderr}");
+}
+
+#[test]
+fn expand_json_unknown_lens_is_versioned_usage_error() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "bogus", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("{\"schema_version\":1,\"error\""), "{stdout}");
+    assert!(stdout.contains("\"kind\":\"usage\""), "{stdout}");
+    assert!(!stdout.contains("E2101"), "usage error must not borrow unknown-command code: {stdout}");
+    assert!(out.stderr.is_empty());
 }
 
 #[test]

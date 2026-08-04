@@ -4,7 +4,8 @@ use jet_foundation::JSON::json_escape;
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
+    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, ExpandProjection, ExpandValue,
+    InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
     SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
@@ -279,6 +280,17 @@ fn json_member(m: &MemberFact) -> String {
 impl SemIndex {
     /// Stable JSON document for tests and `jet inspect semindex --json`.
     pub fn to_json(&self) -> String {
+        self.to_json_inner(None)
+    }
+
+    /// Stable semantic-index document with one additive consumer projection.
+    /// The base fields and their order remain owned by this serializer, so a
+    /// tooling projection does not create a second top-level document.
+    pub fn to_json_with_expand(&self, expand: &ExpandProjection) -> String {
+        self.to_json_inner(Some(expand))
+    }
+
+    fn to_json_inner(&self, expand: Option<&ExpandProjection>) -> String {
         let defs: Vec<String> = self.definitions().iter().map(json_def).collect();
         let refs: Vec<String> = self.references().iter().map(json_ref).collect();
         let calls: Vec<String> = self.call_edges().iter().map(json_call).collect();
@@ -287,8 +299,11 @@ impl SemIndex {
         let definition_facts: Vec<String> = self.definition_facts().iter().map(json_definition_fact).collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
+        let expand = expand
+            .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
+            .unwrap_or_default();
         format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
@@ -297,8 +312,59 @@ impl SemIndex {
             refs.join(","),
             calls.join(","),
             effects.join(","),
-            members.join(",")
+            members.join(","),
+            expand,
         )
+    }
+}
+
+fn json_expand_projection(projection: &ExpandProjection) -> String {
+    let lenses = projection
+        .lenses
+        .iter()
+        .map(|lens| {
+            format!(
+                "{{\"name\":{},\"summary\":{},\"facts\":{}}}",
+                json_str(&lens.name),
+                json_str(&lens.summary),
+                json_expand_value(&ExpandValue::Array(lens.facts.clone()))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"selection\":{},\"lenses\":[{}]}}",
+        json_str(&projection.selection),
+        lenses
+    )
+}
+
+fn json_expand_value(value: &ExpandValue) -> String {
+    match value {
+        ExpandValue::Null => "null".to_string(),
+        ExpandValue::Bool(value) => value.to_string(),
+        ExpandValue::Number(value) => value.to_string(),
+        ExpandValue::String(value) => json_str(value),
+        ExpandValue::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(json_expand_value)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        ExpandValue::Object(fields) => {
+            let mut fields = fields.clone();
+            fields.sort_by(|left, right| left.0.cmp(&right.0));
+            format!(
+                "{{{}}}",
+                fields
+                    .iter()
+                    .map(|(key, value)| format!("{}:{}", json_str(key), json_expand_value(value)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        }
     }
 }
 
