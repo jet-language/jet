@@ -1009,12 +1009,22 @@ fn split_top_level(body: &str) -> Vec<&str> {
 
 fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
     let args = call_args(item, Syntax::PKG_ADAPT).ok_or_else(|| adapter_shape(item))?;
-    validate_fields(args, &["name", "source", "deps", "recipe"])?;
-    let name = named_string(args, "name").ok_or_else(|| adapter_shape(item))?;
-    let source = named_raw(args, "source").ok_or_else(|| adapter_shape(item))?;
+    validate_fields(
+        args,
+        &[
+            Syntax::ADAPTER_FIELD_NAME,
+            Syntax::ADAPTER_FIELD_SOURCE,
+            Syntax::ADAPTER_FIELD_DEPS,
+            Syntax::ADAPTER_FIELD_RECIPE,
+        ],
+    )?;
+    let name = named_string(args, Syntax::ADAPTER_FIELD_NAME)
+        .ok_or_else(|| adapter_shape(item))?;
+    let source = named_raw(args, Syntax::ADAPTER_FIELD_SOURCE)
+        .ok_or_else(|| adapter_shape(item))?;
     let source = unquote(source.trim()).unwrap_or(source);
     super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
-    let deps = named_raw(args, "deps")
+    let deps = named_raw(args, Syntax::ADAPTER_FIELD_DEPS)
         .map(|raw| {
             let body = raw
                 .trim()
@@ -1024,7 +1034,10 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
             Merge::parse_package_list(body)
         })
         .unwrap_or_default();
-    let recipe = parse_recipe(&named_raw(args, "recipe").ok_or_else(|| adapter_shape(item))?)?;
+    let recipe = parse_recipe(
+        &named_raw(args, Syntax::ADAPTER_FIELD_RECIPE)
+            .ok_or_else(|| adapter_shape(item))?,
+    )?;
     Ok(AdapterPlan {
         name,
         source,
@@ -1036,7 +1049,7 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
 fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     let raw = raw.trim();
     if let Some(args) = call_args(raw, Syntax::RECIPE_BUILD) {
-        validate_fields(args, &["steps"])?;
+        validate_fields(args, &[Syntax::RECIPE_FIELD_STEPS])?;
         let steps = parse_build_steps(args)?;
         return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe { steps }));
     }
@@ -1047,10 +1060,18 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
         return Err(adapter_shape(raw));
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_PREBUILT) {
-        validate_fields(args, &["bin", "as", "as_name"])?;
-        let bin = named_string(args, "bin").ok_or_else(|| adapter_shape(raw))?;
-        let as_name = named_string(args, "as")
-            .or_else(|| named_string(args, "as_name"))
+        validate_fields(
+            args,
+            &[
+                Syntax::RECIPE_FIELD_BIN,
+                Syntax::RECIPE_FIELD_AS,
+                Syntax::RECIPE_FIELD_AS_NAME,
+            ],
+        )?;
+        let bin = named_string(args, Syntax::RECIPE_FIELD_BIN)
+            .ok_or_else(|| adapter_shape(raw))?;
+        let as_name = named_string(args, Syntax::RECIPE_FIELD_AS)
+            .or_else(|| named_string(args, Syntax::RECIPE_FIELD_AS_NAME))
             .unwrap_or_else(|| {
                 std::path::Path::new(&bin)
                     .file_name()
@@ -1064,7 +1085,8 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
 }
 
 fn parse_build_steps(args: &str) -> Result<Vec<super::super::Recipe::BuildStep>, Diagnostic> {
-    let raw = named_field(args, "steps").ok_or_else(|| adapter_shape(args))?;
+    let raw = named_field(args, Syntax::RECIPE_FIELD_STEPS)
+        .ok_or_else(|| adapter_shape(args))?;
     let body = raw
         .trim()
         .strip_prefix('[')
@@ -1088,31 +1110,43 @@ fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagno
     use super::super::Recipe::BuildStep;
 
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_FETCH) {
-        validate_fields(args, &["url", "sha256"])?;
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_URL, Syntax::RECIPE_STEP_FIELD_SHA256],
+        )?;
         return Ok(BuildStep::Fetch {
-            url: required_field_string(args, "url")?,
-            sha256: required_field_string(args, "sha256")?,
+            url: required_field_string(args, Syntax::RECIPE_STEP_FIELD_URL)?,
+            sha256: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SHA256)?,
         });
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_EXEC) {
-        validate_fields(args, &["tool", "args"])?;
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_TOOL, Syntax::RECIPE_STEP_FIELD_ARGS],
+        )?;
         return Ok(BuildStep::Exec {
-            tool: required_field_string(args, "tool")?,
-            args: required_field_strings(args, "args")?,
+            tool: required_field_string(args, Syntax::RECIPE_STEP_FIELD_TOOL)?,
+            args: required_field_strings(args, Syntax::RECIPE_STEP_FIELD_ARGS)?,
         });
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL) {
-        validate_fields(args, &["src", "dest"])?;
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+        )?;
         return Ok(BuildStep::Install {
-            src: required_field_string(args, "src")?,
-            dest: required_field_string(args, "dest")?,
+            src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+            dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
         });
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL_TREE) {
-        validate_fields(args, &["src", "dest"])?;
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+        )?;
         return Ok(BuildStep::InstallTree {
-            src: required_field_string(args, "src")?,
-            dest: required_field_string(args, "dest")?,
+            src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+            dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
         });
     }
     Err(adapter_shape(raw))

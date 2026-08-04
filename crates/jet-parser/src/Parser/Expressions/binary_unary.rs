@@ -629,7 +629,7 @@ impl<'a> Parser<'a> {
                                     let (label, _) =
                                         self.expect_ident("for a named build-step argument")?;
                                     self.bump();
-                                    let expr = if label == "args" {
+                                    let expr = if label == Syntax::RECIPE_STEP_FIELD_ARGS {
                                         self.build_step_string_list()?
                                     } else {
                                         self.build_step_string()?
@@ -709,6 +709,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.expect(TokKind::Comma, "between build-step string arguments")?;
+                    if matches!(self.peek().kind, TokKind::RBracket) {
+                        break;
+                    }
                 }
             }
             let close = self.peek().span;

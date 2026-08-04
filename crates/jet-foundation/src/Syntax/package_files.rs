@@ -513,8 +513,15 @@ pub const BUILD_FIELD_ALLOW: &str = "allow";
 /// and recipe spellings. These are named module calls, not lexer keywords, so
 /// they do not add a grammar token or editor highlight.
 pub const PKG_ADAPT: &str = "Pkg.adapt";
+pub const ADAPTER_FIELD_NAME: &str = "name";
+pub const ADAPTER_FIELD_SOURCE: &str = "source";
+pub const ADAPTER_FIELD_DEPS: &str = "deps";
+pub const ADAPTER_FIELD_RECIPE: &str = "recipe";
 pub const RECIPE_COPY: &str = "Recipe.copy";
 pub const RECIPE_PREBUILT: &str = "Recipe.prebuilt";
+pub const RECIPE_FIELD_BIN: &str = "bin";
+pub const RECIPE_FIELD_AS: &str = "as";
+pub const RECIPE_FIELD_AS_NAME: &str = "as_name";
 pub const RECIPE_CARGO: &str = "Recipe.cargo";
 pub const RECIPE_GO: &str = "Recipe.go";
 pub const RECIPE_NODE: &str = "Recipe.node";
@@ -522,11 +529,20 @@ pub const RECIPE_CMAKE: &str = "Recipe.cmake";
 pub const RECIPE_MAKE: &str = "Recipe.make";
 /// D-JPK-BUILDRECIPE1=A (ratified 2026-08-03): finite executable adapter
 /// recipe and step spellings.
+pub const RECIPE_TYPE: &str = "Recipe";
 pub const RECIPE_BUILD: &str = "Recipe.build";
+pub const RECIPE_BUILD_METHOD: &str = "build";
+pub const RECIPE_FIELD_STEPS: &str = "steps";
 pub const RECIPE_STEP_FETCH: &str = ".fetch";
 pub const RECIPE_STEP_EXEC: &str = ".exec";
 pub const RECIPE_STEP_INSTALL: &str = ".install";
 pub const RECIPE_STEP_INSTALL_TREE: &str = ".install_tree";
+pub const RECIPE_STEP_FIELD_URL: &str = "url";
+pub const RECIPE_STEP_FIELD_SHA256: &str = "sha256";
+pub const RECIPE_STEP_FIELD_TOOL: &str = "tool";
+pub const RECIPE_STEP_FIELD_ARGS: &str = "args";
+pub const RECIPE_STEP_FIELD_SRC: &str = "src";
+pub const RECIPE_STEP_FIELD_DEST: &str = "dest";
 pub const ADAPTER_RECIPE_NAMES: &[&str] = &[
     RECIPE_BUILD,
     RECIPE_PREBUILT,

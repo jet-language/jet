@@ -461,7 +461,9 @@ impl<'a> Parser<'a> {
                             // the ratified Recipe.build call; ordinary value
                             // expressions retain the existing upper-case-only
                             // leading-dot enum grammar.
-                            let recipe_build = type_name == "Recipe" && member == "build";
+                            let recipe_build =
+                                type_name == Syntax::RECIPE_TYPE
+                                    && member == Syntax::RECIPE_BUILD_METHOD;
                             let previous_lowercase = self.allow_lowercase_leading_dot;
                             if recipe_build {
                                 self.allow_lowercase_leading_dot = true;

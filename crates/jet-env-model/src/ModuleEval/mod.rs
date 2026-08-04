@@ -503,7 +503,7 @@ module dev {
                 source: "./vendor/wiretool",
                 recipe: Recipe.build(steps: [
                     .fetch(url: "https://example.test/wiretool.tar", sha256: "sha256-source"),
-                    .exec(tool: "cc", args: ["-O2", "main.c", "-o", "wiretool"]),
+                    .exec(tool: "cc", args: ["-O2", "main.c", "-o", "wiretool",]),
                     .install(src: "wiretool", dest: "bin/wiretool"),
                     .install_tree(src: "share", dest: "share"),
                 ])
