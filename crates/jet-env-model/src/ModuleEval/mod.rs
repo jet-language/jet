@@ -799,27 +799,6 @@ module mobile {
     }
 
     #[test]
-    fn contributed_builtin_language_reaches_the_production_environment_plan() {
-        let source = r#"
-module env.dev {
-    languages: [
-        "zig": Lang.{ enable: true, extra: ["zigfmt@nixpkgs"] }
-    ]
-}
-"#;
-        let plan = evaluate_env(source, &base_dir()).unwrap();
-        assert_eq!(plan.language_expansion.applied, vec!["Zig"]);
-        assert!(plan.package_refs.contains(&"zig@nixpkgs".to_string()));
-        assert!(plan.package_refs.contains(&"zigfmt@nixpkgs".to_string()));
-        assert_eq!(plan.language_packs[0].name, "Zig");
-        assert_eq!(plan.language_projections[0].license, "MIT");
-        assert!(plan
-            .language_expansion
-            .fingerprint()
-            .contains("jet-language-pack-v1"));
-    }
-
-    #[test]
     fn conflicting_typed_integration_is_e1335() {
         let src = r#"
 module mobile {

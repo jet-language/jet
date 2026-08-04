@@ -1175,6 +1175,18 @@ fn validate_language_pack(pack: &LanguagePack) -> Result<(), String> {
             pack.name
         ));
     }
+    if pack.venv_packages.iter().any(|package| package.trim().is_empty()) {
+        return Err(format!(
+            "language pack '{}' has an empty venv package",
+            pack.name
+        ));
+    }
+    if pack.variables.keys().any(|name| !valid_env_name(name)) {
+        return Err(format!(
+            "language pack '{}' has an invalid environment variable name",
+            pack.name
+        ));
+    }
     if pack.host.trim().is_empty() {
         return Err(format!("language pack '{}' must declare a host", pack.name));
     }
@@ -2720,6 +2732,39 @@ mod tests {
             })
             .unwrap_err();
         assert!(unlicensed_error.contains("must declare a license"), "{unlicensed_error}");
+
+        let mut malformed = LanguagePackCatalog::default();
+        let invalid_venv = malformed
+            .register(LanguagePack {
+                name: "InvalidVenv".to_string(),
+                packages: vec!["tool@nixpkgs".to_string()],
+                venv_packages: vec!["".to_string()],
+                commands: BTreeMap::from([("tool".to_string(), "tool".to_string())]),
+                host: "native".to_string(),
+                platforms: vec!["x86_64-linux".to_string()],
+                license: "MIT".to_string(),
+                required_tools: vec!["tool".to_string()],
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(invalid_venv.contains("empty venv package"), "{invalid_venv}");
+        let invalid_variable = malformed
+            .register(LanguagePack {
+                name: "InvalidVariable".to_string(),
+                packages: vec!["tool@nixpkgs".to_string()],
+                variables: BTreeMap::from([("not-valid".to_string(), "1".to_string())]),
+                commands: BTreeMap::from([("tool".to_string(), "tool".to_string())]),
+                host: "native".to_string(),
+                platforms: vec!["x86_64-linux".to_string()],
+                license: "MIT".to_string(),
+                required_tools: vec!["tool".to_string()],
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(
+            invalid_variable.contains("invalid environment variable name"),
+            "{invalid_variable}"
+        );
     }
 
     #[test]

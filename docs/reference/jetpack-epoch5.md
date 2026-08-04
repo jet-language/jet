@@ -100,9 +100,10 @@ and license. Expansion validates the required-command mapping before it adds
 packages, carries variables and commands into the ordinary environment plan,
 and includes the complete pack fingerprint in trust identity. Registration
 rejects duplicate names, empty package/host/platform/license/tool facts, empty
-command mappings, and required tools without a command. Unsupported platforms
-and conflicting facts fail closed during expansion; a contribution does not
-create a second resolver or an untracked PATH shortcut.
+command mappings, malformed venv package entries, invalid environment-variable
+names, and required tools without a command. Unsupported platforms and
+conflicting facts fail closed during expansion; a contribution does not create
+a second resolver or an untracked PATH shortcut.
 
 ```text
 module env.dev {

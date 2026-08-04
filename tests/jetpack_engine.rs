@@ -1862,7 +1862,8 @@ fn env_info_json_discloses_selected_environment_profile_and_language_projection(
         "user": .{ user: "epoch5-user" }
     ]
     languages: [
-        "rust": Lang.{ enable: true, channel: .Stable }
+        "rust": Lang.{ enable: true, channel: .Stable },
+        "zig": Lang.{ enable: true }
     ]
     packages: [nixpkgs.ripgrep]
 }
@@ -1898,6 +1899,8 @@ module env.full {
     assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
 
     let full = jetpack()
         .args(["enter", "info", "--json", "--no-color", "--env-profile", "full"])
