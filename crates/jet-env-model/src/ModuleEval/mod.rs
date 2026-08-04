@@ -788,7 +788,7 @@ module mobile {
     fn typed_integration_loss_is_reported_before_plan_persistence() {
         let src = r#"
 module mobile {
-    imports: [env.security.certificates(42)]
+            imports: [env.security.certificates(42)]
 }
 "#;
         let error = evaluate_env(src, &base_dir()).unwrap_err();
@@ -796,6 +796,27 @@ module mobile {
         assert!(error.what.contains("integration lowering was lossy"));
         assert!(error.why.contains("secret input must be a named reference"));
         assert!(!error.why.contains("42"));
+    }
+
+    #[test]
+    fn contributed_builtin_language_reaches_the_production_environment_plan() {
+        let source = r#"
+module env.dev {
+    languages: [
+        "zig": Lang.{ enable: true, extra: ["zigfmt@nixpkgs"] }
+    ]
+}
+"#;
+        let plan = evaluate_env(source, &base_dir()).unwrap();
+        assert_eq!(plan.language_expansion.applied, vec!["Zig"]);
+        assert!(plan.package_refs.contains(&"zig@nixpkgs".to_string()));
+        assert!(plan.package_refs.contains(&"zigfmt@nixpkgs".to_string()));
+        assert_eq!(plan.language_packs[0].name, "Zig");
+        assert_eq!(plan.language_projections[0].license, "MIT");
+        assert!(plan
+            .language_expansion
+            .fingerprint()
+            .contains("jet-language-pack-v1"));
     }
 
     #[test]
@@ -1402,6 +1423,19 @@ module env.dev {
             plan.dev_services[0].extra,
             vec![("prot".to_string(), "6380".to_string())]
         );
+    }
+
+    #[test]
+    fn dev_service_depends_on_is_rejected_in_favor_of_after() {
+        let src = r#"
+module env.dev {
+    services: { api: { enable: true, run: ["sleep", "1"], depends_on: ["database"] } }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        let service = &plan.dev_services[0];
+        assert!(service.after.is_empty());
+        assert_eq!(service.extra[0].0, "depends_on");
     }
 
     /// A dev service with no `enable` is E0975 — the exact same diagnostic

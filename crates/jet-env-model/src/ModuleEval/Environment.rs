@@ -929,6 +929,7 @@ impl LanguagePackCatalog {
         {
             return Err(format!("language pack '{}' is already registered", pack.name));
         }
+        validate_language_pack(&pack)?;
         self.packs.insert(pack.name.clone(), pack);
         Ok(())
     }
@@ -1083,12 +1084,12 @@ impl LanguagePackCatalog {
             } else {
                 projection.omitted.extend(pack.venv_packages.iter().cloned());
             }
-            expansion
-                .variables
-                .extend(pack.variables.iter().map(|(key, value)| (key.clone(), value.clone())));
-            expansion
-                .commands
-                .extend(pack.commands.iter().map(|(key, value)| (key.clone(), value.clone())));
+            for (key, value) in &pack.variables {
+                merge_language_fact(&mut expansion.variables, &pack.name, "variable", key, value)?;
+            }
+            for (key, value) in &pack.commands {
+                merge_language_fact(&mut expansion.commands, &pack.name, "command", key, value)?;
+            }
             expansion.projections.push(projection);
         }
         Ok(expansion)
@@ -1165,6 +1166,76 @@ fn language_key(name: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(|character| character.to_lowercase())
         .collect()
+}
+
+fn validate_language_pack(pack: &LanguagePack) -> Result<(), String> {
+    if pack.packages.is_empty() || pack.packages.iter().any(|package| package.trim().is_empty()) {
+        return Err(format!(
+            "language pack '{}' must declare at least one non-empty package",
+            pack.name
+        ));
+    }
+    if pack.host.trim().is_empty() {
+        return Err(format!("language pack '{}' must declare a host", pack.name));
+    }
+    if pack.platforms.is_empty() || pack.platforms.iter().any(|platform| platform.trim().is_empty()) {
+        return Err(format!(
+            "language pack '{}' must declare at least one non-empty platform",
+            pack.name
+        ));
+    }
+    if pack.license.trim().is_empty() {
+        return Err(format!("language pack '{}' must declare a license", pack.name));
+    }
+    if pack.commands.is_empty() {
+        return Err(format!(
+            "language pack '{}' must declare at least one command",
+            pack.name
+        ));
+    }
+    if pack.commands.iter().any(|(name, command)| {
+        name.trim().is_empty() || command.trim().is_empty()
+    }) {
+        return Err(format!(
+            "language pack '{}' has an empty command name or mapping",
+            pack.name
+        ));
+    }
+    if pack.required_tools.is_empty() || pack.required_tools.iter().any(|tool| tool.trim().is_empty()) {
+        return Err(format!(
+            "language pack '{}' must declare non-empty required tools",
+            pack.name
+        ));
+    }
+    for tool in &pack.required_tools {
+        if !pack.commands.contains_key(tool) {
+            return Err(format!(
+                "language pack '{}' required tool '{}' has no command mapping",
+                pack.name, tool
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn merge_language_fact(
+    facts: &mut BTreeMap<String, String>,
+    pack_name: &str,
+    kind: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    if let Some(existing) = facts.get(key) {
+        if existing != value {
+            return Err(format!(
+                "language pack '{}' conflicts with existing {} '{}'",
+                pack_name, kind, key
+            ));
+        }
+    } else {
+        facts.insert(key.to_string(), value.to_string());
+    }
+    Ok(())
 }
 
 fn versioned_package(package: &str, version: Option<&str>) -> String {
@@ -2439,7 +2510,13 @@ mod tests {
         assert!(catalog.get("jet-experimental").is_some());
         assert!(catalog
             .register(LanguagePack {
-                name: "jetexperimental".to_string(),
+                name: "jet-experimental".to_string(),
+                packages: vec!["other@nixpkgs".to_string()],
+                commands: BTreeMap::from([("other".to_string(), "other".to_string())]),
+                host: "native".to_string(),
+                platforms: vec![jet_pkg_model::Platform::host_key()],
+                license: "MIT".to_string(),
+                required_tools: vec!["other".to_string()],
                 ..Default::default()
             })
             .is_err());
@@ -2510,6 +2587,62 @@ mod tests {
     }
 
     #[test]
+    fn catalog_rejects_conflicting_contributed_variables_and_commands() {
+        let mut catalog = LanguagePackCatalog::default();
+        for (name, variable, command) in [
+            ("First", "strict", "compiler"),
+            ("Second", "fast", "other-compiler"),
+        ] {
+            catalog
+                .register(LanguagePack {
+                    name: name.to_string(),
+                    packages: vec![format!("{name}@nixpkgs")],
+                    variables: BTreeMap::from([(
+                        "COMPILER_MODE".to_string(),
+                        variable.to_string(),
+                    )]),
+                    commands: BTreeMap::from([(
+                        "compiler".to_string(),
+                        command.to_string(),
+                    )]),
+                    host: "native".to_string(),
+                    platforms: vec![jet_pkg_model::Platform::host_key()],
+                    license: "MIT".to_string(),
+                    required_tools: vec!["compiler".to_string()],
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let error = catalog
+            .expand_names(&["First".to_string(), "Second".to_string()])
+            .unwrap_err();
+        assert!(error.contains("conflicts with existing variable"), "{error}");
+
+        let mut commands = LanguagePackCatalog::default();
+        for (name, command) in [("One", "compiler"), ("Two", "other-compiler")] {
+            commands
+                .register(LanguagePack {
+                    name: name.to_string(),
+                    packages: vec![format!("{name}@nixpkgs")],
+                    commands: BTreeMap::from([(
+                        "compiler".to_string(),
+                        command.to_string(),
+                    )]),
+                    host: "native".to_string(),
+                    platforms: vec![jet_pkg_model::Platform::host_key()],
+                    license: "MIT".to_string(),
+                    required_tools: vec!["compiler".to_string()],
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let error = commands
+            .expand_names(&["One".to_string(), "Two".to_string()])
+            .unwrap_err();
+        assert!(error.contains("conflicts with existing command"), "{error}");
+    }
+
+    #[test]
     fn language_pack_rejects_unsupported_platform_and_missing_tool_facts() {
         let mut catalog = LanguagePackCatalog::default();
         catalog
@@ -2537,14 +2670,16 @@ mod tests {
         assert!(unsupported.contains("does not support host platform"), "{unsupported}");
 
         let mut missing = LanguagePackCatalog::default();
-        missing
-            .register(LanguagePack {
+        missing.packs.insert("Missing".to_string(), LanguagePack {
                 name: "Missing".to_string(),
+                packages: vec!["missing@nixpkgs".to_string()],
+                host: "native".to_string(),
+                platforms: vec!["x86_64-linux".to_string()],
                 license: "MIT".to_string(),
                 required_tools: vec!["missing".to_string()],
+                commands: BTreeMap::new(),
                 ..Default::default()
-            })
-            .unwrap();
+            });
         let error = missing
             .expand_for_platform(
                 &[LanguageSpec {
@@ -2573,24 +2708,18 @@ mod tests {
         );
 
         let mut unlicensed = LanguagePackCatalog::default();
-        unlicensed
+        let unlicensed_error = unlicensed
             .register(LanguagePack {
                 name: "Unlicensed".to_string(),
                 packages: vec!["unlicensed@nixpkgs".to_string()],
+                commands: BTreeMap::from([("unlicensed".to_string(), "unlicensed".to_string())]),
+                host: "native".to_string(),
+                platforms: vec!["x86_64-linux".to_string()],
+                required_tools: vec!["unlicensed".to_string()],
                 ..Default::default()
             })
-            .unwrap();
-        let error = unlicensed
-            .expand_for_platform(
-                &[LanguageSpec {
-                    name: "Unlicensed".to_string(),
-                    enable: true,
-                    ..Default::default()
-                }],
-                "x86_64-linux",
-            )
             .unwrap_err();
-        assert!(error.contains("has no license fact"), "{error}");
+        assert!(unlicensed_error.contains("must declare a license"), "{unlicensed_error}");
     }
 
     #[test]

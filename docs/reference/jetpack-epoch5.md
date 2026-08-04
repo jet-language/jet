@@ -98,10 +98,11 @@ built-in entries. A contribution must declare its package and optional venv
 package references, command mappings, required commands, host/platform facts,
 and license. Expansion validates the required-command mapping before it adds
 packages, carries variables and commands into the ordinary environment plan,
-and includes the complete pack fingerprint in trust identity. Duplicate names,
-unsupported platforms, missing command mappings, and missing licenses fail
-closed; a contribution does not create a second resolver or an untracked PATH
-shortcut.
+and includes the complete pack fingerprint in trust identity. Registration
+rejects duplicate names, empty package/host/platform/license/tool facts, empty
+command mappings, and required tools without a command. Unsupported platforms
+and conflicting facts fail closed during expansion; a contribution does not
+create a second resolver or an untracked PATH shortcut.
 
 ```text
 module env.dev {
@@ -241,17 +242,30 @@ mirror falls back to source realization; it never installs an unsigned or
 replayed result.
 
 `jet shared-store install` creates the optional administrator-installed shared
-Hangar configuration and socket-activation units. The administrator can add a
-capability record with `jet shared-store enroll <uid>`; peer credentials and
-that record authorize each read or write. The broker accepts one signed Hangar
-archive per request and re-verifies it before promotion. It never receives
-source or build commands. If the socket is absent, realization stays on the
-ordinary per-user Hangar path.
+Hangar configuration and socket-activation units. Each request runs as a
+short-lived non-root `DynamicUser` with a private state directory. The socket
+is public by mode only; Linux peer credentials and a root-owned per-uid grant
+authorize each read or write.
+
+A read grant is persistent. A write grant contains a short-lived credential,
+an expiry, and exact `source=` and `builder=` allowlists. The command creates
+the credential and expiry; an administrator must add the approved source and
+builder facts before the grant can write. The client sends an unsigned closure
+plus the binding facts for source, builder, action, output, platform, sandbox,
+and policy. The broker verifies those facts against the archived metadata,
+content-checks the closure in an ephemeral `.incoming` stage, signs it only
+after admission, and removes stale stages before accepting new work. It never
+receives source or build commands. If the socket is absent, realization stays
+on the ordinary per-user Hangar path.
 
 ## Services
 
-Services run as direct argument vectors. Readiness is separate from process
-start. A service can use `exec`, `http`, `notify`, or `tcp` readiness.
+Services run as direct argument vectors under the platform-owned supervisor.
+On Linux this is a transient systemd user scope with a delegated cgroup; on
+Windows it is a project-local guardian with a Job Object. macOS rejects a
+service before spawn when that authority is unavailable (E1332). Readiness is
+separate from process start. A service can use `exec`, `http`, `notify`, or
+`tcp` readiness, and every probe has a bounded per-attempt time limit.
 
 ```text
 module env.dev {
@@ -268,15 +282,19 @@ module env.dev {
 }
 ```
 
-`after` names a declared service dependency. Jetpack validates names, disabled
+`after` names a declared service dependency. It is the only dependency spelling;
+the retired `depends_on` spelling is rejected. Jetpack validates names, disabled
 dependencies, and cycles before spawning a process, starts dependencies before
 dependents, and stops the selected graph in reverse order. A failed task,
-startup, or readiness gate cleans up services started by that invocation and
-reports cleanup failures instead of leaving misleading health state.
+startup, readiness gate, or dependency stops the affected graph without
+leaving a dependent alive against a failed prerequisite.
 
 Jet reserves ports and socket paths before start. It checks process start
 identity before it sends a signal. It bounds restart count and backoff, and it
-stops dependent services before their dependencies.
+stops dependent services before their dependencies. Each service directory also
+persists the authority backend, generation, phase, containment, dependency
+list, and recovery reason in `lifecycle`; a post-Ready crash records its
+recovery generation before restart.
 
 ## Flake-class graph
 
