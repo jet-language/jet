@@ -1942,6 +1942,93 @@ module env.full {
     );
 }
 
+#[test]
+fn env_info_json_discloses_typed_integration_projection() {
+    let project = Scratch::new("env-info-integrations");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [
+        env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+        env.security.certificates([dev_certificate]),
+        env.network.hosts(["api.local": "127.0.0.1"]),
+        env.agent.codex(mcp: [repo_server]),
+        env.editor.vscode()
+    ]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"integrations\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"certificates\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"codex-agent\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"host_checks\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"secrets\":[\"dev_certificate\"]"), "stdout: {stdout}");
+}
+
+#[test]
+fn env_info_rejects_unredactable_integration_secret() {
+    let project = Scratch::new("env-info-integration-secret");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.security.certificates(42)]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(!stderr.contains("42"), "stderr: {stderr}");
+}
+
+#[test]
+fn env_info_rejects_unsupported_apple_integration_target() {
+    let project = Scratch::new("env-info-apple-target");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.platform.apple(targets: [.IOS])]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(stderr.contains("apple integration"), "stderr: {stderr}");
+}
+
 
 #[test]
 fn bridge_flake_uses_native_evaluator_without_nix() {

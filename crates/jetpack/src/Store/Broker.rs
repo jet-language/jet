@@ -292,6 +292,10 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
         let service_text = admin_service_unit_text(&executable, &config);
         atomic_write(&socket_unit, socket_text.as_bytes())?;
         atomic_write(&service_unit, service_text.as_bytes())?;
+        #[cfg(target_os = "linux")]
+        if layout.admin {
+            activate_admin_socket()?;
+        }
         return Ok(SharedStoreInstallReport {
             config: config_path,
             socket_unit: Some(socket_unit),
@@ -325,6 +329,28 @@ fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> Str
         systemd_escape_path(&config.trust_key.parent().unwrap_or(Path::new("/"))),
         systemd_escape_path(&config.shared_root)
     )
+}
+
+#[cfg(target_os = "linux")]
+fn activate_admin_socket() -> io::Result<()> {
+    for args in [
+        &["daemon-reload"][..],
+        &["enable", "--now", "jet-shared-store.socket"][..],
+    ] {
+        let status = std::process::Command::new("systemctl")
+            .args(args)
+            .status()
+            .map_err(|error| {
+                invalid(&format!("could not activate shared-store systemd socket: {error}"))
+            })?;
+        if !status.success() {
+            return Err(invalid(&format!(
+                "systemctl {} failed with {status}",
+                args.join(" ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Import a shared entry into the user's Hangar when the optional broker
@@ -388,7 +414,9 @@ pub fn promote_shared_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<boo
         use std::os::unix::net::UnixStream;
         let archive = Archive::export_unsigned_archive(roots, &entry.id, true)?;
         let binding = provenance_binding_for_entry(entry)?;
-        let credential = writer_credential(&config)?;
+        let Some(credential) = writer_credential(&config)? else {
+            return Ok(false);
+        };
         let mut stream = match UnixStream::connect(&config.socket) {
             Ok(stream) => stream,
             Err(error)
@@ -959,16 +987,6 @@ fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
     if !grant.read {
         return Err(invalid("shared-store peer enrollment is missing read authority"));
     }
-    if grant.write
-        && (grant.expires.is_none()
-            || grant.credential.is_none()
-            || grant.sources.is_empty()
-            || grant.builders.is_empty())
-    {
-        return Err(invalid(
-            "shared-store write enrollment requires expiry, credential, source, and builder authority",
-        ));
-    }
     Ok(grant)
 }
 
@@ -1039,8 +1057,6 @@ pub fn enroll_shared_store(roots: &Roots, uid: &str, writable: bool) -> io::Resu
         let expires = now_secs().saturating_add(GRANT_TTL_SECS);
         let credential = encode_hex(&entropy(roots, b"shared-store-writer-credential"));
         text.push_str(&format!("expires={expires}\ncredential={credential}\n"));
-        // Source and builder facts are deliberately administrator-selected.
-        // Until they are appended, a write grant is fail-closed.
     }
     atomic_write(&path, text.as_bytes())?;
     set_mode(&path, 0o644)?;
@@ -1224,13 +1240,36 @@ fn validate_private_directory(path: &Path, label: &str) -> io::Result<()> {
 
 fn validate_managed_directory(path: &Path, label: &str) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let expected = Path::new("/var/lib/private/jet/shared-store/root");
+            let canonical = fs::canonicalize(path).map_err(|error| {
+                invalid(&format!("{label} managed state target cannot be resolved: {error}"))
+            })?;
+            if path != Path::new(ADMIN_BASE).join("root") || canonical != expected {
+                return Err(invalid(&format!("{label} is an unexpected symlink")));
+            }
+            require_private_mode_followed(path, label)
+        }
+        Ok(metadata) if !metadata.is_dir() => {
             Err(invalid(&format!("{label} is not a real directory")))
         }
         Ok(_) => require_private_mode(path, label),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+fn require_private_mode_followed(path: &Path, label: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(invalid(&format!("{label} has insecure permissions")));
+        }
+    }
+    let _ = (path, label);
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1565,19 +1604,36 @@ fn broker_trust_key(config: &SharedStoreConfig) -> io::Result<String> {
     Ok(config.trust_key.to_string_lossy().into_owned())
 }
 
-fn writer_credential(config: &SharedStoreConfig) -> io::Result<String> {
-    let grant = read_writer_grant(config, current_uid()?)?;
+fn writer_credential(config: &SharedStoreConfig) -> io::Result<Option<String>> {
+    let grant = match read_writer_grant(config, current_uid()?) {
+        Ok(grant) => grant,
+        Err(error) if is_private_writer_denial(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
     if !grant.write {
-        return Err(invalid("shared-store peer has no write authority"));
+        return Ok(None);
+    }
+    if grant.sources.is_empty() || grant.builders.is_empty() {
+        return Ok(None);
     }
     if let Some(expires) = grant.expires {
         if now_secs() >= expires {
-            return Err(invalid("shared-store writer grant is expired"));
+            return Ok(None);
         }
     }
     grant
         .credential
+        .map(Some)
         .ok_or_else(|| invalid("shared-store writer grant has no credential"))
+}
+
+fn is_private_writer_denial(error: &io::Error) -> bool {
+    matches!(
+        error.to_string().as_str(),
+        "shared-store peer has no enrollment grant"
+            | "shared-store peer has no write authority"
+            | "shared-store writer grant is expired"
+    )
 }
 
 fn sweep_stale_incoming(incoming: &Path) -> io::Result<usize> {
@@ -1927,7 +1983,8 @@ mod tests {
     #[test]
     fn writer_grants_require_short_lived_source_and_builder_authority() {
         let incomplete = "jet-shared-store-grant-v2\nread\nwrite\n";
-        let error = parse_writer_grant(incomplete).unwrap_err();
+        let grant = parse_writer_grant(incomplete).unwrap();
+        let error = authorize_grant(&grant, true, &test_binding(), "abc").unwrap_err();
         assert!(error.to_string().contains("expiry"));
 
         let expired = format!(

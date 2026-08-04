@@ -251,13 +251,14 @@ authorize each read or write.
 A read grant is persistent. A write grant contains a short-lived credential,
 an expiry, and exact `source=` and `builder=` allowlists. The command creates
 the credential and expiry; an administrator must add the approved source and
-builder facts before the grant can write. The client sends an unsigned closure
-plus the binding facts for source, builder, action, output, platform, sandbox,
-and policy. The broker verifies those facts against the archived metadata,
-content-checks the closure in an ephemeral `.incoming` stage, signs it only
-after admission, and removes stale stages before accepting new work. It never
-receives source or build commands. If the socket is absent, realization stays
-on the ordinary per-user Hangar path.
+builder facts before the pending write grant can write. Until then, reads
+work and writes stay on the ordinary per-user Hangar path. The client sends
+an unsigned closure plus the binding facts for source, builder, action,
+output, platform, sandbox, and policy. The broker verifies those facts against
+the archived metadata, content-checks the closure in an ephemeral `.incoming`
+stage, signs it only after admission, and removes stale stages before
+accepting new work. It never receives source or build commands. If the socket
+or a write grant is absent or expired, realization also stays private.
 
 ## Services
 
