@@ -1,0 +1,76 @@
+// D-PARCAPTURE1=D / E3-1405: measure the serial-to-parallel crossover.
+//
+// Method: run this file with `jet bench` in its optimized benchmark profile.
+// The runner auto-scales each region to a >=1 ms batch, then records twenty
+// timed samples and reports mean ± standard deviation. Repeat the command
+// three times and compare the run medians on the same host as the workload;
+// scheduler, CPU, and callback cost change the crossover.
+// Matrix: item counts 64, 256, 1024, 4096 × callback costs 1, 32, 256.
+// The checked-in source records the method; the observed crossover belongs in
+// the author's local run because timings are host-specific.
+// Reference (2026-08-03, Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
+// three invocations): para_map first beat map at 256 items × cost 256; cost 1
+// and cost 32 never won in this matrix, and 64 × cost 256 still lost.
+
+fn input(count: Int) => [Int] {
+    values := [Int].{}
+    loop index, 0..<count { values.push(index) }
+    return values
+}
+
+fn work(item: Int, cost: Int) => Int {
+    value := item + 1
+    loop step, 0..<cost {
+        value = (value * 31 + step + item) % 1000003
+    }
+    return value
+}
+
+// The checksum consumes every mapped value, so an optimizer cannot discard
+// interior callback work while retaining only a first/last sentinel.
+fn map_case(count: Int, cost: Int) => Int {
+    values :: input(count)
+    mapped :: values.map((item: Int) => work(item, cost))
+    return mapped.sum()
+}
+
+fn para_map_case(count: Int, cost: Int) => Int {
+    values :: input(count)
+    mapped :: values.para_map((item: Int) => work(item, cost))
+    return mapped.sum()
+}
+
+fn run() {
+    // A cheap executable sanity check keeps the example useful under `jet run`.
+    sanity :: para_map_case(64, 32)
+    if sanity < 0 { print("benchmark sanity check failed") }
+    print("para_map crossover: compare map and para_map across 64/256/1024/4096 items and costs 1/32/256")
+}
+
+#Bench("map n64 c1") { require_eq(map_case(64, 1), 66496) }
+#Bench("para_map n64 c1") { require_eq(para_map_case(64, 1), 66496) }
+#Bench("map n64 c32") { require_eq(map_case(64, 32), 31573635) }
+#Bench("para_map n64 c32") { require_eq(para_map_case(64, 32), 31573635) }
+#Bench("map n64 c256") { require_eq(map_case(64, 256), 29097228) }
+#Bench("para_map n64 c256") { require_eq(para_map_case(64, 256), 29097228) }
+
+#Bench("map n256 c1") { require_eq(map_case(256, 1), 1052416) }
+#Bench("para_map n256 c1") { require_eq(para_map_case(256, 1), 1052416) }
+#Bench("map n256 c32") { require_eq(map_case(256, 32), 128432524) }
+#Bench("para_map n256 c32") { require_eq(para_map_case(256, 32), 128432524) }
+#Bench("map n256 c256") { require_eq(map_case(256, 256), 126120204) }
+#Bench("para_map n256 c256") { require_eq(para_map_case(256, 256), 126120204) }
+
+#Bench("map n1024 c1") { require_eq(map_case(1024, 1), 16792576) }
+#Bench("para_map n1024 c1") { require_eq(para_map_case(1024, 1), 16792576) }
+#Bench("map n1024 c32") { require_eq(map_case(1024, 32), 510937729) }
+#Bench("para_map n1024 c32") { require_eq(para_map_case(1024, 32), 510937729) }
+#Bench("map n1024 c256") { require_eq(map_case(1024, 256), 504181020) }
+#Bench("para_map n1024 c256") { require_eq(para_map_case(1024, 256), 504181020) }
+
+#Bench("map n4096 c1") { require_eq(map_case(4096, 1), 268496896) }
+#Bench("para_map n4096 c1") { require_eq(para_map_case(4096, 1), 268496896) }
+#Bench("map n4096 c32") { require_eq(map_case(4096, 32), 2049073194) }
+#Bench("para_map n4096 c32") { require_eq(para_map_case(4096, 32), 2049073194) }
+#Bench("map n4096 c256") { require_eq(map_case(4096, 256), 2040927431) }
+#Bench("para_map n4096 c256") { require_eq(para_map_case(4096, 256), 2040927431) }

@@ -230,6 +230,64 @@ fn jet_bench_example_regions() {
 }
 
 #[test]
+fn jet_bench_para_map_crossover_matrix() {
+    // E3-1405: the crossover example owns one map/para_map pair for each
+    // count/cost cell. Timing values are host-specific; this proves that the
+    // repeatable optimized benchmark emits every named cell and 20-sample
+    // report shape without pinning a machine-dependent threshold.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/para_map_crossover_bench.jet");
+    let out = Command::new(&jet)
+        .arg("bench")
+        .arg(&example)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "para_map crossover benchmark failed:\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for count in [64, 256, 1024, 4096] {
+        for cost in [1, 32, 256] {
+            for method in ["map", "para_map"] {
+                let name = format!("{method} n{count} c{cost}");
+                assert!(stdout.contains(&name), "benchmark output missing {name}:\n{stdout}");
+            }
+        }
+    }
+    assert_eq!(
+        stdout.lines().filter(|line| line.contains("ns/iter")).count(),
+        24,
+        "expected one report line per map/para_map cell:\n{stdout}"
+    );
+}
+
+#[test]
+fn jet_bench_failure_is_not_reported_as_timing() {
+    // A failed `require` in a benchmark body must stop the command; silently
+    // discarding the body Result would publish a false green timing report.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/bench_fail.jet");
+    let out = Command::new(&jet).arg("bench").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "failed benchmark body unexpectedly passed");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("bench region failed"),
+        "missing benchmark failure boundary: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("ns/iter"));
+}
+
+#[test]
 fn jet_test_fail_then_fixed() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();

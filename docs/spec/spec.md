@@ -2125,6 +2125,19 @@ calls the seed factory once. The seed must be an identity for `merge`
 otherwise the deterministic tree is still stable, but it does not define a
 portable parallel reduction.
 
+When the plan has one chunk, the engine runs that chunk on the caller thread.
+This keeps small inputs serial and avoids paying for worker setup; the crossover
+to a useful `para_map` speedup depends on item count, callback cost, and the host.
+Run `jet bench examples/features/tooling/para_map_crossover_bench.jet` on the
+same machine as the workload before choosing between `map` and `para_map`.
+`jet bench` owns the optimized benchmark profile; do not compare its numbers
+with debug or release builds.
+
+The checked-in reference run (Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
+three invocations) first favored `para_map` at 256 items with callback cost 256;
+costs 1 and 32 did not cross within the matrix. This is a teaching example, not
+a portable threshold.
+
 If callbacks fail at more than one item, each chunk stops at its first failure,
 all started chunks are joined, and the operation reports the original Jet
 failure belonging to the lowest source index, independent of worker completion

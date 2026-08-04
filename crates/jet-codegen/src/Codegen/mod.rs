@@ -3269,7 +3269,8 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 /// which wraps each body in an auto-scaled timed loop instead of a pass/fail
 /// check. Each body is emitted exactly like a `#Test` body (a bare statement
 /// list in a `Result<(), String>` fn), so `return Err(…)` from `require` stays
-/// valid; the timing wrapper ignores that result.
+/// valid; the timing wrapper aborts the benchmark command on such an error
+/// instead of printing false timings.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
@@ -3296,6 +3297,10 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+    out.push_str(&format!(
+        "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
+    ));
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
@@ -3387,6 +3392,15 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, false);
 
+    out.push_str(
+        "fn jet_bench_check(result: Result<(), String>) {\n\
+    if let Err(error) = result {\n\
+        eprintln!(\"bench region failed: {}\", error);\n\
+        std::process::exit(70);\n\
+    }\n\
+}\n\n",
+    );
+
     // One body fn + one timing wrapper per bench. The body fn is shaped exactly
     // like a test fn (so `require`'s `return Err(…)` compiles); the wrapper
     // auto-scales the iteration count until a batch lasts >= 1ms, then collects
@@ -3407,7 +3421,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    while iters < (1u64 << 30) {\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
-            "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
+            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
             i
         ));
         out.push_str("        if t0.elapsed().as_millis() >= 1 { break; }\n");
@@ -3419,7 +3433,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("        jet_allocation_probe_reset();\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
-            "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
+            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
             i
         ));
         out.push_str("        samples.push(t0.elapsed().as_nanos());\n");

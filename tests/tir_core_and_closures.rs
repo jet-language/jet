@@ -202,6 +202,31 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
 }
 
 #[test]
+fn parallel_collection_adapters_keep_single_chunk_fold_shape() {
+    if !have_rustc() {
+        return;
+    }
+    // A four-item input is one indexed chunk. The non-associative merge is
+    // therefore not called; this pins the serial fast path without relying on
+    // host thread-count introspection. The preceding 130-item test pins the
+    // multi-chunk tree shape.
+    let src = "\
+fn run() {
+    values :: [Int].{1, 2, 3, 4}
+    folded :: values.para_fold(
+        () => 1,
+        (acc: Int, n: Int) => acc + n,
+        (left: Int, right: Int) => left * 100 + right
+    )
+    print(folded)
+}
+";
+    let (code, stdout) = build_and_run("tir_parallel_single_chunk_fold", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "11\n");
+}
+
+#[test]
 fn parallel_collection_adapters_report_lowest_input_failure() {
     if !have_rustc() {
         return;
