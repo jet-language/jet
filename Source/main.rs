@@ -1524,7 +1524,7 @@ fn main() {
         }
         "unsafe" => {
             let unsafe_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-            CmdUnsafe::run(&unsafe_args, mode.json);
+            CmdUnsafe::run(&unsafe_args, mode.json, mode.color_stderr());
             return;
         }
         "audit" => {

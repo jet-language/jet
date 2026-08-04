@@ -74,6 +74,7 @@ fn inspect_unsafe_reports_policy_provenance_and_operations() {
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "inspect unsafe JSON must parse: {stdout}");
     assert!(stdout.contains("\"location\":{\"start\":{\"line\":4,\"column\":2}"), "{stdout}");
     let repeat = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(repeat.status.code(), Some(0));
@@ -90,16 +91,55 @@ fn inspect_unsafe_loader_failures_use_standard_diagnostics() {
     let stderr = String::from_utf8(malformed.stderr).unwrap();
     assert!(stderr.contains("Error [E0003]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("malformed.jet:1:9"), "{stderr}");
 
+    let colored = Command::new(jet()).args(["inspect", "unsafe", "malformed.jet", "--color=always"]).current_dir(&dir).output().unwrap();
+    assert_eq!(colored.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&colored.stderr).contains("\x1b"), "--color=always must preserve diagnostic styling");
+
     let missing = Command::new(jet()).args(["inspect", "unsafe", "missing.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(missing.status.code(), Some(1));
     let stderr = String::from_utf8(missing.stderr).unwrap();
     assert!(stderr.contains("Error [E0603]") && stderr.contains("Why:") && stderr.contains("Fix:"), "{stderr}");
+
+    let missing_json = Command::new(jet()).args(["inspect", "unsafe", "missing.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing_json.status.code(), Some(1));
+    let stdout = String::from_utf8(missing_json.stdout).unwrap();
+    let stderr = String::from_utf8(missing_json.stderr).unwrap();
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E0603\""), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "loader diagnostic JSON must parse: {stdout}");
+    assert!(stderr.is_empty(), "JSON loader diagnostics should keep stderr quiet: {stderr}");
 
     fs::write(dir.join("missing_reason.jet"), "fn run() {\n #Unsafe { print(\"unchecked\") }\n}\n").unwrap();
     let missing_reason = Command::new(jet()).args(["inspect", "unsafe", "missing_reason.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(missing_reason.status.code(), Some(1));
     let stderr = String::from_utf8(missing_reason.stderr).unwrap();
     assert!(stderr.contains("Error [E3112]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("missing_reason.jet:2:2"), "{stderr}");
+}
+
+#[test]
+fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
+    let dir = isolated_cwd("inspect_unsafe_diagnostics");
+    let main = dir.join("main.jet");
+    let helper = dir.join("helper.jet");
+    let runner = dir.join("runner");
+    fs::create_dir(&runner).unwrap();
+    fs::write(&main, "use \"helper\"\nfn run() {}\n").unwrap();
+    fs::write(&helper, "use core.mem\n#Unsafe(\"helper\", obligations: .Track) fn unsafe_run() {\n    value :: 7\n    pointer :: *Int.{*value}\n}\n").unwrap();
+
+    let human = Command::new(jet()).args(["inspect", "unsafe", main.to_str().unwrap()]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(human.status.code(), Some(1), "{}", String::from_utf8_lossy(&human.stderr));
+    let stderr = String::from_utf8(human.stderr).unwrap();
+    assert!(stderr.contains("Error [E3107]"), "{stderr}");
+    assert!(stderr.contains("helper.jet:4:16"), "{stderr}");
+
+    let json = Command::new(jet()).args(["inspect", "unsafe", main.to_str().unwrap(), "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(json.status.code(), Some(1), "{}", String::from_utf8_lossy(&json.stderr));
+    let stdout = String::from_utf8(json.stdout).unwrap();
+    let stderr = String::from_utf8(json.stderr).unwrap();
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "inspection diagnostic JSON must parse: {stdout}");
+    assert!(stderr.is_empty(), "JSON inspection diagnostics should keep stderr quiet: {stderr}");
 }
 
 #[test]
