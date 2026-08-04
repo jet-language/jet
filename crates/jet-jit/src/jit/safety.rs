@@ -483,13 +483,13 @@ pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
 pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
         TExprKind::Print(inner) => resident_safe_expr(inner, callees),
-        TExprKind::Call { name, args } => {
+        TExprKind::Call { name, args, .. } => {
             if !callees.contains(name) {
                 return false;
             }
             args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
-        TExprKind::ModuleCall { form, args } => {
+        TExprKind::ModuleCall { form, args, .. } => {
             let target = match form {
                 TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                     format!("{rust_mod}::{rust_fn}")

@@ -320,13 +320,31 @@ pub(crate) fn emit_tir_method(
     for line in &tir.reactive_upgrades {
         out.push_str(&format!("{pad}/* jet-reactive-upgrade: {line} */\n"));
     }
+    let (method_generics, method_where) = tir
+        .generics
+        .split_once(" where ")
+        .map_or((tir.generics.as_str(), ""), |(generics, bounds)| {
+            (generics, bounds)
+        });
+    let method_generics = if has_view_return {
+        if method_generics.is_empty() {
+            "<'__jet_view>".to_string()
+        } else {
+            format!("<'__jet_view, {}", &method_generics[1..])
+        }
+    } else {
+        method_generics.to_string()
+    };
+    let method_where = if method_where.is_empty() {
+        String::new()
+    } else {
+        format!(" where {method_where}")
+    };
     out.push_str(&format!(
-        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{view_generic}({params}){ret}{where_clause} {{\n",
+        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{method_generics}({params}){ret}{method_where} {{\n",
         name = mangle(&tir.name),
-        view_generic = if has_view_return { "<'__jet_view>" } else { "" },
         params = params.join(", "),
         ret = ret_clause,
-        where_clause = tir.generics,
     ));
     // D-COV1: probe at the method head.
     if cx.coverage {

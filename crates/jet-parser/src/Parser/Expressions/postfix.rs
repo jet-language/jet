@@ -60,7 +60,8 @@ impl<'a> Parser<'a> {
                                 continue;
                             }
                         }
-                        // D-SERDE6: optional call-site turbofish `decode<Order>(…)`.
+                        // D-GENERIC-CALL1=A: optional call-site type arguments on
+                        // every method call, such as `decode<Order>(…)`.
                         let type_args = if self.at_turbofish() {
                             self.parse_turbofish()?
                         } else {
@@ -77,6 +78,7 @@ impl<'a> Parser<'a> {
                                 receiver: Box::new(expr),
                                 method: member.clone(),
                                 method_span: member_span,
+                                owner_type_args: Vec::new(),
                                 type_args,
                                 args: vec![CallArg {
                                     convention: AccessConvention::Read,
@@ -160,6 +162,7 @@ impl<'a> Parser<'a> {
                                 receiver: Box::new(expr),
                                 method: member,
                                 method_span: member_span,
+                                owner_type_args: Vec::new(),
                                 type_args,
                                 args,
                                 recv_type: None,
@@ -230,6 +233,7 @@ impl<'a> Parser<'a> {
                                     receiver: base.clone(),
                                     method: member.clone(),
                                     method_span: *member_span,
+                                    owner_type_args: Vec::new(),
                                     type_args: Vec::new(),
                                     args: vec![CallArg {
                                         convention: AccessConvention::Read,

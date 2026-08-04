@@ -1,7 +1,12 @@
-use super::super::{Call, CallArg, Diagnostic, Expr, Parser, Span, TokKind};
+use super::super::{Call, CallArg, Diagnostic, Expr, Parser, Span, TokKind, Type};
 
 impl<'a> Parser<'a> {
-        pub(super) fn call_after_name(&mut self, name: String, name_span: Span) -> Result<Call, Diagnostic> {
+        pub(super) fn call_after_name(
+            &mut self,
+            name: String,
+            name_span: Span,
+            type_args: Vec<Type>,
+        ) -> Result<Call, Diagnostic> {
             self.expect(TokKind::LParen, &format!("after `{}` to call it", name))?;
             let mut args = Vec::new();
             if !matches!(self.peek().kind, TokKind::RParen) {
@@ -17,6 +22,7 @@ impl<'a> Parser<'a> {
             Ok(Call {
                 name,
                 name_span,
+                type_args,
                 args,
                 range_checked: false,
             })

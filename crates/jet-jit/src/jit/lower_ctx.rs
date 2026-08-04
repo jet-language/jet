@@ -7881,10 +7881,15 @@ impl LowerCtx<'_, '_> {
     /// `TExprKind::MethodCall`'s `func_ids` lookup key: JIT compiles user
     /// methods into plain functions named `Type::method`. The method's Jet
     /// name is already on `TMethodRef` — no Rust mangle stripping.
-    fn method_key(&self, recv_ty: &Type, method: &TMethodRef) -> Option<String> {
+    fn method_key(
+        &self,
+        recv_ty: &Type,
+        method: &TMethodRef,
+        type_args: &[Type],
+    ) -> Option<String> {
         let base = user_type_name(recv_ty)?;
-        if matches!(recv_ty, Type::Apply { .. }) {
-            let concrete = format!("{}::{}", recv_ty.name(), method.name);
+        if matches!(recv_ty, Type::Apply { .. }) || !type_args.is_empty() {
+            let concrete = TIR::generic_method_instance_key(recv_ty, &method.name, type_args);
             if self.func_ids.contains_key(&concrete) {
                 return Some(concrete);
             }
@@ -8001,16 +8006,20 @@ impl LowerCtx<'_, '_> {
             .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
     }
 
-    fn static_method_key(owner: &TStaticOwner, owner_type: Option<&Type>, method: &TMethodRef) -> Option<String> {
+    fn static_method_key(
+        owner: &TStaticOwner,
+        owner_type: Option<&Type>,
+        method: &TMethodRef,
+        type_args: &[Type],
+    ) -> Option<String> {
         let type_name = match owner {
             TStaticOwner::User(name) => name.as_str(),
             TStaticOwner::Prelude { .. } => return None,
         };
-        Some(format!(
-            "{}::{}",
-            owner_type.map_or_else(|| type_name.to_string(), Type::name),
-            method.name
-        ))
+        let owner = owner_type
+            .cloned()
+            .unwrap_or_else(|| Type::Named(type_name.to_string()));
+        Some(TIR::generic_method_instance_key(&owner, &method.name, type_args))
     }
 
     fn new_record(&mut self, field_count: usize) -> Value {
@@ -8978,7 +8987,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::CompareChain { operands, ops, hooks } => {
                 self.lower_compare_chain(operands, ops, hooks)
             }
-            TExprKind::Call { name, args } => {
+            TExprKind::Call { name, args, .. } => {
                 let func_id = self
                     .func_ids
                     .get(name)
@@ -12754,6 +12763,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::MethodCall {
                 recv,
                 method,
+                type_args,
                 args,
                 ..
             } => {
@@ -12793,7 +12803,7 @@ impl LowerCtx<'_, '_> {
                 {
                     return self.lower_patch_merge(recv, &args[0]);
                 }
-                let key = self.method_key(&recv.ty, method)
+                let key = self.method_key(&recv.ty, method, type_args)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
                 let func_id = self
                     .func_ids
@@ -12824,7 +12834,9 @@ impl LowerCtx<'_, '_> {
                 owner,
                 owner_type,
                 method,
+                type_args,
                 args,
+                ..
             } => {
                 if method.name == "diff" && args.len() == 2 {
                     if let TStaticOwner::User(base) = owner {
@@ -13116,7 +13128,7 @@ impl LowerCtx<'_, '_> {
                     }
                     return Ok(handle);
                 }
-                let key = Self::static_method_key(owner, owner_type.as_ref(), method)
+                let key = Self::static_method_key(owner, owner_type.as_ref(), method, type_args)
                     .ok_or_else(|| format!("jit static `{}::{}`", match owner {
                         TStaticOwner::User(name) => name.as_str(),
                         TStaticOwner::Prelude { path, .. } => path.as_str(),
@@ -14133,7 +14145,7 @@ impl LowerCtx<'_, '_> {
                     self.lower_fn_call(value, &fn_ty, args)
                 }
             },
-            TExprKind::ModuleCall { form, args } => match form {
+            TExprKind::ModuleCall { form, args, .. } => match form {
                 TModuleCallForm::InlineMangled { mangled } => {
                     let func_id = self.func_ids.get(mangled).copied()
                         .ok_or_else(|| "jit module call unsupported".to_string())?;
@@ -14229,7 +14241,11 @@ impl LowerCtx<'_, '_> {
                 if let Some(fid) = host {
                     let host_ref = self.module.declare_func_in_func(fid, self.b.func);
                     self.b.ins().call(host_ref, &[handle]);
-                } else if let Some(key) = self.method_key(&inner.ty, &TMethodRef::bare("close")) {
+                } else if let Some(key) = self.method_key(
+                    &inner.ty,
+                    &TMethodRef::bare("close"),
+                    &[],
+                ) {
                     // User/stdlib `Close.close(^self)` (e.g. resource_close.jet).
                     if let Some(&fid) = self.func_ids.get(&key) {
                         let func_ref = self.module.declare_func_in_func(fid, self.b.func);
@@ -19116,7 +19132,11 @@ impl LowerCtx<'_, '_> {
         self.b.append_block_param(merge, types::I8);
         for (i, op) in ops.iter().enumerate() {
             let cmp = if hooks[i] {
-                let key = self.method_key(&operands[i].ty, &TMethodRef::inherent("compare"))
+                let key = self.method_key(
+                    &operands[i].ty,
+                    &TMethodRef::inherent("compare"),
+                    &[],
+                )
                     .ok_or_else(|| format!("jit compare hook on {:?}", operands[i].ty))?;
                 let func_id = self
                     .func_ids
@@ -19901,7 +19921,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
                 self.lower_range_expr(inner)
             }
-            TExprKind::Call { name, args } => {
+            TExprKind::Call { name, args, .. } => {
                 let func_id = self
                     .func_ids
                     .get(name)

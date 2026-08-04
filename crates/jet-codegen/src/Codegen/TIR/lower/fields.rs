@@ -561,3 +561,41 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
         _ => unit_type(),
     }
 }
+
+/// Resolve a generic call's result using the explicit arguments first, then
+/// the concrete lowered argument types. This is the codegen-side mirror of
+/// sema's substitution; engines receive a concrete TIR type, never a binder.
+pub(crate) fn call_return_type_with_args(
+    cx: &Cx,
+    name: &str,
+    type_args: &[Type],
+    args: &[crate::Codegen::TIR::TCallArg],
+) -> Type {
+    let declared = call_return_type(cx, name);
+    let Some(params) = cx.fn_type_params.get(name) else {
+        return declared;
+    };
+    if params.is_empty() {
+        return declared;
+    }
+    let Some(order) = cx.fn_type_param_order.get(name) else {
+        return declared;
+    };
+    let mut subst = std::collections::HashMap::new();
+    for (param, actual) in order.iter().zip(type_args) {
+        subst.insert(param.clone(), cx.expand_type_aliases(actual));
+    }
+    if let Some(sig) = cx.sigs.get(name) {
+        for ((_, template), actual) in sig.iter().zip(args) {
+            if !crate::Codegen::TIR::bind_generic_type(
+                template,
+                &actual.value.ty,
+                params,
+                &mut subst,
+            ) {
+                return declared;
+            }
+        }
+    }
+    crate::Generics::substitute_type(&declared, &subst)
+}

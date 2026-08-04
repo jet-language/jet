@@ -47,6 +47,12 @@ pub fn artifact_kind(path: &str) -> Option<ArtifactKind> {
 /// S1 (ratified): keyword that starts a function definition.
 pub const KW_FN: &str = "fn";
 
+/// D-GENERIC-CALL1=A (ratified 2026-08-03): explicit call-site type arguments
+/// use the existing angle tokens and must stay adjacent to the call parens.
+/// These constants name the source surface; Jet does not use Rust's `::<T>`.
+pub const GENERIC_CALL_OPEN: &str = "<";
+pub const GENERIC_CALL_CLOSE: &str = ">";
+
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 

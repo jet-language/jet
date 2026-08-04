@@ -9,6 +9,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -17,6 +18,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -539,10 +541,11 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(TokKind::RParen, "to finish the call")?;
                     Ok(Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(String::new(), dot)),
-                        method,
-                        method_span,
-                        type_args: Vec::new(),
+                    receiver: Box::new(Expr::Ident(String::new(), dot)),
+                    method,
+                    method_span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
                         args,
                         recv_type: None,
                         resolved_ret: None,

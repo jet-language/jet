@@ -674,7 +674,7 @@ fn web_wasm_expr_supported(
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
+        TIR::TExprKind::Call { name, args, .. } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
@@ -689,7 +689,7 @@ fn web_wasm_expr_supported(
                 )
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::ModuleCall { form, args } => {
+        TIR::TExprKind::ModuleCall { form, args, .. } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                     qualified_web_key(rust_mod, rust_fn)
@@ -964,7 +964,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
         E::Absent => true,
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
-        E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
+        E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => {
             let arity_ok = if method == "mount" {
                 // D-UI-MOUNT1=A: 2-arg or 3-arg (constraint) — same as tir_core_call.
@@ -3291,7 +3291,7 @@ fn wasm_emit_expr(
                 wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
             )
         }
-        TIR::TExprKind::Call { name, args } => {
+        TIR::TExprKind::Call { name, args, .. } => {
             let key = local_web_key(file_prefix, name);
             let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
             callees.next().ok_or(())?;
@@ -3312,7 +3312,7 @@ fn wasm_emit_expr(
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         ),
-        TIR::TExprKind::ModuleCall { form, args } => {
+        TIR::TExprKind::ModuleCall { form, args, .. } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                     qualified_web_key(rust_mod, rust_fn)
@@ -4454,14 +4454,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 format!("{b}[{i}]")
             }
         },
-        E::Call { name, args } => {
+        E::Call { name, args, .. } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;
             if name == "print" { format!("jetDom.print({args})") }
             else if is_wasm_export(&name, funcs) { format!("await bridge_{name}({args})") }
             else { format!("{name}({args})") }
         }
-        E::ModuleCall { form, args } => {
+        E::ModuleCall { form, args, .. } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                     qualified_web_key(rust_mod, rust_fn)

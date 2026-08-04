@@ -105,7 +105,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Computed Condition DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Measurement PriorityQueue Ptr SelectBuilder Set Shared SharedGuard Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet YAML
+; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Computed Condition DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Measurement PriorityQueue Ptr SelectBuilder Set Shared Shared.Weak SharedGuard Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -127,7 +127,7 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Known Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Kernel Known Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # $[ & ... :: := ]$ ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS

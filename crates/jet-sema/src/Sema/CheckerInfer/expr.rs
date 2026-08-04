@@ -83,6 +83,7 @@ impl<'a> Checker<'a> {
         *e = Expr::Call(Call {
             name: type_name.clone(),
             name_span: span,
+            type_args: Vec::new(),
             args,
             range_checked: false,
         });
@@ -139,6 +140,7 @@ impl<'a> Checker<'a> {
         *e = Expr::Call(Call {
             name: Syntax::TYPE_REGEX.to_string(),
             name_span: span,
+            type_args: Vec::new(),
             args: vec![CallArg {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(parts, literal_span),
@@ -660,6 +662,7 @@ impl<'a> Checker<'a> {
                         .expect("Float has a canonical conversion method")
                         .to_string(),
                     method_span: *suffix_span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
@@ -1511,6 +1514,7 @@ impl<'a> Checker<'a> {
                             receiver,
                             method: "indexes".to_string(),
                             method_span: span,
+                            owner_type_args: Vec::new(),
                             type_args: Vec::new(),
                             args: Vec::new(),
                             recv_type: None,
@@ -1559,6 +1563,7 @@ impl<'a> Checker<'a> {
                 receiver,
                 method,
                 method_span,
+                owner_type_args,
                 type_args,
                 args,
                 recv_type,
@@ -1614,8 +1619,8 @@ impl<'a> Checker<'a> {
                         return None;
                     };
                     **receiver = Expr::Ident(type_name, receiver.span());
-                    if type_args.is_empty() {
-                        *type_args = expected_args;
+                    if owner_type_args.is_empty() {
+                        *owner_type_args = expected_args;
                     }
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
@@ -1695,6 +1700,7 @@ impl<'a> Checker<'a> {
                     receiver,
                     method,
                     *method_span,
+                    owner_type_args,
                     type_args,
                     args,
                     recv_type,

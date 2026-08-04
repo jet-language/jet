@@ -1266,6 +1266,7 @@ pub(crate) fn synthesize_delegation_method(
         )),
         method: sig.name.clone(),
         method_span: zero,
+        owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args,
         recv_type: None,

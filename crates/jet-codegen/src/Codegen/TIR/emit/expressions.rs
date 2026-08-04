@@ -696,9 +696,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         TExprKind::RequireStop { kind, loc, .. } => emit_require_stop(kind, loc, cx),
-        TExprKind::Call { name, args } => {
+        TExprKind::Call {
+            name,
+            type_args,
+            args,
+        } => {
             let arg_str = emit_tir_call_args(args, cx);
-            format!("{}({})", cx.mangle_name(name), arg_str)
+            let type_args = if type_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "::<{}>",
+                    type_args
+                        .iter()
+                        .map(|ty| cx.rust_type(ty))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            format!("{}{}({})", cx.mangle_name(name), type_args, arg_str)
         }
         TExprKind::DistinctCtor { name, arg, .. } => {
             format!("{}({})", cx.mangle_name(name), emit_tir_expr(arg, cx))
@@ -854,6 +870,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::MethodCall {
             recv,
             method,
+            type_args,
             args,
             operator_line,
             ..
@@ -874,7 +891,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.file,
                 );
             }
-            format!("({}).{}({})", emit_tir_expr(recv, cx), method_rust, arg_str)
+            let type_args = if type_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "::<{}>",
+                    type_args
+                        .iter()
+                        .map(|ty| cx.rust_type(ty))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            format!(
+                "({}).{}{}({})",
+                emit_tir_expr(recv, cx),
+                method_rust,
+                type_args,
+                arg_str
+            )
         }
         // c109 Phase 27: a call through a fn-typed struct field. Mirrors the AST
         // `emit_method_call` fn-field branch: `(({recv}).{field})({args})`.
@@ -894,6 +929,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             owner,
             owner_type,
             method,
+            type_args,
             args,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
@@ -902,7 +938,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Some(ty) => cx.rust_type(ty),
                 None => emit_static_owner(owner, cx),
             };
-            format!("{}::{}({})", owner, method.rust(), arg_str)
+            let type_args = if type_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "::<{}>",
+                    type_args
+                        .iter()
+                        .map(|ty| cx.rust_type(ty))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            format!("{}::{}{}({})", owner, method.rust(), type_args, arg_str)
         }
         // D-VALIDATE-DECODE1=B: preserve a child Result's success value and
         // frame every accumulated FieldError at the generated boundary.
@@ -4558,14 +4606,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // emit prepends `cx.root_prefix` exactly where the AST path does (both the
         // qualified `{root}{mod}::{fn}` form and the inline `{root}user_{mangled}` form
         // prefix with root). Args were resolved into `TCallArg`s (`emit_tir_call_args`).
-        TExprKind::ModuleCall { form, args } => {
+        TExprKind::ModuleCall {
+            form,
+            type_args,
+            args,
+        } => {
             let arg_str = emit_tir_call_args(args, cx);
+            let type_args = if type_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "::<{}>",
+                    type_args
+                        .iter()
+                        .map(|ty| cx.rust_type(ty))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
             match form {
                 TModuleCallForm::Qualified { rust_mod, rust_fn } => {
-                    format!("{}{}::{}({})", cx.root_prefix, rust_mod, rust_fn, arg_str)
+                    format!(
+                        "{}{}::{}{}({})",
+                        cx.root_prefix, rust_mod, rust_fn, type_args, arg_str
+                    )
                 }
                 TModuleCallForm::InlineMangled { mangled } => {
-                    format!("{}user_{}({})", cx.root_prefix, mangled, arg_str)
+                    format!("{}user_{}{}({})", cx.root_prefix, mangled, type_args, arg_str)
                 }
             }
         }

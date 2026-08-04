@@ -160,6 +160,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
         receiver: Box::new(receiver),
         method: method.to_string(),
         method_span: span,
+        owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args,
         recv_type: None,

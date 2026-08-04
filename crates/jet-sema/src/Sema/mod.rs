@@ -62,6 +62,9 @@ pub(crate) struct MethodSig {
     is_pub: bool,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
+    /// D-GENERIC-CALL1=A: method-owned type parameters, distinct from the
+    /// receiver's generic arguments.
+    type_params: Vec<crate::AST::TypeParam>,
     is_static: bool,
     self_conv: Option<AccessConvention>,
     /// D-NARG1 (S61): parameter names and default-value presence, parallel to
@@ -477,6 +480,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
         return_type: f.return_type.clone(),
+        type_params: f.type_params.clone(),
         is_static: self_param.is_none(),
         self_conv: self_param.map(|p| p.convention),
         param_info: non_self_params
@@ -1615,6 +1619,7 @@ impl<'a> Checker<'a> {
                         .expect("Float conversion is registered")
                         .to_string(),
                     method_span: span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![crate::AST::CallArg {
                         convention: crate::AST::AccessConvention::Read,

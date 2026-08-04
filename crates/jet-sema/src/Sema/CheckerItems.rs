@@ -116,7 +116,8 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         span: Span,
-        type_args: &mut Vec<Type>,
+        owner_type_args: &mut Vec<Type>,
+        method_type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
@@ -232,7 +233,7 @@ impl<'a> Checker<'a> {
         .unwrap_or_default();
         let mut call_access = self.call_access_frame();
         let mut pre_inferred = None;
-        if method == "new" && type_args.is_empty() {
+        if method == "new" && owner_type_args.is_empty() {
             if !declared.is_empty() {
                 let expected = self.expected_type.clone();
                 let mut inference_args = Vec::new();
@@ -331,14 +332,23 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                 };
-                type_args.extend(
+                owner_type_args.extend(
                     declared
                         .iter()
                         .filter_map(|param| subst.get(&param.name).cloned()),
                 );
             }
         }
-        Self::instantiate_method_sig_from(&mut msig, &declared, type_args);
+        Self::instantiate_method_sig_from(&mut msig, &declared, owner_type_args);
+        let pre_inferred_method = self.instantiate_method_type_args(
+            type_name,
+            method,
+            &mut msig,
+            method_type_args,
+            args,
+            span,
+            &mut call_access,
+        );
         self.record_method_reference(type_name, method, span);
         self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {
@@ -357,9 +367,147 @@ impl<'a> Checker<'a> {
             None,
             args,
             span,
-            pre_inferred.as_deref(),
+            pre_inferred_method
+                .as_deref()
+                .or(pre_inferred.as_deref()),
             Some(call_access),
         )
+    }
+
+    /// D-GENERIC-CALL1=A: resolve method-owned call arguments after the receiver
+    /// type has been instantiated. Receiver arguments and method arguments are
+    /// deliberately separate so `Box<Int>.make<String>(...)` has one clear
+    /// substitution for each binder.
+    pub(crate) fn instantiate_method_type_args(
+        &mut self,
+        type_name: &str,
+        method: &str,
+        sig: &mut MethodSig,
+        type_args: &[Type],
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        call_access: &mut CallAccessFrame,
+    ) -> Option<Vec<Option<Type>>> {
+        if sig.type_params.is_empty() {
+            if !type_args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("{type_name}.{method} is not generic"),
+                    "only methods declared with type parameters accept call-site type arguments"
+                        .to_string(),
+                    format!("call {type_name}.{method}(...) without type arguments"),
+                    Some(span),
+                ));
+            }
+            return None;
+        }
+
+        if !type_args.is_empty() {
+            if type_args.len() != sig.type_params.len() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!(
+                        "{type_name}.{method} expects {} type argument{}, got {}",
+                        sig.type_params.len(),
+                        if sig.type_params.len() == 1 { "" } else { "s" },
+                        type_args.len()
+                    ),
+                    "a generic method call must provide one type for every declared type parameter"
+                        .to_string(),
+                    format!("write {type_name}.{method}<…>(...) with the declared types"),
+                    Some(span),
+                ));
+                return None;
+            }
+            let mut subst = HashMap::new();
+            for (param, actual) in sig.type_params.iter().zip(type_args) {
+                let actual = self.resolve_type(actual.clone());
+                self.check_declared_type(&actual, span);
+                for bound in &param.bounds {
+                    if !self.type_satisfies_bound(&actual, bound) {
+                        self.diags.push(crate::Generics::e0905(
+                            &actual.name(),
+                            bound,
+                            span,
+                            false,
+                        ));
+                    }
+                }
+                subst.insert(param.name.clone(), actual);
+            }
+            for (_, ty) in &mut sig.params {
+                *ty = crate::Generics::substitute_type(ty, &subst);
+            }
+            if let Some(ret) = &mut sig.return_type {
+                *ret = crate::Generics::substitute_type(ret, &subst);
+            }
+            return None;
+        }
+
+        let params: Vec<(AccessConvention, Type)> = sig
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !(sig.self_conv.is_some() && *index == 0))
+            .map(|(_, param)| param.clone())
+            .collect();
+        let mut pre_inferred = Vec::with_capacity(args.len());
+        for (index, arg) in args.iter_mut().enumerate() {
+            pre_inferred.push(self.with_call_access(call_access, |checker| {
+                if let Some((param_conv, param_ty)) = params.get(index) {
+                    checker.check_call_argument_access(arg, *param_conv, param_ty, true);
+                }
+                let saved_expected = checker.expected_type.clone();
+                if let Some((_, param_ty)) = params.get(index) {
+                    checker.expected_type = Some(param_ty.clone());
+                }
+                let inferred = checker.infer(&mut arg.expr);
+                checker.expected_type = saved_expected;
+                checker.check_call_argument_captures(&arg.expr);
+                inferred
+            }));
+        }
+        let arg_types: Vec<Type> = pre_inferred.iter().filter_map(Clone::clone).collect();
+        if arg_types.len() != args.len() {
+            return Some(pre_inferred);
+        }
+        let subst = match self.trait_reg.infer_subst(
+            &params,
+            sig.return_type.as_ref(),
+            &arg_types,
+            &sig.type_params,
+            self.expected_type.as_ref(),
+        ) {
+            Ok(subst) => subst,
+            Err(param) => {
+                self.diags.push(crate::Generics::e0904(span, &param));
+                return Some(pre_inferred);
+            }
+        };
+        for param in &sig.type_params {
+            if let Some(actual) = subst.get(&param.name) {
+                if let Some(bound) = param
+                    .bounds
+                    .iter()
+                    .find(|bound| !self.type_satisfies_bound(actual, bound))
+                {
+                    self.diags.push(crate::Generics::e0905(
+                        &actual.name(),
+                        bound,
+                        span,
+                        false,
+                    ));
+                }
+            }
+        }
+        for (_, ty) in &mut sig.params {
+            *ty = crate::Generics::substitute_type(ty, &subst);
+        }
+        if let Some(ret) = &mut sig.return_type {
+            *ret = crate::Generics::substitute_type(ret, &subst);
+        }
+        let _ = (type_name, method);
+        Some(pre_inferred)
     }
 
     pub(crate) fn check_method_args(

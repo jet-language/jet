@@ -94,6 +94,7 @@ impl<'a> Checker<'a> {
             receiver: &mut Box<Expr>,
             method: &str,
             span: Span,
+            owner_type_args: &mut Vec<Type>,
             type_args: &mut Vec<Type>,
             args: &mut Vec<crate::AST::CallArg>,
             recv_type_out: &mut Option<String>,
@@ -265,7 +266,7 @@ impl<'a> Checker<'a> {
                     {
                         let full = format!("{prefix}.{leaf}");
                         if self.registry.method(&full, method).is_some() {
-                            return self.check_static_method(&full, method, span, type_args, args);
+                            return self.check_static_method(&full, method, span, owner_type_args, type_args, args);
                         }
                     }
                 }
@@ -560,22 +561,22 @@ impl<'a> Checker<'a> {
                                 *resolved_ret_out = ret.clone();
                                 return ret;
                             }
-                            return self.check_static_method(&type_name, method, span, type_args, args);
+                            return self.check_static_method(&type_name, method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
-                            return self.check_static_method("EncodingLimits", method, span, type_args, args);
+                            return self.check_static_method("EncodingLimits", method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
-                            return self.check_static_method("CBOROptions", method, span, type_args, args);
+                            return self.check_static_method("CBOROptions", method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.encoding.xml" && (leaf == "XMLLimits" || leaf == "XMLParseOptions") && method == "safe" {
-                            return self.check_static_method(leaf, method, span, type_args, args);
+                            return self.check_static_method(leaf, method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.email" && leaf == "Limits" && method == "safe" {
-                            return self.check_static_method("Limits", method, span, type_args, args);
+                            return self.check_static_method("Limits", method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
-                            return self.check_static_method("DataLimits", method, span, type_args, args);
+                            return self.check_static_method("DataLimits", method, span, owner_type_args, type_args, args);
                         }
                         if ns == "core.encoding" && leaf == "DataEvent" {
                             let saved: Vec<Expr> = args
@@ -707,7 +708,14 @@ impl<'a> Checker<'a> {
                 // inline `module math { … }` in this file. Resolve via mangled name.
                 if let Some(canonical) = self.code_modules.get(alias.as_str()) {
                     let mangled = format!("{}__{}", canonical, method);
-                    return self.infer_code_module_call(alias, &mangled, *alias_span, span, args);
+                    return self.infer_code_module_call(
+                        alias,
+                        &mangled,
+                        *alias_span,
+                        span,
+                        type_args,
+                        args,
+                    );
                 }
             }
             if let Expr::Ident(type_name, type_span) = &**receiver {
@@ -843,7 +851,7 @@ impl<'a> Checker<'a> {
                 }
                 if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits" || type_name == "DataLimits") && method == "safe")
                     || self.resolve_method_sig(type_name, method).is_some() {
-                    return self.check_static_method(type_name, method, span, type_args, args);
+                    return self.check_static_method(type_name, method, span, owner_type_args, type_args, args);
                 }
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
                 // remains accepted as the existing module-alias path.
@@ -1423,7 +1431,7 @@ impl<'a> Checker<'a> {
                 if self.lookup(type_name).is_none()
                     && builtin_type_from_ident(type_name).is_some()
                 {
-                    return self.check_static_method(type_name, method, span, type_args, args);
+                    return self.check_static_method(type_name, method, span, owner_type_args, type_args, args);
                 }
             }
             self.borrow_ctx = true;
@@ -3840,6 +3848,16 @@ impl<'a> Checker<'a> {
             if let Some(args) = applied_args {
                 self.instantiate_method_sig(&type_name, &mut msig, args);
             }
+            let mut call_access = self.call_access_frame();
+            let pre_inferred_method = self.instantiate_method_type_args(
+                &type_name,
+                method,
+                &mut msig,
+                type_args,
+                args,
+                span,
+                &mut call_access,
+            );
             self.record_method_reference(&type_name, method, span);
             self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
             if msig.is_static {
@@ -3898,8 +3916,8 @@ impl<'a> Checker<'a> {
                 Some(receiver),
                 args,
                 span,
-                None,
-                None,
+                pre_inferred_method.as_deref(),
+                Some(call_access),
             )?;
             let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
             *resolved_ret_out = ret.clone();

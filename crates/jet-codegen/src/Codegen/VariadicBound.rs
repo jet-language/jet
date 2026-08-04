@@ -102,6 +102,7 @@ pub(crate) fn lower_variadic_bound_call(
         ty: ret,
         kind: TExprKind::Call {
             name: variadic_bound_fn_name(&call.name, arity),
+            type_args: Vec::new(),
             args,
         },
     }

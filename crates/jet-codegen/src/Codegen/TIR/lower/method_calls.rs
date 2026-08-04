@@ -9,7 +9,7 @@ use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
-use crate::Codegen::TIR::call_return_type;
+use crate::Codegen::TIR::call_return_type_with_args;
 use crate::Codegen::TIR::core_call_return_ty;
 use crate::Codegen::TIR::duration_new_unit;
 use crate::Codegen::TIR::emit_tir_expr;
@@ -203,7 +203,7 @@ fn lower_serde_encode_node(recv: TExpr, cx: &Cx) -> TExpr {
     if matches!(&recv.ty, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
             format!("{}::encode", recv.ty.name()),
-            (recv.ty.clone(), "encode".to_string()),
+            (recv.ty.clone(), "encode".to_string(), Vec::new()),
         );
     }
     TExpr {
@@ -225,7 +225,7 @@ fn lower_datatree_decode_node(
     if matches!(&target, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
             format!("{}::decode", target.name()),
-            (target.clone(), "decode".to_string()),
+            (target.clone(), "decode".to_string(), Vec::new()),
         );
     }
     TExpr {
@@ -267,6 +267,7 @@ pub(crate) fn lower_method_call(
     receiver: &Expr,
     method: &str,
     method_span: Span,
+    owner_type_args: &[Type],
     type_args: &[Type],
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
@@ -494,6 +495,7 @@ pub(crate) fn lower_method_call(
                 receiver,
                 method,
                 method_span,
+                owner_type_args,
                 type_args,
                 &lowered_args,
                 recv_type,
@@ -600,6 +602,7 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::MethodCall {
                 recv: Box::new(recv),
                 method: TMethodRef::bare(method),
+                type_args: Vec::new(),
                 args: targs,
                 source_first_string_literal: first_string_literal_arg(args),
                 operator_line: matches!(method, "add" | "sub" | "mul" | "div")
@@ -1677,6 +1680,7 @@ pub(crate) fn lower_method_call(
                                 rust_mod: real_mod,
                                 rust_fn: mangle(&real_fn).to_string(),
                             },
+                            type_args: type_args.to_vec(),
                             args: targs,
                         },
                     };
@@ -1730,6 +1734,7 @@ pub(crate) fn lower_method_call(
                                 rust_mod: mod_name,
                                 rust_fn: mangle(method).to_string(),
                             },
+                            type_args: type_args.to_vec(),
                             args: targs,
                         },
                     };
@@ -1739,11 +1744,17 @@ pub(crate) fn lower_method_call(
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     return TExpr {
-                        ty: call_return_type(cx, &mangled_key),
+                        ty: call_return_type_with_args(
+                            cx,
+                            &mangled_key,
+                            type_args,
+                            &targs,
+                        ),
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::InlineMangled {
                                 mangled: mangled_key,
                             },
+                            type_args: type_args.to_vec(),
                             args: targs,
                         },
                     };
@@ -3631,6 +3642,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner("jet_std::EncodingLimits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3644,6 +3656,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner("jet_std::DataLimits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3657,6 +3670,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner("jet_std::DataLimits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3670,6 +3684,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner("jet_std::CBOROptions"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3683,6 +3698,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner(format!("jet_std::{leaf}")),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3696,6 +3712,7 @@ pub(crate) fn lower_method_call(
                         owner: rooted_owner("jet_email::Limits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
                         args: vec![],
                     },
                 };
@@ -3742,6 +3759,7 @@ pub(crate) fn lower_method_call(
                     owner: rooted_owner(format!("Jet{type_name}")),
                     owner_type: None,
                     method: TMethodRef::bare(method_rust),
+                    type_args: Vec::new(),
                     args: args.iter().map(|argument| lower_one_call_arg(argument, None, env, cx)).collect(),
                 },
             };
@@ -3829,6 +3847,7 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::Call {
                         name: type_name,
+                        type_args: Vec::new(),
                         args: vec![lower_one_call_arg(arg, None, env, cx)],
                     },
                 };
@@ -4018,6 +4037,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4057,6 +4077,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4078,6 +4099,7 @@ pub(crate) fn lower_method_call(
                     owner: host_owner("JetCache"),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![TCallArg {
                         value: cap_arg,
                         borrow: false,
@@ -4098,6 +4120,7 @@ pub(crate) fn lower_method_call(
                     owner: host_owner("JetBitSet"),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4109,6 +4132,7 @@ pub(crate) fn lower_method_call(
                     owner: host_owner("JetByteBuffer"),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4144,6 +4168,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4167,6 +4192,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4192,6 +4218,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![],
                 },
             };
@@ -4211,6 +4238,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![TCallArg {
                         value: arg_t,
                         borrow: false,
@@ -4231,6 +4259,7 @@ pub(crate) fn lower_method_call(
                     owner: rooted_owner("jet_std::JetCondition"),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: Vec::new(),
                 },
             };
@@ -4254,6 +4283,7 @@ pub(crate) fn lower_method_call(
                     ),
                     owner_type: None,
                     method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
                     args: vec![TCallArg {
                         value,
                         borrow: false,
@@ -4402,27 +4432,51 @@ pub(crate) fn lower_method_call(
             .get(&(type_name.clone(), method.to_string()))
             .cloned()
             .unwrap_or_default();
+        let sig = instantiate_method_sig(
+            cx,
+            &type_name,
+            method,
+            &sig,
+            owner_type_args,
+            type_args,
+        );
         let targs = lower_method_args(args, &sig, env, cx);
-        let ret_ty = resolved_ret.cloned().unwrap_or_else(|| {
-            cx.method_rets
-                .get(&(type_name.clone(), method.to_string()))
-                .cloned()
-                .flatten()
-                .map(|t| resolve_self_ty(&t, &type_name))
-                .unwrap_or_else(unit_type)
-        });
-        let owner_type = if type_args.is_empty() {
+        let resolved_type_args = resolved_method_type_args(
+            cx,
+            &type_name,
+            method,
+            &sig,
+            owner_type_args,
+            &targs,
+            type_args,
+            resolved_ret,
+        );
+        let ret_ty = instantiate_method_ret(
+            cx,
+            &type_name,
+            method,
+            owner_type_args,
+            &resolved_type_args,
+            resolved_ret,
+        )
+        .map(|ty| resolve_self_ty(&ty, &type_name))
+        .unwrap_or_else(unit_type);
+        let owner_type = if owner_type_args.is_empty() {
             Type::Named(type_name.clone())
         } else {
             Type::Apply {
                 name: type_name.clone(),
-                args: type_args.to_vec(),
+                args: owner_type_args.to_vec(),
             }
         };
-        if matches!(&owner_type, Type::Apply { .. }) {
+        if matches!(&owner_type, Type::Apply { .. }) || !resolved_type_args.is_empty() {
             cx.jit_method_calls.borrow_mut().insert(
-                format!("{}::{method}", owner_type.name()),
-                (owner_type.clone(), method.to_string()),
+                crate::Codegen::TIR::generic_method_instance_key(
+                    &owner_type,
+                    method,
+                    &resolved_type_args,
+                ),
+                (owner_type.clone(), method.to_string(), resolved_type_args.clone()),
             );
         }
         return TExpr {
@@ -4431,6 +4485,7 @@ pub(crate) fn lower_method_call(
                 owner: TStaticOwner::User(type_name.clone()),
                 owner_type: Some(owner_type),
                 method: TMethodRef::inherent(method),
+                type_args: resolved_type_args,
                 args: targs,
             },
         };
@@ -4446,6 +4501,7 @@ pub(crate) fn lower_method_call(
         if cx.trait_names.contains(ty) {
             let key = (ty.clone(), method.to_string());
             let sig = cx.method_sigs.get(&key).cloned().unwrap_or_default();
+            let sig = instantiate_method_sig(cx, ty, method, &sig, &[], type_args);
             let ret_ty = cx
                 .method_rets
                 .get(&key)
@@ -4465,6 +4521,7 @@ pub(crate) fn lower_method_call(
                         kind: TExprKind::MethodCall {
                             recv: Box::new(recv),
                             method: TMethodRef::bare(method),
+                            type_args: type_args.to_vec(),
                             args: targs,
                             source_first_string_literal: first_string_literal_arg(args),
                             operator_line: None,
@@ -4479,6 +4536,7 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv),
                     method: TMethodRef::trait_method(ty, method),
+                    type_args: type_args.to_vec(),
                     args: targs,
                     source_first_string_literal: first_string_literal_arg(args),
                     operator_line: None,
@@ -4535,6 +4593,7 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv_lowered),
                     method: TMethodRef::bare(method),
+                    type_args: type_args.to_vec(),
                     args: targs,
                     source_first_string_literal: first_string_literal_arg(args),
                     operator_line: None,
@@ -4564,6 +4623,11 @@ pub(crate) fn lower_method_call(
     } else {
         lower_expr(receiver, cx, env)
     };
+    let owner_type_args = match &recv.ty {
+        Type::Apply { name, args } if name == &ty_name => args.as_slice(),
+        _ => &[][..],
+    };
+    let sig = instantiate_method_sig(cx, &ty_name, method, &sig, owner_type_args, type_args);
     if matches!(&recv.ty, Type::Named(name) if cx.trait_names.contains(name)) {
         let trait_name = recv.ty.name();
         let mut recv = recv;
@@ -4583,19 +4647,34 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::MethodCall {
                 recv: Box::new(recv),
                 method: TMethodRef::trait_method(&trait_name, method),
+                type_args: type_args.to_vec(),
                 args: targs,
                 source_first_string_literal: first_string_literal_arg(args),
                 operator_line: None,
             },
         };
     }
-    if matches!(&recv.ty, Type::Apply { .. }) {
+    let targs = lower_method_args(args, &sig, env, cx);
+    let resolved_type_args = resolved_method_type_args(
+        cx,
+        &ty_name,
+        method,
+        &sig,
+        owner_type_args,
+        &targs,
+        type_args,
+        resolved_ret,
+    );
+    if matches!(&recv.ty, Type::Apply { .. }) || !resolved_type_args.is_empty() {
         cx.jit_method_calls.borrow_mut().insert(
-            format!("{}::{method}", recv.ty.name()),
-            (recv.ty.clone(), method.to_string()),
+            crate::Codegen::TIR::generic_method_instance_key(
+                &recv.ty,
+                method,
+                &resolved_type_args,
+            ),
+            (recv.ty.clone(), method.to_string(), resolved_type_args.clone()),
         );
     }
-    let targs = lower_method_args(args, &sig, env, cx);
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
     // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s
     // `trait_methods` check exactly — decided here, total, never re-derived in emit.
@@ -4611,25 +4690,143 @@ pub(crate) fn lower_method_call(
     // rarely load-bearing in emit (a binding carries sema's `b.ty`; arithmetic on a
     // method result doesn't trap — matching the AST `expr_jet_ty`/`operand_is_integer`),
     // but the TIR keeps it total per the design principle.
-    let ret_ty = resolved_ret
-        .cloned()
-        .or_else(|| {
-            cx.method_rets
-                .get(&(ty_name.clone(), method.to_string()))
-                .cloned()
-                .flatten()
-        })
-        .unwrap_or_else(unit_type);
+    let ret_ty = instantiate_method_ret(
+        cx,
+        &ty_name,
+        method,
+        owner_type_args,
+        &resolved_type_args,
+        resolved_ret,
+    )
+    .unwrap_or_else(unit_type);
     TExpr {
         ty: ret_ty,
         kind: TExprKind::MethodCall {
             recv: Box::new(recv),
             method: method_ref,
+            type_args: resolved_type_args,
             args: targs,
             source_first_string_literal: first_string_literal_arg(args),
             operator_line: None,
         },
     }
+}
+
+fn instantiate_method_sig(
+    cx: &Cx,
+    type_name: &str,
+    method: &str,
+    sig: &[(AccessConvention, Type)],
+    owner_type_args: &[Type],
+    method_type_args: &[Type],
+) -> Vec<(AccessConvention, Type)> {
+    let mut subst = std::collections::HashMap::new();
+    if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+        for (param, actual) in owner_params.iter().zip(owner_type_args) {
+            subst.insert(param.clone(), actual.clone());
+        }
+    }
+    if let Some(method_params) = cx.method_type_params.get(&(type_name.to_string(), method.to_string())) {
+        for (param, actual) in method_params.iter().zip(method_type_args) {
+            subst.insert(param.name.clone(), actual.clone());
+        }
+    }
+    sig.iter()
+        .map(|(conv, ty)| (*conv, crate::Generics::substitute_type(ty, &subst)))
+        .collect()
+}
+
+fn instantiate_method_ret(
+    cx: &Cx,
+    type_name: &str,
+    method: &str,
+    owner_type_args: &[Type],
+    method_type_args: &[Type],
+    resolved_ret: Option<&Type>,
+) -> Option<Type> {
+    let template = cx
+        .method_rets
+        .get(&(type_name.to_string(), method.to_string()))
+        .cloned()
+        .flatten()
+        .or_else(|| resolved_ret.cloned())?;
+    let mut subst = owner_type_subst(cx, type_name, owner_type_args);
+    if let Some(method_params) = cx
+        .method_type_params
+        .get(&(type_name.to_string(), method.to_string()))
+    {
+        for (param, actual) in method_params.iter().zip(method_type_args) {
+            subst.insert(param.name.clone(), actual.clone());
+        }
+    }
+    Some(crate::Generics::substitute_type(&template, &subst))
+}
+
+fn resolved_method_type_args(
+    cx: &Cx,
+    type_name: &str,
+    method: &str,
+    sig: &[(AccessConvention, Type)],
+    owner_type_args: &[Type],
+    args: &[TCallArg],
+    explicit_type_args: &[Type],
+    resolved_ret: Option<&Type>,
+) -> Vec<Type> {
+    if !explicit_type_args.is_empty() {
+        return explicit_type_args.to_vec();
+    }
+    let Some(method_params) = cx
+        .method_type_params
+        .get(&(type_name.to_string(), method.to_string()))
+    else {
+        return Vec::new();
+    };
+    if method_params.is_empty() {
+        return Vec::new();
+    }
+    let names: std::collections::HashSet<String> =
+        method_params.iter().map(|param| param.name.clone()).collect();
+    let mut subst = std::collections::HashMap::new();
+    for ((_, template), arg) in sig.iter().zip(args) {
+        if !crate::Codegen::TIR::bind_generic_type(
+            template,
+            &arg.value.ty,
+            &names,
+            &mut subst,
+        ) {
+            return Vec::new();
+        }
+    }
+    if let (Some(template), Some(actual)) = (
+        cx.method_rets
+            .get(&(type_name.to_string(), method.to_string()))
+            .and_then(Option::as_ref),
+        resolved_ret,
+    ) {
+        let owner_subst = owner_type_subst(cx, type_name, owner_type_args);
+        let template = crate::Generics::substitute_type(template, &owner_subst);
+        if !crate::Codegen::TIR::bind_generic_type(&template, actual, &names, &mut subst) {
+            return Vec::new();
+        }
+    }
+    method_params
+        .iter()
+        .map(|param| subst.get(&param.name).cloned())
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
+}
+
+fn owner_type_subst(
+    cx: &Cx,
+    type_name: &str,
+    owner_type_args: &[Type],
+) -> std::collections::HashMap<String, Type> {
+    cx.struct_type_param_order
+        .get(type_name)
+        .into_iter()
+        .flat_map(|params| params.iter().zip(owner_type_args))
+        .map(|(param, actual)| (param.clone(), actual.clone()))
+        .collect()
 }
 
 /// Demand monomorphized `T::encode` / `T::decode` when encoding core calls touch
@@ -4664,7 +4861,7 @@ fn demand_generic_serde_codec(
             if matches!(&arg.ty, Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
                     format!("{}::encode", arg.ty.name()),
-                    (arg.ty.clone(), "encode".to_string()),
+                    (arg.ty.clone(), "encode".to_string(), Vec::new()),
                 );
             }
         }
@@ -4679,7 +4876,7 @@ fn demand_generic_serde_codec(
             if matches!(ok.as_ref(), Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
                     format!("{}::decode", ok.name()),
-                    ((**ok).clone(), "decode".to_string()),
+                    ((**ok).clone(), "decode".to_string(), Vec::new()),
                 );
             }
         }

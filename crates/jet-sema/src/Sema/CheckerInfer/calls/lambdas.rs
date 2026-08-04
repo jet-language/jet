@@ -791,6 +791,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     receiver: Box::new(crate::AST::Expr::Ident(target.to_string(), *span)),
                     method: "push".to_string(),
                     method_span: *span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![crate::AST::CallArg {
                         convention: AccessConvention::Read,

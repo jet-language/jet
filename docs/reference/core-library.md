@@ -2054,7 +2054,8 @@ fn run() {
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
-**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? [FieldError]` for
+**Typed decode** — `decode<T>(text)` (D-GENERIC-CALL1; D-SERDE6 owns the codec
+model) returns `T ? [FieldError]` for
 json/toml/yaml, and `[T] ? [FieldError]` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
 cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no

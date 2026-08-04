@@ -1636,7 +1636,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Bool(true))
             }
-            TExprKind::Call { name, args } => self.eval_call(name, args, scope),
+            TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
             TExprKind::IfExpr {
                 cond,
                 then_body,
@@ -4132,6 +4132,7 @@ impl<'a> EvalCtx<'a> {
                 owner_type,
                 method,
                 args,
+                ..
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -4498,7 +4499,7 @@ impl<'a> EvalCtx<'a> {
                     self.call_callable(&callable, argv)
                 }
             },
-            TExprKind::ModuleCall { form, args } => {
+            TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {
                     TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                         format!("{rust_mod}::{rust_fn}")

@@ -67,8 +67,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
-            // D-ENC1 / D-SERDE6: typed encode/decode return types depend on the value
-            // type / call-site `<T>`, so codegen reads them from resolved_ret (I3).
+            // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
+            // types depend on the value type / call-site `<T>`, so codegen reads
+            // them from resolved_ret (I3).
             // D-MIGRATE3=A: `decode_traced` is the same call-site-typed shape, one
             // layer deeper (`DecodeResult<T>`).
             | (

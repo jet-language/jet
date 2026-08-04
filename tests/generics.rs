@@ -418,3 +418,269 @@ fn run() {
         diags.err()
     );
 }
+
+/// D-GENERIC-CALL1=A: explicit type arguments are available on ordinary free
+/// calls, including a result-only generic whose value arguments cannot infer T.
+#[test]
+fn explicit_generic_calls_cover_value_and_result_only_arguments() {
+    let src = r#"
+fn identity<T>(value: ^T) => T {
+    return value
+}
+
+fn empty<T>() => [T] {
+    ignored :: input()
+    return []
+}
+
+fn run() {
+    text :: identity<String>(input() ?? "ok")
+    values :: empty<Int>()
+    print(text)
+    print(values.len())
+}
+"#;
+    let compiled = jet::compile(src)
+        .unwrap_or_else(|diags| panic!("explicit generic calls failed: {diags:#?}"));
+    assert!(
+        compiled.rust.contains("user_identity::<String>"),
+        "AOT output lost the explicit identity type argument:\n{}",
+        compiled.rust
+    );
+    assert!(
+        compiled.rust.contains("user_empty::<i64>"),
+        "AOT output lost the result-only type argument:\n{}",
+        compiled.rust
+    );
+}
+
+#[test]
+fn generic_call_formatter_keeps_adjacent_angles() {
+    let source = "fn run() {\n    value :: identity<Int>(1)\n    nested :: empty<Map<String, [Int]>>()\n    comparison :: 1 < 2\n    json.decode<Order>(text)\n}";
+    let formatted = jet::format_source(source).expect("generic call syntax should format");
+    assert!(formatted.contains("identity<Int>(1)"), "{formatted}");
+    assert!(
+        formatted.contains("empty<Map<String, [Int]>>()"),
+        "nested generic call arguments must keep both closing angles: {formatted}"
+    );
+    assert!(
+        formatted.contains("comparison :: 1 < 2"),
+        "spaced angles must remain a comparison: {formatted}"
+    );
+    assert!(formatted.contains("json.decode<Order>(text)"), "{formatted}");
+    assert_eq!(
+        formatted,
+        jet::format_source(&formatted).expect("formatted generic calls should reformat")
+    );
+}
+
+#[test]
+fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
+    let source = r#"
+module helpers {
+    pub fn identity<T>(value: ^T) => T {
+        return value
+    }
+}
+
+fn run() {
+    text :: helpers.identity<String>("ok")
+    number :: helpers.identity(7)
+    print(text)
+    print(number)
+}
+"#;
+    let compiled = jet::compile(source)
+        .unwrap_or_else(|diags| panic!("namespaced generic call failed: {diags:#?}"));
+    assert!(
+        compiled.rust.contains("user_helpers__identity::<String>"),
+        "AOT output lost the namespaced explicit type argument:\n{}",
+        compiled.rust
+    );
+}
+
+#[test]
+fn generic_call_diagnostics_cover_arity_and_bound_failures() {
+    let wrong_arity = r#"
+fn identity<T>(value: ^T) => T { return value }
+fn run() { value :: identity<Int, String>(1) }
+"#;
+    let arity_diags = jet::compile(wrong_arity).expect_err("wrong generic arity must fail");
+    let arity = arity_diags
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0119")
+        .unwrap_or_else(|| panic!("expected generic arity E0119: {arity_diags:#?}"));
+    assert!(!arity.what.is_empty() && !arity.why.is_empty() && !arity.fix.is_empty());
+
+    let wrong_bound = r#"
+struct NotComparable { value: Int }
+fn choose<T: Comparable>(value: ^T) => T { return value }
+fn run() {
+    value :: choose<NotComparable>(NotComparable.{ value: 1 })
+}
+"#;
+    let bound_diags = jet::compile(wrong_bound).expect_err("failed generic bound must fail");
+    let bound = bound_diags
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0905")
+        .unwrap_or_else(|| panic!("expected generic bound E0905: {bound_diags:#?}"));
+    assert!(!bound.what.is_empty() && !bound.why.is_empty() && !bound.fix.is_empty());
+
+    let non_generic = r#"
+fn plain(value: Int) => Int { return value }
+fn run() { value :: plain<Int>(1) }
+"#;
+    let non_generic_diags = jet::compile(non_generic)
+        .expect_err("non-generic functions must reject explicit call type arguments");
+    assert!(
+        non_generic_diags.iter().any(|diagnostic| diagnostic.code == "E0119"),
+        "expected non-generic call E0119: {non_generic_diags:#?}"
+    );
+
+    let spaced = r#"
+fn identity<T>(value: ^T) => T { return value }
+fn run() { value :: identity < Int > (1) }
+"#;
+    assert!(
+        jet::compile(spaced).is_err(),
+        "spaced angle brackets must not become an explicit generic call"
+    );
+
+    let extra_decode_type = r#"
+use core.encoding.json as json
+fn run() { value :: json.decode<Int, String>("1") }
+"#;
+    let decode_diags = jet::compile(extra_decode_type)
+        .expect_err("typed decode must reject extra call type arguments");
+    assert!(
+        decode_diags.iter().any(|diagnostic| diagnostic.code == "E0119"),
+        "expected typed decode E0119: {decode_diags:#?}"
+    );
+}
+
+#[test]
+fn free_generic_calls_execute_in_the_resident_jit() {
+    let source = r#"
+fn identity<T>(value: ^T) => T { return value }
+fn empty<T>() => [T] { return [] }
+fn run() {
+    text :: identity<String>("ok")
+    values :: empty<Int>()
+    print(text)
+    print(values.len())
+}
+"#;
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_free_calls_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create generic-free test directory");
+    let path = root.join("main.jet");
+    std::fs::write(&path, source).expect("write generic-free test source");
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
+        .expect("generic-free test source should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "generic-free test source should type-check: {diagnostics:?}"
+    );
+    jet_jit::try_compile_bundle(&bundle).expect("generic free calls should compile in resident JIT");
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "generic free call JIT run failed: {stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, "ok\n0\n");
+        }
+        other => panic!("generic free call JIT run did not complete: {other:?}"),
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "generic free call test did not execute resident JIT"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn generic_method_calls_keep_owner_and_method_arguments_separate() {
+    let source = r#"
+struct Box<T> {
+    value: T
+}
+
+impl Box {
+    fn new(value: ^T) => Box<T> {
+        return Box<T>.{ value: value }
+    }
+
+    fn convert<U>(self, value: ^U) => U {
+        return value
+    }
+
+    fn make<U>(value: ^U) => U {
+        return value
+    }
+}
+
+fn run() {
+    box :: Box<Int>.new(3)
+    value :: box.convert<String>("ok")
+    inferred :: box.convert("again")
+    static_value :: Box.make<String>("static")
+    static_inferred :: Box.make("inferred")
+    print(value)
+    print(inferred)
+    print(static_value)
+    print(static_inferred)
+}
+"#;
+    let compiled = jet::compile(source)
+        .unwrap_or_else(|diags| panic!("generic method call failed: {diags:#?}"));
+    assert!(compiled.rust.contains("<user_Box<i64>>::user_new"), "{}", compiled.rust);
+    assert!(compiled.rust.contains(".user_convert::<String>"), "{}", compiled.rust);
+    assert!(compiled.rust.contains("user_Box::user_make::<String>"), "{}", compiled.rust);
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_method_calls_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create generic-method test directory");
+    let path = root.join("main.jet");
+    std::fs::write(&path, source).expect("write generic-method test source");
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
+        .expect("generic-method test source should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "generic-method test source should type-check: {diagnostics:?}"
+    );
+    jet_jit::try_compile_bundle(&bundle).expect("generic methods should compile in resident JIT");
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "generic method JIT run failed: {stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, "ok\nagain\nstatic\ninferred\n");
+        }
+        other => panic!("generic method JIT run did not complete: {other:?}"),
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "generic method test did not execute resident JIT"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

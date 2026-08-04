@@ -601,9 +601,11 @@ always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 reserved for collections/indexing/shorthands. Calls infer type arguments by
 default. **D-GENERIC-CALL1=A** *(ratified 2026-08-03)* allows explicit
 `call<T>(…)` arguments on every generic free, namespaced, and method call.
-Jet does not use Rust's `::<T>` separator. This final uniform law supersedes
-S45's ban, D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved
-general ban.
+The callee, `<…>`, and `(...)` stay adjacent, so spaced `a < B > (c)` remains
+a comparison. The formatter writes `call<T>(…)`. Jet does not use Rust's
+`::<T>` separator. This final uniform law supersedes S45's ban,
+D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved general
+ban.
 
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`

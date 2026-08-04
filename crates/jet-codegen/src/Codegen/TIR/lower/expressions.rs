@@ -10,7 +10,7 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::mangle;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::call_return_type;
+use crate::Codegen::TIR::{call_return_type, call_return_type_with_args};
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -142,6 +142,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -154,6 +155,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             *method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -348,6 +350,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
         kind: TExprKind::MethodCall {
             recv: Box::new(value),
             method: TMethodRef::bare("display"),
+            type_args: Vec::new(),
             args: Vec::new(),
             source_first_string_literal: None,
             operator_line: None,
@@ -1219,7 +1222,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `unqualified_inline` arm) → `{root}user_{mangled}(args)`.
                 if let Some(mangled_key) = cx.unqualified_inline.get(&call.name).cloned() {
                     let sig = cx.sigs.get(&mangled_key).cloned();
-                    let args = call
+                    let args: Vec<_> = call
                         .args
                         .iter()
                         .enumerate()
@@ -1232,11 +1235,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         })
                         .collect();
                     return TExpr {
-                        ty: call_return_type(cx, &mangled_key),
+                        ty: call_return_type_with_args(
+                            cx,
+                            &mangled_key,
+                            &call.type_args,
+                            &args,
+                        ),
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::InlineMangled {
                                 mangled: mangled_key,
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
@@ -1274,6 +1283,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 rust_mod,
                                 rust_fn: mangle(&fn_name).to_string(),
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
@@ -1389,39 +1399,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .entry(call.name.clone())
                 .or_default()
                 .push(
-                    args.iter()
-                        .map(|arg| {
-                            if arg.widen_to_vec {
-                                if let Type::FixedList { elem, .. } = &arg.value.ty {
-                                    return Type::List(elem.clone());
+                    {
+                        let mut shape: Vec<Type> = args
+                            .iter()
+                            .map(|arg| {
+                                if arg.widen_to_vec {
+                                    if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                        return Type::List(elem.clone());
+                                    }
                                 }
-                            }
-                            arg.value.ty.clone()
-                        })
-                        .collect(),
+                                arg.value.ty.clone()
+                            })
+                            .collect();
+                        shape.extend(call.type_args.iter().cloned());
+                        shape
+                    },
                 );
-            let declared_ret = call_return_type(cx, &call.name);
-            let ret = match (
-                cx.fn_type_params.get(&call.name),
-                cx.sigs.get(&call.name),
-            ) {
-                (Some(params), Some(sig)) if !params.is_empty() => {
-                    let mut subst = std::collections::HashMap::new();
-                    if sig.iter().zip(&args).all(|((_, template), actual)| {
-                        crate::Codegen::TIR::bind_generic_type(
-                            template,
-                            &actual.value.ty,
-                            params,
-                            &mut subst,
-                        )
-                    }) {
-                        crate::Generics::substitute_type(&declared_ret, &subst)
-                    } else {
-                        declared_ret
-                    }
-                }
-                _ => declared_ret,
-            };
+            let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
             TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
@@ -1429,6 +1423,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         || call.name.clone(),
                         |prefix| format!("{prefix}{}", mangle(&call.name)),
                     ),
+                    type_args: call.type_args.clone(),
                     args,
                 },
             }
@@ -2044,6 +2039,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::MethodCall {
                             recv: Box::new(recv),
                             method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                            type_args: Vec::new(),
                             args: vec![],
                             source_first_string_literal: None,
                             operator_line: None,

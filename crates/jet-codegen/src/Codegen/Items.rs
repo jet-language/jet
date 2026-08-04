@@ -1720,10 +1720,13 @@ pub(crate) fn emit_type_impl(
             .filter(|param| clone_params.contains(&param.name))
             .map(|param| format!("{}: Clone", param.name))
             .collect();
+        let existing = method.generics.clone();
         method.generics = if bounds.is_empty() {
-            String::new()
-        } else {
+            existing
+        } else if existing.is_empty() {
             format!(" where {}", bounds.join(", "))
+        } else {
+            format!("{existing} where {}", bounds.join(", "))
         };
     }
     let tp_use = Generics::type_param_rust_list(type_params);
