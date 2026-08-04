@@ -1105,6 +1105,23 @@ fn parse_canonical_u64(value: &str) -> Result<u64, String> {
     if value.is_empty() {
         return Err("empty unsigned integer".into());
     }
+    // An all-digit fixed-width value is ambiguous with decimal text. The
+    // canonical emitter uses a leading zero for that case, so recognize it
+    // before the decimal branch while keeping decimal-looking large values
+    // rejected as non-canonical.
+    if value.len() == 16
+        && value.starts_with('0')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        let hexadecimal = u64::from_str_radix(value, 16)
+            .map_err(|_| "unsigned integer is out of range".to_string())?;
+        if hexadecimal <= MAX_EXACT_JSON_INTEGER {
+            return Err("small unsigned integer must use minimal decimal".into());
+        }
+        return Ok(hexadecimal);
+    }
     if value.bytes().all(|byte| byte.is_ascii_digit()) {
         if value.len() > 1 && value.starts_with('0') {
             return Err("unsigned integer has a leading zero".into());

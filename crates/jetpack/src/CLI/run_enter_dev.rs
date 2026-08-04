@@ -371,6 +371,7 @@ pub(super) fn run_project_task_with_mode(
             &task_args,
             &plan.refs,
             &plan.table,
+            &task_environment_hash(&plan.refs, &plan.table, &plan.secrets, &plan.environment),
         ) {
             Ok(key) => key,
             Err(message) => {
@@ -529,7 +530,13 @@ fn run_task_with_access_trace(
     if !cfg!(target_os = "linux") {
         return Err("strict cached task access tracing is currently supported only on Linux".to_string());
     }
-    let tracer = resolve_executable_path("strace")?;
+    let base_path = if clean {
+        crate::Platform::clean_path().to_string()
+    } else {
+        std::env::var("PATH").unwrap_or_default()
+    };
+    let composed_path = env.composed_path(&base_path);
+    let tracer = resolve_executable_path_in("strace", &composed_path)?;
     let _ = std::fs::remove_file(trace_path);
     let mut traced = vec![
         tracer.to_string_lossy().into_owned(),
@@ -582,41 +589,49 @@ fn task_undeclared_accesses(
         .map(|output| task_path(project_dir, Some(output), "output", true))
         .collect::<Result<Vec<_>, _>>()?;
     let mut unexpected = BTreeSet::new();
-    for raw in trace.lines().filter_map(strace_path) {
-        let path = Path::new(raw);
-        let path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            task_cwd.join(path)
-        };
-        let path = if path.exists() {
-            path.canonicalize().unwrap_or(path)
-        } else {
-            path
-        };
-        if !path.starts_with(&project_root)
-            || path.starts_with(project_root.join(".git"))
-            || path.starts_with(project_root.join("target"))
-            || path == entry
-            || declared.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
-            || outputs.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
-        {
-            continue;
+    for line in trace.lines() {
+        for raw in strace_paths(line) {
+            let path = Path::new(raw);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                task_cwd.join(path)
+            };
+            let path = if path.exists() {
+                path.canonicalize().unwrap_or(path)
+            } else {
+                path
+            };
+            if !path.starts_with(&project_root)
+                || path.starts_with(project_root.join(".git"))
+                || path.starts_with(project_root.join("target"))
+                || path == entry
+                || declared.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
+                || outputs.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
+            {
+                continue;
+            }
+            unexpected.insert(path.to_string_lossy().replace('\\', "/"));
         }
-        unexpected.insert(path.to_string_lossy().replace('\\', "/"));
     }
     Ok(unexpected.into_iter().collect())
 }
 
-fn strace_path(line: &str) -> Option<&str> {
-    let start = line.find('"')? + 1;
-    let end = start + line[start..].find('"')?;
-    let path = &line[start..end];
-    if path.is_empty() || path == "?" || path.contains('\\') {
-        None
-    } else {
-        Some(path)
+fn strace_paths(line: &str) -> Vec<&str> {
+    let mut paths = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('"') {
+        let value = &rest[start + 1..];
+        let Some(end) = value.find('"') else {
+            break;
+        };
+        let path = &value[..end];
+        if !path.is_empty() && path != "?" && !path.contains('\\') {
+            paths.push(path);
+        }
+        rest = &value[end + 1..];
     }
+    paths
 }
 
 fn empty_task_plan() -> RunPlan {
@@ -711,6 +726,7 @@ fn task_cache_key(
     task_args: &[String],
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
+    environment_hash: &str,
 ) -> Result<String, String> {
     let mut identity = String::from("jet-task-cache-v2\n");
     identity.push_str(task);
@@ -728,6 +744,7 @@ fn task_cache_key(
     );
     identity.push('\n');
     identity.push_str(&format!("args={task_args:?}\n"));
+    identity.push_str(&format!("environment={environment_hash}\n"));
     identity.push_str(&format!("packages={:?}\n", metadata.packages));
     identity.push_str(&format!("inputs={:?}\n", metadata.inputs));
     identity.push_str(&format!("outputs={:?}\n", metadata.outputs));
@@ -779,24 +796,51 @@ fn task_cache_key(
     Ok(crate::SHA256::sha256_hex(identity.as_bytes()))
 }
 
+fn task_environment_hash(
+    refs: &[RefSpec::RefSpec],
+    table: &RefSpec::SourceTable,
+    secrets: &[String],
+    facts: &ModuleEval::EnvironmentFacts,
+) -> String {
+    let mut identity = Trust::environment_definition_hash(refs, table, secrets, facts);
+    identity.push_str("\n--task-active-environment--\n");
+    identity.push_str(facts.active_environment.as_deref().unwrap_or("<none>"));
+    identity.push('\n');
+    for module in &facts.active_environment_provenance {
+        identity.push_str("provenance=");
+        identity.push_str(module);
+        identity.push('\n');
+    }
+    identity.push_str("--task-source-files--\n");
+    for source in &facts.source_files {
+        identity.push_str(source);
+        identity.push('\n');
+    }
+    crate::SHA256::sha256_hex(identity.as_bytes())
+}
+
 fn resolve_executable_path(program: &str) -> Result<PathBuf, String> {
+    let search = std::env::var_os("PATH")
+        .ok_or_else(|| format!("couldn't resolve executable `{program}`: PATH is unavailable"))?;
+    resolve_executable_path_in(program, &search.to_string_lossy())
+}
+
+fn resolve_executable_path_in(program: &str, search: &str) -> Result<PathBuf, String> {
     let path = Path::new(program);
     if path.is_absolute() || path.components().count() > 1 {
         return path
             .canonicalize()
-            .map_err(|error| format!("couldn't resolve compiler `{program}`: {error}"));
+            .map_err(|error| format!("couldn't resolve executable `{program}`: {error}"));
     }
-    let search = std::env::var_os("PATH")
-        .ok_or_else(|| format!("couldn't resolve compiler `{program}`: PATH is unavailable"))?;
-    for directory in std::env::split_paths(&search) {
+    for directory in std::env::split_paths(search) {
         let candidate = directory.join(program);
         if candidate.is_file() {
             return candidate
                 .canonicalize()
-                .map_err(|error| format!("couldn't resolve compiler `{program}`: {error}"));
+                .map_err(|error| format!("couldn't resolve executable `{program}`: {error}"));
         }
     }
-    Err(format!("couldn't resolve compiler `{program}` through PATH"))
+    Err(format!("couldn't resolve executable `{program}` through PATH"))
 }
 
 fn validate_cached_task_metadata(
@@ -814,12 +858,18 @@ fn validate_cached_task_metadata(
     let outputs = metadata
         .outputs
         .iter()
-        .map(|output| task_path(project_dir, Some(output), "output", true).map(|path| (output, path)))
+        .map(|output| {
+            reject_cache_sensitive_path(output, "output")?;
+            task_path(project_dir, Some(output), "output", true).map(|path| (output, path))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let inputs = metadata
         .inputs
         .iter()
-        .map(|input| task_path(project_dir, Some(input), "input", true).map(|path| (input, path)))
+        .map(|input| {
+            reject_cache_sensitive_path(input, "input")?;
+            task_path(project_dir, Some(input), "input", true).map(|path| (input, path))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     for (output, output_path) in outputs {
         if inputs.iter().any(|(_, input)| {
@@ -843,6 +893,28 @@ fn validate_cached_task_metadata(
         if !input_path.exists() {
             return Err(format!("task input `{input_name}` does not exist"));
         }
+    }
+    Ok(())
+}
+
+fn reject_cache_sensitive_path(relative: &str, field: &str) -> Result<(), String> {
+    let sensitive = Path::new(relative).components().any(|component| {
+        matches!(component, std::path::Component::Normal(name) if name == ".jet")
+    }) || Path::new(relative)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            name == ".env"
+                || name.starts_with(".env.")
+                || ["secret", "credential", "token", "password"]
+                    .iter()
+                    .any(|word| name.contains(word))
+        });
+    if sensitive {
+        return Err(format!(
+            "cached task {field} `{relative}` is secret-bearing or Jet state"
+        ));
     }
     Ok(())
 }
@@ -878,9 +950,10 @@ fn collect_task_scope_files(
         let relative = path
             .strip_prefix(root)
             .map_err(|error| error.to_string())?;
-        if relative.components().next().is_some_and(|component| {
-            matches!(component, std::path::Component::Normal(name) if name == ".jet" || name == ".git" || name == "target")
-        }) || metadata.outputs.iter().any(|output| {
+        if is_cache_sensitive_path(relative)
+            || relative.components().next().is_some_and(|component| {
+                matches!(component, std::path::Component::Normal(name) if name == ".git" || name == "target")
+            }) || metadata.outputs.iter().any(|output| {
             let output = Path::new(output);
             relative == output || relative.starts_with(output)
         }) {
@@ -903,6 +976,22 @@ fn collect_task_scope_files(
         }
     }
     Ok(())
+}
+
+fn is_cache_sensitive_path(relative: &Path) -> bool {
+    relative.components().any(|component| {
+        matches!(component, std::path::Component::Normal(name) if name == ".jet")
+    }) || relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            name == ".env"
+                || name.starts_with(".env.")
+                || ["secret", "credential", "token", "password"]
+                    .iter()
+                    .any(|word| name.contains(word))
+        })
 }
 
 fn task_cache_path(
@@ -2122,9 +2211,9 @@ mod tests {
         let table = RefSpec::SourceTable::empty();
         let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
 
-        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["one".to_string()], &[], &table)
+        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["one".to_string()], &[], &table, "environment-a")
             .unwrap();
-        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["two".to_string()], &[], &table)
+        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["two".to_string()], &[], &table, "environment-a")
             .unwrap();
         assert_ne!(first, second);
         std::fs::remove_dir_all(root).unwrap();
@@ -2188,6 +2277,7 @@ mod tests {
         let secret = root.join("secret.txt");
         let state_dir = root.join(".jet");
         let state_secret = state_dir.join("credentials");
+        let renamed = root.join("other.jet");
         let trace = root.join("access.log");
         std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
         std::fs::write(&input, "input\n").unwrap();
@@ -2198,11 +2288,13 @@ mod tests {
         std::fs::write(
             &trace,
             format!(
-                "123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 3\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 4\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 5\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 6\n",
+                "123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 3\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 4\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 5\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 6\n123 rename(\"{}\", \"{}\") = 0\n",
                 input.display(),
                 hidden.display(),
                 secret.display(),
-                state_secret.display()
+                state_secret.display(),
+                input.display(),
+                renamed.display()
             ),
         )
         .unwrap();
@@ -2218,9 +2310,19 @@ mod tests {
             vec![
                 state_secret.to_string_lossy().replace('\\', "/"),
                 hidden.to_string_lossy().replace('\\', "/"),
+                renamed.to_string_lossy().replace('\\', "/"),
                 secret.to_string_lossy().replace('\\', "/")
             ]
         );
+        let sensitive = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            inputs: vec![".jet/credentials".to_string()],
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        assert!(validate_cached_task_metadata(&root, &sensitive)
+            .unwrap_err()
+            .contains("secret-bearing or Jet state"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2242,10 +2344,68 @@ mod tests {
         };
         let table = RefSpec::SourceTable::empty();
         let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
-        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table).unwrap();
+        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table, "environment-a").unwrap();
         std::fs::write(root.join("undeclared.txt"), "two\n").unwrap();
-        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table).unwrap();
+        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table, "environment-a").unwrap();
         assert_ne!(first, second);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_cache_key_changes_when_environment_profile_facts_change() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-task-cache-environment-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
+        let compiler = std::env::current_exe().unwrap();
+        let metadata = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            inputs: vec!["main.jet".to_string()],
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        let table = RefSpec::SourceTable::default();
+        let first = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &[],
+            &[],
+            &table,
+            "profile=dev;var=MODE=one",
+        )
+        .unwrap();
+        let second = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &[],
+            &[],
+            &table,
+            "profile=dev;var=MODE=two",
+        )
+        .unwrap();
+        assert_ne!(first, second);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_environment_hash_changes_when_active_environment_changes() {
+        let table = RefSpec::SourceTable::empty();
+        let mut first = ModuleEval::EnvironmentFacts::default();
+        first.active_environment = Some("dev".to_string());
+        let mut second = first.clone();
+        second.active_environment = Some("ci".to_string());
+        assert_ne!(
+            task_environment_hash(&[], &table, &[], &first),
+            task_environment_hash(&[], &table, &[], &second)
+        );
     }
 }
