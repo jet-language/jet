@@ -3017,6 +3017,75 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .unwrap();
     assert!(hosts_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_fold.stderr));
 
+    let unknown_hosts = Scratch::new("transition-cli-unknown-host");
+    fs::write(
+        unknown_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let unknown = jet()
+        .args(["split", "hosts", "missing"])
+        .current_dir(&unknown_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("outputs.missing"));
+    assert!(!unknown_hosts.join("package/fleet.jet").exists());
+
+    let stale_hosts = Scratch::new("transition-cli-stale-host");
+    fs::write(
+        stale_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let stale_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&stale_hosts.path)
+        .output()
+        .unwrap();
+    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(stale_hosts.join("package/fleet.jet"))
+        .unwrap()
+        .write_all(b"// changed after the plan\n")
+        .unwrap();
+    let stale_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&stale_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(stale_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&stale_fold.stderr).contains("stale transition"));
+
+    let ambiguous_hosts = Scratch::new("transition-cli-ambiguous-host-journal");
+    fs::write(
+        ambiguous_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let ambiguous_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&ambiguous_hosts.path)
+        .output()
+        .unwrap();
+    assert!(ambiguous_split.status.success(), "stderr: {}", String::from_utf8_lossy(&ambiguous_split.stderr));
+    let journal_dir = ambiguous_hosts.join(".jet/package-transition");
+    let journal = fs::read_dir(&journal_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::copy(&journal, journal_dir.join("duplicate-journal")).unwrap();
+    let ambiguous_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&ambiguous_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(ambiguous_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&ambiguous_fold.stderr).contains("found 2"));
+
     let invalid_hosts = Scratch::new("transition-cli-invalid-host");
     fs::write(
         invalid_hosts.join("package.jet"),
