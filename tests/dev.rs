@@ -5132,6 +5132,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/data_hostile",
         "tooling/data_json",
         "tooling/data_pipeline",
+        "tooling/data_plot",
         "tooling/data_schema",
         "tooling/data_stream_bounds",
         // #1224 — parsing / reflection / tooling

@@ -69,7 +69,7 @@ use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_impure_core_call, display_core_pure_value,
+    apply_core_call, apply_data_line_call, apply_impure_core_call, display_core_pure_value,
     eval_regex_replace_all_with,
 };
 pub use Methods::apply_seeded_rng_method;

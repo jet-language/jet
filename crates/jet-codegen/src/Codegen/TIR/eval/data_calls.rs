@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{apply_core_call, CtValue};
+use crate::Comptime::{apply_core_call, apply_data_line_call, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 
@@ -441,13 +441,11 @@ impl<'a> EvalCtx<'a> {
                 if args.len() > 1 {
                     call_args.push(self.eval_expr(&args[1], scope)?);
                 }
-                let v = apply_core_call(
-                    "core.data",
-                    method,
-                    call_args,
-                    span,
-                    self.repl_mode,
-                )?;
+                let v = if matches!(method, "line_text" | "line_svg") {
+                    apply_data_line_call(method, call_args, span, checked)?
+                } else {
+                    apply_core_call("core.data", method, call_args, span, self.repl_mode)?
+                };
                 if checked {
                     match v {
                         CtValue::Str(_) => Ok(ok(v)),

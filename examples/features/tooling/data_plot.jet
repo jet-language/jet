@@ -21,6 +21,13 @@ fn run() {
         legend: "revenue"
     }
     print(data.line_text(groups, options) ?? panic("line text"))
-    svg :: data.line_svg(groups, options) ?? panic("line svg")
-    print("svg bytes: {svg.len()}")
+svg :: data.line_svg(groups, options) ?? panic("line svg")
+print("svg bytes: {svg.len()}")
+
+invalid_options :: DataLineOptions.{title: "Sales", x_label: "month", y_label: "value", markers: false, reference: None, style: "zig", color: "#2f6f73", legend: ""}
+invalid :: data.line_text(groups, invalid_options)
+if invalid == {
+    .Ok(_) -> { print("invalid line: ok") }
+    .Err(error) -> { print("invalid line: {error}") }
+}
 }

@@ -304,6 +304,13 @@ pub(super) struct LineOptions {
     pub legend: String,
 }
 
+pub(super) struct LineError {
+    pub(super) kind: &'static str,
+    pub(super) operation: &'static str,
+    pub(super) reason: &'static str,
+    pub(super) index: Option<i64>,
+}
+
 pub(super) fn line_text(groups: &[(String, f64)], options: &LineOptions) -> String {
     let groups = groups
         .iter()
@@ -348,6 +355,67 @@ pub(super) fn line_svg(groups: &[(String, f64)], options: &LineOptions) -> Strin
         legend: options.legend.clone(),
     };
     data_plot_rt::jet_data_line_svg(&groups, &options)
+}
+
+fn line_error(error: data_plot_rt::DataPlotError) -> LineError {
+    LineError {
+        kind: error.kind,
+        operation: error.operation,
+        reason: error.reason,
+        index: error.index,
+    }
+}
+
+pub(super) fn line_text_checked(
+    groups: &[(String, f64)],
+    options: &LineOptions,
+) -> Result<String, LineError> {
+    let groups = groups
+        .iter()
+        .map(|(key, value)| data_plot_rt::jet_std::DataGroup {
+            key: key.clone(),
+            count: 1,
+            sum: *value,
+            mean: *value,
+        })
+        .collect::<Vec<_>>();
+    let options = data_plot_rt::jet_std::DataLineOptions {
+        title: options.title.clone(),
+        x_label: options.x_label.clone(),
+        y_label: options.y_label.clone(),
+        markers: options.markers,
+        reference: options.reference,
+        style: options.style.clone(),
+        color: options.color.clone(),
+        legend: options.legend.clone(),
+    };
+    data_plot_rt::jet_data_line_text_plot_checked(&groups, &options).map_err(line_error)
+}
+
+pub(super) fn line_svg_checked(
+    groups: &[(String, f64)],
+    options: &LineOptions,
+) -> Result<String, LineError> {
+    let groups = groups
+        .iter()
+        .map(|(key, value)| data_plot_rt::jet_std::DataGroup {
+            key: key.clone(),
+            count: 1,
+            sum: *value,
+            mean: *value,
+        })
+        .collect::<Vec<_>>();
+    let options = data_plot_rt::jet_std::DataLineOptions {
+        title: options.title.clone(),
+        x_label: options.x_label.clone(),
+        y_label: options.y_label.clone(),
+        markers: options.markers,
+        reference: options.reference,
+        style: options.style.clone(),
+        color: options.color.clone(),
+        legend: options.legend.clone(),
+    };
+    data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options).map_err(line_error)
 }
 
 fn svg_escape(s: &str) -> String {
