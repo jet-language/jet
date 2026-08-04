@@ -894,6 +894,19 @@ impl LanguagePackCatalog {
                     "pip@nixpkgs",
                 ],
             ),
+            pack(
+                "Go",
+                &[
+                    "go@nixpkgs",
+                    "gopls@nixpkgs",
+                ],
+            ),
+            pack(
+                "JavaScript",
+                &[
+                    "nodejs@nixpkgs",
+                ],
+            ),
         ] {
             catalog.register(pack).expect("built-in language pack names are unique");
         }
@@ -1189,6 +1202,24 @@ fn pack(name: &str, packages: &[&str]) -> LanguagePack {
             ]),
             "MIT OR PSF-2.0".to_string(),
             vec!["python".to_string(), "pip".to_string()],
+        ),
+        "Go" => (
+            BTreeMap::from([
+                ("go".to_string(), "go".to_string()),
+                ("gofmt".to_string(), "gofmt".to_string()),
+                ("gopls".to_string(), "gopls".to_string()),
+            ]),
+            "BSD-3-Clause".to_string(),
+            vec!["go".to_string(), "gofmt".to_string(), "gopls".to_string()],
+        ),
+        "JavaScript" => (
+            BTreeMap::from([
+                ("node".to_string(), "node".to_string()),
+                ("npm".to_string(), "npm".to_string()),
+                ("npx".to_string(), "npx".to_string()),
+            ]),
+            "MIT".to_string(),
+            vec!["node".to_string(), "npm".to_string(), "npx".to_string()],
         ),
         _ => (BTreeMap::new(), String::new(), Vec::new()),
     };
@@ -2157,8 +2188,8 @@ mod tests {
     #[test]
     fn catalog_has_the_core_language_families() {
         let catalog = LanguagePackCatalog::builtin();
-        assert_eq!(catalog.names().len(), 2);
-        for name in ["Rust", "Python"] {
+        assert_eq!(catalog.names().len(), 4);
+        for name in ["Rust", "Python", "Go", "JavaScript"] {
             assert!(catalog.get(name).is_some());
         }
         let expanded = catalog
@@ -2177,6 +2208,36 @@ mod tests {
             .unwrap();
         assert!(expanded.packages.contains(&"rustc@nixpkgs".to_string()));
         assert!(expanded.packages.contains(&"python@nixpkgs".to_string()));
+    }
+
+    #[test]
+    fn catalog_expands_go_and_javascript_with_tool_projection() {
+        let catalog = LanguagePackCatalog::builtin();
+        let expanded = catalog
+            .expand(&[
+                LanguageSpec {
+                    name: "go".to_string(),
+                    enable: true,
+                    ..Default::default()
+                },
+                LanguageSpec {
+                    name: "javascript".to_string(),
+                    enable: true,
+                    ..Default::default()
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(expanded.applied, ["Go", "JavaScript"]);
+        assert!(expanded.packages.contains(&"go@nixpkgs".to_string()));
+        assert!(expanded.packages.contains(&"gopls@nixpkgs".to_string()));
+        assert!(expanded.packages.contains(&"nodejs@nixpkgs".to_string()));
+        assert_eq!(expanded.commands.get("gofmt").map(String::as_str), Some("gofmt"));
+        assert_eq!(expanded.commands.get("npx").map(String::as_str), Some("npx"));
+        assert!(expanded
+            .projections
+            .iter()
+            .all(|projection| projection.missing_tools.is_empty()));
     }
 
     #[test]

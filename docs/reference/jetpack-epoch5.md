@@ -81,10 +81,12 @@ closed catalog into ordinary package references. Disabled records remain in
 the plan and in the trust fingerprint, but missing tools for a disabled pack do
 not block the environment.
 
-Each Rust and Python pack discloses its host kind, supported platform list,
-license summary, and required commands. An unsupported host or an enabled
-catalog pack with a missing required command fails during planning; it does not
-create a partial PATH or claim a tool that is absent.
+Each Rust, Python, Go, and JavaScript pack discloses its host kind, supported
+platform list, license summary, and required commands. Go exposes `go`,
+`gofmt`, and `gopls`; JavaScript exposes `node`, `npm`, and `npx`. An
+unsupported host or an enabled catalog pack with a missing required command
+fails during planning; it does not create a partial PATH or claim a tool that
+is absent.
 
 ```text
 module env.dev {
