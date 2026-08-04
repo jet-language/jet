@@ -143,6 +143,13 @@
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
+/// D-CALLDUAL1=E: sema-only metadata carried on `Expr::MethodCall` until TIR
+/// lowers a resolved `#Root` call to the ordinary free-function/module-call
+/// shape. These strings are never source syntax.
+pub const INTERNAL_ROOT_CALL_LOCAL: &str = "__jet_root_call_local";
+pub const INTERNAL_ROOT_CALL_IMPORT_PREFIX: &str = "__jet_root_call_import:";
+pub const INTERNAL_ROOT_CALL_CORE_PREFIX: &str = "__jet_root_call_core:";
+
 // D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from
 // D-AUTOPAR1's provisional `par_` spellings; there are no aliases.

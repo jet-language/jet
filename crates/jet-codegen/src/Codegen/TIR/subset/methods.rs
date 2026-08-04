@@ -57,6 +57,20 @@ pub(crate) fn method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    // D-CALLDUAL1=E: sema has already resolved a receiver-first `#Root` call
+    // to one ordinary function, import, or Core print target. Keep this gate
+    // structural; the target's signature and capabilities were checked in
+    // sema, and lowering preserves them on the ordinary call node.
+    if recv_type.as_deref().is_some_and(|name| {
+        name == Syntax::INTERNAL_ROOT_CALL_LOCAL
+            || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
+            || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+    }) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
     // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves a method on a bounded
     // type parameter to the synthetic Reader/Writer/Driver contract and records
     // that type parameter in `recv_type`. Rust emits the real trait-bound call.

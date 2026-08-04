@@ -318,12 +318,26 @@ pub(crate) fn join_print_args(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
-    let mut parts = Vec::with_capacity(args.len() * 2);
-    for (index, arg) in args.iter().enumerate() {
+    join_print_values(
+        args.iter()
+            .map(|arg| lower_expr(&arg.expr, cx, env)),
+        cx,
+    )
+}
+
+pub(crate) fn join_print_values(
+    values: impl IntoIterator<Item = TExpr>,
+    cx: &Cx,
+) -> TExpr {
+    let values: Vec<TExpr> = values
+        .into_iter()
+        .map(|value| lower_display_value(value, cx))
+        .collect();
+    let mut parts = Vec::with_capacity(values.len() * 2);
+    for (index, value) in values.into_iter().enumerate() {
         if index > 0 {
             parts.push(TStrPart::Lit("\n".to_string()));
         }
-        let value = lower_display_value(lower_expr(&arg.expr, cx, env), cx);
         parts.push(TStrPart::Interp(value, crate::AST::StrFormat::Display));
     }
     TExpr {

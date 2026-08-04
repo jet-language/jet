@@ -514,6 +514,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
                 (p.convention, ty)
             })
             .collect(),
+        root_param: f.params.first().is_some_and(|p| p.root),
         param_info: f
             .params
             .iter()
@@ -559,6 +560,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
                 (p.convention, ty)
             })
             .collect(),
+        root_param: false,
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),

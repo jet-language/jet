@@ -1,4 +1,7 @@
-use crate::AST::{AccessConvention, CtValue, EnumLitArg, Expr, StrPart, Type};
+use crate::AST::{
+    AccessConvention, Call, CallArg, CallArgFlags, CtValue, EnumLitArg, Expr, FuncSig, StrPart,
+    Type,
+};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::e0901;
@@ -22,9 +25,253 @@ use crate::Sema::CheckerCoreLib::{
     wrong_core_arity,
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
-use crate::Sema::Diagnostics::{builtin_type_from_ident, expr_root_ident, type_is_copy};
+use crate::Sema::Diagnostics::{builtin_type_from_ident, expr_root_ident, is_printable, type_is_copy};
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
+use std::collections::HashSet;
+
+#[derive(Debug, Clone)]
+struct RootCallTarget {
+    module_idx: Option<usize>,
+    alias: Option<String>,
+    core_module: Option<String>,
+    name: String,
+}
+
+impl<'a> Checker<'a> {
+    fn root_param_accepts(
+        sig: &FuncSig,
+        fn_params: &[crate::AST::TypeParam],
+        receiver_ty: &Type,
+    ) -> bool {
+        let Some((convention, param_ty)) = sig.params.first() else {
+            return false;
+        };
+        if *convention != AccessConvention::Read {
+            return false;
+        }
+        param_ty == receiver_ty
+            || matches!(
+                param_ty,
+                Type::Named(name) if fn_params.iter().any(|param| param.name == *name)
+            )
+    }
+
+    fn root_call_candidates(&self, method: &str, receiver_ty: &Type) -> Vec<RootCallTarget> {
+        let mut candidates = Vec::new();
+        if let Some(sig) = self.funcs.get(method) {
+            let fn_params = self
+                .trait_reg
+                .fn_params
+                .get(method)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if sig.root_param && Self::root_param_accepts(sig, fn_params, receiver_ty) {
+                candidates.push(RootCallTarget {
+                    module_idx: None,
+                    alias: None,
+                    core_module: None,
+                    name: method.to_string(),
+                });
+            }
+        }
+
+        // D-CALLDUAL1=E: ambient `print` is the one prelude free function that
+        // earns the receiver-first spelling without a user declaration. An
+        // explicit `core.io` import also makes the spelling available in a
+        // `#NoPrelude` file. A user declaration named `print` shadows the
+        // ambient prelude, matching ordinary direct-call resolution.
+        if method == Syntax::BUILTIN_PRINT
+            && !self.funcs.contains_key(method)
+            && (!self.no_prelude
+                || self
+                    .core_imports
+                    .values()
+                    .any(|module| module == "core.io"))
+            && (is_printable(receiver_ty, self.registry, self.trait_reg)
+                || self.is_unit_type(receiver_ty))
+        {
+            candidates.push(RootCallTarget {
+                module_idx: None,
+                alias: None,
+                core_module: Some("core.io".to_string()),
+                name: method.to_string(),
+            });
+        }
+
+        let Some(modules) = self.modules else {
+            return candidates;
+        };
+        let mut imports: Vec<(String, usize)> = self
+            .imports
+            .iter()
+            .map(|(alias, index)| (alias.clone(), *index))
+            .collect();
+        imports.sort_by(|left, right| left.cmp(right));
+        let mut seen_modules = HashSet::new();
+        for (alias, module_idx) in imports {
+            if !seen_modules.insert(module_idx) {
+                continue;
+            }
+            let target = &modules[module_idx];
+            let Some(sig) = target.funcs.get(method) else {
+                continue;
+            };
+            let visible = target.func_pub.get(method).copied().unwrap_or(false)
+                || (self.same_package_scope(module_idx)
+                    && target.func_pkg_pub.get(method).copied().unwrap_or(false));
+            if !visible || !sig.root_param {
+                continue;
+            }
+            let fn_params = target
+                .trait_reg
+                .fn_params
+                .get(method)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if Self::root_param_accepts(sig, fn_params, receiver_ty) {
+                candidates.push(RootCallTarget {
+                    module_idx: Some(module_idx),
+                    alias: Some(alias),
+                    core_module: None,
+                    name: method.to_string(),
+                });
+            }
+        }
+        candidates
+    }
+
+    fn select_root_call(
+        &mut self,
+        method: &str,
+        receiver_ty: &Type,
+        span: Span,
+    ) -> Option<Result<RootCallTarget, ()>> {
+        let candidates = self.root_call_candidates(method, receiver_ty);
+        if candidates.is_empty() {
+            return None;
+        }
+        let receiver_name = match receiver_ty {
+            Type::Named(name) | Type::Apply { name, .. } => Some(name.clone()),
+            Type::Option(inner) => match inner.as_ref() {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(type_name) = receiver_name {
+            if self.resolve_method_sig(&type_name, method).is_some() {
+                self.diags.push(Diagnostic::error(
+                    "E0105",
+                    format!("dot call `.{method}()` conflicts with a method on `{type_name}`"),
+                    "a `#Root` function cannot silently compete with a real instance method"
+                        .to_string(),
+                    format!("rename the `#Root` function or call it as `{method}(value, …)`"),
+                    Some(span),
+                ));
+                return Some(Err(()));
+            }
+        }
+        if candidates.len() > 1 {
+            let names = candidates
+                .iter()
+                .map(|candidate| {
+                    candidate.core_module.as_deref().map_or_else(
+                        || {
+                            candidate.alias.as_deref().map_or_else(
+                                || candidate.name.clone(),
+                                |alias| format!("{alias}.{}", candidate.name),
+                            )
+                        },
+                        |module| format!("{module}.{}", candidate.name),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.diags.push(Diagnostic::error(
+                "E0105",
+                format!("dot call `.{method}()` is ambiguous"),
+                format!("more than one imported `#Root` function accepts this receiver: {names}"),
+                format!("call one function explicitly: `{method}(value, …)`"),
+                Some(span),
+            ));
+            return Some(Err(()));
+        }
+        Some(Ok(candidates.into_iter().next().expect("root candidate")))
+    }
+
+    fn infer_root_call(
+        &mut self,
+        target: RootCallTarget,
+        receiver: &mut Box<Expr>,
+        method_span: Span,
+        type_args: &[Type],
+        args: &mut Vec<crate::AST::CallArg>,
+        recv_type_out: &mut Option<String>,
+    ) -> Option<Type> {
+        let receiver_expr = std::mem::replace(
+            receiver,
+            Box::new(Expr::Ident(String::new(), method_span)),
+        );
+        let mut call_args = Vec::with_capacity(args.len() + 1);
+        call_args.push(CallArg {
+            convention: AccessConvention::Read,
+            expr: *receiver_expr,
+            span: method_span,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: false,
+        });
+        call_args.append(args);
+
+        let result = if let Some(core_module) = target.core_module.as_deref() {
+            self.infer_core_call(
+                core_module,
+                &target.name,
+                method_span,
+                method_span,
+                type_args,
+                &mut call_args,
+            )
+        } else if let Some(module_idx) = target.module_idx {
+            self.infer_import_call(
+                module_idx,
+                &target.name,
+                method_span,
+                method_span,
+                type_args,
+                &mut call_args,
+            )
+        } else {
+            let mut call = Call {
+                name: target.name.clone(),
+                name_span: method_span,
+                type_args: type_args.to_vec(),
+                args: call_args,
+                range_checked: false,
+            };
+            let result = self.check_call(&mut call, true).flatten();
+            call_args = call.args;
+            result
+        };
+        let receiver_arg = call_args
+            .first()
+            .expect("root call always has a receiver")
+            .expr
+            .clone();
+        *receiver = Box::new(receiver_arg);
+        *args = call_args.into_iter().skip(1).collect();
+        *recv_type_out = Some(if let Some(core_module) = target.core_module {
+            format!("{}{core_module}", Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+        } else {
+            target.alias.map_or_else(
+                || Syntax::INTERNAL_ROOT_CALL_LOCAL.to_string(),
+                |alias| format!("{}{alias}", Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX),
+            )
+        });
+        result
+    }
+}
 
 fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     match type_name {
@@ -1488,6 +1735,28 @@ impl<'a> Checker<'a> {
                 Type::Tagged { inner, .. } => *inner,
                 other => other,
             };
+            // D-CALLDUAL1=E: a `#Root` free function is the one sanctioned
+            // receiver-first spelling. Resolve it before ordinary method
+            // lookup so the same function body handles both call forms.
+            if let Some(selection) = self.select_root_call(method, &recv_ty, span) {
+                let target = match selection {
+                    Ok(target) => target,
+                    Err(()) => {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                };
+                return self.infer_root_call(
+                    target,
+                    receiver,
+                    span,
+                    type_args,
+                    args,
+                    recv_type_out,
+                );
+            }
             if receiver_is_clock
                 && !clock_is_deterministic
                 && matches!(method, "now" | "tick" | "advance" | "wait")

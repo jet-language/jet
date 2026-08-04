@@ -276,6 +276,113 @@ pub(crate) fn lower_method_call(
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
 ) -> TExpr {
+    // D-CALLDUAL1=E: sema has already selected one `#Root` function. Lower
+    // the receiver as argument zero and keep the callee on the ordinary
+    // direct/module-call TIR path so AOT, JIT, interpreter, and web share it.
+    let root_call = recv_type.as_deref().and_then(|name| {
+        if name == Syntax::INTERNAL_ROOT_CALL_LOCAL {
+            Some((None, None, method.to_string()))
+        } else if let Some(alias) = name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX) {
+            Some((Some(alias.to_string()), None, method.to_string()))
+        } else {
+            name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+                .map(|module| (None, Some(module.to_string()), method.to_string()))
+        }
+    });
+    if let Some((root_alias, root_core, root_name)) = root_call {
+        if root_core.is_some() {
+            // Core print is the first prelude `#Root` function. Preserve its
+            // variadic newline semantics by lowering the receiver as argument
+            // zero and joining it with the ordinary call arguments.
+            let receiver = lowered_receiver
+                .unwrap_or_else(|| crate::Codegen::TIR::lower_expr(receiver, cx, env));
+            let joined = crate::Codegen::TIR::lower::join_print_values(
+                std::iter::once(receiver).chain(
+                    args.iter()
+                        .map(|arg| crate::Codegen::TIR::lower_expr(&arg.expr, cx, env)),
+                ),
+                cx,
+            );
+            return TExpr {
+                ty: unit_type(),
+                kind: TExprKind::Print(Box::new(joined)),
+            };
+        }
+        let sig = root_alias.as_ref().and_then(|alias| {
+            cx.import_sigs
+                .get(&(alias.clone(), root_name.clone()))
+                .cloned()
+        });
+        let sig = sig.or_else(|| cx.sigs.get(&root_name).cloned());
+        let receiver = lowered_receiver
+            .unwrap_or_else(|| crate::Codegen::TIR::lower_expr(receiver, cx, env));
+        let receiver_conv = sig.as_ref().and_then(|params| params.first()).cloned();
+        let receiver_arg = TCallArg {
+            borrow: receiver_conv.as_ref().is_some_and(|(conv, ty)| {
+                *conv == AccessConvention::Read && !ty.is_scalar()
+            }),
+            mut_borrow: receiver_conv
+                .as_ref()
+                .is_some_and(|(conv, _)| *conv == AccessConvention::Write),
+            value: receiver,
+            clone: false,
+            arc_clone: false,
+            fn_coerce: None,
+            widen_to_vec: false,
+            widen_to_union: None,
+        };
+        let mut lowered_args = Vec::with_capacity(args.len() + 1);
+        lowered_args.push(receiver_arg);
+        lowered_args.extend(args.iter().enumerate().map(|(index, arg)| {
+            let conv = sig
+                .as_ref()
+                .and_then(|params| params.get(index + 1))
+                .cloned();
+            lower_one_call_arg(arg, conv, env, cx)
+        }));
+        if let Some(alias) = root_alias {
+            let ret = cx
+                .import_rets
+                .get(&(alias.clone(), root_name.clone()))
+                .cloned()
+                .flatten()
+                .unwrap_or_else(unit_type);
+            let (rust_mod, rust_fn) = cx
+                .reexport_calls
+                .get(&(alias.clone(), root_name.clone()))
+                .cloned()
+                .or_else(|| {
+                    cx.import_mods
+                        .get(&alias)
+                        .cloned()
+                        .map(|module| (module, root_name.clone()))
+                })
+                .expect("sema root import must have a codegen import target");
+            return TExpr {
+                ty: ret,
+                kind: TExprKind::ModuleCall {
+                    form: TModuleCallForm::Qualified {
+                        rust_mod,
+                        rust_fn: mangle(&rust_fn).to_string(),
+                    },
+                    type_args: type_args.to_vec(),
+                    args: lowered_args,
+                },
+            };
+        }
+        let ret = call_return_type_with_args(cx, &root_name, type_args, &lowered_args);
+        return TExpr {
+            ty: ret,
+            kind: TExprKind::Call {
+                name: cx.jit_local_call_prefix.as_ref().map_or_else(
+                    || root_name.clone(),
+                    |prefix| format!("{prefix}{}", mangle(&root_name)),
+                ),
+                type_args: type_args.to_vec(),
+                args: lowered_args,
+            },
+        };
+    }
     let guard_receiver = tir_recv_jet_ty(receiver, env).and_then(|ty| match ty {
         Type::Tagged { marker, inner } => match inner.as_ref() {
             Type::Apply { name, args }

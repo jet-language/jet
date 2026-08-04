@@ -806,6 +806,7 @@ impl<'a> Parser<'a> {
             .enumerate()
             .map(|(index, (name, ty))| crate::AST::Param {
                 convention: crate::AST::AccessConvention::Read,
+                root: false,
                 name: name.unwrap_or_else(|| format!("_{index}")),
                 name_span: crate::Diagnostics::Span::new(0, 0),
                 ty: ty.clone(),

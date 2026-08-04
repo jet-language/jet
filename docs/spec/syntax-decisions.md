@@ -186,6 +186,16 @@ type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
 
+**D-CALLDUAL1=E — marked receiver for reversible calls** *(ratified
+2026-08-03, card #1401)*: a top-level free function may mark its first
+bare-read parameter with `#Root`. The function then accepts both `f(value, …)`
+and `value.f(…)`. Dot-call lookup is limited to functions visible through the
+current module's imports; it is never a global search. A real method with the
+same name is an error, and more than one matching imported function is an
+ambiguity error. Resolution never uses the return type. `#Root` is not valid on
+a write or move parameter, on a later parameter, or on a method. Formatting
+preserves the declaration and never rewrites either call spelling.
+
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).

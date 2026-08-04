@@ -926,6 +926,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_param(&mut self, p: &Param) {
+        if p.root {
+            self.write("#");
+            self.write(Syntax::CONTRACT_ROOT);
+            self.write(" ");
+        }
         // D-MEM1: capability is a sigil, never a word. The sigil rides the type
         // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is
         // unmarked.

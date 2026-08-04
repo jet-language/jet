@@ -385,6 +385,7 @@ impl<'a> Fmt<'a> {
                         .enumerate()
                         .map(|(index, ty)| crate::AST::Param {
                             convention: crate::AST::AccessConvention::Read,
+                            root: false,
                             name: format!("_{index}"),
                             name_span: crate::Diagnostics::Span::new(0, 0),
                             ty: ty.clone(),
