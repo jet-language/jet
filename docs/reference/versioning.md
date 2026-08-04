@@ -39,7 +39,7 @@ Wording may improve; codes are never reused or renumbered (see
 
 ### Toolchain pin
 
-Projects may pin a Jet version in `pkg.jet` under the `payload: { jet: "…" }` field. The
+Projects may pin a Jet version in `package.jet` under the top-level `jet: "…"` field. The
 compiler rejects incompatible toolchains with **E1208**.
 
 ## Release artifacts

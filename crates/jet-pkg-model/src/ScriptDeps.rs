@@ -5,11 +5,9 @@
 //! into a generated `pkg.jet`. See
 //! docs/plans/epoch-4/{vision,implementation}.md.
 //!
-//! Resolution today: the Jet package registry has no source-fetch path yet —
-//! `jet registry publish` writes only the sparse index line (`Publish/Index.rs`),
-//! never the source tree, so consuming a registry dep by name is still
-//! E1207 (M12.2). Until that lands, an inline dep resolves from a local,
-//! offline source only:
+//! Resolution is intentionally local and offline. Inline dependencies use a
+//! committed or explicitly materialized local source tree, not an implicit
+//! registry network request:
 //!
 //!   1. `<script_dir>/.jet/inline-deps/<name>/<version>/` — a committed (or
 //!      previously `jet fetch --lock`-populated) local copy. `.jet/` is the existing
@@ -18,7 +16,7 @@
 //!      the same `<name>/<version>/` shape, checked only when the env var is
 //!      set (mirrors Jetpack's own `JETPACK_FIXTURES` test convention).
 //!
-//! Anything else is E1253 — an honest "can't resolve yet", never a fake
+//! Anything else is E1253 — an honest unresolved dependency, never a fake
 //! success (I2/I3).
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -93,7 +91,9 @@ pub enum Unresolved {
 /// Resolve one inline dep against the script's local `.jet/inline-deps/`
 /// cache, then (if set) `JET_INLINE_DEPS_FIXTURES`. Pure directory lookup —
 /// no network, no code execution, exactly like reading an already-realized
-/// hangar entry.
+/// hangar entry. A registry dependency is not silently substituted for this
+/// local source cache; it must be lifted into a manifest and fetched through
+/// the package workflow first.
 pub fn resolve(dep: &InlineDep, script_dir: &Path) -> Result<Resolved, Unresolved> {
     let mut roots = vec![script_dir.join(".jet").join("inline-deps")];
     if let Ok(fixtures) = std::env::var("JET_INLINE_DEPS_FIXTURES") {
@@ -181,11 +181,11 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
     let (why, fix) = match reason {
         Unresolved::UnknownPackage => (
             format!(
-                "no local source knows a package named `{}` — the Jet registry has no fetch path yet, so an inline dependency only resolves from a committed local copy.",
+                "no local source knows a package named `{}` — an inline dependency must resolve from a committed or explicitly materialized local copy.",
                 dep.name
             ),
             format!(
-                "commit a copy at `.jet/inline-deps/{}/<version>/`, or run `jet init` and depend on `{}` through `pkg.jet` once you have a real source for it.",
+                "commit a copy at `.jet/inline-deps/{}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{}` through `pkg.jet`.",
                 dep.name, dep.name
             ),
         ),

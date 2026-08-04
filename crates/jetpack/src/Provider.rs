@@ -476,7 +476,7 @@ pub(crate) fn prepare_nix_identity(
             )));
         }
         let digest = super::Envelope::try_output_hash_of(path).map_err(|reason| {
-            ProviderError::BadOutput(format!(
+            ProviderError::Ingest(format!(
                 "Nix output `{name}` at `{path}` could not be hashed from its bytes: {reason}"
             ))
         })?;
@@ -493,7 +493,7 @@ pub(crate) fn prepare_nix_identity(
     if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
         if let Some((_, locked)) = super::Lock::nix_realization(project, &spec.raw) {
             if locked.output_hash != output_hash {
-                return Err(ProviderError::BadOutput(format!(
+                return Err(ProviderError::Ingest(format!(
                     "Nix output digest mismatch for `{}`: lock has `{}`, realized bytes have `{output_hash}`",
                     spec.raw, locked.output_hash
                 )));
@@ -666,6 +666,8 @@ pub enum ProviderError {
     BuildFailed(String),
     /// The provider's JSON didn't have the shape we expected.
     BadOutput(String),
+    /// Provider output could not pass the byte-level ingest boundary.
+    Ingest(String),
     /// Offline/fixture mode but no fixture file for this ref.
     FixtureMissing(PathBuf),
     /// The selected provider can't realize this ref yet.
@@ -715,6 +717,7 @@ impl ProviderError {
             ProviderError::Cran(_) => None,
             ProviderError::LuaRocks(_) => None,
             ProviderError::Registry(_, _) => None,
+            ProviderError::Ingest(_) => Some("E1315"),
             _ => None,
         }
     }
@@ -780,11 +783,10 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
     explicit.or_else(|| std::env::var_os("JETPACK_FIXTURES").map(PathBuf::from))
 }
 
-/// Whether the `nix` binary is reachable on PATH (U16). Used by the two call
-/// sites that shell out to `nix` for something other than a package ref —
-/// `jet env`'s foreign-flake/devenv fallback and `jet bridge flake` — so both
-/// fail with a clean E1256 up front instead of a raw spawn error partway
-/// through.
+/// Whether the `nix` compatibility provider is reachable on PATH. The native
+/// foreign-flake bridge does not call this probe. Package references that
+/// still need the compatibility provider use it to fail with the bounded
+/// no-Nix diagnostic before a raw process spawn.
 pub fn nix_on_path() -> bool {
     Command::new("nix")
         .arg("--version")
@@ -815,9 +817,10 @@ pub(crate) trait Provider {
     ) -> Result<Realized, ProviderError>;
 }
 
-/// The Nix compatibility provider: translates a ref to a flake ref and shells
-/// out to `nix build --no-link --json` (R3 will remove the installed-`nix`
-/// requirement; the boundary here does not change).
+/// The Nix compatibility provider for package references that are not yet
+/// representable by the native provider. The no-Nix gate prevents this path
+/// from being reached accidentally; when selected explicitly it translates a
+/// ref to `nix build --no-link --json` and records the provider identity.
 pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {

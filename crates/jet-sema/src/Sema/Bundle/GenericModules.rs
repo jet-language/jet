@@ -950,7 +950,12 @@ pub(super) fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) 
 }
 
 pub(super) fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
-    let manifest = std::fs::read_to_string(root.join(crate::Syntax::PAYLOAD_FILE)).unwrap_or_default();
+    let manifest_path = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| root.join(crate::Syntax::PAYLOAD_FILE));
+    let manifest = std::fs::read_to_string(manifest_path).unwrap_or_default();
     let name = quoted_field(&manifest, "name").or_else(|| dependency_name.map(str::to_string)).unwrap_or_else(|| "workspace".into());
     let version = canonical_semver(&quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into()));
     let source = canonical_lock_source(&bundle.project_root, root, dependency_name, &name);

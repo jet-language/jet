@@ -14,7 +14,6 @@ use std::process::Command;
 use crate::Diagnostics::Diagnostic;
 use crate::PackageManifest;
 use crate::SHA256;
-use crate::Syntax;
 use crate::WorkspaceFile::{WorkspaceMember, WorkspacePlan};
 
 /// CLI selection request for a workspace command.
@@ -94,7 +93,9 @@ pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<Workspa
     let mut indegree = vec![0usize; members.len()];
 
     for (index, member) in members.iter().enumerate() {
-        let manifest = std::fs::read_to_string(member_abs(root, member).join(Syntax::PAYLOAD_FILE))
+        let manifest = std::fs::read_to_string(PackageManifest::PackManifest::path_in(
+            &member_abs(root, member),
+        ))
             .ok()
             .and_then(|source| PackageManifest::parse(&source).ok());
         let Some(manifest) = manifest else {
@@ -314,7 +315,7 @@ fn reverse_dependents(root: &Path, plan: &WorkspacePlan) -> HashMap<String, Vec<
     let mut reverse: HashMap<String, Vec<String>> = HashMap::new();
     for m in &plan.members {
         let abs = member_abs(root, m);
-        let pkg_jet = abs.join(Syntax::PAYLOAD_FILE);
+        let pkg_jet = PackageManifest::PackManifest::path_in(&abs);
         let Ok(src) = std::fs::read_to_string(&pkg_jet) else {
             continue;
         };

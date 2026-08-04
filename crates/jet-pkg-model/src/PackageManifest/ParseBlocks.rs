@@ -1,7 +1,7 @@
 //! Block-body parsers for the `pkg.jet` manifest: `payload:`, `deps:`,
 //! `packages:`, `build:`.
 
-use super::Helpers::{key_value_entries, top_level_commas, unquote};
+use super::Helpers::{key_value_entries, split_field, top_level_commas, top_level_entries, unquote};
 use super::{
     BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta,
     ProviderAuthority, Target, TrustDecision, TrustPolicy,
@@ -43,6 +43,57 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
             // will turn unknown keys into an E-coded diagnostic.
             _ => {}
         }
+    }
+    if !have_name {
+        return Err(ManifestError::MissingField("name"));
+    }
+    if !have_version {
+        return Err(ManifestError::MissingField("version"));
+    }
+    Ok(meta)
+}
+
+/// Parse the canonical `package.jet` root. The root has no wrapper, so this
+/// reader only claims the identity fields owned by the old compiler-facing
+/// manifest. Other Package fields remain owned by PackageFacts and are
+/// intentionally ignored here rather than rejected as an unknown legacy
+/// section.
+pub(super) fn parse_package_root(text: &str) -> Result<PackageMeta, ManifestError> {
+    let mut meta = PackageMeta::default();
+    let mut have_name = false;
+    let mut have_version = false;
+    for entry in top_level_entries(text) {
+        let Some((key, value)) = split_field(&entry) else {
+            continue;
+        };
+        let value = unquote(&value);
+        match key.as_str() {
+            "name" => {
+                meta.name = value;
+                have_name = true;
+            }
+            "version" => {
+                meta.version = value;
+                have_version = true;
+            }
+            "jet" => meta.jet_constraint = Some(value),
+            "edition" => meta.edition = Some(value),
+            "license" => meta.license = Some(value),
+            "description" => meta.description = Some(value),
+            "repository" => meta.repository = Some(value),
+            "target" => meta.target = Some(value),
+            "runtime" => {
+                meta.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(&value).ok_or_else(
+                    || ManifestError::BadLayer {
+                        value: value.clone(),
+                    },
+                )?);
+            }
+            _ => {}
+        }
+    }
+    if !have_name && !have_version {
+        return Err(ManifestError::MissingPayload);
     }
     if !have_name {
         return Err(ManifestError::MissingField("name"));

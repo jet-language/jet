@@ -116,12 +116,12 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet registry publish` inside a project",
+        "error: no package.jet found — run `jet registry publish` inside a project",
     );
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -635,12 +635,12 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet registry vendor` inside a project",
+        "error: no package.jet found — run `jet registry vendor` inside a project",
     );
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -716,7 +716,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet inspect audit` inside a project",
+        "error: no package.jet found — run `jet inspect audit` inside a project",
     );
 
     let lock = match jet::Lock::load(&root) {
@@ -821,12 +821,12 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet inspect sbom` inside a project",
+        "error: no package.jet found — run `jet inspect sbom` inside a project",
     );
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -883,12 +883,12 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet registry yank` inside a project",
+        "error: no package.jet found — run `jet registry yank` inside a project",
     );
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {

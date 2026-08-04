@@ -13,7 +13,7 @@ pub(crate) fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet add` inside a project\n fix: run `jet new <name>` to create a project first",
+        "error: no package.jet found — run `jet add` inside a project\n fix: run `jet new <name>` to create a project first",
     );
 
     // Parse: jet add <dep-name> --path <dir> | --git <url> [--tag <t>|--branch <b>|--rev <r>]
@@ -65,17 +65,17 @@ pub(crate) fn run_add(raw_args: &[String]) {
     };
 
     // Load the manifest, add the dep, write back.
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let updated = jet::Manifest::add_dependency(&raw, dep_name, &spec);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't write {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("added `{}` to {}", dep_name, jet::Syntax::PAYLOAD_FILE);
+    println!("added `{}` to {}", dep_name, pack_path.display());
 
     // Auto-fetch.
     do_fetch(&root, false);
@@ -83,19 +83,19 @@ pub(crate) fn run_add(raw_args: &[String]) {
 
 pub(crate) fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = crate::require_manifest_root(&cwd, "error: no `pkg.jet` found");
+    let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let updated = jet::Manifest::remove_dependency(&raw, dep_name);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't write {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("removed `{}` from {}", dep_name, jet::Syntax::PAYLOAD_FILE);
+    println!("removed `{}` from {}", dep_name, pack_path.display());
 
     // Re-fetch to update lock.
     do_fetch(&root, false);
@@ -105,18 +105,18 @@ pub(crate) fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet fetch` inside a project",
+        "error: no package.jet found — run `jet fetch` inside a project",
     );
     do_fetch(&root, locked);
 }
 
 pub(crate) fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = crate::require_manifest_root(&cwd, "error: no `pkg.jet` found");
+    let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
 
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -144,7 +144,7 @@ pub(crate) fn run_update(dep: Option<&str>) {
             let src = String::new();
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &src, &diags)
+                jet::render_diagnostics(&pack_path.display().to_string(), &src, &diags)
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -224,9 +224,9 @@ pub(crate) fn run_hangar_rollback(gen_str: &str) {
 }
 
 fn do_fetch(root: &Path, locked: bool) {
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(root).expect("manifest root has a Package file");
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        eprintln!("error: couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -253,7 +253,7 @@ fn do_fetch(root: &Path, locked: bool) {
         Err(diags) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                jet::render_diagnostics(&pack_path.display().to_string(), &raw, &diags)
             );
             exit(ExitCodes::USER_ERROR);
         }

@@ -450,18 +450,19 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
     policy.build_deny = parse_build_deny(&body)?;
     policy.build_grants = parse_build_grants(&body)?;
     let mut pos = 0;
-    while let Some(rel) = body[pos..].find(Syntax::WORKSPACE_OVERLAY) {
-        let at = pos + rel;
-        if !word_boundary_before(&body, at) {
-            pos = at + Syntax::WORKSPACE_OVERLAY.len();
-            continue;
+    while let Some(at) = find_word_outside(&body, Syntax::WORKSPACE_OVERLAY, pos) {
+        let mut cursor = at + Syntax::WORKSPACE_OVERLAY.len();
+        while body[cursor..].chars().next().is_some_and(char::is_whitespace) {
+            cursor += body[cursor..].chars().next().expect("peeked whitespace").len_utf8();
         }
-        let rest = body[at + Syntax::WORKSPACE_OVERLAY.len()..].trim_start();
-        let (name, after_name) = read_ident(rest).ok_or_else(|| {
+        let (name, after_name) = read_ident(&body[cursor..]).ok_or_else(|| {
             OverlayError::Malformed("`overlay` needs a name in `workspace.jet`".to_string())
         })?;
-        let after_name = after_name.trim_start();
-        let block_src = after_name.strip_prefix('{').ok_or_else(|| {
+        cursor += body[cursor..].len() - after_name.len();
+        while body[cursor..].chars().next().is_some_and(char::is_whitespace) {
+            cursor += body[cursor..].chars().next().expect("peeked whitespace").len_utf8();
+        }
+        let block_src = body[cursor..].strip_prefix('{').ok_or_else(|| {
             OverlayError::Malformed(format!("`overlay {name}` needs a `{{ … }}` body"))
         })?;
         let (overlay_body, consumed) = balanced_with_len(block_src, '{', '}');
@@ -473,7 +474,7 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
             )));
         }
         policy.overlays.push(parsed);
-        pos = at + Syntax::WORKSPACE_OVERLAY.len() + rest.len() - after_name.len() + 1 + consumed;
+        pos = cursor + 1 + consumed;
     }
     let mut packages = BTreeSet::new();
     for overlay in &policy.overlays {
@@ -493,22 +494,55 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
         provider: None,
         packages: Vec::new(),
     };
-    for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if line.starts_with("//") {
+    let mut saw_overrides = false;
+    for line in top_level_statements(body) {
+        let line = line.trim().trim_end_matches(';').trim();
+        if line.is_empty() {
             continue;
         }
         if let Some(value) = line.strip_prefix("provider:") {
+            if overlay.provider.is_some() {
+                return Err(OverlayError::Malformed(
+                    "overlay declares `provider` more than once".to_string(),
+                ));
+            }
             overlay.provider = Some(parse_provider_override(value.trim())?);
             continue;
         }
         if let Some(pkg) = parse_package_override_line(line)? {
             merge_package_override(&mut overlay.packages, pkg)?;
+            continue;
         }
-    }
-    if let Some(overrides) = named_record(body, "overrides")? {
-        for package in parse_keyed_overrides(&overrides)? {
-            merge_package_override(&mut overlay.packages, package)?;
+        if let Some((field, value)) = split_top_level_colon(line) {
+            if field.trim() != "overrides" {
+                return Err(OverlayError::Malformed(format!(
+                    "unknown overlay field `{}`",
+                    field.trim()
+                )));
+            }
+            if saw_overrides {
+                return Err(OverlayError::Malformed(
+                    "overlay declares `overrides` more than once".to_string(),
+                ));
+            }
+            saw_overrides = true;
+            let record = value.trim();
+            let Some(record) = record.strip_prefix('{').or_else(|| record.strip_prefix(".{")) else {
+                return Err(OverlayError::Malformed(
+                    "`overrides` must be a record".to_string(),
+                ));
+            };
+            let record = record.strip_suffix('}').ok_or_else(|| {
+                OverlayError::Malformed("`overrides` record is not closed".to_string())
+            })?;
+            for package in parse_keyed_overrides(record)? {
+                merge_package_override(&mut overlay.packages, package)?;
+            }
+            continue;
         }
+        return Err(OverlayError::Malformed(format!(
+            "unknown overlay declaration `{line}`"
+        )));
     }
     Ok(overlay)
 }
@@ -755,32 +789,6 @@ fn parse_env_record(raw: &str) -> Result<Vec<(String, String)>, OverlayError> {
         values.push((key, value));
     }
     Ok(values)
-}
-
-fn named_record(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
-    let Some(rel) = body.find(name) else {
-        return Ok(None);
-    };
-    let at = rel;
-    let after = at + name.len();
-    if !word_boundary_before(body, at)
-        || body[after..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        return Ok(None);
-    }
-    let rest = body[after..].trim_start();
-    let Some(rest) = rest.strip_prefix(':').map(str::trim_start) else {
-        return Err(OverlayError::Malformed(format!("`{name}` needs `:`")));
-    };
-    let Some(rest) = rest.strip_prefix('{') else {
-        return Err(OverlayError::Malformed(format!(
-            "`{name}` must be a record"
-        )));
-    };
-    Ok(Some(balanced_policy_body(rest)?))
 }
 
 fn parse_provider_override(raw: &str) -> Result<ProviderOverride, OverlayError> {
@@ -1345,17 +1353,12 @@ pub fn strip_overlay_policy(src: &str) -> String {
 fn strip_overlay_blocks(body: &str) -> String {
     let mut out = String::new();
     let mut pos = 0;
-    while let Some(rel) = body[pos..].find(Syntax::WORKSPACE_OVERLAY) {
-        let at = pos + rel;
-        if !word_boundary_before(body, at) {
-            out.push_str(&body[pos..at + Syntax::WORKSPACE_OVERLAY.len()]);
-            pos = at + Syntax::WORKSPACE_OVERLAY.len();
-            continue;
-        }
+    while let Some(at) = find_word_outside(body, Syntax::WORKSPACE_OVERLAY, pos) {
         let before = &body[pos..at];
         out.push_str(before);
         let rest = &body[at + Syntax::WORKSPACE_OVERLAY.len()..];
-        let Some(open_rel) = rest.find('{') else {
+        let Some(open_rel) = find_char_outside(rest, '{') else {
+            out.push_str(Syntax::WORKSPACE_OVERLAY);
             pos = at + Syntax::WORKSPACE_OVERLAY.len();
             continue;
         };
@@ -1380,11 +1383,24 @@ fn strip_policy_allow_unfree_lines(body: &str) -> String {
 /// Locate the `{` that opens the `module workspace { … }` body.
 /// Pub for use by `jetpack::Overlay`'s `draft_overlay_source`.
 pub fn find_workspace_body_start(src: &str) -> Option<usize> {
-    let marker = format!("{} {}", Syntax::KW_MODULE, Syntax::NS_WORKSPACE);
-    let at = src.find(&marker)?;
-    src[at + marker.len()..]
-        .find('{')
-        .map(|rel| at + marker.len() + rel)
+    let mut search = 0;
+    while let Some(at) = find_word_outside(src, Syntax::KW_MODULE, search) {
+        let mut cursor = at + Syntax::KW_MODULE.len();
+        while src[cursor..].chars().next().is_some_and(char::is_whitespace) {
+            cursor += src[cursor..].chars().next()?.len_utf8();
+        }
+        if src[cursor..].starts_with(Syntax::NS_WORKSPACE)
+            && !src[cursor + Syntax::NS_WORKSPACE.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return find_char_outside(&src[cursor + Syntax::NS_WORKSPACE.len()..], '{')
+                .map(|rel| cursor + Syntax::NS_WORKSPACE.len() + rel);
+        }
+        search = at + Syntax::KW_MODULE.len();
+    }
+    None
 }
 
 /// Returns `(body_content, chars_consumed_through_closing_brace)`.
@@ -1393,8 +1409,62 @@ pub fn balanced_with_len(s: &str, open: char, close: char) -> (String, usize) {
     let mut depth = 1i32;
     let mut out = String::new();
     let mut consumed = 0usize;
-    for (i, c) in s.char_indices() {
+    let mut chars = s.char_indices().peekable();
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while let Some((i, c)) = chars.next() {
         consumed = i + c.len_utf8();
+        if line_comment {
+            out.push(c);
+            if c == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment {
+            out.push(c);
+            if c == '*' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+                let (slash_i, slash) = chars.next().expect("peeked comment terminator");
+                out.push(slash);
+                consumed = slash_i + slash.len_utf8();
+                block_comment = false;
+            }
+            continue;
+        }
+        if quoted {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if c == '/' {
+            if chars.peek().is_some_and(|(_, next)| *next == '/') {
+                let (slash_i, slash) = chars.next().expect("peeked line comment marker");
+                out.push(c);
+                out.push(slash);
+                consumed = slash_i + slash.len_utf8();
+                line_comment = true;
+                continue;
+            }
+            if chars.peek().is_some_and(|(_, next)| *next == '*') {
+                let (star_i, star) = chars.next().expect("peeked block comment marker");
+                out.push(c);
+                out.push(star);
+                consumed = star_i + star.len_utf8();
+                block_comment = true;
+                continue;
+            }
+        }
+        if c == '"' {
+            quoted = true;
+        }
         if c == open {
             depth += 1;
         } else if c == close {
@@ -1406,6 +1476,170 @@ pub fn balanced_with_len(s: &str, open: char, close: char) -> (String, usize) {
         out.push(c);
     }
     (out, consumed)
+}
+
+fn find_word_outside(source: &str, word: &str, start: usize) -> Option<usize> {
+    let mut chars = source.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if index < start {
+            continue;
+        }
+        if ch == '"' {
+            skip_quoted(&mut chars);
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+            chars.next();
+            for (_, next) in chars.by_ref() {
+                if next == '\n' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '*') {
+            chars.next();
+            let mut previous = '\0';
+            for (_, next) in chars.by_ref() {
+                if previous == '*' && next == '/' {
+                    break;
+                }
+                previous = next;
+            }
+            continue;
+        }
+        if source[index..].starts_with(word)
+            && word_boundary_before(source, index)
+            && source[index + word.len()..]
+                .chars()
+                .next()
+                .is_none_or(|next| !(next.is_ascii_alphanumeric() || next == '_'))
+        {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn find_char_outside(source: &str, wanted: char) -> Option<usize> {
+    let mut chars = source.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '"' {
+            skip_quoted(&mut chars);
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+            chars.next();
+            for (_, next) in chars.by_ref() {
+                if next == '\n' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '*') {
+            chars.next();
+            let mut previous = '\0';
+            for (_, next) in chars.by_ref() {
+                if previous == '*' && next == '/' {
+                    break;
+                }
+                previous = next;
+            }
+            continue;
+        }
+        if ch == wanted {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn skip_quoted(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    let mut escaped = false;
+    for (_, ch) in chars.by_ref() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            break;
+        }
+    }
+}
+
+fn top_level_statements(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut chars = source.chars().peekable();
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while let Some(ch) = chars.next() {
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+                if depth == 0 && !current.trim().is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            continue;
+        }
+        if block_comment {
+            if ch == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                block_comment = false;
+            }
+            continue;
+        }
+        if quoted {
+            current.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            line_comment = true;
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            block_comment = true;
+            continue;
+        }
+        match ch {
+            '"' => {
+                quoted = true;
+                current.push(ch);
+            }
+            '{' | '[' | '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '}' | ']' | ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            '\n' | ',' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current);
+    }
+    out
 }
 
 fn read_ident(s: &str) -> Option<(String, &str)> {
@@ -1436,8 +1670,34 @@ pub fn top_level_commas(body: &str) -> Vec<String> {
     let mut depth = 0i32;
     let mut quoted = false;
     let mut escaped = false;
+    let mut line_comment = false;
+    let mut block_comment_depth = 0usize;
     let mut cur = String::new();
-    for c in body.chars() {
+    let mut chars = body.chars().peekable();
+    while let Some(c) = chars.next() {
+        if line_comment {
+            cur.push(c);
+            if c == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment_depth > 0 {
+            if c == '/' && chars.peek() == Some(&'*') {
+                chars.next();
+                block_comment_depth += 1;
+                cur.push(' ');
+                cur.push(' ');
+            } else if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                block_comment_depth -= 1;
+                cur.push(' ');
+                cur.push(' ');
+            } else {
+                cur.push(if c == '\n' { '\n' } else { ' ' });
+            }
+            continue;
+        }
         if quoted {
             cur.push(c);
             if escaped {
@@ -1447,6 +1707,20 @@ pub fn top_level_commas(body: &str) -> Vec<String> {
             } else if c == '"' {
                 quoted = false;
             }
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            line_comment = true;
+            cur.push(' ');
+            cur.push(' ');
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            block_comment_depth = 1;
+            cur.push(' ');
+            cur.push(' ');
             continue;
         }
         match c {

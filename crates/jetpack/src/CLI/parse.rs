@@ -43,14 +43,13 @@ pub(super) struct Flags {
     /// U16: `--flake` forces foreign-flake/devenv detection even when the
     /// project's own manifest already declares `env.*` modules.
     pub(super) flake: bool,
-    /// U16: `--pure` — isolate the shell from the host environment. Threaded
-    /// straight through to the underlying `nix` invocation for the
-    /// foreign-flake fallback; jetpack's own composed shells are already
-    /// PATH-only, so this is a no-op there today.
+    /// U16: `--pure` — isolate the foreign projected shell from host
+    /// variables. Jetpack's ordinary composed shell remains intentionally
+    /// interactive and keeps its existing host-variable behavior.
     pub(super) pure: bool,
     /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
-    /// push to. Always honestly gated (E1268): pushing needs TLS support that
-    /// doesn't exist yet, so this is only ever read to report that gate.
+    /// push to. HTTP(S) references use the native OCI Distribution adapter;
+    /// other values are local layout paths.
     pub(super) push: Option<String>,
     /// D-JPK-OSGEN1=C: optional generation name for `jet os switch`.
     pub(super) os_name: Option<String>,

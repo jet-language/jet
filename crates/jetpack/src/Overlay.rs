@@ -46,6 +46,7 @@ pub fn apply_overlay_patches(
     Ok(applied)
 }
 
+#[cfg(test)]
 fn apply_unified_patch(
     source_root: &Path,
     patch_text: &str,
@@ -84,6 +85,17 @@ fn apply_unified_patch_staged(
         let target = normalize_patch_path(next.trim_start_matches("+++ ").trim());
         let relative = safe_relative_path(&target, "patched file")?;
         let path = source_root.join(&relative);
+        let mut cursor = source_root.to_path_buf();
+        for component in relative.components() {
+            cursor.push(component.as_os_str());
+            if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
+                if metadata.file_type().is_symlink() {
+                    return Err(OverlayError::Patch(format!(
+                        "patched file `{target}` contains a symlink"
+                    )));
+                }
+            }
+        }
         let canonical_path = path.canonicalize().map_err(|e| {
             OverlayError::IO(format!(
                 "could not resolve patched file `{}`: {e}",
@@ -124,7 +136,7 @@ fn apply_unified_patch_staged(
             .lines()
             .map(|s| s.to_string())
             .collect();
-        let trailing_newline = original.ends_with(b'\n');
+        let trailing_newline = original.ends_with(b"\n");
         let mut added = 0usize;
         let mut removed = 0usize;
         let mut had_hunk = false;
@@ -257,6 +269,17 @@ fn safe_existing_path(
 ) -> Result<std::path::PathBuf, OverlayError> {
     let relative = safe_relative_path(raw, label)?;
     let candidate = root.join(&relative);
+    let mut cursor = root.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component.as_os_str());
+        if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
+            if metadata.file_type().is_symlink() {
+                return Err(OverlayError::Patch(format!(
+                    "{label} `{raw}` contains a symlink"
+                )));
+            }
+        }
+    }
     let metadata = std::fs::symlink_metadata(&candidate).map_err(|error| {
         OverlayError::IO(format!("could not inspect {label} `{}`: {error}", candidate.display()))
     })?;

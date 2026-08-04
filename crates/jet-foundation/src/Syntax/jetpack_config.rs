@@ -307,7 +307,8 @@ pub const ENV_FILE: &str = "env.jet";
 pub const CONFIG_FILE: &str = "config.jet";
 
 /// D-ECO-FILEROOT1=A: the one reserved Package source filename. `pkg.jet`
-/// remains a migration-era fallback until old workspaces are folded.
+/// remains only as explicit migration input while the current root is
+/// `package.jet`.
 pub const PACKAGE_FILE: &str = "package.jet";
 
 /// D-WORKSPACE1 (B) + D-WORKSPACE2 (A), ratified 2026-06-25: the monorepo index
@@ -550,10 +551,9 @@ pub const PROMPT_STRIP_OFF: &str = "Off";
 pub const TYPE_PKG: &str = "Pkg";
 pub const REF_PROVIDER_AT: &str = "@";
 
-/// U10 (ratified 2026-06-16; amends U1) / D-JPK-FILES (ratified 2026-06-18;
-/// amends U10): the package manifest is `pkg.jet` (D-JPK-FILES rename; prior
-/// interim names retired, clean break, no alias). A payload is a collection
-/// of packages; its identity block is `payload: { … }`.
+/// Migration-era wrapper filename. The canonical Package root is
+/// `PACKAGE_FILE`; this spelling is accepted only by the explicit migration
+/// adapter and never competes with a canonical root.
 pub const PAYLOAD_FILE: &str = "pkg.jet";
 
 /// D-JPK-FILENAME2=B (A2, card c9jetpackgates, ratified 2026-07-02): retired

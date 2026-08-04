@@ -221,9 +221,14 @@ impl CompilerQueries {
                     .map(|input| canonical_path(&bundle.project_root.join(&input.path))),
             );
             files.extend([
-                bundle.project_root.join("pkg.jet"),
+                crate::PackageManifest::PackManifest::path_in(&bundle.project_root),
                 bundle.project_root.join(".jet/lock"),
             ]);
+            if bundle.project_root.join("package.jet").is_file()
+                && bundle.project_root.join("pkg.jet").is_file()
+            {
+                files.push(bundle.project_root.join("pkg.jet"));
+            }
             if crate::Sema::bundle_has_comptime_evaluation(bundle)
                 || !bundle.comptime_inputs.is_empty()
             {
@@ -256,7 +261,13 @@ fn external_input(root: &Path) -> InputKey {
 
 fn default_external_files(root: &Path) -> Vec<PathBuf> {
     let project = root.parent().unwrap_or_else(|| Path::new("."));
-    let mut files = vec![project.join("pkg.jet"), project.join(".jet/lock")];
+    let mut files = vec![
+        crate::PackageManifest::PackManifest::path_in(project),
+        project.join(".jet/lock"),
+    ];
+    if project.join("package.jet").is_file() && project.join("pkg.jet").is_file() {
+        files.push(project.join("pkg.jet"));
+    }
     files.sort();
     files
 }

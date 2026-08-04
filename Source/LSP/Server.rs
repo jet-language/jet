@@ -3559,7 +3559,8 @@ fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
 fn project_root_marker(path: &str) -> Option<String> {
     let mut dir = std::path::Path::new(path).parent()?;
     loop {
-        if dir.join("pkg.jet").exists()
+        if dir.join("package.jet").exists()
+            || dir.join("pkg.jet").exists()
             || dir.join("Jet.toml").exists()
             || dir.join("jet.toml").exists()
             || dir.join(".git").exists()

@@ -255,10 +255,15 @@ pub(super) fn core_recipe_identity(
         || normalized_manifest_semantics(manifest),
         canonical_package_semantics,
     );
+    let toolchain = if artifact == "cargo-rlib" {
+        toolchain_facts(toolchain)
+    } else {
+        "not-required".to_string()
+    };
     Ok(format!(
         "core-provider-recipe-v4\npackage={package}\nversion={version}\nkind={kind:?}\nartifact={artifact}\nsource_tree={source_tree}\nmanifest={}\ntoolchain={}\n",
         SHA256::sha256_hex(semantics.as_bytes()),
-        toolchain_facts(toolchain),
+        toolchain,
     ))
 }
 

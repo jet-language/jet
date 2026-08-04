@@ -129,6 +129,9 @@ pub fn read_archive_file(path: &Path) -> io::Result<Vec<u8>> {
 
 /// Atomically write a canonical archive file.
 pub fn write_archive_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if bytes.len() > MAX_ARCHIVE_BYTES {
+        return Err(invalid("archive exceeds the 1 GiB limit"));
+    }
     write_atomic(path, bytes)
 }
 
@@ -195,19 +198,19 @@ pub fn sign_archive(
 }
 
 /// Copy a closure to another local Jetpack root through the same archive path
-/// used by export/import.  Network endpoints are rejected until a transport
-/// adapter can preserve the same verified archive contract.
+/// used by export/import. Remote archive transport is deliberately not
+/// inferred from a URL: the archive command has no host-owned transport
+/// binding, so SSH/HTTP endpoints fail before any bytes are claimed as copied.
 pub fn copy_archive(
     roots: &Roots,
     target: &str,
     destination: &Path,
     key: Option<&str>,
 ) -> io::Result<ArchiveReport> {
-    if destination.to_string_lossy().starts_with("ssh://")
-        || destination.to_string_lossy().starts_with("https://")
-    {
+    let destination_text = destination.to_string_lossy();
+    if destination_text.contains("://") {
         return Err(invalid(
-            "remote Hangar copy needs a configured transport adapter; export the signed archive and import it on the target",
+            "Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive",
         ));
     }
     let (bytes, _) = export_archive(roots, target, true, key)?;
@@ -598,8 +601,15 @@ fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
 }
 
 fn collect_nodes(root: &Path) -> io::Result<Vec<ArchiveNode>> {
-    if !root.exists() {
-        return Err(invalid(&format!("output `{}` is missing", root.display())));
+    let metadata = fs::symlink_metadata(root).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            invalid(&format!("output `{}` is missing", root.display()))
+        } else {
+            error
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(invalid("Hangar output root may not be a symlink"));
     }
     let mut nodes = Vec::new();
     let canonical_root = fs::canonicalize(root)?;
@@ -672,7 +682,7 @@ fn collect_nodes_at(
             path,
             kind: ArchiveNodeKind::File,
             mode: mode_of(&metadata),
-            bytes: fs::read(root)?,
+            bytes: read_bounded_limit(root, MAX_NODE_BYTES as usize, "archive file")?,
         });
     } else if file_type.is_symlink() {
         let target = fs::read_link(root)?;
@@ -932,7 +942,11 @@ fn signing_key(roots: &Roots, requested: Option<&str>, create: bool) -> io::Resu
         write_atomic(&path, &secret)?;
         set_mode(&path, 0o600)?;
     }
-    let bytes = fs::read(&path)?;
+    let metadata = fs::symlink_metadata(&path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(invalid("archive signer key is not a regular file"));
+    }
+    let bytes = read_bounded_limit(&path, 4096, "archive signer key")?;
     let secret = decode_secret(&bytes)?;
     TrustKey::from_secret(secret).map_err(|error| invalid(&format!("invalid archive signer key: {error}")))
 }
@@ -965,9 +979,10 @@ fn decode_secret(bytes: &[u8]) -> io::Result<Vec<u8>> {
 
 fn entropy(roots: &Roots) -> Vec<u8> {
     #[cfg(unix)]
-    if let Ok(bytes) = fs::read("/dev/urandom") {
-        if bytes.len() >= 32 {
-            return bytes[..32].to_vec();
+    if let Ok(mut file) = fs::File::open("/dev/urandom") {
+        let mut bytes = [0u8; 32];
+        if file.read_exact(&mut bytes).is_ok() {
+            return bytes.to_vec();
         }
     }
     let now = SystemTime::now()
@@ -1406,16 +1421,23 @@ fn signature_path(roots: &Roots, entry: &StoreEntry) -> PathBuf {
 }
 
 fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
+    read_bounded_limit(path, MAX_ARCHIVE_BYTES, "archive input")
+}
+
+fn read_bounded_limit(path: &Path, limit: usize, label: &str) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(invalid("archive input may not be a symlink"));
     }
-    if !metadata.is_file() || metadata.len() > MAX_ARCHIVE_BYTES as u64 {
-        return Err(invalid("archive input is not a regular file within the size limit"));
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        return Err(invalid(&format!("{label} is not a regular file within the size limit")));
     }
-    let mut file = fs::File::open(path)?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.read_to_end(&mut bytes)?;
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::with_capacity((metadata.len() as usize).min(limit));
+    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(invalid(&format!("{label} exceeded its bound while being read")));
+    }
     Ok(bytes)
 }
 

@@ -658,7 +658,7 @@ renumbered, and no new `W` code may be allocated.
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency cannot be resolved or its source artifact failed verification |
-| E1208 | jet   | toolchain `jet:` field in `pkg.jet` incompatible (M12.1) |
+| E1208 | jet   | toolchain `jet:` field in `package.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 | E1210 | jet   | unknown or reserved target in `packages:` block (D-TGT1/D-TGT2) |
 | E1211 | jet   | `packages:` block-form entry uses the removed `kind:` field — write `targets:` (D-TGT1) |
@@ -696,14 +696,14 @@ renumbered, and no new `W` code may be allocated.
 | E1246 | jet   | a package signature doesn't verify against its pinned public key (D-PKGSIGN1) |
 | E1247 | jet   | a registry with `require_signed: true` served an unsigned package (D-PKGSIGN1) |
 | E1248 | jet   | `jet registry keygen` refused: a signing key already exists (use `--force`) (D-PKGSIGN1) |
-| E1249 | jet   | a `jet:` toolchain pin isn't a valid version/channel ref (D-JPK-TOOLCHAIN1) |
+| E1249 | jet   | a `jet:` toolchain pin in `package.jet` isn't a valid version/channel ref (D-JPK-TOOLCHAIN1) |
 | E1250 | jet   | a `jet:` channel pin is unlocked under `--offline`/CI — no `[[toolchain]]` lock entry (D-JPK-TOOLCHAIN1) |
 | E1251 | jet   | the pinned Jet toolchain has no prebuilt object for this platform — never source-built (D-JPK-TOOLCHAIN1) |
 | E1252 | jet   | `jet init` refused: a `pkg.jet` already exists here (D-JPK-TOOLCHAIN1) |
 | E1253 | jet   | an inline script dependency (`use pkg#version;`) didn't resolve (D-JPK-SCRIPTDEP1) |
 | E1254 | jet   | project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1) |
 | E1255 | jet   | an untrusted project env hit a non-interactive path with no `--trust`/prior grant (U19, D-JPK-DEVCOMPOSE1) |
-| E1256 | jet   | `jet bridge flake` or foreign-flake detection needs `nix`, which isn't on PATH (U16) |
+| E1256 | jet   | bounded native projection cannot translate a foreign flake/devShell surface into Jet facts (U16) |
 | E1257 | jet   | a `target: plugin` package's exported interface changed incompatibly since the last frozen build (D-PLUGIN-VERSION1=A) |
 | E1258 | jet   | a `target: plugin` package's own code uses an effect — plugins are deny-by-default, zero host capabilities (D-PLUGIN1=B) |
 | E1259 | jet   | couldn't build a plugin's WASM Component — missing/failed `rustc`/`wasm-tools` toolchain (D-DEP-WASM1=A) |
@@ -1731,7 +1731,7 @@ front-end `.jet` diagnostics).
 | E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `pkg.jet` once you have a real source for it. |
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
-| E1256 | `{cmd}` needs `nix`, which isn't on PATH. | `jet bridge flake` translates a `flake.nix`'s devShell, and `jet env`'s foreign-flake/`devenv.nix` detection shells out to `nix` as the ratified stopgap (U16); neither works without the `nix` binary. | Install Nix from the official installer, or skip the foreign flake and declare packages in `env.*` instead. |
+| E1256 | `{cmd}` cannot project the foreign environment. | The bounded native evaluator could not translate the foreign `flake.nix`/`devenv.nix` surface into Jet facts (U16). Jet does not shell out to an installed Nix binary for this path. | Use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`. |
 | E1257 | This plugin's exported interface changed incompatibly. | A `target: plugin` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api/plugin__<name>.api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
 | E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
 | E1259 | Couldn't build the plugin's WASM Component. | Building a `target: plugin` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |

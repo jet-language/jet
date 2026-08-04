@@ -228,6 +228,17 @@ pub fn run_clean_command(env: &Env, cmd_args: &[String]) -> i32 {
 
 /// Enter an interactive temporary shell. Returns the child's exit code.
 pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
+    enter_with_mode(theme, env, kind, false)
+}
+
+/// Enter an interactive temporary shell with only the composed environment.
+/// This is the explicit `--pure` foreign-environment path; ordinary Jetpack
+/// shells keep the host variables that users expect for interactive work.
+pub fn enter_clean(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
+    enter_with_mode(theme, env, kind, true)
+}
+
+fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i32 {
     if !env.validate_cache(theme) {
         return 126;
     }
@@ -247,7 +258,12 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
     ]);
 
     let mut cmd = Command::new(kind.binary());
-    env.apply_to(&mut cmd);
+    if clean {
+        cmd.env_clear();
+        env.apply_clean_to(&mut cmd);
+    } else {
+        env.apply_to(&mut cmd);
+    }
     if theme.color {
         cmd.env_remove("NO_COLOR");
     } else {
@@ -290,14 +306,13 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
 }
 
 /// The branded interactive-shell command a caller with its own outer process
-/// (e.g. `nix develop`'s foreign-flake fallback) can append after its own
-/// `--command` flag, so a shell entered through a path other than
-/// [`enter`] still gets the unmistakable jetpack prompt rather than
-/// silently inheriting the user's plain shell prompt. `env_vars` must be set
-/// on the OUTER command (e.g. `nix develop`'s `Command`) so they reach the
-/// inner shell; `cleanup` must be called once the caller's blocking
-/// `.status()` call returns, mirroring how [`enter`] keeps its own scratch
-/// files alive for exactly the child's lifetime.
+/// can append after its own `--command` flag, so a shell entered through a
+/// path other than [`enter`] still gets the unmistakable jetpack prompt rather
+/// than silently inheriting the user's plain shell prompt. `env_vars` must be
+/// set on the outer command so they reach the inner shell; `cleanup` must be
+/// called once the caller's blocking `.status()` call returns, mirroring how
+/// [`enter`] keeps its own scratch files alive for exactly the child's
+/// lifetime.
 pub struct BrandedShell {
     pub command_tail: Vec<String>,
     pub env_vars: Vec<(String, String)>,

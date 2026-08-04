@@ -64,7 +64,7 @@ pub fn edition_is_supported(edition: &str) -> bool {
     SUPPORTED_EDITIONS.contains(&edition.trim())
 }
 
-/// Validate the `edition:` field from `pkg.jet` (D-REL3). A manifest that
+/// Validate the `edition:` field from `package.jet` (D-REL3). A manifest that
 /// asks for an edition this toolchain doesn't ship is E2001. A manifest with no
 /// `edition:` field is fine — it tracks the toolchain's newest stable edition.
 pub fn check_edition_support(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
@@ -248,7 +248,8 @@ pub enum DepSpec {
     /// Git dependency with one selector (D-JPK23): `{ git: "...", tag/branch/rev: "..." }`,
     /// or an `owner/repo/rev@github` provider ref (always a pinned rev).
     Git { url: String, selector: GitSelector },
-    /// Registry version string (M12.2 only; error in M12.1 during resolution).
+    /// Registry version string. `jet fetch` materializes its verified source
+    /// tree before the compiler builds module search paths.
     Registry(String),
 }
 
@@ -279,9 +280,16 @@ pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     PackageManifest::to_manifest(&pm, raw)
 }
 
-/// Load and parse the `pkg.jet` manifest in a directory.
+/// Load and parse the nearest package manifest in a directory. The canonical
+/// `package.jet` wins; `pkg.jet` is accepted only as migration-era input.
 pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
-    let pack_path = dir.join(Syntax::PAYLOAD_FILE);
+    if PackageManifest::PackManifest::has_both_manifests(dir) {
+        return Some(Err(to_diagnostic(
+            &dir.join(Syntax::PACKAGE_FILE),
+            &ManifestError::BothManifestFiles,
+        )));
+    }
+    let pack_path = PackageManifest::PackManifest::path_in(dir);
     if !pack_path.is_file() {
         return None;
     }
@@ -297,7 +305,7 @@ pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
     Some(parse(&pack_path, &raw))
 }
 
-/// Validate the toolchain constraint from `pkg.jet`. Returns E1208 on mismatch.
+/// Validate the toolchain constraint from `package.jet`. Returns E1208 on mismatch.
 pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
     let Some(constraint) = &manifest.package.jet_constraint else {
         return Ok(());
@@ -318,10 +326,10 @@ pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnosti
                 "this project requires Jet `{}` but this is Jet {}",
                 constraint, COMPILER_VERSION
             ),
-            "the `jet` field in `payload` specifies a minimum toolchain version".to_string(),
+            "the top-level `jet` field specifies a minimum toolchain version".to_string(),
             format!(
                 "update Jet to a newer version, or change the `jet` field in `{}`",
-                Syntax::PAYLOAD_FILE
+                Syntax::PACKAGE_FILE
             ),
             None,
         ));
@@ -395,6 +403,21 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
     let file = path.display().to_string();
     match err {
         ManifestError::MissingPayload => e1206(&file, "no `payload: { … }` block"),
+        ManifestError::BothManifestFiles => Diagnostic::error(
+            "E1206",
+            "the package has two manifest roots".to_string(),
+            format!(
+                "`{}` is canonical and `{}` is migration input; reading both would make package identity ambiguous",
+                Syntax::PACKAGE_FILE,
+                Syntax::PAYLOAD_FILE,
+            ),
+            format!(
+                "remove `{}` or migrate its contents into `{}`",
+                Syntax::PAYLOAD_FILE,
+                Syntax::PACKAGE_FILE,
+            ),
+            None,
+        ),
         ManifestError::MissingField(field) => {
             e1206(&file, &format!("`payload` is missing required field `{field}`"))
         }
