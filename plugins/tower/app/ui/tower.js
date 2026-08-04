@@ -272,6 +272,7 @@ const VIEWS = [
   { id: 'now', name: 'Now', count: () => ballotCount(), alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
+  { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
 ];
 function docsFileCount() {
   if (!docsCache) return 0;
@@ -1391,8 +1392,53 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   });
 }
 
+// ---- PAPERCUTS: append-only friction log, grouped by day --------------------
+let papercutFilter = 'open';   // 'open' | 'all'
+function viewPapercuts() {
+  const v = $('#view');
+  const all = [...(S.papercuts || [])].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  const open = all.filter(p => p.status === 'open');
+  const list = papercutFilter === 'open' ? open : all;
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Papercuts</h1>
+      <span class="viewhead__sub">one-line tooling friction agents hit — <b>${open.length}</b> open</span>
+      <div class="viewhead__actions">
+        <button class="btn btn--ghost" id="pc-filter">${papercutFilter === 'open' ? 'Show all' : 'Open only'}</button>
+      </div></div>
+    <div id="pc-list"></div>`;
+  $('#pc-filter').addEventListener('click', () => { papercutFilter = papercutFilter === 'open' ? 'all' : 'open'; viewPapercuts(); });
+  const body = $('#pc-list');
+  if (!list.length) {
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">✓</div><div>${papercutFilter === 'open'
+      ? 'No open papercuts — nothing snagging the agents.' : 'No papercuts logged yet.'}</div></div>`));
+    return;
+  }
+  let day = null;
+  for (const pc of list) {
+    const d = new Date(pc.created);
+    const key = d.toDateString();
+    if (key !== day) {
+      day = key;
+      body.appendChild(el(`<div class="docs__label">${esc(d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))}</div>`));
+    }
+    const c = pc.cardId ? cardById(pc.cardId) : null;
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const resolved = pc.status === 'resolved';
+    const row = el(`<div class="idea"${resolved ? ' style="opacity:.5"' : ''}>
+        <span class="num">${esc(time)}</span>
+        <span class="chip">${esc(pc.by)}</span>
+        <span class="idea__t">${esc(pc.text)}${c ? ` <button class="chip" data-card title="open card">#${c.num}</button>` : ''}</span>
+        ${resolved
+          ? '<span class="critrow__badge critrow__badge--verified">resolved</span>'
+          : '<button class="btn btn--ghost btn--sm" data-resolve>Resolve</button>'}
+      </div>`);
+    if (c) $('[data-card]', row).addEventListener('click', () => showDetail(c.id));
+    $('[data-resolve]', row)?.addEventListener('click', () => api('papercut/resolve', { id: pc.id, by: 'owner' }));
+    body.appendChild(row);
+  }
+}
+
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, docs: viewDocs };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -1431,8 +1477,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2', '3'].indexOf(e.key);
-  if (i >= 0) go(VIEWS[i].id);
+  const i = ['1', '2', '3', '4'].indexOf(e.key);
+  if (i >= 0 && VIEWS[i]) go(VIEWS[i].id);
 });
 
 // ---- command palette (⌘K / Ctrl-K) -------------------------------------------

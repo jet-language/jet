@@ -17,6 +17,7 @@ Board data: `plugins/tower/.tower/`. UI: `tower serve --open`. Full board mechan
 - **Comment / triage notes**: `tower card update '#N' --log "..." --by <me>`. Log entries are the comment stream.
 - **Apply / remove triage tags**: `tower card update '#N' --add-tag needs-info --by <me>` / `--remove-tag needs-info`.
 - **Ask the reporter / owner**: `tower question ask --card '#N' --text "..." --by <me>`.
+- **Log tooling friction**: `tower papercut add --by <me> --text "..." [--card '#N']` — one line for a dead-end command, broken helper, misleading doc, or stale cache; never derail the task to fix it.
 - **Blockers**: `tower card update '#N' --blockedBy '#1,#2' --by <me>` (card refs or decision ids).
 - **Claim**: `tower brief '#N' --agent <me>` or `tower card claim '#N' --by <me>`.
 - **Close**: `tower card update '#N' --phase done --by <me>` after real verification (criteria gate may apply).

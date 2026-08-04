@@ -102,6 +102,7 @@ tower card      list|show|add|update|claim|release|delete
 tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower message   list|add|done
+tower papercut  list|add|resolve
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
 tower milestone list|add|update|delete
@@ -114,6 +115,12 @@ Agents can leave a durable card message with
 message until the owner marks it done. `tower message list` shows open
 messages. `tower message done <id> --by owner` closes one message. Clearing
 completed cards in the Now page does not clear messages.
+
+Agents log one-line tooling friction (dead-end commands, broken helpers,
+misleading docs, stale caches) with `tower papercut add --by agent-name --text
+"…"` instead of silently pushing through. It never fails on a card lane, so
+logging never derails the task. The **Papercuts** tab groups them by day; the
+owner clears a handled one with `tower papercut resolve <id> --by owner`.
 
 `tower brief` is the one-shot agent work packet (#462): card, live blocker
 state, exit criteria, every linked decision copied verbatim, open questions,

@@ -80,6 +80,11 @@ Start the local Tower board with the one canonical command:
 `node plugins/tower/tower.mjs serve --open`. Board data lives in
 `plugins/tower/.tower/`. Read and write board state through that CLI.
 
+When tooling snags you mid-task — a dead-end command, a broken helper, a
+misleading doc, a stale cache — log it in one line and keep going:
+`node plugins/tower/tower.mjs papercut add --by <agent> --text "..."`. Do not
+silently push through, and do not derail the task to fix it.
+
 ## Invariants
 
 Violating an invariant means stop and fix it.

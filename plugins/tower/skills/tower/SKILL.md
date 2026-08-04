@@ -115,6 +115,21 @@ flags a ratified decision id still sitting in `docs/ballots/*.md`. Exit code
 1 means findings exist — fix them or raise a ballot, don't just clear the
 board and move on.
 
+## Papercuts — log tooling friction, don't push through it
+
+When a tool wastes your time mid-task — a dead-end command, a broken helper, a
+misleading doc or error, a stale cache — log it in one line and keep going:
+
+```
+tower papercut add --by me --text "jet-env swallowed stderr on failure" [--card '#N']
+```
+
+It is deliberately low-friction: only `--by` (non-owner) and non-empty text are
+required, and it is never blocked by a frozen/decide card lane — logging must
+never fail. Do **not** derail the task to fix the friction; the papercut is the
+record. The owner reviews them on the **Papercuts** tab and clears handled ones
+with `tower papercut resolve <id> --by owner`.
+
 ## Guards (agent-hard, owner-soft)
 
 Writes with `--by` other than `owner` are gated; `--by owner` bypasses

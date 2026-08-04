@@ -54,7 +54,7 @@ const fail = (code, msg) => { throw new TowerError(code, msg); };
 
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
-  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], events: [],
+  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -299,7 +299,7 @@ export function normalize(s) {
   if (s.meta.completionCursor == null && s.meta.digestCursor != null)
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -531,7 +531,7 @@ export function project(s, config = null, history = null) {
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
   };
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
-    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
+    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, papercuts: s.papercuts,
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
@@ -1323,6 +1323,44 @@ export function doneMessage(s, id, by) {
   message.doneBy = by;
   logEvent(s, { by, action: 'message.done', ref: id });
   return message;
+}
+
+// ---- mutations: papercuts (append-only friction log) ----------------------
+// Steve Ruiz's "papercuts": agents log one line of tooling friction instead
+// of silently pushing through. Append-only, attributed, owner-resolved. Kept
+// OFF the questions machinery on purpose — high-volume, never blocks a card,
+// never gated by a card's owner lane. Logging friction must never fail.
+
+export function listPapercuts(s, { status } = {}) {
+  const list = status ? s.papercuts.filter(p => p.status === status) : s.papercuts;
+  return [...list].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+}
+
+export function addPapercut(s, p) {
+  if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'papercut needs text');
+  if (!p.by || p.by === 'owner') fail('E_INVALID', 'papercut add needs --by <agent>');
+  const card = p.cardId == null ? null : mustCard(s, p.cardId);   // link only; no lane guard
+  const pc = {
+    id: newId('pc'),
+    by: p.by,
+    text: String(p.text).trim(),
+    cardId: card ? card.id : null,
+    created: now(),
+    status: 'open',
+  };
+  s.papercuts.push(pc);
+  logEvent(s, { by: p.by, action: 'papercut.add', ref: pc.id, note: card ? `#${card.num}` : '' });
+  return card ? { ...pc, cardNum: card.num } : pc;
+}
+
+export function resolvePapercut(s, id, by) {
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'papercut resolve is owner-only');
+  const pc = s.papercuts.find(x => x.id === id) || fail('E_NOT_FOUND', `no papercut ${id}`);
+  pc.status = 'resolved';
+  pc.resolvedAt = now();
+  pc.resolvedBy = by;
+  logEvent(s, { by, action: 'papercut.resolve', ref: id });
+  return pc;
 }
 
 // ---- mutations: ideas ------------------------------------------------------
