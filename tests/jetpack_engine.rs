@@ -10,6 +10,7 @@
 //! `tests/support/jetpack_fixtures.rs` for shared helpers.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -2929,6 +2930,14 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .output()
         .unwrap();
     assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    let package_json = jet()
+        .args(["split", "package", "app", "--check", "--json"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_json.status.success(), "stderr: {}", String::from_utf8_lossy(&package_json.stderr));
+    let package_json = jetpack::JSON::parse(&String::from_utf8_lossy(&package_json.stdout)).unwrap();
+    assert_eq!(json_string(&package_json, "before"), json_string(&package_json, "after"));
     let package_split = jet()
         .args(["split", "package", "app"])
         .current_dir(&package_project.path)
@@ -2943,6 +2952,50 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .unwrap();
     assert!(package_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&package_fold.stderr));
     assert_eq!(fs::read_to_string(package_project.join("package.jet")).unwrap(), package_original);
+
+    let stale_project = Scratch::new("transition-cli-stale-member");
+    fs::write(stale_project.join("package.jet"), package_original).unwrap();
+    let stale_split = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&stale_project.path)
+        .output()
+        .unwrap();
+    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(stale_project.join("packages/app/package.jet"))
+        .unwrap()
+        .write_all(b"// changed after the plan\n")
+        .unwrap();
+    let stale_fold = jet()
+        .args(["fold", "packages/app/package.jet"])
+        .current_dir(&stale_project.path)
+        .output()
+        .unwrap();
+    assert_eq!(stale_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&stale_fold.stderr).contains("stale transition"));
+    assert!(stale_project.join("packages/app/package.jet").is_file());
+
+    let duplicate_project = Scratch::new("transition-cli-duplicate-member");
+    fs::create_dir_all(duplicate_project.join("packages/existing")).unwrap();
+    fs::write(
+        duplicate_project.join("packages/existing/package.jet"),
+        "name: \"app\"\n",
+    )
+    .unwrap();
+    let duplicate_original =
+        "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+    fs::write(duplicate_project.join("package.jet"), duplicate_original).unwrap();
+    let duplicate = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&duplicate_project.path)
+        .output()
+        .unwrap();
+    assert_eq!(duplicate.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&duplicate.stderr)
+        .contains("member Package name `app` is declared more than once"));
+    assert_eq!(fs::read_to_string(duplicate_project.join("package.jet")).unwrap(), duplicate_original);
+    assert!(!duplicate_project.join("packages/app/package.jet").exists());
 
     let hosts_project = Scratch::new("transition-cli-hosts");
     fs::write(

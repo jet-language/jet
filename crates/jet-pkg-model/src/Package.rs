@@ -626,6 +626,17 @@ impl PackageFacts {
     /// validator above catches lexical escapes; this variant also rejects an
     /// escaping symlink before a workspace can realize the member.
     pub fn validate_members_in(&self, dir: &std::path::Path) -> Result<(), PackageParseError> {
+        self.member_names_in(dir).map(|_| ())
+    }
+
+    /// Validate member paths and return the canonical names discovered in the
+    /// physical Package root. Transition planners use the same checked
+    /// discovery result when they preview a new member, so name collisions do
+    /// not create a second member-validation mechanism.
+    pub fn member_names_in(
+        &self,
+        dir: &std::path::Path,
+    ) -> Result<Vec<String>, PackageParseError> {
         self.validate_members()
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
         let root = dir.canonicalize().map_err(|error| {
@@ -728,7 +739,7 @@ impl PackageFacts {
                 names.push(name);
             }
         }
-        Ok(())
+        Ok(names)
     }
 }
 

@@ -346,6 +346,14 @@ fn split_plan(root: &Path, target: SplitTarget) -> Result<TransitionPlan, Transi
         }
         SplitTarget::Package { name } => {
             validate_name(&name, "Package")?;
+            let existing_member_names = package
+                .member_names_in(&root)
+                .map_err(|error| TransitionError(error.to_string()))?;
+            if existing_member_names.iter().any(|existing| existing == &name) {
+                return Err(TransitionError(format!(
+                    "member Package name `{name}` is declared more than once"
+                )));
+            }
             let (entry, body) = required_inline_config(&entries, &name, &package_path)?;
             let destination = PathBuf::from(format!("packages/{name}/package.jet"));
             ensure_new_file(&root, &destination)?;
@@ -2203,6 +2211,32 @@ mod tests {
         assert!(fs::read_to_string(root.join(PACKAGE_FILE))
             .unwrap()
             .contains("app :: Config"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_split_rejects_duplicate_member_name_before_writes() {
+        let root = temp_root("member-duplicate");
+        fs::create_dir_all(root.join("packages/existing")).unwrap();
+        fs::write(
+            root.join("packages/existing/package.jet"),
+            "name: \"app\"\n",
+        )
+        .unwrap();
+        let original =
+            "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        let error = split(
+            &root,
+            SplitTarget::Package {
+                name: "app".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(error.0.contains("member Package name `app` is declared more than once"), "{error}");
+        assert_eq!(fs::read_to_string(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(!root.join("packages/app/package.jet").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
