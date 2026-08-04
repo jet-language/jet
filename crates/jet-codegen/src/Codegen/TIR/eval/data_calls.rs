@@ -435,12 +435,16 @@ impl<'a> EvalCtx<'a> {
                     Ok(CtValue::List(out))
                 }
             }
-            "bar_text" | "bar_svg" => {
+            "bar_text" | "bar_svg" | "line_text" | "line_svg" => {
                 let groups = self.eval_expr(&args[0], scope)?;
+                let mut call_args = vec![groups];
+                if args.len() > 1 {
+                    call_args.push(self.eval_expr(&args[1], scope)?);
+                }
                 let v = apply_core_call(
                     "core.data",
                     method,
-                    vec![groups],
+                    call_args,
                     span,
                     self.repl_mode,
                 )?;

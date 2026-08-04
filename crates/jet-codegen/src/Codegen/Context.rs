@@ -386,8 +386,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TempDir" => Some("TempDir"),
         "TempFile" => Some("TempFile"),
         "FileLock" => Some("FileLock"),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data values.
         "DataGroup" => Some("DataGroup"),
+        "DataLineOptions" => Some("DataLineOptions"),
         "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
         "DataSummary" => Some("DataSummary"),

@@ -1315,6 +1315,17 @@ pub fn core_fixed_sig(
                 Some((args, Some(Type::String)))
             }
         }
+        ("core.data", "line_text" | "line_svg") => {
+            let args = vec![
+                (read, Type::List(Box::new(Type::Named("DataGroup".to_string())))),
+                (read, Type::Named("DataLineOptions".to_string())),
+            ];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
+            } else {
+                Some((args, Some(Type::String)))
+            }
+        }
         ("core.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }

@@ -9,6 +9,32 @@
 //! Not here: none of the call-site-typed table/lazy pipeline names above —
 //! those live in `DataPipeline.rs` (including `schema`).
 
+mod data_plot_rt {
+    pub(crate) mod jet_std {
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataGroup {
+            pub(crate) key: String,
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+        }
+
+        #[derive(Clone, Debug, Default)]
+        pub(crate) struct DataLineOptions {
+            pub(crate) title: String,
+            pub(crate) x_label: String,
+            pub(crate) y_label: String,
+            pub(crate) markers: bool,
+            pub(crate) reference: Option<f64>,
+            pub(crate) style: String,
+            pub(crate) color: String,
+            pub(crate) legend: String,
+        }
+    }
+
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
+}
+
 pub(super) fn sum(values: &[f64]) -> f64 {
     values.iter().copied().sum()
 }
@@ -265,6 +291,63 @@ pub(super) fn bar_svg(groups: &[(String, i64)]) -> String {
     }
     out.push_str("</svg>");
     out
+}
+
+pub(super) struct LineOptions {
+    pub title: String,
+    pub x_label: String,
+    pub y_label: String,
+    pub markers: bool,
+    pub reference: Option<f64>,
+    pub style: String,
+    pub color: String,
+    pub legend: String,
+}
+
+pub(super) fn line_text(groups: &[(String, f64)], options: &LineOptions) -> String {
+    let groups = groups
+        .iter()
+        .map(|(key, value)| data_plot_rt::jet_std::DataGroup {
+            key: key.clone(),
+            count: 1,
+            sum: *value,
+            mean: *value,
+        })
+        .collect::<Vec<_>>();
+    let options = data_plot_rt::jet_std::DataLineOptions {
+        title: options.title.clone(),
+        x_label: options.x_label.clone(),
+        y_label: options.y_label.clone(),
+        markers: options.markers,
+        reference: options.reference,
+        style: options.style.clone(),
+        color: options.color.clone(),
+        legend: options.legend.clone(),
+    };
+    data_plot_rt::jet_data_line_text(&groups, &options)
+}
+
+pub(super) fn line_svg(groups: &[(String, f64)], options: &LineOptions) -> String {
+    let groups = groups
+        .iter()
+        .map(|(key, value)| data_plot_rt::jet_std::DataGroup {
+            key: key.clone(),
+            count: 1,
+            sum: *value,
+            mean: *value,
+        })
+        .collect::<Vec<_>>();
+    let options = data_plot_rt::jet_std::DataLineOptions {
+        title: options.title.clone(),
+        x_label: options.x_label.clone(),
+        y_label: options.y_label.clone(),
+        markers: options.markers,
+        reference: options.reference,
+        style: options.style.clone(),
+        color: options.color.clone(),
+        legend: options.legend.clone(),
+    };
+    data_plot_rt::jet_data_line_svg(&groups, &options)
 }
 
 fn svg_escape(s: &str) -> String {

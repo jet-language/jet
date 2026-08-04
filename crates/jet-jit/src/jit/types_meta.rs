@@ -851,6 +851,9 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "replacement",
         ],
         "DataGroup" => &["key", "count", "sum", "mean"],
+        "DataLineOptions" => &[
+            "title", "x_label", "y_label", "markers", "reference", "style", "color", "legend",
+        ],
         "DataError" => &[
             "kind",
             "operation",
@@ -996,6 +999,14 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        },
+        "DataLineOptions" => match field {
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
+                Some(Type::String)
+            }
+            "markers" => Some(Type::Bool),
+            "reference" => Some(Type::Option(Box::new(Type::Float))),
             _ => None,
         },
         "DataError" => match field {

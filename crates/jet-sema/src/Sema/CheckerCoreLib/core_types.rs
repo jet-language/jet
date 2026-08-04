@@ -194,7 +194,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         | "WatchEvent" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
-        | "DataGroup" | "DataColumn" | "DataStatus" | "DataSummary"
+        | "DataGroup" | "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
@@ -841,6 +841,16 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataLineOptions" {
+        return match field {
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
+                Some(Type::String)
+            }
+            "markers" => Some(Type::Bool),
+            "reference" => Some(Type::Option(Box::new(Type::Float))),
             _ => None,
         };
     }
@@ -1698,6 +1708,16 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_sort_rows".to_string(), Type::Int),
             ("max_join_rows".to_string(), Type::Int),
             ("max_output_rows".to_string(), Type::Int),
+        ]),
+        "DataLineOptions" => Some(vec![
+            ("title".to_string(), Type::String),
+            ("x_label".to_string(), Type::String),
+            ("y_label".to_string(), Type::String),
+            ("markers".to_string(), Type::Bool),
+            ("reference".to_string(), Type::Option(Box::new(Type::Float))),
+            ("style".to_string(), Type::String),
+            ("color".to_string(), Type::String),
+            ("legend".to_string(), Type::String),
         ]),
         "DataError" => Some(vec![
             ("kind".to_string(), Type::Named("DataErrorKind".to_string())),

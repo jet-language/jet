@@ -86,6 +86,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "UiNode"
             | "MigrationStatus"
             | "DataGroup"
+            | "DataLineOptions"
             | "DataPivotCell"
             | "DataLimits"
             | "DataError"
@@ -134,8 +135,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             member,
             "domain" | "kind" | "path" | "detail" | "pid" | "port"
         ),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data fields
+        // use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
+        "DataLineOptions" => matches!(
+            member,
+            "title" | "x_label" | "y_label" | "markers" | "reference" | "style"
+                | "color" | "legend"
+        ),
         "DataPivotCell" => matches!(member, "row_key" | "column_key" | "count" | "sum" | "mean"),
         "DataLimits" => matches!(
             member,
@@ -428,6 +435,16 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if name == "DataLineOptions" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
+                Some(Type::String)
+            }
+            "markers" => Some(Type::Bool),
+            "reference" => Some(Type::Option(Box::new(Type::Float))),
             _ => None,
         };
     }

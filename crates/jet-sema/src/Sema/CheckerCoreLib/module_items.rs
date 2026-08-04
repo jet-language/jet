@@ -245,6 +245,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "csv_reader",
             "json_reader",
             "DataLimits",
+            "DataLineOptions",
             "DataError",
             "DataErrorKind",
             "DataStream",
@@ -283,6 +284,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "require_bridge",
             "bar_text",
             "bar_svg",
+            "line_text",
+            "line_svg",
         ],
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D (#443): one compute family; Tensor owns storage.
         "core.compute" => &[

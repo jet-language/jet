@@ -5464,6 +5464,18 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[v]);
                 Ok(self.b.inst_results(call)[0])
             }
+            "line_text" | "line_svg" if args.len() == 2 => {
+                let groups = self.lower_expr(&args[0])?;
+                let options = self.lower_expr(&args[1])?;
+                let host_id = if method == "line_text" {
+                    self.host.data.line_text
+                } else {
+                    self.host.data.line_svg
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[groups, options]);
+                Ok(self.b.inst_results(call)[0])
+            }
             "table" if args.len() == 1 => {
                 let rows = self.lower_expr(&args[0])?;
                 // DataTable { rows, missing: 0, plan: ["table"] }
@@ -22107,6 +22119,9 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "replacement",
         ],
         "DataGroup" => &["key", "count", "sum", "mean"],
+        "DataLineOptions" => &[
+            "title", "x_label", "y_label", "markers", "reference", "style", "color", "legend",
+        ],
         "DataError" => &[
             "kind",
             "operation",

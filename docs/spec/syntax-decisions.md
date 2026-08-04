@@ -3970,7 +3970,11 @@ implementation.
     is the D-WD dossier lens `jet inspect dossier data`.
   - **D-DATA-PLOT1 (=A, ratified 2026-07-06, #237)**: Core plotting starts with
     first-party deterministic SVG plus a text backend; bitmap export may layer
-    on the same model later.
+    on the same model later. The shipped line family is `line_text(groups,
+    options)` / `line_svg(groups, options)` over `DataGroup`; `DataLineOptions`
+    carries title, x/y labels, point markers, an optional horizontal reference,
+    line style, color, and legend. Bar and line renderers use deterministic
+    output and the same checked geometry rules on every execution tier.
 - **D-WD10**: `core.game` is a stable game substrate: assets, ECS, input,
   fixed-step timing, deterministic replay, editor hooks, and budgets; renderer,
   audio, and editor backends remain replaceable packages.

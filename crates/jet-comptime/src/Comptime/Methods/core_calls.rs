@@ -281,6 +281,91 @@ fn as_data_groups(v: &CtValue, span: Span) -> Result<Vec<(String, i64)>, Diagnos
     }
 }
 
+fn as_data_line_groups(v: &CtValue, span: Span) -> Result<Vec<(String, f64)>, Diagnostic> {
+    match v {
+        CtValue::List(xs) => xs
+            .iter()
+            .map(|x| match x {
+                CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
+                    let key = fields
+                        .iter()
+                        .find(|(n, _)| n == "key")
+                        .map(|(_, v)| v.clone());
+                    let mean = fields
+                        .iter()
+                        .find(|(n, _)| n == "mean")
+                        .map(|(_, v)| v.clone());
+                    match key {
+                        Some(CtValue::Str(key)) => {
+                            let Some(mean) = mean else {
+                                return Err(unsupported(
+                                    "core.data: a `DataGroup` needs `mean: Float`",
+                                    span,
+                                ));
+                            };
+                            Ok((key, as_float(&mean, span)?))
+                        }
+                        _ => Err(unsupported(
+                            "core.data: a `DataGroup` needs `key: String`",
+                            span,
+                        )),
+                    }
+                }
+                _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
+    }
+}
+
+fn as_data_line_options(
+    v: &CtValue,
+    span: Span,
+) -> Result<super::super::DataLite::LineOptions, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = v else {
+        return Err(unsupported(
+            "core.data line renderers need `DataLineOptions`",
+            span,
+        ));
+    };
+    if type_name != "DataLineOptions" {
+        return Err(unsupported(
+            "core.data line renderers need `DataLineOptions`",
+            span,
+        ));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.clone())
+            .ok_or_else(|| unsupported("DataLineOptions is missing a required field", span))
+    };
+    let string = |name: &str| match field(name)? {
+        CtValue::Str(value) => Ok(value),
+        _ => Err(unsupported("DataLineOptions string field has the wrong type", span)),
+    };
+    let markers = match field("markers")? {
+        CtValue::Bool(value) => value,
+        _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
+    };
+    let reference = match field("reference")? {
+        CtValue::Some(value) => Some(as_float(&value, span)?),
+        CtValue::None(_) => None,
+        _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
+    };
+    Ok(super::super::DataLite::LineOptions {
+        title: string("title")?,
+        x_label: string("x_label")?,
+        y_label: string("y_label")?,
+        markers,
+        reference,
+        style: string("style")?,
+        color: string("color")?,
+        legend: string("legend")?,
+    })
+}
+
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 fn hex_encode(bytes: Vec<u8>) -> String {
@@ -2100,6 +2185,14 @@ pub fn apply_core_call(
             one(0)?,
             span,
         )?))),
+        ("core.data", "line_text") => Ok(CtValue::Str(super::super::DataLite::line_text(
+            &as_data_line_groups(one(0)?, span)?,
+            &as_data_line_options(one(1)?, span)?,
+        ))),
+        ("core.data", "line_svg") => Ok(CtValue::Str(super::super::DataLite::line_svg(
+            &as_data_line_groups(one(0)?, span)?,
+            &as_data_line_options(one(1)?, span)?,
+        ))),
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
             as_string(one(0)?, span)?.chars().count() as i64,
