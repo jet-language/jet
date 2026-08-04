@@ -249,10 +249,11 @@ is public by mode only; Linux peer credentials and a root-owned per-uid grant
 authorize each read or write.
 
 A read grant is persistent. A write grant contains a short-lived credential,
-an expiry, and exact `source=` and `builder=` allowlists. The command creates
-the credential and expiry; an administrator must add the approved source and
-builder facts before the pending write grant can write. Until then, reads
-work and writes stay on the ordinary per-user Hangar path. The client sends
+an expiry, and exact allowlists for `source=`, `builder=`, `action=`,
+`output=`, `platform=`, `sandbox=`, and `policy=`. The command creates the
+credential and expiry; an administrator must add every approved binding fact
+before the pending write grant can write. Until then, reads work and writes
+stay on the ordinary per-user Hangar path. The client sends
 an unsigned closure plus the binding facts for source, builder, action,
 output, platform, sandbox, and policy. The broker verifies those facts against
 the archived metadata, content-checks the closure in an ephemeral `.incoming`

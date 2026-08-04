@@ -78,6 +78,11 @@ struct WriterGrant {
     credential: Option<String>,
     sources: BTreeSet<String>,
     builders: BTreeSet<String>,
+    actions: BTreeSet<String>,
+    outputs: BTreeSet<String>,
+    platforms: BTreeSet<String>,
+    sandboxes: BTreeSet<String>,
+    policies: BTreeSet<String>,
 }
 
 fn user_broker_layout(roots: &Roots) -> BrokerLayout {
@@ -322,12 +327,15 @@ fn systemd_escape_path(path: &Path) -> String {
 #[cfg(unix)]
 fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> String {
     format!(
-        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory=jet/shared-store/root\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={} {}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
+        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory=jet/shared-store/broker\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={} {}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={} {} {} {}\n",
         systemd_escape_path(executable),
         systemd_escape_path(&config.trust_key),
         systemd_escape_path(&config.grants),
         systemd_escape_path(&config.trust_key.parent().unwrap_or(Path::new("/"))),
-        systemd_escape_path(&config.shared_root)
+        systemd_escape_path(&config.shared_root.join(".incoming")),
+        systemd_escape_path(&config.shared_root.join(".stage")),
+        systemd_escape_path(&config.shared_root.join("objects")),
+        systemd_escape_path(&config.shared_root.join("closure-db"))
     )
 }
 
@@ -892,6 +900,11 @@ fn read_writer_grant(config: &SharedStoreConfig, uid: u32) -> io::Result<WriterG
             credential: Some("private-owner".to_string()),
             sources: BTreeSet::new(),
             builders: BTreeSet::new(),
+            actions: BTreeSet::new(),
+            outputs: BTreeSet::new(),
+            platforms: BTreeSet::new(),
+            sandboxes: BTreeSet::new(),
+            policies: BTreeSet::new(),
         });
     }
     let grant = config.grants.join(uid.to_string());
@@ -925,6 +938,11 @@ fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
         credential: None,
         sources: BTreeSet::new(),
         builders: BTreeSet::new(),
+        actions: BTreeSet::new(),
+        outputs: BTreeSet::new(),
+        platforms: BTreeSet::new(),
+        sandboxes: BTreeSet::new(),
+        policies: BTreeSet::new(),
     };
     for line in lines {
         if line.is_empty() {
@@ -979,6 +997,36 @@ fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
                             return Err(invalid("shared-store peer enrollment repeats `builder`"));
                         }
                     }
+                    "action" => {
+                        validate_text_field(value, "shared-store writer action")?;
+                        if !grant.actions.insert(value.to_string()) {
+                            return Err(invalid("shared-store peer enrollment repeats `action`"));
+                        }
+                    }
+                    "output" => {
+                        validate_text_field(value, "shared-store writer output")?;
+                        if !grant.outputs.insert(value.to_string()) {
+                            return Err(invalid("shared-store peer enrollment repeats `output`"));
+                        }
+                    }
+                    "platform" => {
+                        validate_text_field(value, "shared-store writer platform")?;
+                        if !grant.platforms.insert(value.to_string()) {
+                            return Err(invalid("shared-store peer enrollment repeats `platform`"));
+                        }
+                    }
+                    "sandbox" => {
+                        validate_text_field(value, "shared-store writer sandbox")?;
+                        if !grant.sandboxes.insert(value.to_string()) {
+                            return Err(invalid("shared-store peer enrollment repeats `sandbox`"));
+                        }
+                    }
+                    "policy" => {
+                        validate_text_field(value, "shared-store writer policy")?;
+                        if !grant.policies.insert(value.to_string()) {
+                            return Err(invalid("shared-store peer enrollment repeats `policy`"));
+                        }
+                    }
                     _ => return Err(invalid("shared-store peer enrollment has an unknown field")),
                 }
             }
@@ -1020,11 +1068,20 @@ fn authorize_grant(
     if grant.credential.as_deref() != Some(credential) {
         return Err(invalid("shared-store writer credential is invalid"));
     }
-    if !grant.sources.contains(&binding.source) {
-        return Err(invalid("shared-store writer source is not allowlisted"));
-    }
-    if !grant.builders.contains(&binding.builder) {
-        return Err(invalid("shared-store writer builder is not allowlisted"));
+    for (label, allowed, actual) in [
+        ("source", &grant.sources, &binding.source),
+        ("builder", &grant.builders, &binding.builder),
+        ("action", &grant.actions, &binding.action),
+        ("output", &grant.outputs, &binding.output),
+        ("platform", &grant.platforms, &binding.platform),
+        ("sandbox", &grant.sandboxes, &binding.sandbox),
+        ("policy", &grant.policies, &binding.policy),
+    ] {
+        if !allowed.contains(actual) {
+            return Err(invalid(&format!(
+                "shared-store writer {label} is not allowlisted"
+            )));
+        }
     }
     Ok(())
 }
@@ -1593,13 +1650,19 @@ fn provenance_binding_for_entry(entry: &StoreEntry) -> io::Result<ProvenanceBind
 
 fn broker_trust_key(config: &SharedStoreConfig) -> io::Result<String> {
     if is_admin_config(config) {
-        if let Some(path) = std::env::var_os("JET_SHARED_STORE_TRUST_KEY") {
-            let path = PathBuf::from(path);
-            if !path.is_absolute() {
-                return Err(invalid("shared-store broker trust credential is not absolute"));
-            }
-            return Ok(path.to_string_lossy().into_owned());
+        let credentials_dir = std::env::var_os("CREDENTIALS_DIRECTORY")
+            .ok_or_else(|| invalid("shared-store broker credentials directory is missing"))?;
+        let expected = PathBuf::from(credentials_dir).join("hangar.key");
+        let actual = std::env::var_os("JET_SHARED_STORE_TRUST_KEY")
+            .map(PathBuf::from)
+            .ok_or_else(|| invalid("shared-store broker trust credential is missing"))?;
+        if actual != expected || !actual.is_absolute() {
+            return Err(invalid(
+                "shared-store broker trust credential is outside the systemd credential directory",
+            ));
         }
+        require_safe_descriptor(&actual, "shared-store broker trust credential")?;
+        return Ok(actual.to_string_lossy().into_owned());
     }
     Ok(config.trust_key.to_string_lossy().into_owned())
 }
@@ -1613,7 +1676,18 @@ fn writer_credential(config: &SharedStoreConfig) -> io::Result<Option<String>> {
     if !grant.write {
         return Ok(None);
     }
-    if grant.sources.is_empty() || grant.builders.is_empty() {
+    if [
+        grant.sources.is_empty(),
+        grant.builders.is_empty(),
+        grant.actions.is_empty(),
+        grant.outputs.is_empty(),
+        grant.platforms.is_empty(),
+        grant.sandboxes.is_empty(),
+        grant.policies.is_empty(),
+    ]
+    .into_iter()
+    .any(|empty| empty)
+    {
         return Ok(None);
     }
     if let Some(expires) = grant.expires {
@@ -1847,7 +1921,7 @@ mod tests {
         fs::write(
             grants.join(uid.to_string()),
             format!(
-                "jet-shared-store-grant-v2\nread\nwrite\nexpires={}\ncredential=abc\nsource=source\nbuilder=builder\n",
+                "jet-shared-store-grant-v2\nread\nwrite\nexpires={}\ncredential=abc\nsource=source\nbuilder=builder\naction=action\noutput=output\nplatform=platform\nsandbox=sandbox\npolicy=policy\n",
                 now_secs() + GRANT_TTL_SECS
             ),
         )
@@ -1869,8 +1943,11 @@ mod tests {
         let service = admin_service_unit_text(Path::new("/usr/bin/jetpack"), &config);
         assert!(service.contains("DynamicUser=yes"), "{service}");
         assert!(!service.contains("User=root"), "{service}");
-        assert!(service.contains("StateDirectory=jet/shared-store/root\n"));
+        assert!(service.contains("StateDirectory=jet/shared-store/broker\n"));
         assert!(service.contains("ReadOnlyPaths=/var/lib/jet/shared-store/users"));
+        assert!(service.contains(
+            "ReadWritePaths=/var/lib/jet/shared-store/root/.incoming /var/lib/jet/shared-store/root/.stage /var/lib/jet/shared-store/root/objects /var/lib/jet/shared-store/root/closure-db"
+        ));
         assert!(service.contains("NoNewPrivileges=yes"));
         assert!(service.contains("RestrictAddressFamilies=AF_UNIX"));
     }
@@ -1915,10 +1992,9 @@ mod tests {
             .args(["verify"])
             .arg(&service_path)
             .arg(&socket_path)
-            .status();
-        if let Ok(status) = status {
-            assert!(status.success(), "systemd-analyze verify failed: {status}");
-        }
+            .status()
+            .expect("systemd-analyze is required for the broker unit proof");
+        assert!(status.success(), "systemd-analyze verify failed: {status}");
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1988,7 +2064,7 @@ mod tests {
         assert!(error.to_string().contains("expiry"));
 
         let expired = format!(
-            "jet-shared-store-grant-v2\nread\nwrite\nexpires={}\ncredential=abc\nsource=source\nbuilder=builder\n",
+            "jet-shared-store-grant-v2\nread\nwrite\nexpires={}\ncredential=abc\nsource=source\nbuilder=builder\naction=action\noutput=output\nplatform=platform\nsandbox=sandbox\npolicy=policy\n",
             now_secs().saturating_sub(1)
         );
         let grant = parse_writer_grant(&expired).unwrap();
@@ -2026,10 +2102,7 @@ mod tests {
             ])
             .env("JET_BROKER_PROBE_SOCKET", &socket)
             .spawn();
-        let Ok(mut child) = child else {
-            let _ = fs::remove_file(socket);
-            return;
-        };
+        let mut child = child.expect("the native peer-credential proof requires unshare");
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut accepted = None;
         while Instant::now() < deadline {
@@ -2046,9 +2119,7 @@ mod tests {
         }
         let status = child.wait().unwrap();
         let Some(stream) = accepted else {
-            eprintln!("note: unprivileged user namespaces unavailable; peer proof not run");
-            let _ = fs::remove_file(socket);
-            return;
+            panic!("native peer-credential proof did not connect");
         };
         let uid = peer_uid(&stream).unwrap();
         assert_ne!(uid, current_uid().unwrap());
