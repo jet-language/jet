@@ -2758,13 +2758,13 @@ fn run_toolchain() -> ! {
 /// fails just because the *lift* half had nothing to do.
 fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
     let target = match args.get(1).map(|value| value.as_str()) {
-        Some("env") => jet::Transition::SplitTarget::Environment,
+        Some("env") => jetpack::Transition::SplitTarget::Environment,
         Some("package") => {
             let Some(name) = args.get(2) else {
                 eprintln!("error: jet split package needs a Package name");
                 exit(ExitCodes::USAGE);
             };
-            jet::Transition::SplitTarget::Package {
+            jetpack::Transition::SplitTarget::Package {
                 name: (*name).clone(),
             }
         }
@@ -2773,7 +2773,7 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
                 eprintln!("error: jet split hosts needs a host name");
                 exit(ExitCodes::USAGE);
             };
-            jet::Transition::SplitTarget::Hosts {
+            jetpack::Transition::SplitTarget::Hosts {
                 name: (*name).clone(),
             }
         }
@@ -2909,7 +2909,7 @@ fn run_init(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if raw.iter().any(|arg| arg == "--restore-role-files") {
         let check_only = raw.iter().any(|arg| arg == "--check");
-        match jet::Transition::restore_role_files(&cwd, check_only) {
+        match jetpack::Transition::restore_role_files(&cwd, check_only) {
             Ok(result) => print_transition_result(&result, check_only, mode),
             Err(error) => {
                 eprintln!("error: {error}");
@@ -2922,7 +2922,7 @@ fn run_init(
             .iter()
             .any(|name| cwd.join(name).is_file());
         if has_role_file {
-            match jet::Transition::init(&cwd, true) {
+            match jetpack::Transition::init(&cwd, true) {
                 Ok(result) => print_transition_result(&result, true, mode),
                 Err(error) => {
                     eprintln!("error: {error}");
@@ -2939,7 +2939,7 @@ fn run_init(
             .any(|name| cwd.join(name).is_file())
         && !cwd.join(jet::Syntax::PACKAGE_FILE).is_file()
     {
-        match jet::Transition::init(&cwd, false) {
+            match jetpack::Transition::init(&cwd, false) {
             Ok(result) => print_transition_result(&result, false, mode),
             Err(error) => {
                 eprintln!("error: {error}");
