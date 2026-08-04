@@ -141,9 +141,12 @@ cache policy, authority, and limits. Platform skips use `Linux`, `MacOS`,
 and scheduled `jet dev` runs apply the same skip rule.
 
 Cached tasks require declared inputs and outputs. Their identity includes task
-arguments, locked package facts, policy, platform, compiler bytes, and project
-inputs. Strict cached runs trace project file access and refuse to record a
-cache result when the task reads an undeclared project path; use
+arguments, locked package facts, policy, platform, compiler bytes, declared
+project inputs, and the composed values of allowed non-secret environment
+variables. `.env` files and secret-bearing paths are never cache inputs.
+Strict cached runs trace project file access and refuse to record a cache
+result when the task reads an undeclared project path. Tasks with declared
+secrets or secret-bearing environment variables fail closed; use
 `cache: .Uncached` when the task is intentionally dynamic.
 
 `jet env sync` resolves all sources first, prints the plan, writes content

@@ -25,7 +25,7 @@ use crate::Shell::{self, Env, ShellKind};
 use crate::Store;
 use crate::Syntax;
 use crate::Trust;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// `jetpack run [<ref>|<task>] [-- cmd…]`
@@ -350,6 +350,15 @@ pub(super) fn run_project_task_with_mode(
             );
             return 2;
         }
+        if let Err(message) = validate_cached_task_environment(&plan, &env) {
+            theme.error_coded(
+                "E1330",
+                &format!("task `{task}` has an unsafe cached environment"),
+                &message,
+                "remove secret-bearing environment inputs, or use `cache: .Uncached`.",
+            );
+            return 2;
+        }
         jet_binary = match resolve_task_jet_binary(&env) {
             Ok(path) => path,
             Err(message) => {
@@ -371,7 +380,13 @@ pub(super) fn run_project_task_with_mode(
             &task_args,
             &plan.refs,
             &plan.table,
-            &task_environment_hash(&plan.refs, &plan.table, &plan.secrets, &plan.environment),
+            &task_environment_hash_with_env(
+                &plan.refs,
+                &plan.table,
+                &plan.secrets,
+                &plan.environment,
+                &env,
+            ),
         ) {
             Ok(key) => key,
             Err(message) => {
@@ -411,11 +426,14 @@ pub(super) fn run_project_task_with_mode(
         .as_deref()
         .map(task_access_trace_path);
     let code = if let Some(trace_path) = access_trace.as_deref() {
+        // A strict cache key must describe the complete task environment. The
+        // ordinary direct-task path inherits host variables, so cached tasks
+        // use the clean composed environment whose values are in the key.
         match run_task_with_access_trace(
             &env,
             &argv,
             &task_cwd,
-            clean,
+            true,
             silent,
             trace_path,
         ) {
@@ -591,7 +609,7 @@ fn task_undeclared_accesses(
     let mut unexpected = BTreeSet::new();
     for line in trace.lines() {
         for raw in strace_paths(line) {
-            let path = Path::new(raw);
+            let path = raw.as_path();
             let path = if path.is_absolute() {
                 path.to_path_buf()
             } else {
@@ -617,21 +635,170 @@ fn task_undeclared_accesses(
     Ok(unexpected.into_iter().collect())
 }
 
-fn strace_paths(line: &str) -> Vec<&str> {
-    let mut paths = Vec::new();
-    let mut rest = line;
-    while let Some(start) = rest.find('"') {
-        let value = &rest[start + 1..];
-        let Some(end) = value.find('"') else {
-            break;
-        };
-        let path = &value[..end];
-        if !path.is_empty() && path != "?" && !path.contains('\\') {
-            paths.push(path);
+fn strace_paths(line: &str) -> Vec<PathBuf> {
+    let Some(open) = line.find('(') else {
+        return Vec::new();
+    };
+    let Some(name) = line[..open].split_whitespace().last() else {
+        return Vec::new();
+    };
+    let args = strace_argument_tokens(&line[open + 1..]);
+    let indices: Vec<usize> = match name {
+        "execve" | "open" | "creat" | "stat" | "lstat" | "statx" | "access"
+        | "readlink" | "unlink" | "rmdir" | "truncate" | "chmod" | "chown"
+        | "lchown" | "mknod" | "mkdir" | "chdir" | "getxattr" | "lgetxattr"
+        | "setxattr" | "lsetxattr" | "listxattr" | "llistxattr" | "removexattr" => {
+            vec![0]
         }
-        rest = &value[end + 1..];
+        "execveat" | "openat" | "openat2" | "newfstatat" | "fstatat64"
+        | "faccessat" | "faccessat2" | "readlinkat" | "unlinkat" | "mkdirat"
+        | "fchmodat" | "fchownat" | "utimensat" => vec![1],
+        "rename" | "renameat2" | "link" | "linkat" => vec![0, 1, 3],
+        "renameat" => vec![1, 3],
+        "symlink" => vec![0, 1],
+        "symlinkat" => vec![0, 2],
+        "pivot_root" => vec![0, 1],
+        _ => (0..args.len()).collect(),
+    };
+    indices
+        .into_iter()
+        .filter_map(|index| {
+            args.get(index)
+                .and_then(|argument| strace_quoted_argument(argument))
+        })
+        .filter_map(decode_strace_string)
+        .filter(|path| !path.is_empty() && path.as_slice() != b"?")
+        .map(strace_path_from_bytes)
+        .collect()
+}
+
+/// Return top-level syscall arguments. Nested strings, such as `execve`'s
+/// argv array, are intentionally kept inside one argument so they cannot be
+/// mistaken for file paths.
+fn strace_argument_tokens(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    let mut tokens = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().enumerate() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match *byte {
+            b'"' => quoted = true,
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                tokens.push(&line[start..index]);
+                start = index + 1;
+            }
+            b')' if depth == 0 => {
+                tokens.push(&line[start..index]);
+                break;
+            }
+            _ => {}
+        }
     }
-    paths
+    tokens
+}
+
+fn strace_quoted_argument(argument: &str) -> Option<&str> {
+    let argument = argument.trim();
+    let bytes = argument.as_bytes();
+    if bytes.first().copied() != Some(b'"') {
+        return None;
+    }
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().enumerate().skip(1) {
+        if escaped {
+            escaped = false;
+        } else if *byte == b'\\' {
+            escaped = true;
+        } else if *byte == b'"' {
+            return Some(&argument[1..index]);
+        }
+    }
+    None
+}
+
+fn decode_strace_string(raw: &str) -> Option<Vec<u8>> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            let character = raw[index..].chars().next()?;
+            let width = character.len_utf8();
+            decoded.extend_from_slice(&bytes[index..index + width]);
+            index += width;
+            continue;
+        }
+        index += 1;
+        let escaped = *bytes.get(index)?;
+        match escaped {
+            b'\\' => decoded.push(b'\\'),
+            b'"' => decoded.push(b'"'),
+            b'a' => decoded.push(0x07),
+            b'b' => decoded.push(0x08),
+            b'f' => decoded.push(0x0c),
+            b'n' => decoded.push(b'\n'),
+            b'r' => decoded.push(b'\r'),
+            b't' => decoded.push(b'\t'),
+            b'v' => decoded.push(0x0b),
+            b'?' => decoded.push(b'?'),
+            b'x' => {
+                let high = hex_digit(*bytes.get(index + 1)?)?;
+                let low = hex_digit(*bytes.get(index + 2)?)?;
+                decoded.push(high * 16 + low);
+                index += 2;
+            }
+            b'0'..=b'7' => {
+                let mut value = escaped - b'0';
+                let mut consumed = 1;
+                while consumed < 3 {
+                    let Some(next @ b'0'..=b'7') = bytes.get(index + consumed).copied() else {
+                        break;
+                    };
+                    value = value * 8 + next - b'0';
+                    consumed += 1;
+                }
+                decoded.push(value);
+                index += consumed - 1;
+            }
+            other => decoded.push(other),
+        }
+        index += 1;
+    }
+    Some(decoded)
+}
+
+#[cfg(unix)]
+fn strace_path_from_bytes(bytes: Vec<u8>) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    PathBuf::from(std::ffi::OsString::from_vec(bytes))
+}
+
+#[cfg(not(unix))]
+fn strace_path_from_bytes(bytes: Vec<u8>) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn empty_task_plan() -> RunPlan {
@@ -796,11 +963,22 @@ fn task_cache_key(
     Ok(crate::SHA256::sha256_hex(identity.as_bytes()))
 }
 
-fn task_environment_hash(
+fn task_environment_hash_with_env(
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
     secrets: &[String],
     facts: &ModuleEval::EnvironmentFacts,
+    env: &Env,
+) -> String {
+    task_environment_hash_with_vars(refs, table, secrets, facts, &env.vars)
+}
+
+fn task_environment_hash_with_vars(
+    refs: &[RefSpec::RefSpec],
+    table: &RefSpec::SourceTable,
+    secrets: &[String],
+    facts: &ModuleEval::EnvironmentFacts,
+    vars: &BTreeMap<String, String>,
 ) -> String {
     let mut identity = Trust::environment_definition_hash(refs, table, secrets, facts);
     identity.push_str("\n--task-active-environment--\n");
@@ -814,6 +992,13 @@ fn task_environment_hash(
     identity.push_str("--task-source-files--\n");
     for source in &facts.source_files {
         identity.push_str(source);
+        identity.push('\n');
+    }
+    identity.push_str("--task-environment-values--\n");
+    for (name, value) in vars {
+        identity.push_str(name);
+        identity.push('=');
+        identity.push_str(&crate::SHA256::sha256_hex(value.as_bytes()));
         identity.push('\n');
     }
     crate::SHA256::sha256_hex(identity.as_bytes())
@@ -858,17 +1043,22 @@ fn validate_cached_task_metadata(
     let outputs = metadata
         .outputs
         .iter()
-        .map(|output| {
+        .map(|output| -> Result<(&String, PathBuf), String> {
             reject_cache_sensitive_path(output, "output")?;
-            task_path(project_dir, Some(output), "output", true).map(|path| (output, path))
+            let path = task_path(project_dir, Some(output), "output", true)?;
+            reject_cache_sensitive_resolved_path(project_dir, &path, output, "output")?;
+            Ok((output, path))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, String>>()?;
     let inputs = metadata
         .inputs
         .iter()
-        .map(|input| {
+        .map(|input| -> Result<(&String, PathBuf), String> {
             reject_cache_sensitive_path(input, "input")?;
-            task_path(project_dir, Some(input), "input", true).map(|path| (input, path))
+            let path = task_path(project_dir, Some(input), "input", true)?;
+            reject_cache_sensitive_resolved_path(project_dir, &path, input, "input")?;
+            reject_cache_sensitive_descendants(&path, input, "input")?;
+            Ok((input, path))
         })
         .collect::<Result<Vec<_>, _>>()?;
     for (output, output_path) in outputs {
@@ -897,24 +1087,92 @@ fn validate_cached_task_metadata(
     Ok(())
 }
 
+fn validate_cached_task_environment(plan: &RunPlan, env: &Env) -> Result<(), String> {
+    if !plan.secrets.is_empty() {
+        return Err(
+            "strict cached tasks cannot use declared secrets; secret values are never cache inputs"
+                .to_string(),
+        );
+    }
+    if let Some(dotenv) = plan
+        .environment
+        .lifecycle
+        .dotenv
+        .iter()
+        .find(|dotenv| !dotenv.secrets.is_empty())
+    {
+        return Err(format!(
+            "strict cached tasks cannot use secret dotenv variables from `{}`",
+            dotenv.file
+        ));
+    }
+    if let Some(name) = env.vars.keys().find(|name| is_sensitive_environment_name(name)) {
+        return Err(format!(
+            "strict cached tasks cannot use secret-bearing environment variable `{name}`"
+        ));
+    }
+    Ok(())
+}
+
 fn reject_cache_sensitive_path(relative: &str, field: &str) -> Result<(), String> {
-    let sensitive = Path::new(relative).components().any(|component| {
-        matches!(component, std::path::Component::Normal(name) if name == ".jet")
-    }) || Path::new(relative)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            let name = name.to_ascii_lowercase();
-            name == ".env"
-                || name.starts_with(".env.")
-                || ["secret", "credential", "token", "password"]
-                    .iter()
-                    .any(|word| name.contains(word))
-        });
-    if sensitive {
+    if is_cache_sensitive_path(Path::new(relative)) {
         return Err(format!(
             "cached task {field} `{relative}` is secret-bearing or Jet state"
         ));
+    }
+    Ok(())
+}
+
+fn reject_cache_sensitive_resolved_path(
+    project_dir: &Path,
+    path: &Path,
+    declared: &str,
+    field: &str,
+) -> Result<(), String> {
+    let root = project_dir
+        .canonicalize()
+        .map_err(|error| format!("couldn't resolve cached task project root: {error}"))?;
+    let relative = path
+        .strip_prefix(&root)
+        .map_err(|_| format!("cached task {field} `{declared}` escapes the project"))?;
+    if is_cache_sensitive_path(relative) {
+        return Err(format!(
+            "cached task {field} `{declared}` resolves into secret-bearing or Jet state `{}`",
+            relative.display()
+        ));
+    }
+    Ok(())
+}
+
+fn reject_cache_sensitive_descendants(
+    root: &Path,
+    relative: &str,
+    field: &str,
+) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root)
+        .map_err(|error| format!("couldn't inspect cached task {field} `{relative}`: {error}"))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let child = Path::new(relative).join(entry.file_name());
+        if is_cache_sensitive_path(&child) {
+            return Err(format!(
+                "cached task {field} `{relative}` contains secret-bearing or Jet state `{}`",
+                child.display()
+            ));
+        }
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "strict cached task {field} `{relative}` contains unsupported symlink `{}`",
+                child.display()
+            ));
+        }
+        if file_type.is_dir() {
+            reject_cache_sensitive_descendants(&entry.path(), &child.to_string_lossy(), field)?;
+        }
     }
     Ok(())
 }
@@ -980,17 +1238,40 @@ fn collect_task_scope_files(
 
 fn is_cache_sensitive_path(relative: &Path) -> bool {
     relative.components().any(|component| {
-        matches!(component, std::path::Component::Normal(name) if name == ".jet")
-    }) || relative
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            let name = name.to_ascii_lowercase();
-            name == ".env"
-                || name.starts_with(".env.")
-                || ["secret", "credential", "token", "password"]
-                    .iter()
-                    .any(|word| name.contains(word))
+        matches!(component, std::path::Component::Normal(name) if is_cache_sensitive_component(name))
+    })
+}
+
+fn is_cache_sensitive_component(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return true;
+    };
+    let name = name.to_ascii_lowercase();
+    name == ".jet"
+        || name == ".env"
+        || name.starts_with(".env.")
+        || ["secret", "credential", "token", "password"]
+            .iter()
+            .any(|word| name.contains(word))
+}
+
+fn is_sensitive_environment_name(name: &str) -> bool {
+    name.to_ascii_lowercase()
+        .split(['_', '-', '.'])
+        .any(|part| {
+            matches!(
+                part,
+                "secret"
+                    | "secrets"
+                    | "credential"
+                    | "credentials"
+                    | "token"
+                    | "tokens"
+                    | "password"
+                    | "passwords"
+                    | "key"
+                    | "keys"
+            )
         })
 }
 
@@ -2285,6 +2566,9 @@ mod tests {
         std::fs::write(&secret, "secret\n").unwrap();
         std::fs::create_dir_all(&state_dir).unwrap();
         std::fs::write(&state_secret, "secret\n").unwrap();
+        let nested = root.join("workspace/credentials/prod");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("config"), "secret\n").unwrap();
         std::fs::write(
             &trace,
             format!(
@@ -2323,7 +2607,54 @@ mod tests {
         assert!(validate_cached_task_metadata(&root, &sensitive)
             .unwrap_err()
             .contains("secret-bearing or Jet state"));
+        let nested_sensitive = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            inputs: vec!["workspace".to_string()],
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        assert!(validate_cached_task_metadata(&root, &nested_sensitive)
+            .unwrap_err()
+            .contains("secret-bearing or Jet state"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn strace_paths_use_file_arguments_and_decode_escapes() {
+        assert_eq!(
+            strace_paths(
+                r#"123 execve("/project/jet", ["jet", "run", "--task=build"], 0x0) = 0"#
+            ),
+            vec![PathBuf::from("/project/jet")]
+        );
+        assert_eq!(
+            strace_paths(r#"123 rename("src", "odd\\name") = 0"#),
+            vec![PathBuf::from("src"), PathBuf::from("odd\\name")]
+        );
+        assert_eq!(
+            strace_paths(r#"123 openat(AT_FDCWD, "space\x20name", O_RDONLY) = 3"#),
+            vec![PathBuf::from("space name")]
+        );
+        assert_eq!(
+            strace_paths(r#"123 linkat(AT_FDCWD, "src", AT_FDCWD, "dest", 0) = 0"#),
+            vec![PathBuf::from("src"), PathBuf::from("dest")]
+        );
+        assert_eq!(
+            strace_paths(r#"123 open("caf\303\251", O_RDONLY) = 3"#),
+            vec![PathBuf::from("café")]
+        );
+    }
+
+    #[test]
+    fn strict_cached_tasks_reject_secret_environment_names() {
+        let mut env = empty_task_env();
+        for name in ["API_KEY", "PRIVATE_KEY", "AWS_ACCESS_KEY_ID"] {
+            env.vars.insert(name.to_string(), "not-for-cache".to_string());
+            let error = validate_cached_task_environment(&empty_task_plan(), &env)
+                .unwrap_err();
+            assert!(error.contains("secret-bearing environment variable"), "{name}: {error}");
+            env.vars.clear();
+        }
     }
 
     #[test]
@@ -2404,8 +2735,22 @@ mod tests {
         let mut second = first.clone();
         second.active_environment = Some("ci".to_string());
         assert_ne!(
-            task_environment_hash(&[], &table, &[], &first),
-            task_environment_hash(&[], &table, &[], &second)
+            task_environment_hash_with_vars(&[], &table, &[], &first, &BTreeMap::new()),
+            task_environment_hash_with_vars(&[], &table, &[], &second, &BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn task_environment_hash_changes_when_allowed_dotenv_value_changes() {
+        let table = RefSpec::SourceTable::empty();
+        let facts = ModuleEval::EnvironmentFacts::default();
+        let mut first = BTreeMap::new();
+        first.insert("PORT".to_string(), "8080".to_string());
+        let mut second = first.clone();
+        second.insert("PORT".to_string(), "8081".to_string());
+        assert_ne!(
+            task_environment_hash_with_vars(&[], &table, &[], &facts, &first),
+            task_environment_hash_with_vars(&[], &table, &[], &facts, &second)
         );
     }
 }
