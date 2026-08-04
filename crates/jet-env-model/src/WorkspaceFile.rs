@@ -374,9 +374,18 @@ fn validate_member_path(
     if has_members {
         return Err(Diagnostic::error(
             "E1323",
-            format!("member package `{rel_path}` declares `members`"),
-            "Package membership has depth cap one: only the workspace root may list members".to_string(),
-            "remove the inner `members:` field and lift its references into the workspace root".to_string(),
+            format!(
+                "member package `{rel_path}` at `{}` declares `members`",
+                path.display()
+            ),
+            format!(
+                "Package membership has depth cap one: only the workspace root may list members; the declaration comes from `{}`",
+                path.display()
+            ),
+            format!(
+                "remove the inner `members:` field from `{}` and lift its references into the workspace root",
+                path.display()
+            ),
             span,
         ));
     }
@@ -840,6 +849,9 @@ module workspace {
         )
         .expect_err("nested Package membership is not allowed");
         assert_eq!(error.code, "E1323");
+        assert!(error
+            .what
+            .contains(&package.join(Syntax::PACKAGE_FILE).display().to_string()));
         assert!(error.span.is_some());
         std::fs::remove_dir_all(tmp).ok();
     }

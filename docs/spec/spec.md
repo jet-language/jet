@@ -2347,8 +2347,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   Nix. Package refs that still route through the Nix compatibility provider are
   reported together as E1272, naming only those holes and suggesting either
   installing Nix or drafting an adapter with `jetpack add <ref> --adapt`.
-  Foreign-flake commands remain E1256 because they cannot run at all without
-  the `nix` binary.
+  Foreign-flake projection uses the bounded native evaluator. Unsupported
+  expressions remain E1256; Jetpack does not delegate this path to an
+  installed `nix` binary.
 - **Offline discovery (U26):** `jet search <query>` and
   `jet info <source>.<package>` read only `.jet/discovery/index.jsonl`, local
   provider fixtures, and hangar metadata. They never fetch. `--json` emits the
@@ -3060,15 +3061,13 @@ generated-code license statement — lives in docs/spec/release-policy.md.
 
 ## Toolchain as a dependency — the `jet:` pin (D-JPK-TOOLCHAIN1=A, #179, U30)
 
-A `pkg.jet` pins **which Jet compiler** builds the project with a `jet:` field
-in `payload`, whose value is a **channel ref** (D-JPK-CHANNEL1 semantics):
+A `package.jet` pins **which Jet compiler** builds the project with a top-level
+`jet:` field, whose value is a **channel ref** (D-JPK-CHANNEL1 semantics):
 
 ```jet
-payload: {
-    name:    "wordstats",
-    version: "0.3.1",
-    jet:     0.4,          // track the 0.4 series
-}
+name:    "wordstats"
+version: "0.3.1"
+jet:     0.4              // track the 0.4 series
 ```
 
 Accepted forms: a `MAJOR.MINOR` series (`0.4`), a `MAJOR.MINOR.PATCH` exact
@@ -3116,21 +3115,22 @@ exact lock entry; an unlocked channel source is E1271, including under CI or
 
 ### Frozen-forward identity block
 
-The `payload:` block's `name`, `version`, and `jet` fields form the project's
+The Package root's `name`, `version`, and `jet` fields form the project's
 **identity block**, read by a dedicated pre-parse (`Jetpack::JetPin::
-identity_preparse`) *before* the full manifest parse. Its grammar is
+identity_preparse`) *before* the full manifest parse. Migration-era `pkg.jet`
+keeps the old `payload` wrapper until `jet init` folds it. The canonical grammar is
 **contract-frozen** and must never be narrowed, so version dispatch can never be
 wedged by later manifest evolution (the Go `go.mod` contract):
 
-- The reader finds the top-level `payload: { … }` block by brace matching
-  (strings skipped), then extracts `name:`, `version:`, and `jet:` as simple
-  `key: value` entries at the block's top level, unquoted and trimmed.
-- Any other top-level key, any unknown nested block inside or outside `payload`,
+- The reader extracts top-level `name:`, `version:`, and `jet:` as simple
+  `key: value` entries, unquoted and trimmed. A migration-era `payload: { … }`
+  wrapper is read by the same frozen reader.
+- Any other top-level key, any unknown nested block inside or outside the Package,
   and any surrounding syntax the running `jet` doesn't recognise is tolerated
   and skipped — it never blocks the identity read.
 
 Guarantee: **every past and future `jet` can read the identity block of any
-`pkg.jet`.** New manifest features may only *add* fields/blocks the identity
+`package.jet` or migration-era `pkg.jet`.** New manifest features may only *add* fields/blocks the identity
 reader ignores; the three identity fields keep this exact `key: value` shape.
 
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)

@@ -660,7 +660,8 @@ fn workspace_member_entry(
             return Ok(candidate);
         }
     }
-    let package_manifest = member_root.join(Syntax::PAYLOAD_FILE);
+    let package_manifest = Loader::manifest_path(&member_root)
+        .unwrap_or_else(|| member_root.join(Syntax::PACKAGE_FILE));
     if let Ok(source) = std::fs::read_to_string(&package_manifest) {
         if PackageManifest::build_entry_source(&source).is_some() {
             // A package may own build authority without a runtime entry file.
@@ -697,11 +698,8 @@ fn package_output_entry(root: &std::path::Path) -> Result<Option<std::path::Path
             return Ok(None);
         }
         Err(error) => {
-            let source = if root.join(Syntax::PACKAGE_FILE).is_file() {
-                root.join(Syntax::PACKAGE_FILE)
-            } else {
-                root.join(Syntax::PAYLOAD_FILE)
-            };
+            let source = Loader::manifest_path(root)
+                .unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
             return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
         }
     };
@@ -836,7 +834,7 @@ fn build_project_root(file: &str) -> std::path::PathBuf {
         .to_path_buf();
     let fallback = directory.clone();
     loop {
-        if directory.join(Syntax::PAYLOAD_FILE).is_file() {
+        if Loader::manifest_path(&directory).is_some() {
             return directory;
         }
         let Some(parent) = directory.parent() else {
@@ -872,7 +870,11 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     };
     let mut directory = absolute.parent();
     while let Some(dir) = directory {
-        let package_path = dir.join(Syntax::PAYLOAD_FILE);
+        let package_path = PackageManifest::PackManifest::path_in(dir);
+        if !package_path.is_file() {
+            directory = dir.parent();
+            continue;
+        }
         if !package_seen {
             if let Ok(source) = std::fs::read_to_string(&package_path) {
                 package_seen = true;

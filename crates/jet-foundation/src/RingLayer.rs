@@ -2,7 +2,8 @@
 //!
 //! Profiles form a total order: `core ⊂ alloc ⊂ hosted`. The compiler infers a
 //! package's minimum runtime profile from `use core.*` imports and emitted helper usage,
-//! and rejects imports/helpers above an optional `runtime:` ceiling in `pkg.jet`.
+//! and rejects imports/helpers above an optional `runtime:` ceiling in
+//! `package.jet` (or explicit migration input).
 
 use crate::Syntax;
 
@@ -135,7 +136,7 @@ pub fn layer_ceiling_exceeded(
     let mut why = format!(
         "this package declares `runtime: {}` in `{}`, which caps imports at the `{}` runtime profile; `{module}` needs `{}`",
         ceiling.as_str(),
-        Syntax::PAYLOAD_FILE,
+        Syntax::PACKAGE_FILE,
         ceiling.as_str(),
         needed.as_str(),
     );
@@ -152,7 +153,7 @@ pub fn layer_ceiling_exceeded(
         format!(
             "remove the import or helper use, raise the ceiling to `runtime: {}` in `{}`, or use a `{}` runtime alternative",
             needed.as_str(),
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
             ceiling.as_str(),
         ),
         span,

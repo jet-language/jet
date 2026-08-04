@@ -24,6 +24,9 @@ members: find("./packages")
 
 `Config` files add typed facts to the Package. Equal facts merge. Conflicting
 facts fail before realization. A Config cannot declare `members`.
+Scalar conflicts name both contributing source files and their values. Successful
+fields retain ordered contributor provenance for lock and explain projections;
+failed composition never mutates the Package facts.
 
 ## Registry delivery and provider facts
 
@@ -155,8 +158,10 @@ to have transferred bytes when no verified transport is configured.
 Workspace policy may request cache roles. The host binds those roles to an
 ordered mirror list; endpoints and credentials do not come from a repository,
 flag, or environment variable. Local paths and `file://` mirrors use the
-signed NAR path. Other endpoint families report their missing adapter instead
-of pretending to transfer bytes.
+canonical signed NAR path. HTTP(S), SSH/ssh-ng, S3-compatible, Hangar, and
+Nix-store endpoints use host-owned adapters and preserve the same narinfo,
+NAR digest, and output identity. A missing host adapter is an explicit
+capability error; it never pretends to transfer bytes.
 
 ```text
 jet cache bind public file:///srv/jet-cache --credential keychain:jet/public --yes
@@ -172,16 +177,20 @@ wins. Publishing requires the separate binding write grant. A substitution
 never overwrites an existing destination.
 
 Binary-cache substitution uses the canonical NAR codec. NAR bytes are hashed
-before admission, and a local `narinfo` must carry a matching signed hash,
-size, reference set, and store identity. Substitution stages the decoded tree
-and refuses conflicting existing objects. A missing or corrupt mirror falls
-back to source realization; it never installs an unsigned or replayed result.
+before admission, and a narinfo must carry a matching signed hash, size,
+reference set, and store identity. Substitution stages the decoded tree and
+refuses conflicting existing objects. Local and host-adapter transfers resume
+through a verified .partial prefix before publication. A missing or corrupt
+mirror falls back to source realization; it never installs an unsigned or
+replayed result.
 
-`jet shared-store install` creates the optional user-owned shared Hangar
-configuration and socket-activation units. The broker accepts one
-writer-token-authenticated, signed Hangar archive per request. It never
-receives source or build commands. If the socket is absent, realization stays
-on the ordinary per-user Hangar path.
+`jet shared-store install` creates the optional administrator-installed shared
+Hangar configuration and socket-activation units. The administrator can add a
+capability record with `jet shared-store enroll <uid>`; peer credentials and
+that record authorize each read or write. The broker accepts one signed Hangar
+archive per request and re-verifies it before promotion. It never receives
+source or build commands. If the socket is absent, realization stays on the
+ordinary per-user Hangar path.
 
 ## Services
 
@@ -202,6 +211,12 @@ module env.dev {
     }
 }
 ```
+
+`after` names a declared service dependency. Jetpack validates names, disabled
+dependencies, and cycles before spawning a process, starts dependencies before
+dependents, and stops the selected graph in reverse order. A failed task,
+startup, or readiness gate cleans up services started by that invocation and
+reports cleanup failures instead of leaving misleading health state.
 
 Jet reserves ports and socket paths before start. It checks process start
 identity before it sends a signal. It bounds restart count and backoff, and it
@@ -233,8 +248,36 @@ invalidates the graph before bridge output is reused.
 ```
 
 Use `jet bridge flake` to review an `env.*` shim. Every field without a
-lossless Jet meaning produces L0204. Missing Nix for a foreign-flake path
-produces E1256. Arbitrary evaluator functions never become Jet values.
+lossless Jet meaning produces L0204. Unsupported or over-budget foreign-flake
+input produces E1256. Arbitrary evaluator functions never become Jet values.
+
+The private native evaluator is bounded before parsing: source input is capped
+at 1 MiB, token and expression budgets are finite, imports require explicit
+project-root authority, and only the pinned Stage A systems are accepted.
+Unsupported or over-budget expressions fail with a typed evaluator error. The
+production boundary does not invoke `nix` or require it on `PATH`.
+
+The evaluator's pinned breadth inventory records overlays, dev shells, and
+multi-output package projections as covered. Fixed-output fetchers, cross-system
+packages, and external flakes remain explicit skips: they require fetch,
+target/provider, or remote-source authority that this no-std boundary does not
+own. Differential fuzzing belongs to the host proof harness. These skips are
+reported as unsupported evaluator input; they are not empty or guessed values.
+
+## package.jet transitions
+
+The typed Package model owns one reversible transition journal. `jet init
+--check` previews migration from retired `pkg.jet`, `env.jet`, `workspace.jet`,
+or `config.jet` files; `jet init` applies only closed facts and refuses unknown
+or open fields before writing. `jet init --restore-role-files` reverses the
+last migration and restores the original bytes.
+
+Growth uses the same journal: `jet split env`, `jet split package <name>`, and
+`jet split hosts <name>` preview by default when `--check` is present. A split
+extracts a closed Config or Fleet contribution, records the pre-change bytes
+and fact fingerprint, and applies all files atomically. `jet fold <generated
+file>` reverses the matching journal only when every recorded file still has
+the expected bytes. User-authored files added after a split are not consumed.
 
 ## Build hooks and images
 

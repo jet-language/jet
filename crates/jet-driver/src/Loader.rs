@@ -295,7 +295,8 @@ fn load_entry_with_overlays_mode_with_sink(
     };
     let entry_abs = normalize_path(&entry_abs);
 
-    // M12.1: walk upward from the entry file's directory to find pkg.jet.
+    // Walk upward from the entry file's directory to find package.jet (or the
+    // explicit migration-era pkg.jet fallback).
     // If found, use that directory as project_root and validate the manifest.
     // If none found, fall back to the entry file's directory (R9 — single-file mode).
     let entry_dir = entry_abs
@@ -325,8 +326,25 @@ fn load_entry_with_overlays_mode_with_sink(
         package_auto_derive,
     ) = if let Some(manifest_dir) = manifest_root
     {
-        // Found a pkg.jet — validate it and collect dep source paths.
-        let pack_path = manifest_dir.join(Syntax::PAYLOAD_FILE);
+        if crate::PackageManifest::PackManifest::has_both_manifests(&manifest_dir) {
+            return Err(vec![Diagnostic::error(
+                "E1206",
+                "the package has two manifest roots".to_string(),
+                format!(
+                    "`{}` and `{}` both exist; choosing one would make package identity ambiguous",
+                    Syntax::PACKAGE_FILE,
+                    Syntax::PAYLOAD_FILE,
+                ),
+                format!(
+                    "remove `{}` or migrate it into `{}`",
+                    Syntax::PAYLOAD_FILE,
+                    Syntax::PACKAGE_FILE,
+                ),
+                None,
+            )]);
+        }
+        // Found a Package root — validate it and collect dep source paths.
+        let pack_path = manifest_path(&manifest_dir).expect("manifest root has a manifest");
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
         let package_manifest = match crate::PackageManifest::parse(&raw) {
             Ok(manifest) => manifest,
@@ -823,11 +841,19 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
     Ok(declarations)
 }
 
-/// Walk upward from `start` to find the nearest directory containing `pkg.jet`.
+/// Return the manifest path owned by `root`, preferring canonical
+/// `package.jet` over migration-era `pkg.jet`.
+pub fn manifest_path(root: &Path) -> Option<PathBuf> {
+    let path = crate::PackageManifest::PackManifest::path_in(root);
+    path.is_file().then_some(path)
+}
+
+/// Walk upward from `start` to find the nearest directory containing a Package
+/// root.
 pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join(Syntax::PAYLOAD_FILE).is_file() {
+        if manifest_path(&dir).is_some() {
             return Some(dir);
         }
         match dir.parent() {
@@ -838,7 +864,7 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// D-JPK-FILENAME2=B (A2): walk upward the same way [`find_manifest_root`]
-/// does, but look for a *retired* manifest filename instead of `pkg.jet`.
+/// does, but look for a *retired* manifest filename instead of a Package root.
 /// Stops (returns `None`) the moment a directory has `pkg.jet` — nothing
 /// stale to report once the real manifest is found. Used to upgrade a plain
 /// "no pkg.jet found" message into the E1226 teaching diagnostic when the
@@ -846,7 +872,7 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
 pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join(Syntax::PAYLOAD_FILE).is_file() {
+        if manifest_path(&dir).is_some() {
             return None;
         }
         for name in Syntax::STALE_MANIFEST_NAMES {
@@ -868,12 +894,12 @@ pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)>
 pub fn stale_manifest_name_message(start: &Path) -> Option<String> {
     let (dir, stale) = find_stale_manifest_name(start)?;
     Some(format!(
-        "Error [E1226]: `{stale}` is not the package manifest name — Jet reads `pkg.jet`\n \
-         Why: the manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so \
+        "Error [E1226]: `{stale}` is not the package manifest name — Jet reads `package.jet`\n \
+         Why: the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so \
          tooling, docs, and every worked example never have to guess which file to read\n \
          Fix: rename `{}` to `{}`\n",
         dir.join(stale).display(),
-        dir.join(Syntax::PAYLOAD_FILE).display(),
+        dir.join(Syntax::PACKAGE_FILE).display(),
     ))
 }
 
@@ -976,7 +1002,9 @@ fn collect_dep_dirs(
                 }
             }
             Manifest::DepSpec::Registry(_) => {
-                // Registry deps not available in M12.1.
+                // Registry source trees are materialized by `jet fetch` before
+                // loading. Keep unresolved manifests out of module search
+                // instead of inventing a path or silently using a stale one.
             }
         }
     }
@@ -988,7 +1016,9 @@ fn collect_dep_dirs(
 /// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
 /// empty maps when there is no manifest (R9 single-file mode).
 fn project_resolution(project_root: &Path) -> (HashMap<String, DependencyDir>, PkgResolution) {
-    let pack_path = project_root.join(Syntax::PAYLOAD_FILE);
+    let Some(pack_path) = manifest_path(project_root) else {
+        return (HashMap::new(), PkgResolution::default());
+    };
     let Some(Ok(mf)) = Manifest::load(project_root) else {
         return (HashMap::new(), PkgResolution::default());
     };

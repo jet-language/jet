@@ -94,6 +94,86 @@ pub(super) fn key_value_entries(body: &str) -> Vec<(String, String)> {
     entries
 }
 
+/// Split a source document into fields at top-level commas or newlines.
+/// Nested records, lists, calls, and quoted strings stay inside one field.
+pub(super) fn top_level_entries(text: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in text.chars() {
+        if quoted {
+            current.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                quoted = true;
+                current.push(ch);
+            }
+            '{' | '[' | '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '}' | ']' | ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' | '\n' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    entries.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        entries.push(current);
+    }
+    entries
+}
+
+/// Split one top-level `field: value` entry. A colon inside a nested value or
+/// string is data, not the field separator.
+pub(super) fn split_field(entry: &str) -> Option<(String, String)> {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in entry.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => depth -= 1,
+            ':' if depth == 0 => {
+                return Some((
+                    entry[..index].trim().to_string(),
+                    entry[index + ch.len_utf8()..].trim().to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Split on commas that are not nested inside `()`/`[]`/`{}`.
 pub(super) fn top_level_commas(body: &str) -> Vec<String> {
     let mut out = Vec::new();

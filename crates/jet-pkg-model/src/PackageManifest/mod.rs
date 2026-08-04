@@ -273,6 +273,9 @@ pub struct PackManifest {
 pub enum ManifestError {
     /// No `payload: { … }` block at all.
     MissingPayload,
+    /// Both the canonical root and migration-era wrapper exist. Choosing one
+    /// silently would make package identity depend on traversal order.
+    BothManifestFiles,
     /// `payload` is missing a required `name` or `version`.
     MissingField(&'static str),
     /// A `deps` value is not a `name#version`, bare path, or source ref.
@@ -326,6 +329,13 @@ pub enum ManifestError {
 const RESERVED_SECTIONS: &[&str] = &["dev_deps", "patch", "workspace"];
 
 impl PackManifest {
+    /// Whether both manifest spellings exist in this directory. The wrapper is
+    /// migration input only; it must never compete with `package.jet`.
+    pub fn has_both_manifests(dir: &std::path::Path) -> bool {
+        dir.join(Syntax::PACKAGE_FILE).is_file()
+            && dir.join(Syntax::PAYLOAD_FILE).is_file()
+    }
+
     /// The path to the package manifest in a project dir.
     pub fn path_in(dir: &std::path::Path) -> std::path::PathBuf {
         let canonical = dir.join(Syntax::PACKAGE_FILE);
@@ -338,6 +348,9 @@ impl PackManifest {
 
     /// Load and parse the package manifest in `dir`, if present.
     pub fn load(dir: &std::path::Path) -> Option<Result<PackManifest, ManifestError>> {
+        if Self::has_both_manifests(dir) {
+            return Some(Err(ManifestError::BothManifestFiles));
+        }
         let path = Self::path_in(dir);
         let text = std::fs::read_to_string(&path).ok()?;
         Some(parse(&text).map(|mut manifest| {
@@ -364,13 +377,14 @@ impl PackManifest {
     }
 }
 
-/// Parse a `pkg.jet` package manifest from its text (U1/U10/D-BUILDPROFILE1).
+/// Parse a package manifest from either the canonical `package.jet` root or a
+/// migration-era `pkg.jet` wrapper (U1/U10/D-ECO-FILEROOT1).
 pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     let text = Helpers::strip_line_comments(text);
 
     let package = match block_body(&text, Syntax::MANIFEST_BLOCK_PAYLOAD, '{', '}').or_else(|| block_body(&text, "identity", '{', '}')) {
         Some(body) => parse_package(&body)?,
-        None => return Err(ManifestError::MissingPayload),
+        None => ParseBlocks::parse_package_root(&text)?,
     };
 
     let deps = match block_body(&text, "deps", '{', '}') {

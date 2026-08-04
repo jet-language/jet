@@ -23,6 +23,7 @@ use std::process::Command;
 mod common;
 use common::jetpack_bin;
 use jet_env_model::ModuleEval::evaluate_env;
+use jetpack::Store;
 
 fn jetpack() -> Command {
     Command::new(jetpack_bin())
@@ -82,6 +83,44 @@ fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
             fs::set_permissions(&bin, perm).unwrap();
         }
     }
+}
+
+fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
+    let source = root.join(format!("source-{name}"));
+    fs::create_dir_all(source.join("bin")).unwrap();
+    fs::write(source.join("bin").join(binary), b"#!/bin/sh\necho image\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = source.join("bin").join(binary);
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+    let roots = Store::Roots {
+        root: root.to_path_buf(),
+        dev_mode: false,
+    };
+    Store::ingest_tree(
+        &roots,
+        &Store::IngestRequest {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            reference: reference.to_string(),
+            cache_identity: Store::CacheIdentity {
+                source_fingerprint: format!("sha256-source-{name}"),
+                recipe_fingerprint: format!("sha256-recipe-{name}"),
+                policy_fingerprint: "policy=image-test".to_string(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".to_string(), source)]),
+            signature: String::new(),
+            provenance: "image-test".to_string(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap();
 }
 
 // ── field-check / cross-check (modeval) ─────────────────────────────────────
@@ -197,6 +236,70 @@ fn image_build_is_reproducible_end_to_end() {
     fs::remove_dir_all(scratch.path.join(".jet/images")).unwrap();
     let b = digest_of();
     assert_eq!(a, b, "same project must build byte-identical index.json");
+}
+
+/// Environment images consume the realized Hangar bin projection. A project
+/// `build/` directory is intentionally absent, so the old scratch-file path
+/// would fail this production-store check.
+#[test]
+fn environment_image_uses_realized_package_output() {
+    let project = Scratch::new("environment-store");
+    let root = Scratch::new("environment-store-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev }\n",
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+
+    let out = jetpack()
+        .arg("image")
+        .arg("server")
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "image should use Hangar output: {stderr}");
+    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
+        .unwrap();
+    assert!(report.contains("package:bash@nixpkgs"), "projection: {report}");
+    assert!(!project.path.join("build").exists());
+}
+
+#[test]
+fn environment_image_service_projection_is_e1336() {
+    let project = Scratch::new("environment-service");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { services: { api: { run: [\"true\"] } } }\nmodule image.server { from: env.dev, services: [\"api\"] }\n",
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "service projection must fail: {stderr}");
+    let diagnostic = stderr
+        .split("\n\n")
+        .find(|block| block.contains("error[E1336]"))
+        .map(|block| {
+            block
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(str::trim)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .expect("E1336 diagnostic block");
+    assert_eq!(diagnostic, include_str!("cli/image_service_projection_e1336.txt").trim());
+    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
+        .expect("rejected image projection report");
+    assert!(report.contains("\"rejected\":[\"services\"]"), "projection: {report}");
 }
 
 /// `jetpack image <name>` when the package hasn't been built yet (no

@@ -60,6 +60,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} cache substitute <entry> --role <role> --to <dir> --yes
                                       restore a verified NAR into a new directory
   {bin} shared-store install         install the optional shared Hangar broker
+  {bin} shared-store enroll <uid>    grant a user read/write broker access
   {bin} shared-store status          show shared-store broker configuration
   {bin} vendor [<dir>]                 write vendored + hash-pinned sources
   {bin} audit                          read build provenance (runs nothing)
@@ -94,7 +95,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} services health [<name>]       one-shot readiness check
   {bin} services logs <name>           print a service's captured stdout/stderr
   {bin} image <name>                   build a declared `.Oci` image into a native OCI layout
-  {bin} image <name> --push <ref>      copy a local file:// OCI layout; remote refs fail E1268
+  {bin} image <name> --push <ref>      copy locally or publish through OCI Distribution
 
 {trust}
   {bin} trust list                    show package/build/env/service/image/fleet/jetos grants
@@ -131,7 +132,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --affected-since <ref>               (build/test/run) members changed since git ref + dependents
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
-  --push <ref>                         (image) copy a local file:// OCI layout; remote refs fail E1268
+  --push <ref>                         (image) copy locally or publish through OCI Distribution
   --name <name>                        (os switch) override generation name
   --manual <path>                      (os init/image) record manual disk path
   --disk <path>                        (os vm prove) target qcow2/raw disk image

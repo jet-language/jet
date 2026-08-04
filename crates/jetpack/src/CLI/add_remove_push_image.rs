@@ -9,6 +9,14 @@ use crate::RefSpec;
 use crate::Store;
 use crate::{Components, EnvFile, Image, Lock, Syntax};
 use jet_env_model::ModuleEval;
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+
+enum ImagePushDestination {
+    Local(std::path::PathBuf),
+    Registry(String),
+}
 
 /// `jetpack add <ref>` — edit the project env file. `jetpack add <Component>`
 /// (an exact, case-sensitive match against the starter component catalog —
@@ -376,8 +384,8 @@ pub(super) fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
 /// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
 /// builds the named `.Oci` `image.<name>` module contribution into a native
 /// OCI layout (`Jetpack::Image`). `.Iso` images ride the jetos installer tier
-/// (Phase D, owner-gated — untouched here); `--push` is honestly gated on TLS
-/// (E1268), never a fake push.
+/// (Phase D, owner-gated — untouched here); --push uses a local immutable
+/// copy or the native OCI Distribution transport.
 pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
@@ -438,20 +446,36 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 
     let push_destination = match parsed.flags.push.as_deref() {
-        Some(push_ref) if push_ref.starts_with("https://") || push_ref.starts_with("http://") => {
+        Some(push_ref)
+            if push_ref.starts_with("https://") || push_ref.starts_with("http://") =>
+        {
+            Some(ImagePushDestination::Registry(push_ref.to_string()))
+        }
+        Some(push_ref) if push_ref.starts_with("oci://") => {
             theme.error_coded(
                 "E1268",
-                &format!("`jet image {name}` cannot push to remote registry `{push_ref}`"),
-                "the image bytes are built and verified locally, but this binary has no configured OCI registry transport; it never fakes a remote push.",
-                "use `--push file:///path/to/layout` for a local mirror, or configure a verified registry transport.",
+                &format!("OCI reference {push_ref} needs an HTTP registry URL"),
+                "the native registry transport accepts an explicit http:// or https:// registry reference.",
+                "use --push https://registry.example/repository:tag, or use file:///... for a local layout.",
             );
             return 2;
         }
-        Some(push_ref) => Some(if let Some(path) = push_ref.strip_prefix("file://") {
+        Some(push_ref) if looks_like_registry_reference(push_ref) => {
+            theme.error_coded(
+                "E1268",
+                &format!("`jet image {name}` cannot push remote OCI reference `{push_ref}`"),
+                "remote registry TLS/transport requires an explicit verified HTTP(S) endpoint; Jet never treats a registry name as a local path.",
+                "use `--push https://registry.example/repository:tag` for the configured transport, or `--push file:///path/to/layout` for a local copy.",
+            );
+            return 2;
+        }
+        Some(push_ref) => Some(ImagePushDestination::Local(if let Some(path) =
+            push_ref.strip_prefix("file://")
+        {
             std::path::PathBuf::from(path)
         } else {
             std::path::PathBuf::from(push_ref)
-        }),
+        })),
         None => None,
     };
 
@@ -466,10 +490,24 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
         Some(reference) => {
-            let path = reference
-                .strip_prefix("file://")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| dir.join(reference));
+            let path = if let Some(file) = reference.strip_prefix("file://") {
+                std::path::PathBuf::from(file)
+            } else {
+                let relative = std::path::Path::new(reference);
+                if relative.is_absolute()
+                    || relative.components().any(|component| {
+                        component == std::path::Component::ParentDir
+                    })
+                {
+                    theme.error(
+                        &format!("base OCI layout `{reference}` escapes the project"),
+                        "a project-relative base must stay inside the project root.",
+                        "use a safe relative layout path or an explicit file:/// absolute path.",
+                    );
+                    return 2;
+                }
+                dir.join(relative)
+            };
             if !path.is_dir() {
                 theme.error(
                     &format!("base OCI layout `{}` does not exist", path.display()),
@@ -483,27 +521,47 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         None => None,
     };
 
-    // D-JPK-IMAGE1/D-ENV-IMAGE1: build from what `jet build` already realized.
-    // Jetpack has
-    // no dependency on the compiler's own build machinery (the dependency
-    // runs the other way — `jet` depends on `jet-driver`, not vice versa), so
-    // this mirrors, rather than calls into, `jet build`'s `build/<name>`
-    // output convention (`Source/CmdCompile.rs::bin_path`).
+    // D-JPK-IMAGE1: non-environment package images still read the compiler's
+    // project-local `build/<name>` output. Environment images below consume
+    // verified Hangar package outputs instead.
+    let roots = Store::resolve();
+    let out_dir = dir.join(".jet").join("images").join(name);
+    let mut projection = Image::ProjectionReport::default();
+    if !image.services.is_empty() {
+        projection.rejected.push("services".to_string());
+        if let Err(error) = write_rejected_projection(&out_dir, &projection) {
+            theme.error(
+                &format!("couldn't write image {name} rejection projection"),
+                &error.to_string(),
+                "check that the image output directory is writable.",
+            );
+        }
+        theme.error_coded(
+            "E1336",
+            &format!("environment image {name} cannot project services"),
+            "the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy",
+            "run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime",
+        );
+        return 2;
+    }
     let mut files = if image.from_environment {
-        environment_image_files(theme, &dir, &plan, image, name)
+        environment_image_files(theme, &roots, &plan, name)
     } else {
         let bin_path = dir.join("build").join(&image.from);
-        let Ok(bin_data) = std::fs::read(&bin_path) else {
-            theme.error(
-                &format!("`{}` isn't built yet", image.from),
-                &format!(
-                    "`jet image {name}` needs `{}` already built at `{}`.",
-                    image.from,
-                    bin_path.display()
-                ),
-                &format!("run `jet build` first, then `jet image {name}`"),
-            );
-            return 2;
+        let bin_data = match read_project_image_file(&dir.join("build"), &image.from) {
+            Ok(data) => data,
+            Err(_) => {
+                theme.error(
+                    &format!("{} isn't built yet", image.from),
+                    &format!(
+                        "jet image {name} needs {} already built at {}.",
+                        image.from,
+                        bin_path.display()
+                    ),
+                    &format!("run jet build first, then jet image {name}"),
+                );
+                return 2;
+            }
         };
         vec![Image::LayerFile {
             path: format!("usr/local/bin/{}", image.from),
@@ -511,23 +569,99 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             mode: 0o755,
         }]
     };
+    if image.from_environment {
+        projection
+            .included
+            .extend(plan.package_refs.iter().map(|value| format!("package:{value}")));
+        projection.included.push("environment:shell".to_string());
+        projection.changed.push("from:environment".to_string());
+        if !plan.secrets.is_empty() {
+            projection.omitted.push("environment.secrets".to_string());
+        }
+        if !plan.files.is_empty() {
+            projection.omitted.push("environment.managed-files".to_string());
+        }
+        if !plan.integrations.is_empty() {
+            projection.omitted.push("environment.integrations".to_string());
+        }
+        for language in &plan.language_projections {
+            let prefix = format!("language:{}", language.selection.name);
+            projection
+                .changed
+                .push(format!("{prefix}:pack={}", language.pack.fingerprint()));
+            projection.included.extend(
+                language
+                    .included
+                    .iter()
+                    .map(|fact| format!("{prefix}:included:{fact}")),
+            );
+            projection.changed.extend(
+                language
+                    .changed
+                    .iter()
+                    .map(|fact| format!("{prefix}:changed:{fact}")),
+            );
+            projection.omitted.extend(
+                language
+                    .omitted
+                    .iter()
+                    .map(|fact| format!("{prefix}:omitted:{fact}")),
+            );
+        }
+        if !plan.profiles.is_empty() {
+            projection.omitted.push("environment.profiles".to_string());
+        }
+    } else {
+        projection
+            .included
+            .push(format!("package:{}", image.from));
+    }
+    for (key, _) in &image.env_vars {
+        projection.changed.push(format!("env:{key}"));
+    }
+    if !image.expose.is_empty() {
+        projection.changed.push("expose".to_string());
+    }
+    if image.user.is_some() {
+        projection.changed.push("user".to_string());
+    }
+    if image.health.is_some() {
+        projection.changed.push("health".to_string());
+    }
+    if image.entrypoint.is_some() {
+        projection.changed.push("entrypoint".to_string());
+    }
     if files.is_empty() {
+        projection.rejected.push("environment.package-output".to_string());
+        if let Err(error) = write_rejected_projection(&out_dir, &projection) {
+            theme.error(
+                &format!("couldn't write image {name} rejection projection"),
+                &error.to_string(),
+                "check that the image output directory is writable.",
+            );
+        }
         return 2;
     }
     for rel in &image.files {
-        let Ok(data) = std::fs::read(dir.join(rel)) else {
-            theme.error(
-                &format!("`{rel}` (from `files:`) doesn't exist"),
-                &format!("`image.{name}`'s `files:` names `{rel}`, relative to the project dir."),
-                "fix the path, or remove it from `files:`.",
-            );
-            return 2;
+        let data = match read_project_image_file(&dir, rel) {
+            Ok(data) => data,
+            Err(error) => {
+                projection.rejected.push(format!("file:{rel}"));
+                let _ = write_rejected_projection(&out_dir, &projection);
+                theme.error(
+                    &format!("image file {rel} cannot be projected"),
+                    &error,
+                    "use a regular project-relative file that stays inside the project root.",
+                );
+                return 2;
+            }
         };
         files.push(Image::LayerFile {
-            path: rel.trim_start_matches('/').to_string(),
+            path: rel.to_string(),
             data,
             mode: 0o644,
         });
+        projection.included.push(format!("file:{rel}"));
     }
 
     let spec = Image::BuildSpec {
@@ -544,18 +678,46 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         user: image.user.unwrap_or(10_001),
         healthcheck: image.health.clone(),
     };
-    let out_dir = dir.join(".jet").join("images").join(name);
     match Image::build_with_base(&spec, &out_dir, name, base_directory.as_deref()) {
         Ok(built) => {
-            if let Some(destination) = push_destination {
-                if let Err(error) = Image::copy_layout(&out_dir, &destination) {
-                    theme.error(
-                        &format!("couldn't copy image `{name}` to `{}`", destination.display()),
-                        &error.to_string(),
-                        "choose an empty or byte-identical local OCI layout destination.",
-                    );
-                    return 2;
+            if let Err(error) =
+                Image::write_projection_report(&out_dir, &built.manifest_digest, &projection)
+            {
+                theme.error(
+                    &format!("couldn't write image {name} projection"),
+                    &error.to_string(),
+                    "check that the image output directory is writable.",
+                );
+                return 2;
+            }
+            match push_destination {
+                Some(ImagePushDestination::Local(destination)) => {
+                    if let Err(error) = Image::copy_layout(&out_dir, &destination) {
+                        theme.error(
+                            &format!("couldn't copy image {name} to {}", destination.display()),
+                            &error.to_string(),
+                            "choose an empty or byte-identical local OCI layout destination.",
+                        );
+                        return 2;
+                    }
                 }
+                Some(ImagePushDestination::Registry(reference)) => {
+                    match Image::push_registry(&out_dir, &reference) {
+                        Ok(report) => theme.detail(&format!(
+                            "published {} ({} new blobs, {} bytes)",
+                            report.reference, report.blobs_uploaded, report.bytes_uploaded
+                        )),
+                        Err(error) => {
+                            theme.error(
+                                &format!("couldn't publish image {name}"),
+                                &error.to_string(),
+                                "check the registry URL and its host-configured credentials.",
+                            );
+                            return 2;
+                        }
+                    }
+                }
+                None => {}
             }
             theme.ok(&format!(
                 "built image `{name}` -> {} ({})",
@@ -575,68 +737,122 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+fn looks_like_registry_reference(reference: &str) -> bool {
+    let authority = reference.split('/').next().unwrap_or_default();
+    authority == "localhost" || authority.contains('.')
+}
+
+fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec<u8>, String> {
+    let path = std::path::Path::new(relative);
+    if relative.is_empty()
+        || relative.contains('\\')
+        || relative.bytes().any(|byte| byte.is_ascii_control())
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("image files must be safe project-relative paths".to_string());
+    }
+    let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let source = root.join(path);
+    let metadata = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("image file must be a regular file, not a symlink or directory".to_string());
+    }
+    if metadata.len() > 512 * 1024 * 1024 {
+        return Err("image file exceeds the 512 MiB layer limit".to_string());
+    }
+    let resolved = std::fs::canonicalize(&source).map_err(|error| error.to_string())?;
+    if !resolved.starts_with(&root) {
+        return Err("image file resolves outside the project root".to_string());
+    }
+    let file = std::fs::File::open(resolved).map_err(|error| error.to_string())?;
+    let mut data = Vec::new();
+    file.take(512 * 1024 * 1024 + 1)
+        .read_to_end(&mut data)
+        .map_err(|error| error.to_string())?;
+    if data.len() > 512 * 1024 * 1024 {
+        return Err("image file exceeded the 512 MiB layer limit while being read".to_string());
+    }
+    Ok(data)
+}
+
 fn environment_image_files(
     theme: &Theme,
-    dir: &std::path::Path,
+    roots: &Store::Roots,
     plan: &ModuleEval::EnvPlan,
-    image: &ModuleEval::ImagePlan,
     name: &str,
 ) -> Vec<Image::LayerFile> {
-    let mut package_names = plan
-        .package_refs
-        .iter()
-        .filter_map(|reference| reference.split('@').next())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    for service in &image.services {
-        let Some(declaration) = plan.dev_services.iter().find(|candidate| candidate.name == *service) else {
-            theme.error(
-                &format!("environment image `{name}` names unknown service `{service}`"),
-                "an image can project only services declared by the source environment",
-                "declare the service under `env.<name>`, or remove it from `services:`",
-            );
-            return Vec::new();
-        };
-        if !declaration.enable {
-            theme.error(
-                &format!("environment image `{name}` selects disabled service `{service}`"),
-                "disabled services are not part of the environment projection",
-                "enable the service or remove it from the image projection",
-            );
-            return Vec::new();
-        }
-        if let Some(reference) = crate::Services::catalog_pkg_ref(service) {
-            if let Some(package) = reference.split('@').next() {
-                package_names.push(package.to_string());
-            }
-        }
-    }
-    package_names.sort();
-    package_names.dedup();
+    let mut package_refs = plan.package_refs.clone();
+    package_refs.sort();
+    package_refs.dedup();
 
-    let mut files = Vec::new();
+    let mut files: Vec<Image::LayerFile> = Vec::new();
     let mut shell_source = None;
-    for package in package_names {
-        let path = dir.join("build").join(&package);
-        let Ok(data) = std::fs::read(&path) else {
-            theme.error(
-                &format!("environment package `{package}` isn't built yet"),
-                &format!("the environment image needs `{}` at `{}`", package, path.display()),
-                &format!("run `jet build` for the environment packages, then `jet image {name}`"),
+    for reference in package_refs {
+        let Some(entry) = Store::find_by_reference(roots, &reference) else {
+            theme.error_coded(
+                "E1336",
+                &format!("environment package `{reference}` is not realized"),
+                "environment images consume the verified Hangar package output; they do not read a project build scratch file",
+                &format!("run `jetpack build {reference}`, then `jet image {name}`"),
             );
             return Vec::new();
         };
-        if shell_source.is_none() && matches!(package.as_str(), "bash" | "busybox" | "dash" | "sh") {
-            shell_source = Some(data.clone());
+        if let Err(error) = verify_realized_hangar_package(roots, &entry) {
+            theme.error_coded(
+                "E1336",
+                &format!("environment package `{reference}` failed Hangar verification"),
+                &error,
+                &format!("realize a verified executable package for `{reference}`, then run `jet image {name}`"),
+            );
+            return Vec::new();
         }
-        files.push(Image::LayerFile {
-            path: format!("usr/local/bin/{package}"),
-            data,
-            mode: 0o755,
-        });
+        let binaries = match read_realized_package_binaries(&entry) {
+            Ok(binaries) => binaries,
+            Err(error) => {
+                theme.error_coded(
+                    "E1336",
+                    &format!("environment package `{reference}` has no usable binary output"),
+                    &error,
+                    &format!("realize an executable package for `{reference}`, then run `jet image {name}`"),
+                );
+                return Vec::new();
+            }
+        };
+        for (binary, data) in &binaries {
+            if matches!(binary.as_str(), "bash" | "busybox" | "dash" | "sh")
+                && shell_source.is_none()
+            {
+                shell_source = Some(data.clone());
+            }
+            let target = format!("usr/local/bin/{binary}");
+            if let Some(existing) = files.iter().find(|file| file.path == target) {
+                if existing.data != *data {
+                    theme.error_coded(
+                        "E1336",
+                        &format!("environment image `{name}` has conflicting binary `{binary}`"),
+                        "two realized package outputs would write different bytes to one image path",
+                        "remove the duplicate executable or select package outputs with one stable binary",
+                    );
+                    return Vec::new();
+                }
+                continue;
+            }
+            files.push(Image::LayerFile {
+                path: target,
+                data: data.clone(),
+                mode: 0o755,
+            });
+        }
     }
     let Some(shell) = shell_source else {
-        theme.error(
+        theme.error_coded(
+            "E1336",
             &format!("environment image `{name}` has no shell"),
             "D-ENV-IMAGE1's beginner image is a runnable shell image and cannot copy a host shell or invent one",
             "add `bash`, `busybox`, `dash`, or `sh` to the environment packages and build it first",
@@ -649,4 +865,93 @@ fn environment_image_files(
         mode: 0o755,
     });
     files
+}
+
+fn write_rejected_projection(
+    out_dir: &Path,
+    projection: &Image::ProjectionReport,
+) -> std::io::Result<()> {
+    fs::create_dir_all(out_dir)?;
+    Image::write_projection_report(out_dir, "", projection)
+}
+
+fn verify_realized_hangar_package(
+    roots: &Store::Roots,
+    entry: &Store::StoreEntry,
+) -> Result<(), String> {
+    Store::verify_hangar_object(roots, entry).map_err(|error| format!("{error:?}"))?;
+    if entry.envelope.output_hash.is_empty() {
+        return Err("the Hangar entry has no canonical output digest".to_string());
+    }
+    let expected = fs::canonicalize(
+        roots
+            .hangar_dir()
+            .join("objects")
+            .join(&entry.envelope.output_hash),
+    )
+    .map_err(|error| format!("the Hangar object cannot be opened: {error}"))?;
+    let output_metadata = fs::symlink_metadata(&entry.out)
+        .map_err(|error| format!("the Hangar output cannot be opened: {error}"))?;
+    if output_metadata.file_type().is_symlink() {
+        return Err("the Hangar output is a symlink".to_string());
+    }
+    let output = fs::canonicalize(&entry.out)
+        .map_err(|error| format!("the Hangar output cannot be resolved: {error}"))?;
+    if output != expected {
+        return Err("the Hangar entry output is not its verified content-addressed object".to_string());
+    }
+    let bin_metadata = fs::symlink_metadata(&entry.bin)
+        .map_err(|error| format!("the Hangar bin projection cannot be opened: {error}"))?;
+    if bin_metadata.file_type().is_symlink() {
+        return Err("the Hangar bin projection is a symlink".to_string());
+    }
+    let bin = fs::canonicalize(&entry.bin)
+        .map_err(|error| format!("the Hangar bin projection cannot be resolved: {error}"))?;
+    if !bin.starts_with(&output) {
+        return Err("the Hangar bin projection escapes its verified output".to_string());
+    }
+    Ok(())
+}
+
+fn read_realized_package_binaries(entry: &Store::StoreEntry) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if entry.bin.is_empty() {
+        return Err("the Hangar entry has no executable bin directory".to_string());
+    }
+    let bin = Path::new(&entry.bin);
+    let metadata = fs::symlink_metadata(bin).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("the Hangar bin projection is not a real directory".to_string());
+    }
+    let root = fs::canonicalize(bin).map_err(|error| error.to_string())?;
+    let mut paths = fs::read_dir(&root)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    paths.sort_by_key(|entry| entry.file_name());
+    let mut binaries = Vec::new();
+    for item in paths {
+        let path = item.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("the Hangar bin projection contains a non-regular entry".to_string());
+        }
+        let resolved = fs::canonicalize(&path).map_err(|error| error.to_string())?;
+        if !resolved.starts_with(&root) {
+            return Err("the Hangar bin projection escapes its package output".to_string());
+        }
+        if metadata.len() > 512 * 1024 * 1024 {
+            return Err("a realized package binary exceeds the 512 MiB layer limit".to_string());
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty() && !value.bytes().any(|byte| byte.is_ascii_control()))
+            .ok_or_else(|| "a realized package binary has an unsafe name".to_string())?
+            .to_string();
+        binaries.push((name, fs::read(resolved).map_err(|error| error.to_string())?));
+    }
+    if binaries.is_empty() {
+        return Err("the Hangar bin projection is empty".to_string());
+    }
+    Ok(binaries)
 }

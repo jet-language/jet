@@ -46,6 +46,9 @@ pub struct NarInfo {
     pub nar_hash: String,
     pub references: Vec<String>,
     pub deriver: Option<String>,
+    /// Optional Nix content-addressing descriptor. It is signed with the
+    /// remaining narinfo fields and retained across endpoint round-trips.
+    pub ca: Option<String>,
     pub signatures: Vec<NarSignature>,
 }
 
@@ -130,6 +133,9 @@ impl NarInfo {
             return Err(invalid("only uncompressed NARs are supported by this cache"));
         }
         validate_digest(&self.nar_hash)?;
+        if self.file_size > MAX_NAR_BYTES as u64 || self.nar_size > MAX_NAR_BYTES as u64 {
+            return Err(invalid("narinfo size exceeds the NAR limit"));
+        }
         if self.file_size != self.nar_size {
             return Err(invalid("uncompressed narinfo file and NAR sizes disagree"));
         }
@@ -143,6 +149,14 @@ impl NarInfo {
         if let Some(deriver) = &self.deriver {
             if !deriver.is_empty() {
                 validate_store_path(deriver)?;
+            }
+        }
+        if let Some(ca) = &self.ca {
+            if ca.is_empty()
+                || ca.len() > MAX_NAME_BYTES * 4
+                || ca.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+            {
+                return Err(invalid("narinfo CA field is invalid"));
             }
         }
         let mut signatures = BTreeSet::new();
@@ -178,6 +192,9 @@ impl NarInfo {
                 line(&mut out, "Deriver", deriver)?;
             }
         }
+        if let Some(ca) = &self.ca {
+            line(&mut out, "CA", ca)?;
+        }
         Ok(out)
     }
 
@@ -208,6 +225,7 @@ impl NarInfo {
             nar_hash: String::new(),
             references: Vec::new(),
             deriver: None,
+            ca: None,
             signatures: Vec::new(),
         };
         let mut seen = BTreeSet::new();
@@ -239,6 +257,7 @@ impl NarInfo {
                         }
                     }
                     "Deriver" => info.deriver = Some(value.to_string()),
+                    "CA" => info.ca = Some(value.to_string()),
                     "Sig" => info.signatures.push(parse_signature(value)?),
                     _ => return Err(invalid("narinfo contains an unknown field")),
                 }
@@ -388,7 +407,7 @@ fn encode_node(
         if metadata.len() > MAX_NODE_BYTES {
             return Err(invalid("NAR file exceeds the 512 MiB limit"));
         }
-        let bytes = fs::read(path)?;
+        let bytes = read_bounded(path, MAX_NODE_BYTES as usize)?;
         put_string(out, "(")?;
         put_string(out, "type")?;
         put_string(out, "regular")?;
@@ -519,6 +538,7 @@ fn publish_decoded_node(node: &NarNode, destination: &Path) -> io::Result<()> {
     let parent = destination
         .parent()
         .ok_or_else(|| invalid("NAR substitution destination has no parent"))?;
+    validate_destination_parent(parent)?;
     fs::create_dir_all(parent)?;
     let staging = parent.join(format!(
         ".nar-stage-{}-{}",
@@ -724,7 +744,11 @@ fn validate_store_path(value: &str) -> io::Result<()> {
 fn validate_relative_url(value: &str) -> io::Result<()> {
     let path = Path::new(value);
     if value.is_empty()
-        || value.contains('\0')
+        || value.bytes().any(|byte| {
+            byte == 0
+                || byte.is_ascii_control()
+                || matches!(byte, b'?' | b'#' | b'%')
+        })
         || value.contains("//")
         || value.ends_with('/')
         || path.is_absolute()
@@ -804,9 +828,13 @@ fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit as u64 {
         return Err(invalid("binary-cache input is not a regular file within its limit"));
     }
-    let mut file = fs::File::open(path)?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.read_to_end(&mut bytes)?;
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take((limit as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(invalid("binary-cache input exceeded its limit while being read"));
+    }
     Ok(bytes)
 }
 
@@ -817,7 +845,7 @@ fn write_or_match(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
     if path.is_file() {
-        if fs::read(path)? == bytes {
+        if read_bounded(path, bytes.len())? == bytes {
             return Ok(());
         }
         return Err(invalid("binary-cache destination already has conflicting bytes"));
@@ -846,8 +874,22 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .open(&partial)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    match fs::rename(&partial, path) {
-        Ok(()) => Ok(()),
+    match fs::hard_link(&partial, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&partial);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let same = read_bounded(path, bytes.len())
+                .map(|existing| existing == bytes)
+                .unwrap_or(false);
+            let _ = fs::remove_file(&partial);
+            if same {
+                Ok(())
+            } else {
+                Err(invalid("binary-cache destination was concurrently published with different bytes"))
+            }
+        }
         Err(error) => {
             let _ = fs::remove_file(&partial);
             Err(error)
@@ -877,6 +919,36 @@ fn remove_tree(path: &Path) -> io::Result<()> {
     } else {
         fs::remove_dir_all(path)
     }
+}
+
+fn validate_destination_parent(path: &Path) -> io::Result<()> {
+    let mut current = if path.is_absolute() {
+        PathBuf::from(std::path::MAIN_SEPARATOR_STR)
+    } else {
+        std::env::current_dir()?
+    };
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => {}
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(invalid("NAR destination contains a parent component"));
+            }
+            Component::Normal(value) => {
+                current.push(value);
+                if let Ok(metadata) = fs::symlink_metadata(&current) {
+                    if metadata.file_type().is_symlink() {
+                        return Err(invalid("NAR destination traverses a symlink"));
+                    }
+                    if !metadata.is_dir() {
+                        return Err(invalid("NAR destination parent is not a directory"));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn unique_suffix() -> String {
@@ -924,6 +996,7 @@ mod tests {
             nar_hash: digest_for(b"test"),
             references: Vec::new(),
             deriver: None,
+            ca: None,
             signatures: Vec::new(),
         };
         let signed = info.signed(&key).unwrap();

@@ -3617,15 +3617,15 @@ deps: {
 }
 ```
 
-**U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `pkg.jet` may carry a top-level
+**U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `package.jet` carries a top-level
 `jet:` field pinning the toolchain (channel semantics per D-JPK-CHANNEL1;
 `.jet/lock` records the exact version). A jet whose version differs realizes
 the pinned toolchain into the hangar (prebuilt objects via D-JPK-CACHE1,
 offline thereafter per D-JPK-OFFLINE1, GC per D-JPK-GC1, no Nix required per
 D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
-(D-JPK-DISPATCH1). Frozen-forward identity block: the `payload:` block and
-`jet:` line stay parseable by every future jet, so an old jet can always
-read enough of any manifest to fetch the right toolchain. `jet self toolchain`
+(D-JPK-DISPATCH1). Frozen-forward identity block: the top-level identity fields
+and migration-era `payload:` wrapper stay parseable by every future jet, so an
+old jet can always read enough of any manifest to fetch the right toolchain. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is `name: target@provider`, or a bare

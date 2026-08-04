@@ -12,7 +12,7 @@
 //! `jet dev`'s health gate and `jetpack services up/down/health/logs`
 //! (`Jetpack::CLI::cmd_services`) are the only callers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
@@ -43,6 +43,10 @@ struct Catalog {
     /// The `<package>@<source>` ref to realize before spawning (D-JPK-REF1
     /// ref grammar) — added to the project's package refs automatically.
     pkg_ref: &'static str,
+    /// The executable exposed by the package. Package names and executable
+    /// names are not assumed to match (for example, `postgresql` provides
+    /// `postgres`).
+    executable: &'static str,
     port: i64,
     run: fn(port: i64, data_dir: &Path) -> Vec<String>,
     ready: fn(port: i64) -> String,
@@ -62,6 +66,7 @@ fn catalog(name: &str) -> Option<Catalog> {
     match name {
         "redis" => Some(Catalog {
             pkg_ref: "redis@nixpkgs",
+            executable: "redis-server",
             port: 6379,
             run: |port, data_dir| vec![
                 "redis-server".to_string(),
@@ -76,6 +81,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "postgres" | "postgresql" => Some(Catalog {
             pkg_ref: "postgresql@nixpkgs",
+            executable: "postgres",
             port: 5432,
             run: |port, data_dir| vec![
                 "postgres".to_string(),
@@ -88,6 +94,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "mysql" => Some(Catalog {
             pkg_ref: "mysql@nixpkgs",
+            executable: "mysqld",
             port: 3306,
             run: |port, data_dir| vec![
                 "mysqld".to_string(),
@@ -99,6 +106,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "mariadb" => Some(Catalog {
             pkg_ref: "mariadb@nixpkgs",
+            executable: "mariadbd",
             port: 3306,
             run: |port, data_dir| vec![
                 "mariadbd".to_string(),
@@ -110,6 +118,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "nginx" => Some(Catalog {
             pkg_ref: "nginx@nixpkgs",
+            executable: "nginx",
             port: 8080,
             run: |port, data_dir| vec![
                 "nginx".to_string(),
@@ -122,6 +131,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "minio" => Some(Catalog {
             pkg_ref: "minio@nixpkgs",
+            executable: "minio",
             port: 9000,
             run: |port, data_dir| vec![
                 "minio".to_string(),
@@ -134,6 +144,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "mail" | "mailpit" => Some(Catalog {
             pkg_ref: "mailpit@nixpkgs",
+            executable: "mailpit",
             port: 8025,
             run: |port, data_dir| vec![
                 "mailpit".to_string(),
@@ -146,6 +157,7 @@ fn catalog(name: &str) -> Option<Catalog> {
         }),
         "adminer" => Some(Catalog {
             pkg_ref: "adminer@nixpkgs",
+            executable: "adminer",
             port: 8081,
             run: |port, data_dir| vec![
                 "adminer".to_string(),
@@ -165,6 +177,39 @@ fn catalog(name: &str) -> Option<Catalog> {
 /// enable: true }` (no explicit `run`) actually has `redis-server` on PATH.
 pub fn catalog_pkg_ref(name: &str) -> Option<&'static str> {
     catalog(name).map(|c| c.pkg_ref)
+}
+
+/// The executable that a catalog package contributes to an environment image.
+/// Keep this beside `catalog_pkg_ref`: package labels are not executable paths.
+pub fn catalog_executable(name: &str) -> Option<&'static str> {
+    catalog(name).map(|c| c.executable)
+}
+
+/// Resolve the executable vector used when an environment image projects a
+/// selected service. The image path is deliberately different from the host
+/// dev-shell path: service state lives below /var/lib/jet/services, so a
+/// generated image supervisor cannot retain a build-machine path.
+pub fn image_run_command(plan: &DevServicePlan) -> Result<Vec<String>, String> {
+    if !plan.enable {
+        return Err(format!("service {} is disabled", plan.name));
+    }
+    if let Some(run) = &plan.run {
+        if run.is_empty() || run.iter().any(|arg| arg.contains('\0')) {
+            return Err(format!("service {} has an invalid empty run command", plan.name));
+        }
+        return Ok(run.clone());
+    }
+    let Some(entry) = catalog(&plan.name) else {
+        return Err(format!(
+            "service {} has no run command and is not a built-in service",
+            plan.name
+        ));
+    };
+    let port = plan.ports.first().copied().unwrap_or(entry.port);
+    if !(1..=65535).contains(&port) {
+        return Err(format!("service {} has an invalid port", plan.name));
+    }
+    Ok((entry.run)(port, Path::new(&format!("/var/lib/jet/services/{}", plan.name))))
 }
 
 /// Built-in service presets exposed by the typed contribution/catalog path.
@@ -214,6 +259,16 @@ fn stopping_path(dir: &Path) -> PathBuf {
 
 fn supervisor_error_path(dir: &Path) -> PathBuf {
     dir.join("supervisor.error")
+}
+
+fn supervisor_failure(project_dir: &Path, plan: &DevServicePlan) -> Option<String> {
+    let error = read_text_bounded(
+        &supervisor_error_path(&service_dir(project_dir, &plan.name)),
+        4096,
+    )
+    .ok()?;
+    let error = error.trim();
+    (!error.is_empty()).then(|| error.to_string())
 }
 
 fn ports_path(dir: &Path) -> PathBuf {
@@ -305,7 +360,7 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
         Vec::new()
     };
     let ports = if declared_ports.iter().any(|port| *port == 0) {
-        fs::read_to_string(ports_path(&dir))
+        read_text_bounded(&ports_path(&dir), 4096)
             .ok()
             .map(|raw| {
                 raw.lines()
@@ -676,7 +731,7 @@ fn prepare_sockets(project_dir: &Path, sockets: &[String]) -> Result<PreparedSoc
 
 fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, String> {
     let path = pid_path(dir);
-    let text = match fs::read_to_string(&path) {
+    let text = match read_text_bounded(&path, 4096) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -759,17 +814,14 @@ fn process_alive(pid: u32) -> Result<bool, String> {
     }
     #[cfg(not(windows))]
     {
-        let output = Command::new("kill")
+        let status = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .stdout(Stdio::null())
-            .output()
+            .stderr(Stdio::null())
+            .status()
             .map_err(|e| format!("couldn't probe service process {pid}: {e}"))?;
-        if output.status.success() {
+        if status.success() {
             return Ok(true);
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("not permitted") || stderr.contains("Permission denied") {
-            return Err(format!("couldn't probe service process {pid}: {}", stderr.trim()));
         }
         Ok(false)
     }
@@ -779,7 +831,7 @@ fn process_alive(pid: u32) -> Result<bool, String> {
 fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
     const ESRCH: i32 = 3;
     let path = PathBuf::from(format!("/proc/{pid}/stat"));
-    let stat = match fs::read_to_string(&path) {
+    let stat = match read_text_bounded(&path, 4096) {
         Ok(stat) => stat,
         Err(error)
             if error.kind() == std::io::ErrorKind::NotFound
@@ -1319,7 +1371,7 @@ fn monitor_service(
     let mut stamps = match watch_stamps(&project_dir, &watched) {
         Ok(stamps) => stamps,
         Err(error) => {
-            finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+            finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
             return;
         }
     };
@@ -1331,7 +1383,7 @@ fn monitor_service(
                 finish_supervisor(
                     &project_dir,
                     &plan,
-                    started.state.pid,
+                    &started.state,
                     Some(&format!("supervisor could not inspect service: {error}")),
                 );
                 return;
@@ -1348,7 +1400,7 @@ fn monitor_service(
                 if !restart || restarts >= max_restarts || stopping {
                     let error = (restart && !stopping && restarts >= max_restarts)
                         .then_some("service restart limit exhausted");
-                    finish_supervisor(&project_dir, &plan, started.state.pid, error);
+                    finish_supervisor(&project_dir, &plan, &started.state, error);
                     return;
                 }
                 restarts += 1;
@@ -1362,7 +1414,7 @@ fn monitor_service(
                                 finish_supervisor(
                                     &project_dir,
                                     &plan,
-                                    started.state.pid,
+                                    &started.state,
                                     Some(&error),
                                 );
                                 return;
@@ -1373,13 +1425,13 @@ fn monitor_service(
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            started.state.pid,
+                            &started.state,
                             Some("service restart did not produce a running process"),
                         );
                         return;
                     }
                     Err(error) => {
-                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                         return;
                     }
                 }
@@ -1391,7 +1443,7 @@ fn monitor_service(
         }) {
             Some(Ok(changed)) => changed,
             Some(Err(error)) => {
-                finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                 return;
             }
             None => false,
@@ -1401,21 +1453,21 @@ fn monitor_service(
             if restarts >= max_restarts || stopping {
                 let error = (!stopping && restarts >= max_restarts)
                     .then_some("service watch restart limit exhausted");
-                finish_supervisor(&project_dir, &plan, started.state.pid, error);
+                finish_supervisor(&project_dir, &plan, &started.state, error);
                 return;
             }
             if let Err(error) = stop_process(&started.state, plan.shutdown.as_ref()) {
                 match started.child.try_wait() {
                     Ok(Some(_)) => {}
                     Ok(None) => {
-                        finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                         return;
                     }
                     Err(wait_error) => {
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            started.state.pid,
+                            &started.state,
                             Some(&format!("{error}; couldn't reap service: {wait_error}")),
                         );
                         return;
@@ -1434,7 +1486,7 @@ fn monitor_service(
                             finish_supervisor(
                                 &project_dir,
                                 &plan,
-                                started.state.pid,
+                                &started.state,
                                 Some(&error),
                             );
                             return;
@@ -1445,13 +1497,13 @@ fn monitor_service(
                     finish_supervisor(
                         &project_dir,
                         &plan,
-                        started.state.pid,
+                        &started.state,
                         Some("service watch restart did not produce a running process"),
                     );
                     return;
                 }
                 Err(error) => {
-                    finish_supervisor(&project_dir, &plan, started.state.pid, Some(&error));
+                    finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
                     return;
                 }
             }
@@ -1500,20 +1552,12 @@ fn stopping_requested(project_dir: &Path, plan: &DevServicePlan) -> bool {
     service_dir(project_dir, &plan.name).join(".stopping").is_file()
 }
 
-fn best_effort_kill_process_group(pid: u32) {
-    let _ = run_stop_action(pid, StopAction::Kill);
-}
-
 fn finish_supervisor(
     project_dir: &Path,
     plan: &DevServicePlan,
-    pid: u32,
+    state: &ProcessState,
     error: Option<&str>,
 ) {
-    // The service owns a process group whose leader was pid. Kill the group
-    // before dropping state so reparented foreground children cannot survive
-    // a restart limit, crash, or normal supervisor shutdown.
-    best_effort_kill_process_group(pid);
     let dir = service_dir(project_dir, &plan.name);
     let Ok(_guard) = super::RuntimePolicy::acquire_lock(
         &super::Store::managed_dir(project_dir),
@@ -1524,6 +1568,21 @@ fn finish_supervisor(
         // user-issued shutdown and claiming cleanup that did not happen.
         return;
     };
+
+    // The service owns a process group whose leader was state.pid. Recheck
+    // the recorded start identity before signaling it. If the process has
+    // already exited, there is nothing to kill. If the identity probe or the
+    // kill fails, preserve the PID and ports as live evidence instead of
+    // claiming cleanup and risking a PID-reuse signal or an orphan.
+    let cleanup_error = stop_process(state, Some(&ShutdownPolicy::Kill)).err();
+    if let Some(cleanup_error) = cleanup_error {
+        let message = match error {
+            Some(error) => format!("{error}; supervisor cleanup failed: {cleanup_error}"),
+            None => format!("supervisor cleanup failed: {cleanup_error}"),
+        };
+        let _ = write_atomic(&supervisor_error_path(&dir), message.as_bytes());
+        return;
+    }
     if let Some(error) = error {
         let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
     } else {
@@ -2006,10 +2065,34 @@ pub fn wait_healthy_with_env(
     if !plan.enable {
         return true;
     }
+    // A service without a readiness probe is healthy only after it remains
+    // alive for one bounded observation window. This closes the race where a
+    // detached reaper has not yet observed a fast child exit and a single
+    // process-liveness check would report false green.
+    let needs_stability = resolve(project_dir, plan)
+        .map(|resolved| {
+            resolved.ready.is_none()
+                && resolved.ready_probe.is_none()
+                && resolved.ports.is_empty()
+        })
+        .unwrap_or(false);
+    const NO_PROBE_STABILITY: Duration = Duration::from_millis(300);
+    let mut stable_since = None;
     let deadline = Instant::now() + timeout;
     loop {
+        if supervisor_failure(project_dir, plan).is_some() {
+            return false;
+        }
         if matches!(health_one_with_env(project_dir, env, plan), Health::Healthy) {
-            return true;
+            if !needs_stability {
+                return true;
+            }
+            let started = stable_since.get_or_insert_with(Instant::now);
+            if started.elapsed() >= NO_PROBE_STABILITY {
+                return true;
+            }
+        } else {
+            stable_since = None;
         }
         if Instant::now() >= deadline {
             return false;
@@ -2110,49 +2193,113 @@ pub fn up_ordered(
     plans: &[DevServicePlan],
     timeout: Duration,
 ) -> Result<Vec<String>, String> {
+    let selected = (0..plans.len()).collect::<Vec<_>>();
+    let started = up_ordered_with(project_dir, env, plans, &selected, timeout, |_| Ok(()))?;
+    Ok(started
+        .into_iter()
+        .map(|index| plans[index].name.clone())
+        .collect())
+}
+
+/// Start selected enabled services in one dependency-first lifecycle. The
+/// callback is the only caller-owned hook; process startup, readiness, and
+/// rollback stay centralized here for both CLI and dev entry points.
+pub fn up_ordered_with<F>(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plans: &[DevServicePlan],
+    selected: &[usize],
+    timeout: Duration,
+    mut before_start: F,
+) -> Result<Vec<usize>, String>
+where
+    F: FnMut(&DevServicePlan) -> Result<(), String>,
+{
     let order = dependency_order(plans)?;
+    let selected = selected_dependency_order(plans, &order, selected)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let mut started = Vec::new();
     for index in order {
+        if !selected.contains(&index) {
+            continue;
+        }
         let plan = &plans[index];
         let was_running = matches!(
             health_one_with_env(project_dir, Some(env), plan),
             Health::Healthy | Health::Unhealthy
         );
-        if let Err(error) = up_one(project_dir, env, plan) {
-            let cleanup = started
-                .iter()
-                .filter_map(|name| plans.iter().find(|candidate| &candidate.name == name))
-                .filter_map(|plan| down_one(project_dir, plan).err())
-                .collect::<Vec<_>>();
-            return Err(if cleanup.is_empty() {
-                error
-            } else {
-                format!("{error}; cleanup failed: {}", cleanup.join("; "))
+        if let Err(error) = before_start(plan) {
+            let cleanup = down_ordered(project_dir, plans, &started).err();
+            return Err(match cleanup {
+                None => error,
+                Some(cleanup) => format!("{error}; cleanup failed: {cleanup}"),
             });
         }
+        if let Err(error) = up_one(project_dir, env, plan) {
+            let cleanup = down_ordered(project_dir, plans, &started).err();
+            return Err(match cleanup {
+                None => error,
+                Some(cleanup) => format!("{error}; cleanup failed: {cleanup}"),
+            });
+        }
+        // Restart policy does not weaken the readiness contract. The
+        // supervisor owns retries and exhaustion, but the caller still waits
+        // for the same healthy state before starting dependents.
         if !wait_healthy_with_env(project_dir, Some(env), plan, timeout) {
-            let current_error = format!("service `{}` did not become healthy", plan.name);
-            let cleanup = (!was_running)
-                .then_some(plan)
-                .into_iter()
-                .chain(
-                    started
-                        .iter()
-                        .filter_map(|name| plans.iter().find(|candidate| &candidate.name == name)),
-                )
-                .filter_map(|plan| down_one(project_dir, plan).err())
-                .collect::<Vec<_>>();
-            return Err(if cleanup.is_empty() {
-                current_error
-            } else {
-                format!("{current_error}; cleanup failed: {}", cleanup.join("; "))
+            let supervisor_error = supervisor_failure(project_dir, plan);
+            let current_error = supervisor_error
+                .as_deref()
+                .map(|error| format!("service `{}` {error}", plan.name))
+                .unwrap_or_else(|| format!("service `{}` did not become healthy", plan.name));
+            let mut cleanup_indexes = started.clone();
+            // A supervisor that exhausted its bounded restart budget already
+            // removed its PID and wrote durable failure evidence. Preserve
+            // that evidence; only clean a still-running failed service.
+            let still_running = matches!(
+                health_one_with_env(project_dir, Some(env), plan),
+                Health::Healthy | Health::Unhealthy
+            );
+            if !was_running && supervisor_error.is_none() && still_running {
+                cleanup_indexes.push(index);
+            }
+            let cleanup = down_ordered(project_dir, plans, &cleanup_indexes).err();
+            return Err(match cleanup {
+                None => current_error,
+                Some(cleanup) => format!("{current_error}; cleanup failed: {cleanup}"),
             });
         }
         if !was_running {
-            started.push(plan.name.clone());
+            started.push(index);
         }
     }
     Ok(started)
+}
+
+/// Stop a dependency-first selection in reverse order. Callers use the same
+/// graph result for startup and teardown, so a dependent is never left alive
+/// while its dependency is being removed. The function attempts every entry
+/// before returning a combined failure.
+pub fn down_ordered(
+    project_dir: &Path,
+    plans: &[DevServicePlan],
+    dependency_first: &[usize],
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for &index in dependency_first.iter().rev() {
+        let Some(plan) = plans.get(index) else {
+            errors.push(format!("service dependency order contains unknown index {index}"));
+            continue;
+        };
+        if let Err(error) = down_one(project_dir, plan) {
+            errors.push(format!("{}: {error}", plan.name));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 /// Restart one service under its declared bounded restart budget. The normal
@@ -2163,24 +2310,74 @@ pub fn restart_one(
     env: &ShellEnv,
     plan: &DevServicePlan,
 ) -> Result<(), String> {
-    validate_restart_policy(plan)?;
-    let (max_restarts, backoff_ms, exponential) = restart_budget(plan);
-    down_one(project_dir, plan)?;
-    let mut last_error = String::new();
-    for attempt in 0..=max_restarts {
-        if attempt > 0 {
-            std::thread::sleep(restart_delay(backoff_ms, exponential, attempt as u32));
+    restart_ordered_with(
+        project_dir,
+        env,
+        std::slice::from_ref(plan),
+        &[0],
+        Duration::from_secs(30),
+        |_| Ok(()),
+    )
+    .map(|_| ())
+}
+
+/// Restart a dependency-first selection through the same lifecycle used by
+/// `services up`: validate the graph, stop dependents before dependencies,
+/// run the caller hook before every start, wait for typed readiness, and clean
+/// up a partial restart on failure.
+pub fn restart_ordered_with<F>(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plans: &[DevServicePlan],
+    selected: &[usize],
+    timeout: Duration,
+    before_start: F,
+) -> Result<Vec<usize>, String>
+where
+    F: FnMut(&DevServicePlan) -> Result<(), String>,
+{
+    let order = dependency_order(plans)?;
+    let selected = selected_dependency_order(plans, &order, selected)?;
+    down_ordered(project_dir, plans, &selected)?;
+    up_ordered_with(project_dir, env, plans, &selected, timeout, before_start)
+}
+
+fn selected_dependency_order(
+    plans: &[DevServicePlan],
+    order: &[usize],
+    selected: &[usize],
+) -> Result<Vec<usize>, String> {
+    let selected = selected.iter().copied().collect::<BTreeSet<_>>();
+    for &index in &selected {
+        let Some(plan) = plans.get(index) else {
+            return Err(format!("service dependency order contains unknown index {index}"));
+        };
+        if !plan.enable {
+            return Err(format!("service `{}` is disabled", plan.name));
         }
-        match up_one(project_dir, env, plan) {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = error,
+        for dependency in dependency_names(plan) {
+            let dependency_index = plans
+                .iter()
+                .position(|candidate| candidate.name == dependency)
+                .ok_or_else(|| {
+                    format!(
+                        "service `{}` depends on unknown service `{dependency}`",
+                        plan.name
+                    )
+                })?;
+            if !selected.contains(&dependency_index) {
+                return Err(format!(
+                    "service `{}` restart selection omits dependency `{dependency}`",
+                    plan.name
+                ));
+            }
         }
     }
-    Err(if last_error.is_empty() {
-        format!("service `{}` could not be restarted", plan.name)
-    } else {
-        last_error
-    })
+    Ok(order
+        .iter()
+        .copied()
+        .filter(|index| selected.contains(index))
+        .collect())
 }
 
 /// Check watched files once and restart only after the recorded fingerprint
@@ -2190,35 +2387,91 @@ pub fn watch_once(
     env: &ShellEnv,
     plan: &DevServicePlan,
 ) -> Result<bool, String> {
-    if plan.watch.is_empty() {
-        return Err(format!("service `{}` has no watched files", plan.name));
-    }
-    validate_service_name(&plan.name)?;
-    for path in &plan.watch {
-        validate_watch_path(path)?;
-    }
-    let paths = plan
-        .watch
+    Ok(!watch_once_ordered_with(
+        project_dir,
+        env,
+        std::slice::from_ref(plan),
+        &[0],
+        Duration::from_secs(30),
+        |_| Ok(()),
+    )?
+    .is_empty())
+}
+
+/// Observe and, when needed, restart a dependency-complete service selection.
+/// Watch baselines for changed files are committed only after the ordered
+/// restart succeeds, so a failed restart remains retryable on the next call.
+pub fn watch_once_ordered_with<F>(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plans: &[DevServicePlan],
+    selected: &[usize],
+    timeout: Duration,
+    before_start: F,
+) -> Result<Vec<usize>, String>
+where
+    F: FnMut(&DevServicePlan) -> Result<(), String>,
+{
+    let mut changed = Vec::new();
+    let mut current_by_index = BTreeMap::new();
+    let order = dependency_order(plans)?;
+    let selected = selected_dependency_order(plans, &order, selected)?;
+    let watched = selected
         .iter()
-        .map(|path| {
-            let path = project_dir.join(path);
-            ensure_project_path(project_dir, &path, "watch").map(|()| path)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let state_path = service_dir(project_dir, &plan.name).join("watch.state");
-    ensure_project_path(project_dir, &state_path, "watch state")?;
-    if let Some(parent) = state_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        .copied()
+        .filter(|index| !plans[*index].watch.is_empty())
+        .collect::<Vec<_>>();
+    if watched.is_empty() {
+        return Err("selected services have no watched files".to_string());
     }
-    let current = watch_stamps(project_dir, &paths)?.join("\n");
-    let previous = fs::read_to_string(&state_path).unwrap_or_default();
-    if previous.is_empty() || previous == current {
-        write_atomic(&state_path, current.as_bytes()).map_err(|error| error.to_string())?;
-        return Ok(false);
+    for index in watched {
+        let plan = plans
+            .get(index)
+            .ok_or_else(|| format!("service dependency order contains unknown index {index}"))?;
+        validate_service_name(&plan.name)?;
+        for path in &plan.watch {
+            validate_watch_path(path)?;
+        }
+        let paths = plan
+            .watch
+            .iter()
+            .map(|path| {
+                let path = project_dir.join(path);
+                ensure_project_path(project_dir, &path, "watch").map(|()| path)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let state_path = service_dir(project_dir, &plan.name).join("watch.state");
+        ensure_project_path(project_dir, &state_path, "watch state")?;
+        if let Some(parent) = state_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let current = watch_stamps(project_dir, &paths)?.join("\n");
+        let previous = read_text_bounded(&state_path, 4 * 1024 * 1024).unwrap_or_default();
+        if !previous.is_empty() && previous != current {
+            changed.push(index);
+        }
+        current_by_index.insert(index, (state_path, current));
     }
-    restart_one(project_dir, env, plan)?;
-    write_atomic(&state_path, current.as_bytes()).map_err(|error| error.to_string())?;
-    Ok(true)
+    if changed.is_empty() {
+        for (state_path, current) in current_by_index.values() {
+            write_atomic(state_path, current.as_bytes()).map_err(|error| error.to_string())?;
+        }
+        return Ok(changed);
+    }
+    restart_ordered_with(
+        project_dir,
+        env,
+        plans,
+        &selected,
+        timeout,
+        before_start,
+    )?;
+    for index in &changed {
+        if let Some((state_path, current)) = current_by_index.get(index) {
+            write_atomic(state_path, current.as_bytes()).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(changed)
 }
 
 /// Measure service startup latency by cycling the service down → up →
@@ -2290,11 +2543,8 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
         ("stderr", stderr_path(&dir)),
         ("supervisor", supervisor_error_path(&dir)),
     ] {
-        let mut buf = String::new();
-        if File::open(&path)
-            .and_then(|mut f| f.read_to_string(&mut buf))
-            .is_ok()
-            && !buf.is_empty()
+        let buf = read_text_bounded(&path, 1024 * 1024).unwrap_or_default();
+        if !buf.is_empty()
         {
             out.push_str(&format!("── {label} ──\n"));
             out.push_str(&buf);
@@ -2304,6 +2554,28 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
         }
     }
     out
+}
+
+fn read_text_bounded(path: &Path, limit: usize) -> std::io::Result<String> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "service state is not a bounded regular file",
+        ));
+    }
+    let file = File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "service state exceeded its bound while being read",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "service state is not UTF-8")
+    })
 }
 
 #[cfg(test)]
@@ -2384,6 +2656,55 @@ mod tests {
         assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
         assert!(matches!(health_one(&dir, &p), Health::Disabled));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fast_exit_without_probe_is_not_reported_healthy() {
+        let dir = scratch("fast-exit-no-probe");
+        let service = plan("fixture", "exit 7;");
+        up_one(&dir, &env(), &service).unwrap();
+        assert!(!wait_healthy(&dir, &service, Duration::from_secs(2)));
+        assert!(matches!(health_one(&dir, &service), Health::NotRunning));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dependency_order_is_dependency_first_and_rejects_cycles() {
+        let mut database = plan("database", "sleep 30");
+        let mut api = plan("api", "sleep 30");
+        let worker = plan("worker", "sleep 30");
+        api.after = vec!["database".to_string()];
+        database.depends_on = vec!["worker".to_string()];
+
+        let plans = vec![api.clone(), database.clone(), worker];
+        let order = dependency_order(&plans).unwrap();
+        let names = order
+            .iter()
+            .map(|index| plans[*index].name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["worker", "database", "api"]);
+
+        let mut cycle = api;
+        cycle.depends_on = vec!["database".to_string()];
+        let cyclic = vec![cycle, database];
+        let error = dependency_order(&cyclic).unwrap_err();
+        assert!(error.contains("service dependency cycle"), "{error}");
+        assert!(error.contains("api") && error.contains("database"), "{error}");
+    }
+
+    #[test]
+    fn dependency_order_rejects_unknown_and_disabled_dependencies() {
+        let mut unknown = plan("api", "sleep 1");
+        unknown.after = vec!["database".to_string()];
+        let error = dependency_order(&[unknown]).unwrap_err();
+        assert!(error.contains("depends on unknown service"), "{error}");
+
+        let mut disabled = plan("database", "sleep 1");
+        disabled.enable = false;
+        let mut dependent = plan("api", "sleep 1");
+        dependent.after = vec!["database".to_string()];
+        let error = dependency_order(&[dependent, disabled]).unwrap_err();
+        assert!(error.contains("depends on disabled service"), "{error}");
     }
 
     #[cfg(unix)]

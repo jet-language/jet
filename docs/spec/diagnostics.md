@@ -617,7 +617,7 @@ renumbered, and no new `W` code may be allocated.
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
-| E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root (D-ECO-MEMBERS1) |
+| E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root; the diagnostic names the member manifest source (D-ECO-MEMBERS1) |
 | E1324 | jetpack | two workspace member paths resolve to the same physical directory (D-ECO-MEMBERS1) |
 | E1325 | jetpack | two workspace members claim the same stable package name (D-ECO-MEMBERS1) |
 | E1326 | jetpack | a managed environment file has an invalid destination, source, mode, permission, or content shape (D-ENV-FILES1) |
@@ -630,6 +630,7 @@ renumbered, and no new `W` code may be allocated.
 | E1333 | sema | a dotenv declaration has an unsafe path or invalid allowlist/secret shape (D-ENV-LIFECYCLE2) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
 | E1335 | sema/jetpack | a first-party environment integration has conflicting facts or an invalid host projection (D-ENV-INTEGRATIONS1) |
+| E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -658,7 +659,7 @@ renumbered, and no new `W` code may be allocated.
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency cannot be resolved or its source artifact failed verification |
-| E1208 | jet   | toolchain `jet:` field in `pkg.jet` incompatible (M12.1) |
+| E1208 | jet   | toolchain `jet:` field in `package.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 | E1210 | jet   | unknown or reserved target in `packages:` block (D-TGT1/D-TGT2) |
 | E1211 | jet   | `packages:` block-form entry uses the removed `kind:` field — write `targets:` (D-TGT1) |
@@ -673,7 +674,7 @@ renumbered, and no new `W` code may be allocated.
 | E1220 | jet   | a transitive dependency uses an effect outside the `pkg.jet` `effects:` budget (D-EFFBUDGET1) |
 | E1221 | jet   | a malformed `effects:`/`grants:` block in `pkg.jet` (D-EFFBUDGET1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
-| E1226 | jet   | a retired manifest filename (`pack.jet`/`payload.jet`/`jet.toml`) found where `pkg.jet` belongs (D-JPK-FILENAME2) |
+| E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-JPK-FILENAME2) |
 | E1227 | jet   | `jet` and the `jetpack`/`jetos` engine binary disagree on protocol version (D-JPK-DISPATCH1) |
 | E1228 | jet   | an engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed (D-JPK-DISPATCH1) |
 | E1229 | jet   | a role-module contribution uses the retired `module name { ns.path: Type.{ } }` form (D-JPK-MODBODY1) |
@@ -696,14 +697,14 @@ renumbered, and no new `W` code may be allocated.
 | E1246 | jet   | a package signature doesn't verify against its pinned public key (D-PKGSIGN1) |
 | E1247 | jet   | a registry with `require_signed: true` served an unsigned package (D-PKGSIGN1) |
 | E1248 | jet   | `jet registry keygen` refused: a signing key already exists (use `--force`) (D-PKGSIGN1) |
-| E1249 | jet   | a `jet:` toolchain pin isn't a valid version/channel ref (D-JPK-TOOLCHAIN1) |
+| E1249 | jet   | a `jet:` toolchain pin in `package.jet` isn't a valid version/channel ref (D-JPK-TOOLCHAIN1) |
 | E1250 | jet   | a `jet:` channel pin is unlocked under `--offline`/CI — no `[[toolchain]]` lock entry (D-JPK-TOOLCHAIN1) |
 | E1251 | jet   | the pinned Jet toolchain has no prebuilt object for this platform — never source-built (D-JPK-TOOLCHAIN1) |
-| E1252 | jet   | `jet init` refused: a `pkg.jet` already exists here (D-JPK-TOOLCHAIN1) |
+| E1252 | jet   | `jet init` refused: a `package.jet` already exists here (D-JPK-TOOLCHAIN1) |
 | E1253 | jet   | an inline script dependency (`use pkg#version;`) didn't resolve (D-JPK-SCRIPTDEP1) |
 | E1254 | jet   | project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1) |
 | E1255 | jet   | an untrusted project env hit a non-interactive path with no `--trust`/prior grant (U19, D-JPK-DEVCOMPOSE1) |
-| E1256 | jet   | `jet bridge flake` or foreign-flake detection needs `nix`, which isn't on PATH (U16) |
+| E1256 | jet   | bounded native projection cannot translate a foreign flake/devShell surface into Jet facts (U16) |
 | E1257 | jet   | a `target: plugin` package's exported interface changed incompatibly since the last frozen build (D-PLUGIN-VERSION1=A) |
 | E1258 | jet   | a `target: plugin` package's own code uses an effect — plugins are deny-by-default, zero host capabilities (D-PLUGIN1=B) |
 | E1259 | jet   | couldn't build a plugin's WASM Component — missing/failed `rustc`/`wasm-tools` toolchain (D-DEP-WASM1=A) |
@@ -889,7 +890,7 @@ membership, profile, managed-file, service, or task state is applied.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1322 | the workspace member path escapes the workspace root | Membership is rooted in the workspace, including the physical target behind a symlink. | Use a relative path below the workspace root and remove escaping symlinks. |
-| E1323 | a member Package declares `members` | Membership has one level: the workspace root owns discovery. | Remove the nested `members:` field and declare those paths at the workspace root. |
+| E1323 | a member Package declares `members` (the diagnostic names its `package.jet` or `pkg.jet` source) | Membership has one level: the workspace root owns discovery, and source provenance makes the offending Package reviewable. | Remove the nested `members:` field from the named member manifest and declare those paths at the workspace root. |
 | E1324 | two member paths resolve to one physical directory | Two spellings cannot create two Package identities. | Keep one member path for the directory. |
 | E1325 | two members claim the same Package name | Stable package references need one owner. | Rename one Package or remove the duplicate member. |
 | E1326 | a managed environment file declaration is invalid | Managed files are typed and plan before apply; unsafe paths or ambiguous ownership must fail closed. | Use a project-relative destination and a valid `source`/`content`, mode, and permission record. |
@@ -902,6 +903,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1333 | a dotenv declaration is invalid | Dotenv is part of the typed lifecycle plan. Paths stay inside the project, and expert allowlists make secret handling explicit. | Use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
 | E1335 | an environment integration has conflicting facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies for one integration. | Merge the declarations or select a target and policy supported by the integration. |
+| E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1701,7 +1703,7 @@ front-end `.jet` diagnostics).
 | E1214 | `jetpack.toml` line {n} is not a valid assignment or table header. | Every line in `jetpack.toml` must be `key = "value"` (inside a table), a `[table]` header, or a blank/comment line. Anything else can't be interpreted. | Fix the line so it is either `[table]`, `key = "value"`, or a blank or `#`-comment line. |
 | E1215 | `jetpack.toml` {kind} `{name}` is not recognized. | `jetpack.toml` only accepts the tables `[repo]` and `[sources]`, and the keys listed for each. An unknown name is usually a typo. | Did you mean `{suggestion}`? Check the allowed names for this table. |
 | E1225 | `jetpack.toml` `[packages]` is retired. | Monorepo member indexes now live in `workspace.jet` so package sets use Jet's module grammar instead of a second manifest shape. | Move the member list to `workspace.jet`: `module workspace { members: find("./packages") }`. |
-| E1226 | `{name}` is not the package manifest name — Jet reads `pkg.jet`. | The manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so tooling, docs, and every worked example never have to guess which file to read. `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `pkg.jet`. |
+| E1226 | `{name}` is not the package manifest name — Jet reads `package.jet`. | The manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so tooling, docs, and every worked example never have to guess which file to read. `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `package.jet`. |
 | E1227 | `jet` {jet_version} and `{engine}` {engine_version} disagree. | `jet` and its engine binaries (`jetpack`, `jetos`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. | Use matching `jet`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release. |
 | E1228 | `{verb}` needs the `{engine}` engine, which isn't installed. | `{verb}` is an engine verb — `jet` execs `{engine}` for it (D-JPK-DISPATCH1) rather than linking package-manager/OS logic into the compiler binary. | Install the matching Jet toolchain; the `{engine}` binary ships alongside `jet`. |
 | E1229 | Role namespace `{ns}` belongs in the module declaration name. | `module {name} { {ns}.{role}: {Type}.{ … } }` splits the role across two places; the canonical form puts it once, in the declaration name, so discovery-by-declaration (`module env.dev`) reads the role straight off the name (D-JPK-MODBODY1). | Write `module {ns}.{role} { … }` and move the contribution's fields up to the module body. |
@@ -1727,11 +1729,11 @@ front-end `.jet` diagnostics).
 | E1249 | `{value}` is not a valid toolchain pin. | The `jet:` field pins which Jet toolchain builds this project (D-JPK-TOOLCHAIN1); its value is a channel ref, not a version range. `>=1.0.0`-style constraints don't name one reproducible toolchain. | Write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`. |
 | E1250 | Toolchain channel `{channel}` is pinned but not locked. | An `--offline`/CI build won't resolve a channel — it needs the exact toolchain version recorded in `.jet/lock`, and none is present (D-JPK-TOOLCHAIN1). Resolving a channel reaches the network, which offline/CI forbids. | Run `jet update jet` to resolve `{channel}` to an exact version, then commit `.jet/lock`. |
 | E1251 | Toolchain {channel} ({version}) isn't available for {platform}. | This project pins a Jet toolchain, but no prebuilt object for it was found for this platform. Jet realizes the pinned compiler as a prebuilt — it never builds the compiler from source and never silently falls back to a different `jet` (D-JPK-TOOLCHAIN1). | Move the pin with `jet update jet <channel>` to a toolchain your platform has, or install the pinned toolchain from the release page. |
-| E1252 | `jet init` refused: a `pkg.jet` already exists here. | `jet init` writes a fresh package manifest pinning the running toolchain; overwriting one would discard its dependencies, pins, and identity (D-JPK-TOOLCHAIN1). | Edit the existing manifest, or run `jet init` in an empty directory. |
+| E1252 | `jet init` refused: a `package.jet` already exists here. | `jet init` writes a fresh package manifest pinning the running toolchain; overwriting one would discard its dependencies, pins, and identity (D-JPK-TOOLCHAIN1). | Edit the existing manifest, or run `jet init` in an empty directory. |
 | E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `pkg.jet` once you have a real source for it. |
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
-| E1256 | `{cmd}` needs `nix`, which isn't on PATH. | `jet bridge flake` translates a `flake.nix`'s devShell, and `jet env`'s foreign-flake/`devenv.nix` detection shells out to `nix` as the ratified stopgap (U16); neither works without the `nix` binary. | Install Nix from the official installer, or skip the foreign flake and declare packages in `env.*` instead. |
+| E1256 | `{cmd}` cannot project the foreign environment. | The bounded native evaluator could not translate the foreign `flake.nix`/`devenv.nix` surface into Jet facts (U16). Jet does not shell out to an installed Nix binary for this path. | Use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`. |
 | E1257 | This plugin's exported interface changed incompatibly. | A `target: plugin` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api/plugin__<name>.api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
 | E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
 | E1259 | Couldn't build the plugin's WASM Component. | Building a `target: plugin` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |

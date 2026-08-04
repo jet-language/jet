@@ -133,14 +133,14 @@ fn json_strings(values: &[String]) -> String {
     format!("[{}]", values.iter().map(|value| format!("\"{}\"", json_escape(value))).collect::<Vec<_>>().join(","))
 }
 
-/// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.
+/// D-BUILDPROFILE1: load Package build profiles from the project root of `source_file`.
 fn load_pkg_profiles(
     source_file: &str,
 ) -> Option<Vec<jet::PackageManifest::BuildProfileDef>> {
     let src_path = std::path::Path::new(source_file);
     let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root)?;
     let raw = fs::read_to_string(&pack_path).ok()?;
     jet::PackageManifest::parse(&raw)
         .ok()
@@ -190,7 +190,7 @@ fn load_pkg_manifest(
     let source_path = Path::new(source_file);
     let search_from = source_path.parent().unwrap_or(Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
-    let raw = fs::read_to_string(root.join(jet::Syntax::PAYLOAD_FILE)).ok()?;
+    let raw = fs::read_to_string(jet::Loader::manifest_path(&root)?).ok()?;
     let manifest = jet::PackageManifest::parse(&raw).ok()?;
     Some((root, manifest))
 }
@@ -989,7 +989,7 @@ pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
 ///
 /// Best-effort: an SBOM describes the *dependency* graph, so a single-file
 /// program with no project is emitted with just the root component. When a
-/// `pkg.jet` and lockfile exist, the SBOM lists every locked dependency with
+/// Package root and lockfile exist, the SBOM lists every locked dependency with
 /// its tree-hash checksum.
 fn write_sbom_for_build(file: &str, bin: &Path) {
     let file_path = Path::new(file);
@@ -998,7 +998,8 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
     // Resolve a name/version + lockfile from the enclosing project, if any.
     let (name, version, lock) = match jet::Loader::find_manifest_root(search_from) {
         Some(root) => {
-            let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+            let pack_path = jet::Loader::manifest_path(&root)
+                .expect("manifest root has a Package file");
             let (n, v) = match fs::read_to_string(&pack_path)
                 .ok()
                 .and_then(|raw| jet::Manifest::parse(&pack_path, &raw).ok())
@@ -1150,15 +1151,15 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: `{}` already exists", name);
         exit(ExitCodes::USER_ERROR);
     }
-    // Create: <name>/pkg.jet, <name>/run.jet, <name>/.gitignore
+    // Create: <name>/package.jet, <name>/run.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
         exit(ExitCodes::USER_ERROR);
     });
     let manifest_text = jet::Manifest::new_template(name, annotated);
-    fs::write(dir.join(jet::Syntax::PAYLOAD_FILE), manifest_text).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+    fs::write(dir.join(jet::Syntax::PACKAGE_FILE), manifest_text).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::Syntax::PACKAGE_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
     let run_src = "fn run() {\n    print(\"hello, world\");\n}\n";
@@ -1175,7 +1176,7 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         exit(ExitCodes::USER_ERROR);
     });
     println!("created {}/", name);
-    println!("  {}", jet::Syntax::PAYLOAD_FILE);
+    println!("  {}", jet::Syntax::PACKAGE_FILE);
     println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
     println!("  .gitignore");
     println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
@@ -1644,7 +1645,8 @@ const IGNORED_DIRS: &[&str] = &[
     "vendor", "target", "build", ".git", "node_modules", ".jet",
 ];
 
-/// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS and `pkg.jet`.
+/// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
+/// and reserved Package roots.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
@@ -1658,6 +1660,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
+            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PACKAGE_FILE)
             && path.file_name().and_then(|name| name.to_str())
                 != Some(jet::Syntax::PAYLOAD_FILE)
         {
@@ -2136,7 +2139,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
     exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
 }
 
-/// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing `pkg.jet`'s bytes, or
+/// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing Package root's bytes, or
 /// an empty identity when the file has no project manifest. An unreadable
 /// manifest returns `None`, disabling cache reuse rather than guessing. The
 /// fingerprint is folded into the cache-key salt so a manifest edit — including
@@ -2148,7 +2151,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
 fn manifest_fingerprint(file: &str) -> Option<String> {
     let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
     if let Some(root) = jet::Loader::find_manifest_root(search_from) {
-        let pack = root.join(jet::Syntax::PAYLOAD_FILE);
+        let pack = jet::Loader::manifest_path(&root)?;
         return fs::read(&pack)
             .ok()
             .map(|raw| jet::SHA256::sha256_hex(&raw));

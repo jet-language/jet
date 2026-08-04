@@ -851,65 +851,6 @@ impl LanguagePackCatalog {
                     "pip@nixpkgs",
                 ],
             ),
-            pack("Go", &["go@nixpkgs", "gopls@nixpkgs", "gotools@nixpkgs"]),
-            pack(
-                "JavaScript",
-                &["nodejs@nixpkgs", "npm@nixpkgs", "yarn@nixpkgs"],
-            ),
-            pack("TypeScript", &["nodejs@nixpkgs", "typescript@nixpkgs"]),
-            pack("Java", &["jdk@nixpkgs"]),
-            pack("Kotlin", &["kotlin@nixpkgs"]),
-            pack("C", &["gcc@nixpkgs"]),
-            pack("CPlusPlus", &["gcc@nixpkgs", "cmake@nixpkgs"]),
-            pack("Ruby", &["ruby@nixpkgs", "bundler@nixpkgs"]),
-            pack("PHP", &["php@nixpkgs", "composer@nixpkgs"]),
-            pack("Elixir", &["elixir@nixpkgs", "erlang@nixpkgs"]),
-            pack("Haskell", &["ghc@nixpkgs", "cabal-install@nixpkgs"]),
-            pack("Zig", &["zig@nixpkgs"]),
-            pack("Swift", &["swift@nixpkgs"]),
-            pack("CSharp", &["dotnet-sdk@nixpkgs"]),
-            pack("FSharp", &["dotnet-sdk@nixpkgs"]),
-            pack("Clojure", &["clojure@nixpkgs"]),
-            pack("Crystal", &["crystal@nixpkgs"]),
-            pack("Dart", &["dart@nixpkgs"]),
-            pack("D", &["dmd@nixpkgs"]),
-            pack("Fortran", &["gfortran@nixpkgs"]),
-            pack("Erlang", &["erlang@nixpkgs"]),
-            pack("Gleam", &["gleam@nixpkgs"]),
-            pack("Julia", &["julia@nixpkgs"]),
-            pack("Lua", &["lua@nixpkgs"]),
-            pack("LuaJIT", &["luajit@nixpkgs"]),
-            pack("Nim", &["nim@nixpkgs"]),
-            pack("OCaml", &["ocaml@nixpkgs", "opam@nixpkgs"]),
-            pack("Perl", &["perl@nixpkgs"]),
-            pack("R", &["R@nixpkgs"]),
-            pack("Scala", &["scala_3@nixpkgs"]),
-            pack("Shell", &["bash@nixpkgs", "shellcheck@nixpkgs"]),
-            pack("Assembly", &["nasm@nixpkgs"]),
-            pack("CUDA", &["cudaPackages.cudatoolkit@nixpkgs"]),
-            pack("ObjectiveC", &["clang@nixpkgs"]),
-            pack("ObjectiveCPlusPlus", &["clang@nixpkgs"]),
-            pack("Groovy", &["groovy@nixpkgs"]),
-            pack("SQL", &["sqlite@nixpkgs"]),
-            pack("Terraform", &["terraform@nixpkgs"]),
-            pack("Nix", &["nix@nixpkgs"]),
-            pack("Dhall", &["dhall@nixpkgs"]),
-            pack("Jsonnet", &["jsonnet@nixpkgs"]),
-            pack("Elm", &["elmPackages.elm@nixpkgs"]),
-            pack("PureScript", &["purescript@nixpkgs"]),
-            pack("Reason", &["ocaml@nixpkgs"]),
-            pack("Racket", &["racket@nixpkgs"]),
-            pack("CommonLisp", &["sbcl@nixpkgs"]),
-            pack("Scheme", &["guile@nixpkgs"]),
-            pack("Protobuf", &["protobuf@nixpkgs"]),
-            pack("GraphQL", &["graphql-cli@nixpkgs"]),
-            pack("Solidity", &["solc@nixpkgs"]),
-            pack("Vyper", &["python@nixpkgs"]),
-            pack("Move", &["move@nixpkgs"]),
-            pack("WebAssembly", &["wasmtime@nixpkgs"]),
-            pack("Markdown", &["pandoc@nixpkgs"]),
-            pack("LaTeX", &["texliveSmall@nixpkgs"]),
-            pack("MATLAB", &["matlab@nixpkgs"]),
         ] {
             catalog.register(pack).expect("built-in language pack names are unique");
         }
@@ -2027,8 +1968,8 @@ mod tests {
     #[test]
     fn catalog_has_the_core_language_families() {
         let catalog = LanguagePackCatalog::builtin();
-        assert_eq!(catalog.names().len(), 58);
-        for name in ["Rust", "Python", "Go", "JavaScript"] {
+        assert_eq!(catalog.names().len(), 2);
+        for name in ["Rust", "Python"] {
             assert!(catalog.get(name).is_some());
         }
         let expanded = catalog
