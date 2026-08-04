@@ -40,7 +40,7 @@ pub use Types::{
     ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 pub use Environment::{
-    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookSpec, LanguageExpansion, LanguagePack,
+    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookAction, HookSpec, LanguageExpansion, LanguagePack,
     LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
     EnvironmentIntegration, IntegrationKind, ProfileError, ProfileSet, ProfileSpec, ReloadPolicy,
     ResolvedProfile, valid_env_name,
@@ -493,6 +493,23 @@ module dev {
     }
 
     #[test]
+    fn evaluate_env_rejects_empty_prebuilt_recipe() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [Pkg.adapt(
+            name: "tool",
+            source: "./vendor/tool",
+            recipe: Recipe.prebuilt()
+        )],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
+    }
+
+    #[test]
     fn evaluate_env_captures_finite_build_recipe() {
         let src = r#"
 module dev {
@@ -502,7 +519,7 @@ module dev {
                 name: "wiretool",
                 source: "./vendor/wiretool",
                 recipe: Recipe.build(steps: [
-                    .fetch(url: "https://example.test/wiretool.tar", sha256: "sha256-source"),
+                    .fetch(url: "https://example.test/wiretool.tar", sha256: "sha{{}}\n\t"),
                     .exec(tool: "cc", args: ["-O2", "main.c", "-o", "wiretool",]),
                     .install(src: "wiretool", dest: "bin/wiretool"),
                     .install_tree(src: "share", dest: "share"),
@@ -517,7 +534,10 @@ module dev {
             panic!("expected a finite build recipe");
         };
         assert_eq!(recipe.steps.len(), 4);
-        assert!(matches!(recipe.steps[0], super::super::Recipe::BuildStep::Fetch { .. }));
+        let super::super::Recipe::BuildStep::Fetch { sha256, .. } = &recipe.steps[0] else {
+            panic!("expected a fetch step");
+        };
+        assert_eq!(sha256, "sha{}\n\t");
         assert!(matches!(recipe.steps[1], super::super::Recipe::BuildStep::Exec { .. }));
         assert!(matches!(recipe.steps[2], super::super::Recipe::BuildStep::Install { .. }));
         assert!(matches!(recipe.steps[3], super::super::Recipe::BuildStep::InstallTree { .. }));

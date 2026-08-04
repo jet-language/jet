@@ -924,6 +924,35 @@ fn run_with_project_env_file_resolves_declared_packages() {
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
 }
 
+#[test]
+fn nested_package_commands_use_the_nearest_package_root() {
+    let (base, project, root) = core_hello_project("package-root");
+    let package = project.join("package");
+    let nested = package.join("src");
+    fs::create_dir_all(&nested).unwrap();
+    fs::rename(project.join("env.jet"), package.join("env.jet")).unwrap();
+    fs::write(package.join("package.jet"), "name: \"demo\"\n").unwrap();
+
+    let output = jetpack()
+        .args(["run", "--no-color", "--offline", "--", "true"])
+        .current_dir(&nested)
+        .env("JETPACK_ROOT", &root)
+        .env("JETPACK_FIXTURES", example_fixtures(&root))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "nearest package root was not used: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("hello"),
+        "package-root env facts were not loaded: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    drop(base);
+}
+
 
 #[test]
 fn typed_env_copy_adapter_realizes_local_source() {
@@ -987,6 +1016,61 @@ module dev {
         String::from_utf8_lossy(&cached.stderr).contains("1 cached"),
         "stderr: {}",
         String::from_utf8_lossy(&cached.stderr)
+    );
+}
+
+
+#[test]
+fn typed_env_build_recipe_realizes_local_source() {
+    let proj = Scratch::new("build-recipe-project");
+    let root = Scratch::new("build-recipe-root");
+    let home = Scratch::new("build-recipe-home");
+    let vendor = proj.join("vendor/tool");
+    fs::create_dir_all(&vendor).unwrap();
+    fs::write(vendor.join("payload.txt"), "built recipe\n").unwrap();
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: "./vendor/tool",
+                recipe: Recipe.build(steps: [
+                    .install_tree(src: ".", dest: "share"),
+                ])
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color", "--trust"])
+        .current_dir(&proj.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entries = jetpack::Store::list(&roots);
+    assert!(
+        entries.iter().any(|entry| {
+            fs::read_to_string(Path::new(&entry.out).join("share/payload.txt"))
+                .unwrap_or_default()
+                == "built recipe\n"
+        }),
+        "build recipe output missing copied file: {entries:?}"
     );
 }
 
@@ -1808,6 +1892,10 @@ module env.full {
     assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");
     assert!(stdout.contains("\"fingerprint\":\""), "stdout: {stdout}");
     assert!(stdout.contains("\"language_projections\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"host\":\"native\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"platform\":\"x86_64-linux\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"license\":\"Apache-2.0 OR MIT\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
 }
@@ -1837,6 +1925,60 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
         "stdout: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+#[test]
+fn bridge_flake_native_commits_losses_and_preserves_lock_on_failure() {
+    let dir = Scratch::new("bridge-native-loss-lock");
+    fs::write(
+        dir.join("flake.nix"),
+        r#"{
+  devShells.x86_64-linux.default = {
+    packages = [ pkgs.fd ];
+    shellHook = "export FOO=1";
+  };
+}
+"#,
+    )
+    .unwrap();
+    let first = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&first.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&first.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(stderr.contains("L0204"), "native loss was not disclosed: {stderr}");
+    assert!(stderr.contains("shellHook"), "native loss name missing: {stderr}");
+    let lock_path = dir.join(".jet/lock");
+    let before = fs::read(&lock_path).expect("native bridge must commit its lock");
+    let lock_text = String::from_utf8_lossy(&before);
+    assert!(lock_text.contains("shellHook"), "lock lost native loss fact: {lock_text}");
+
+    fs::write(
+        dir.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }\n",
+    )
+    .unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("E1256"));
+    assert_eq!(fs::read(&lock_path).unwrap(), before);
 }
 
 #[test]
@@ -1977,7 +2119,7 @@ fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
     let fixtures = Scratch::new("bridge-shim-fx");
     fs::write(
         fixtures.join("flake-devshell.json"),
-        r#"{"buildInputs": ["ripgrep", "fd"], "shellHook": "export FOO=1"}"#,
+        r#"{"buildInputs": ["ripgrep", "fd"], "shellHook": "export FOO=1", "fixtureOnly": true}"#,
     )
     .unwrap();
     let output = jetpack()
@@ -2000,6 +2142,12 @@ fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("L0204"), "stderr: {stderr}");
     assert!(stderr.contains("shellHook"), "stderr: {stderr}");
+    assert!(stderr.contains("fixtureOnly"), "stderr: {stderr}");
+    let lock = fs::read_to_string(dir.join(".jet/lock")).unwrap();
+    assert!(
+        lock.contains("flake-unsupported:fixtureOnly"),
+        "fixture-only loss was not persisted: {lock}"
+    );
 }
 
 

@@ -94,6 +94,59 @@ fn sandbox_tool_must_be_a_dep_e1238() {
     std::fs::remove_dir_all(&base).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn failed_recipe_preserves_previous_output_and_removes_partial_stage() {
+    let base = scratch("rollback");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(out.join("old"), "previous").unwrap();
+
+    let mut tools = HashMap::new();
+    tools.insert("sh".to_string(), PathBuf::from("/bin/sh"));
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![
+            BuildStep::Exec {
+                tool: "sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    "printf replacement > \"$JET_BUILD_OUTPUT/new\"".to_string(),
+                ],
+            },
+            BuildStep::Exec {
+                tool: "sh".to_string(),
+                args: vec!["-c".to_string(), "false".to_string()],
+            },
+        ],
+    };
+
+    let error = Recipe::run(&recipe, &ctx, None).unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert_eq!(std::fs::read_to_string(out.join("old")).unwrap(), "previous");
+    assert!(!out.join("new").exists());
+    assert!(
+        std::fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".out.jet-stage-")),
+        "failed recipe left a partial staged output"
+    );
+    std::fs::remove_dir_all(&base).ok();
+}
+
 #[test]
 fn toolchain_unavailable_is_e1240() {
     let d = Toolchain::e1240();

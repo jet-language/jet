@@ -14,16 +14,34 @@ pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
 }
 
-/// Find the nearest environment or workspace root for commands run below a
-/// project directory. Explicit refs and workspace members must use the same
-/// source facts from that root as the plan loader.
+/// Find the nearest Package, environment, or workspace root for commands run
+/// below a project directory. Explicit refs and project plans must use the
+/// same source facts from that root.
 pub(super) fn project_root(start: &Path) -> PathBuf {
+    nearest_root_with_file(
+        start,
+        &[
+            Syntax::PACKAGE_FILE,
+            Syntax::ENV_FILE,
+            Syntax::WORKSPACE_FILE,
+        ],
+    )
+    .unwrap_or_else(|| start.to_path_buf())
+}
+
+/// Workspace member lookup has a wider boundary than a member Package. Keep
+/// it on the nearest workspace declaration so a package inside a monorepo
+/// still sees the monorepo's member index.
+fn workspace_root(start: &Path) -> PathBuf {
+    nearest_root_with_file(start, &[Syntax::WORKSPACE_FILE])
+        .unwrap_or_else(|| start.to_path_buf())
+}
+
+fn nearest_root_with_file(start: &Path, files: &[&str]) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join(Syntax::ENV_FILE).is_file()
-            || dir.join(Syntax::WORKSPACE_FILE).is_file()
-        {
-            return dir;
+        if files.iter().any(|file| dir.join(file).is_file()) {
+            return Some(dir);
         }
         let Some(parent) = dir.parent() else {
             break;
@@ -33,7 +51,7 @@ pub(super) fn project_root(start: &Path) -> PathBuf {
         }
         dir = parent.to_path_buf();
     }
-    start.to_path_buf()
+    None
 }
 
 /// Load and evaluate `workspace.jet` from `dir`, emit workspace entries into
@@ -135,7 +153,7 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
-    let dir = project_root(&std::env::current_dir().unwrap_or_default());
+    let dir = workspace_root(&std::env::current_dir().unwrap_or_default());
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),
         // A malformed `workspace.jet` is source failure, never permission to
@@ -184,7 +202,8 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
 
 #[cfg(test)]
 mod tests {
-    use super::project_root;
+    use super::{project_root, workspace_root};
+    use crate::Syntax;
     use std::fs;
 
     #[test]
@@ -198,6 +217,37 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         fs::write(root.join("env.jet"), "module env.dev {}\n").unwrap();
         assert_eq!(project_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_root_walks_to_the_nearest_package_file() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-package-root-{}",
+            std::process::id()
+        ));
+        let nested = root.join("packages/app/src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
+        assert_eq!(project_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_root_survives_a_nested_package_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-workspace-root-{}",
+            std::process::id()
+        ));
+        let package = root.join("packages/app");
+        let nested = package.join("src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join(Syntax::WORKSPACE_FILE), "module workspace {}\n").unwrap();
+        fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
+        assert_eq!(project_root(&nested), package);
+        assert_eq!(workspace_root(&nested), root);
         let _ = fs::remove_dir_all(root);
     }
 }

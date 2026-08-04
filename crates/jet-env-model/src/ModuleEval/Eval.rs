@@ -673,7 +673,9 @@ fn evaluate_env_fields(
     // comptime value.
     let field_map = fields
         .iter()
-        .filter(|(name, _, _)| name != &Syntax::SYSTEM_FIELD_PACKAGES)
+        .filter(|(name, _, _)| {
+            name != &Syntax::SYSTEM_FIELD_PACKAGES && !is_lifecycle_field(name)
+        })
         .map(|(name, span, value)| (name.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
     for (name, _, value) in fields {
@@ -761,25 +763,17 @@ fn evaluate_env_fields(
                     )
                 })?);
             }
-        } else if matches!(
-            name.as_str(),
-            Syntax::ENV_FIELD_DOTENV
-                | Syntax::ENV_FIELD_UNSET
-                | Syntax::ENV_FIELD_ON_ENTER
-                | Syntax::ENV_FIELD_CHECKS
-                | Syntax::ENV_FIELD_RELOAD
-        ) {
-            if let Some(value) = resolved.get(name) {
-                lifecycle_from_field(&mut lifecycle, name, value).map_err(|error| {
-                    Diagnostic::error(
-                        "E1333",
-                        format!("environment lifecycle declaration is invalid: {error}"),
-                        "lifecycle fields use typed dotenv, unset, hook, and reload records".to_string(),
-                        "fix the field shape, for example `dotenv: [\".env\"]` or `reload: .Prompt`".to_string(),
-                        Some(*span),
-                    )
-                })?;
-            }
+        } else if is_lifecycle_field(name) {
+            let value = evaluate_lifecycle_value(value, base_dir, funcs, globals)?;
+            lifecycle_from_field(&mut lifecycle, name, &value).map_err(|error| {
+                Diagnostic::error(
+                    "E1333",
+                    format!("environment lifecycle declaration is invalid: {error}"),
+                    "lifecycle fields use typed dotenv, unset, task names, and hook records".to_string(),
+                    "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, or `reload: .Prompt`".to_string(),
+                    Some(*span),
+                )
+            })?;
         } else {
             let v = resolved
                 .get(name)
@@ -801,6 +795,76 @@ fn evaluate_env_fields(
         languages,
         files,
     })
+}
+
+fn is_lifecycle_field(name: &str) -> bool {
+    matches!(
+        name,
+        Syntax::ENV_FIELD_DOTENV
+            | Syntax::ENV_FIELD_UNSET
+            | Syntax::ENV_FIELD_ON_ENTER
+            | Syntax::ENV_FIELD_CHECKS
+            | Syntax::ENV_FIELD_RELOAD
+    )
+}
+
+/// Lifecycle names are references, not comptime variable reads. Keep bare
+/// identifiers as strings while still evaluating ordinary literals and the
+/// explicit expert record's scalar fields.
+fn evaluate_lifecycle_value(
+    expr: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Result<crate::Comptime::CtValue, Diagnostic> {
+    match expr {
+        Expr::Ident(name, _) => Ok(crate::Comptime::CtValue::Str(name.clone())),
+        Expr::Field(..) => Ok(crate::Comptime::CtValue::Str(expression_name(expr))),
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| evaluate_lifecycle_value(value, base_dir, funcs, globals))
+            .collect::<Result<Vec<_>, _>>()
+            .map(crate::Comptime::CtValue::List),
+        Expr::StructLit {
+            type_name, fields, ..
+        } => fields
+            .iter()
+            .map(|(name, _, value)| {
+                Ok((
+                    name.clone(),
+                    evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()
+            .map(|fields| crate::Comptime::CtValue::Struct {
+                type_name: type_name.clone(),
+                fields,
+            }),
+        Expr::MapLit(entries, _) => entries
+            .iter()
+            .map(|(key, value)| {
+                let key = evaluate_lifecycle_value(key, base_dir, funcs, globals)?;
+                let key = integration_ct_key(&key).ok_or_else(|| {
+                    Diagnostic::error(
+                        "E1333",
+                        "lifecycle map keys must be deterministic scalar values".to_string(),
+                        "lifecycle records are captured as stable plan facts".to_string(),
+                        "use a string, integer, boolean, or character key".to_string(),
+                        Some(expr.span()),
+                    )
+                })?;
+                Ok((
+                    key,
+                    evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()
+            .map(|entries| crate::Comptime::CtValue::Map(entries.into_iter().collect())),
+        _ => {
+            check_build_io(expr)?;
+            Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)
+        }
+    }
 }
 
 fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
@@ -1060,6 +1124,9 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
         return Err(adapter_shape(raw));
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_PREBUILT) {
+        if args.trim().is_empty() {
+            return Err(adapter_shape(raw));
+        }
         validate_fields(
             args,
             &[
@@ -1232,7 +1299,29 @@ fn named_string(args: &str, key: &str) -> Option<String> {
 
 fn unquote(raw: &str) -> Option<String> {
     let s = raw.strip_prefix('"')?.strip_suffix('"')?;
-    Some(s.replace("\\\"", "\"").replace("\\\\", "\\"))
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                let escaped = chars.next()?;
+                let (_, decoded) = Syntax::ESCAPES
+                    .iter()
+                    .find(|&&(marker, _)| marker == escaped)?;
+                out.push(*decoded);
+            }
+            '{' if chars.clone().next() == Some('{') => {
+                chars.next();
+                out.push('{');
+            }
+            '}' if chars.clone().next() == Some('}') => {
+                chars.next();
+                out.push('}');
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out)
 }
 
 fn adapter_shape(_raw: &str) -> Diagnostic {
