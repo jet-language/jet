@@ -1069,9 +1069,9 @@ fn project_trust_policy(project_dir: &Path) -> Option<super::PackageManifest::Tr
 
 /// A stable hash over a foreign flake/devenv file's content (U16) — the same
 /// role `env_definition_hash` plays for a declared env, but for untrusted
-/// input jetpack didn't write: an arbitrary `flake.nix`/`devenv.nix` runs
-/// Nix-evaluator code the moment jetpack shells out to it, so a first
-/// encounter needs the same trust decision (D-JPK-DEVCOMPOSE1's rationale
+/// input jetpack didn't write: an arbitrary `flake.nix`/`devenv.nix` is still
+/// untrusted evaluator input, so a first encounter needs the same trust
+/// decision (D-JPK-DEVCOMPOSE1's rationale
 /// extended to U16's two new untrusted-input surfaces, `-p` ad-hoc packages
 /// and a foreign flake).
 pub fn flake_definition_hash(content: &str) -> String {
@@ -1079,8 +1079,8 @@ pub fn flake_definition_hash(content: &str) -> String {
 }
 
 /// The trust gate for a foreign flake/devenv file (U16) — `jet env`'s
-/// foreign-flake fallback and `jet bridge flake` both reach this before
-/// shelling out to `nix`. Same store, same hash-grant/pattern machinery, same
+/// foreign-flake projection and `jet bridge flake` both reach this before
+/// native evaluation. Same store, same hash-grant/pattern machinery, same
 /// non-interactive-stdin refusal as [`gate`]; keyed on the file's content
 /// instead of a ref list, since there is no `RefSpec` for "arbitrary flake.nix
 /// text". Ad-hoc `-p` packages do NOT go through this function — they become
@@ -1103,8 +1103,8 @@ pub fn gate_flake(
             "E1255",
             "this project's environment isn't trusted yet",
             &format!(
-                "entering `{}` shells out to `nix` against a foreign flake this project didn't \
-                 declare through `env.*`; a first entry needs a trust decision, and stdin isn't a \
+                "entering `{}` evaluates a foreign flake this project didn't declare through \
+                 `env.*`; a first entry needs a trust decision, and stdin isn't a \
                  terminal to ask interactively",
                 flake_path.display()
             ),

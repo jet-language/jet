@@ -99,6 +99,24 @@ fn private_integration_materializes_fixed_output_derivation() {
 }
 
 #[test]
+fn private_integration_materializes_all_declared_non_fixed_outputs() {
+    let evaluated = super::evaluate_derivation(
+        r#"builtins.derivationStrict { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }"#,
+        "x86_64-linux",
+    )
+    .expect("private materializer must preserve every declared output");
+    assert_eq!(evaluated.outputs().len(), 2);
+    assert!(evaluated
+        .outputs()
+        .get("out")
+        .is_some_and(|path| path.ends_with("-many")));
+    assert!(evaluated
+        .outputs()
+        .get("dev")
+        .is_some_and(|path| path.ends_with("-many-dev")));
+}
+
+#[test]
 fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
     let fixture = crate::JSON::parse(STAGE_A_DERIVATION_FIXTURE).expect("fixture must parse");
     let root = fixture.as_object().expect("fixture root");

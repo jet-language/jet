@@ -26,7 +26,7 @@ pub use jet_codegen::{
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
-    JavaBind, JSON, LintPolicy, Lock, Manifest, PackageManifest, PascalBind, Platform,
+    JavaBind, JSON, LintPolicy, Lock, Manifest, Package, PackageManifest, PascalBind, Platform,
     PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
 };
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
@@ -78,6 +78,7 @@ pub mod TOML;
 pub mod Toolchain;
 pub mod Trust;
 pub mod TrustRoot;
+pub mod Transition;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 

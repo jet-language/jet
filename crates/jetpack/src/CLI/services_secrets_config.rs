@@ -57,41 +57,60 @@ pub(super) fn wait_for_services_ready(
     env: &Env,
     services: &[ModuleEval::DevServicePlan],
 ) -> Result<(), i32> {
-    let order = match Services::dependency_order(services) {
-        Ok(order) => order,
-        Err(error) => {
-            theme.error(
-                "service dependency graph is invalid",
-                &error,
-                "declare each dependency once, keep it enabled, and remove dependency cycles.",
-            );
-            return Err(2);
-        }
-    };
-    let mut started = Vec::new();
-    for index in order {
-        let svc = &services[index];
-        let already_running = matches!(
-            Services::health_one_with_env(project_dir, Some(env), svc),
-            Services::Health::Healthy | Services::Health::Unhealthy
-        );
-        if let Err(()) = run_before_start_tasks(theme, parsed, roots, project_dir, entry, svc) {
-            cleanup_started_services(theme, project_dir, services, &started);
-            return Err(2);
-        }
-        theme.detail(&format!(
-            "waiting for service `{}` to become healthy…",
-            svc.name
-        ));
-        if bring_up_one(theme, project_dir, env, svc).is_err() {
-            cleanup_started_services(theme, project_dir, services, &started);
-            return Err(2);
-        }
-        if !already_running {
-            started.push(index);
-        }
+    let selected = (0..services.len()).collect::<Vec<_>>();
+    let result = Services::up_ordered_with(
+        project_dir,
+        env,
+        services,
+        &selected,
+        service_health_timeout(),
+        |svc| {
+            if let Some(field) = Services::unknown_field(svc) {
+                theme.error_coded(
+                    "E1262",
+                    &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+                    "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                    "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
+                );
+                return Err(format!("service `{}` has an unsupported field", svc.name));
+            }
+            if let Err(()) = run_before_start_tasks(theme, parsed, roots, project_dir, entry, svc) {
+                return Err(format!("before_start task for service `{}` failed", svc.name));
+            }
+            theme.detail(&format!(
+                "waiting for service `{}` to become healthy…",
+                svc.name
+            ));
+            Ok(())
+        },
+    );
+    if let Err(error) = result {
+        report_service_start_error(theme, "couldn't start dev services", &error);
+        return Err(2);
     }
     Ok(())
+}
+
+fn report_service_start_error(theme: &Theme, title: &str, error: &str) {
+    if error.contains("did not become healthy") {
+        let name = error
+            .strip_prefix("service `")
+            .and_then(|rest| rest.split_once('`'))
+            .map(|(name, _)| name)
+            .unwrap_or("unknown");
+        theme.error_coded(
+            "E1261",
+            &format!("service `{name}` never became healthy"),
+            "jetpack waited for the service's typed readiness contract and it did not pass in time.",
+            &format!("inspect `jetpack services logs {name}` and fix the service's run or readiness declaration."),
+        );
+    } else {
+        theme.error(
+            title,
+            error,
+            "inspect the service logs and readiness declarations before retrying.",
+        );
+    }
 }
 
 fn run_before_start_tasks(
@@ -243,58 +262,6 @@ fn run_lifecycle_hooks_with_mode(
     Ok(())
 }
 
-/// Bring up one enabled service and wait for readiness unless its explicit
-/// restart policy hands health/exhaustion to the supervisor: E1262 for an
-/// unrecognized field, a plain error if it can't be started at all, E1261 on
-/// a readiness timeout. Shared by `wait_for_services_ready` (the `jet dev`
-/// health gate) and `cmd_services`'s `up` verb so the two never drift.
-fn bring_up_one(
-    theme: &Theme,
-    project_dir: &Path,
-    env: &Env,
-    svc: &ModuleEval::DevServicePlan,
-) -> Result<(), ()> {
-    if let Some(field) = Services::unknown_field(svc) {
-        theme.error_coded(
-            "E1262",
-            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
-            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
-            "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
-        );
-        return Err(());
-    }
-    let already_running = matches!(
-        Services::health_one_with_env(project_dir, Some(env), svc),
-        Services::Health::Healthy | Services::Health::Unhealthy
-    );
-    if let Err(msg) = Services::up_one(project_dir, env, svc) {
-        theme.error(&format!("couldn't start service `{}`", svc.name), &msg, "");
-        return Err(());
-    }
-    if svc.restart.is_some() {
-        return Ok(());
-    }
-    if Services::wait_healthy_with_env(
-        project_dir,
-        Some(env),
-        svc,
-        service_health_timeout(),
-    ) {
-        Ok(())
-    } else {
-        if !already_running {
-            let _ = Services::down_one(project_dir, svc);
-        }
-        theme.error_coded(
-            "E1261",
-            &format!("service `{}` never became healthy", svc.name),
-            "jetpack waited for its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) and it never passed.",
-            &format!("check `jetpack services logs {}` for what it printed, and confirm its `run`/`ready` declarations are correct.", svc.name),
-        );
-        Err(())
-    }
-}
-
 /// U12: the readiness-poll ceiling `wait_for_services_ready`/`cmd_services`'s
 /// `up` verb allow a service before reporting E1261. Not yet user-configurable
 /// (no ratified field for it) — 15s comfortably covers a local dev dependency
@@ -316,8 +283,11 @@ fn selected_service_order(
     let order = Services::dependency_order(services)?;
     let Some(name) = name else { return Ok(order) };
     let Some(target) = services.iter().position(|service| service.name == name) else {
-        return Ok(Vec::new());
+        return Err(format!("service `{name}` is not declared"));
     };
+    if !services[target].enable {
+        return Err(format!("service `{name}` is disabled"));
+    }
     let mut needed = std::collections::BTreeSet::new();
     let mut pending = vec![target];
     while let Some(index) = pending.pop() {
@@ -334,21 +304,6 @@ fn selected_service_order(
         .into_iter()
         .filter(|index| needed.contains(index))
         .collect())
-}
-
-fn cleanup_started_services(
-    theme: &Theme,
-    project_dir: &Path,
-    services: &[ModuleEval::DevServicePlan],
-    started: &[usize],
-) {
-    if let Err(error) = Services::down_ordered(project_dir, services, started) {
-        theme.error(
-            "service cleanup failed",
-            &error,
-            "inspect the service state and logs before retrying the environment.",
-        );
-    }
 }
 
 /// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
@@ -451,36 +406,42 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     return 2;
                 }
             };
-            let mut started = Vec::new();
-            for index in order {
-                let svc = &plan.dev_services[index];
-                let already_running = matches!(
-                    Services::health_one_with_env(&project_dir, Some(&env), svc),
-                    Services::Health::Healthy | Services::Health::Unhealthy
-                );
-                if !svc.enable {
-                    theme.detail(&format!("service `{}` is disabled, skipping", svc.name));
-                    continue;
-                }
-                if let Err(()) = run_before_start_tasks(
-                    theme,
-                    parsed,
-                    &roots,
-                    &project_dir,
-                    &find_project_entry(&project_dir),
-                    svc,
-                ) {
-                    cleanup_started_services(theme, &project_dir, &plan.dev_services, &started);
+            let entry = find_project_entry(&project_dir);
+            let started = match Services::up_ordered_with(
+                &project_dir,
+                &env,
+                &plan.dev_services,
+                &order,
+                service_health_timeout(),
+                |svc| {
+                    if let Some(field) = Services::unknown_field(svc) {
+                        theme.error_coded(
+                            "E1262",
+                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
+                        );
+                        return Err(format!("service `{}` has an unsupported field", svc.name));
+                    }
+                    run_before_start_tasks(
+                        theme,
+                        parsed,
+                        &roots,
+                        &project_dir,
+                        &entry,
+                        svc,
+                    )
+                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                },
+            ) {
+                Ok(started) => started,
+                Err(error) => {
+                    report_service_start_error(theme, "couldn't start services", &error);
                     return 2;
                 }
-                if bring_up_one(theme, &project_dir, &env, svc).is_err() {
-                    cleanup_started_services(theme, &project_dir, &plan.dev_services, &started);
-                    return 2;
-                }
-                if !already_running {
-                    started.push(index);
-                }
-                theme.ok(&format!("service `{}` is up", svc.name));
+            };
+            for index in started {
+                theme.ok(&format!("service `{}` is up", plan.dev_services[index].name));
             }
             0
         }
@@ -498,37 +459,45 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             let entry = find_project_entry(&project_dir);
-            for index in order {
-                let svc = &plan.dev_services[index];
-                if let Err(()) = run_before_start_tasks(
-                    theme,
-                    parsed,
-                    &roots,
-                    &project_dir,
-                    &entry,
-                    svc,
-                ) {
-                    return 2;
-                }
-                if let Err(error) = Services::restart_one(&project_dir, &env, svc) {
-                    theme.error(&format!("couldn't restart service `{}`", svc.name), &error, "check the service logs and restart policy.");
-                    return 2;
-                }
-                if !Services::wait_healthy_with_env(
-                    &project_dir,
-                    Some(&env),
-                    svc,
-                    service_health_timeout(),
-                ) {
-                    theme.error_coded(
-                        "E1261",
-                        &format!("service `{}` never became healthy after restart", svc.name),
-                        "the service restart completed, but its declared readiness probe did not pass.",
-                        &format!("check `jetpack services logs {}` and its `ready` declaration.", svc.name),
+            let restarted = match Services::restart_ordered_with(
+                &project_dir,
+                &env,
+                &plan.dev_services,
+                &order,
+                service_health_timeout(),
+                |svc| {
+                    if let Some(field) = Services::unknown_field(svc) {
+                        theme.error_coded(
+                            "E1262",
+                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
+                        );
+                        return Err(format!("service `{}` has an unsupported field", svc.name));
+                    }
+                    run_before_start_tasks(
+                        theme,
+                        parsed,
+                        &roots,
+                        &project_dir,
+                        &entry,
+                        svc,
+                    )
+                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                },
+            ) {
+                Ok(restarted) => restarted,
+                Err(error) => {
+                    theme.error(
+                        "couldn't restart services",
+                        &error,
+                        "check the service logs, readiness declarations, and restart policy.",
                     );
                     return 2;
                 }
-                theme.ok(&format!("service `{}` restarted", svc.name));
+            };
+            for index in restarted {
+                theme.ok(&format!("service `{}` restarted", plan.dev_services[index].name));
             }
             0
         }
@@ -630,15 +599,49 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     return 2;
                 }
             };
-            for index in order {
-                let svc = &plan.dev_services[index];
-                match Services::watch_once(&project_dir, &env, svc) {
-                    Ok(true) => theme.ok(&format!("service `{}` restarted after a watched-file change", svc.name)),
-                    Ok(false) => theme.detail(&format!("service `{}` watch baseline is current", svc.name)),
-                    Err(error) => {
-                        theme.error(&format!("couldn't watch service `{}`", svc.name), &error, "declare project-relative files in `watch`.");
-                        return 2;
+            let entry = find_project_entry(&project_dir);
+            let changed = match Services::watch_once_ordered_with(
+                &project_dir,
+                &env,
+                &plan.dev_services,
+                &order,
+                service_health_timeout(),
+                |svc| {
+                    if let Some(field) = Services::unknown_field(svc) {
+                        theme.error_coded(
+                            "E1262",
+                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
+                        );
+                        return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
+                    run_before_start_tasks(
+                        theme,
+                        parsed,
+                        &roots,
+                        &project_dir,
+                        &entry,
+                        svc,
+                    )
+                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                },
+            ) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    theme.error(
+                        "couldn't watch services",
+                        &error,
+                        "declare project-relative files in `watch` and inspect the service lifecycle error.",
+                    );
+                    return 2;
+                }
+            };
+            for index in order {
+                if changed.contains(&index) {
+                    theme.ok(&format!("service `{}` restarted after a watched-file change", plan.dev_services[index].name));
+                } else if !plan.dev_services[index].watch.is_empty() {
+                    theme.detail(&format!("service `{}` watch baseline is current", plan.dev_services[index].name));
                 }
             }
             0

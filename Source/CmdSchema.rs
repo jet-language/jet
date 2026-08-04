@@ -47,12 +47,13 @@ pub(crate) fn run_schema(args: &[String]) {
     }
 }
 
-/// Locate the project root (dir containing `pkg.jet`) or exit with a clear error.
+/// Locate the project root (dir containing package.jet or migration-era pkg.jet)
+/// or exit with a clear error.
 fn project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet inspect schema` inside a project",
+        "error: no package.jet found — run `jet inspect schema` inside a project",
     )
 }
 
@@ -162,7 +163,7 @@ fn run_squash(before: Option<&str>) {
     let root = project_root();
 
     // Read the package version (the current published shape's version).
-    let pack_path = root.join(Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root).unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
     let version = match std::fs::read_to_string(&pack_path) {
         Ok(raw) => match jet::Manifest::parse(&pack_path, &raw) {
             Ok(mf) => mf.package.version,

@@ -146,8 +146,8 @@ fn run() {
     child :: process.run(["./raw_probe"]) ?? panic("raw child failed")
     print(child.output)
     if env.vars() == {
-        Ok(_) -> { print("unexpected vars success") }
-        Err(e) -> { print(e) }
+        .Ok(_) -> { print("unexpected vars success") }
+        .Err(e) -> { print(e) }
     }
 }
 "#;
@@ -213,8 +213,8 @@ fn run() {
     // Test-only vetted probe: mutate the real host block after main's mandatory
     // snapshot and verify both directions of isolation in this same process.
     let rust = out.rust.replacen(
-        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
-        "    jet_std_env_init();\n    std::env::set_var(\"JET_HOST_ISOLATION\", \"host-after-snapshot\");\n    jet_runtime_boundary(|| user_run());\n    assert_eq!(std::env::var(\"JET_HOST_ISOLATION\").as_deref(), Ok(\"host-after-snapshot\"));",
+        "    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());",
+        "    jet_std_env_init();\n    std::env::set_var(\"JET_HOST_ISOLATION\", \"host-after-snapshot\");\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());\n    assert_eq!(std::env::var(\"JET_HOST_ISOLATION\").as_deref(), Ok(\"host-after-snapshot\"));",
         1,
     );
     assert_ne!(rust, out.rust, "test probe did not attach after eager init");
@@ -288,8 +288,8 @@ fn main() {
     // snapshot, forcing the writer to commit a new pair during that launch.
     // No hook or synchronization state ships in generated production code.
     let hooked_snapshot = out.rust.replacen(
-        "fn jet_std_env_snapshot_raw() => JetEnvEntries {\n    jet_env_read().clone()\n}",
-        r#"fn jet_std_env_snapshot_raw() => JetEnvEntries {
+        "fn jet_std_env_snapshot_raw() -> JetEnvEntries {\n    jet_env_read().clone()\n}",
+        r#"fn jet_std_env_snapshot_raw() -> JetEnvEntries {
     jet_test_snapshot_entry();
     jet_env_read().clone()
 }
@@ -392,7 +392,7 @@ fn jet_test_snapshot_entry() {
     assert!(advanced_during_launch, "writer generation never advanced across a child launch");
     jet_runtime_boundary(|| user_run());"#;
     let rust = hooked_snapshot.replacen(
-        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
+        "    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());",
         probe,
         1,
     );
@@ -417,7 +417,7 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     assert!(matches!(invalid_value, Err(jet_std::EnvError::InvalidValue)));
     jet_runtime_boundary(|| user_run());"#;
     let rust = out.rust.replacen(
-        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
+        "    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());",
         probe,
         1,
     );

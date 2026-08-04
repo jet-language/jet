@@ -72,6 +72,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             walk_jet_files(&path, out);
         } else if path.extension().and_then(|x| x.to_str()) == Some(Syntax::FILE_EXT)
+            && fname_str != Syntax::PACKAGE_FILE
             && fname_str != Syntax::PAYLOAD_FILE
         {
             out.push(path);

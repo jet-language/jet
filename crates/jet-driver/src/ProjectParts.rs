@@ -265,6 +265,7 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
             collect_jet_files(&path, out);
         } else if file_type.is_file()
             && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
+            && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PACKAGE_FILE)
             && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PAYLOAD_FILE)
         {
             out.push(path);

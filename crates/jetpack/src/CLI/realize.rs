@@ -24,6 +24,20 @@ pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::Re
     })
 }
 
+fn current_project_dir() -> Option<std::path::PathBuf> {
+    let dir = std::env::current_dir().ok()?;
+    if EnvFile::path_in(&dir).is_file()
+        || dir.join(Syntax::JETPACK_TOML).is_file()
+        || dir.join(Syntax::PACKAGE_FILE).is_file()
+        || dir.join(Syntax::PAYLOAD_FILE).is_file()
+        || dir.join(Syntax::WORKSPACE_FILE).is_file()
+    {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
 /// Realize one ref, recording it in the store and printing progress. `table`
 /// resolves named sources (D-JPK17); it is empty for direct CLI refs.
 pub(super) fn realize_ref(
@@ -108,7 +122,7 @@ pub(super) fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    let project_dir = std::env::current_dir().ok();
+    let project_dir = current_project_dir();
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
     // D-JPK-OFFLINE2=B: an offline Nix ref with no fixtures may still reuse a
     // hangar copy when the project lock records a matching realization whose
@@ -331,7 +345,7 @@ pub(super) fn realize_adapter(
 )> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
-    let project_dir = std::env::current_dir().ok();
+    let project_dir = current_project_dir();
     let ctx = Provider::Ctx {
         fixtures: None,
         store_dir: &store_dir,
@@ -446,6 +460,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             "couldn't understand the provider's output",
             reason,
             "this is likely a Jetpack bug — please report it.",
+        ),
+        ProviderError::Ingest(reason) => theme.error_coded(
+            "E1315",
+            "hangar ingest aborted",
+            reason,
+            "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source.",
         ),
         ProviderError::FixtureMissing(path) => theme.error(
             "no offline fixture for that ref",

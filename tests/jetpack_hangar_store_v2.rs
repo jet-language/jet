@@ -343,7 +343,7 @@ fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
         .find("\n  error[E1320]")
         .map(|index| &stale_stderr[index..])
         .unwrap_or(&stale_stderr);
-    assert_jetos_stderr_snapshot("external_root_stale_etag", diagnostic);
+    assert_jetos_stderr_snapshot_trimmed("external_root_stale_etag", diagnostic);
 
     let unregister = jetpack()
         .args([

@@ -231,7 +231,11 @@ impl WatchGraph {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if name == "pkg.jet" || name.ends_with(".manifest") || name == "web.manifest.json" {
+        if name == "package.jet"
+            || name == "pkg.jet"
+            || name.ends_with(".manifest")
+            || name == "web.manifest.json"
+        {
             return RootKind::Manifest;
         }
         if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") {
@@ -271,7 +275,10 @@ impl WatchGraph {
 
         let project = entry.parent().unwrap_or_else(|| Path::new("."));
         let extras = [
-            (project.join("pkg.jet"), RootKind::Manifest),
+            (
+                jet_driver::PackageManifest::PackManifest::path_in(project),
+                RootKind::Manifest,
+            ),
             (project.join(".jet/lock"), RootKind::Lock),
             (
                 project.join(format!(

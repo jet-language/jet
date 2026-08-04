@@ -217,11 +217,9 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
         "{workspace}"
     );
     assert!(
-        workspace.contains("package(\"foo\").patches += [patch(\"patches/foo.patch\")]"),
-        "{workspace}"
-    );
-    assert!(
-        workspace.contains("package(\"foo\").allowUnfree: true"),
+        workspace.contains("\"foo\": .{")
+            && workspace.contains("patches: [patch(\"patches/foo.patch\")]")
+            && workspace.contains("allowUnfree: true"),
         "{workspace}"
     );
 
@@ -239,7 +237,7 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
     assert!(
         stdout.contains("package-overlay:plasma_beta:foo")
             && stdout.contains("provider: nixpkgs")
-            && stdout.contains("policy: workspace.overlay.plasma_beta"),
+            && stdout.contains("policy: workspace.overlay.resolved:foo"),
         "explain: {stdout}"
     );
 }
@@ -376,7 +374,10 @@ fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
     }
     fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700)).unwrap();
 
-    let socket = root.join("wrong-kind");
+    // Unix socket addresses are capped at SUN_LEN; the test's scratch root is
+    // intentionally verbose, so keep this path short and independent of the
+    // Jetpack root.
+    let socket = std::env::temp_dir().join(format!("jpk-sock-{}", std::process::id()));
     let listener = UnixListener::bind(&socket).unwrap();
     write_fixture(&socket);
     let failed = build();
@@ -386,6 +387,7 @@ fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
     assert!(stderr.contains("unsupported special file"), "stderr: {stderr}");
     assert_no_hangar_entry(&root.path, "greet-");
     drop(listener);
+    let _ = fs::remove_file(socket);
 }
 
 
@@ -1605,10 +1607,9 @@ fn enter_flake_detection_ordering_project_env_wins_without_flag() {
 
 
 #[test]
-fn enter_flake_flag_forces_foreign_flake_and_reports_missing_nix() {
-    // `--flake` forces the foreign-flake fallback even though the project
-    // declares `env.*`; with no `nix` on PATH this is a clean E1256, not a
-    // panic or a raw spawn error.
+fn enter_flake_flag_requires_trust_before_native_projection() {
+    // `--flake` forces the foreign-flake projection even though the project
+    // declares `env.*`; the trust boundary runs before native evaluation.
     let (base, proj, root) = core_hello_project("flake-forced");
     fs::write(proj.join("flake.nix"), "{ }").unwrap();
     let output = jetpack()
@@ -1621,8 +1622,9 @@ fn enter_flake_flag_forces_foreign_flake_and_reports_missing_nix() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E1256"), "stderr: {stderr}");
-    assert!(stderr.contains("nix"), "stderr: {stderr}");
+    assert!(stderr.contains("E1255"), "stderr: {stderr}");
+    assert!(stderr.contains("--trust"), "stderr: {stderr}");
+    assert!(!stderr.contains("E1256"), "stderr: {stderr}");
 }
 
 
