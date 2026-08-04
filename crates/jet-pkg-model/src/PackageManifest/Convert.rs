@@ -90,19 +90,17 @@ fn bad_dep_shape(name: &str, why: &str) -> Diagnostic {
     )
 }
 
-/// Generate a `pkg.jet` template for `jet new`.
+/// Generate the canonical `package.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     let ver = crate::Manifest::COMPILER_VERSION;
     if annotated {
         format!(
-            r#"payload: {{
-    name:    "{name}",
-    version: "0.1.0",
-    jet:     ">={ver}",
-    description: "",
-    license: "MIT OR Apache-2.0",
-    repository: "",
-}}
+            r#"name: "{name}"
+version: "0.1.0"
+jet: ">={ver}"
+description: ""
+license: "MIT OR Apache-2.0"
+repository: ""
 
 // Jet package dependencies:
 // deps: {{
@@ -113,14 +111,12 @@ pub fn new_template(name: &str, annotated: bool) -> String {
         )
     } else {
         format!(
-            r#"payload: {{
-    name:    "{name}",
-    version: "0.1.0",
-    jet:     ">={ver}",
-    description: "",
-    license: "MIT OR Apache-2.0",
-    repository: "",
-}}
+            r#"name: "{name}"
+version: "0.1.0"
+jet: ">={ver}"
+description: ""
+license: "MIT OR Apache-2.0"
+repository: ""
 
 deps: {{
 }}

@@ -2,7 +2,7 @@ use super::parse::Parsed;
 use crate::Output::Theme;
 use crate::Store;
 
-/// `jetpack shared-store install|broker` — optional authenticated shared store.
+/// `jetpack shared-store install|enroll|broker` — optional authenticated shared store.
 pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str).unwrap_or("install") {
         "install" => match Store::install_shared_store(&Store::resolve()) {
@@ -20,7 +20,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.error(
                     "shared-store install failed",
                     &error.to_string(),
-                    "check the user-owned Jetpack root and keep the broker optional.",
+                    "check the administrator-selected Jetpack root and keep the broker optional.",
                 );
                 2
             }
@@ -40,7 +40,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                         theme.error(
                             "shared-store broker failed",
                             &error.to_string(),
-                            "the broker accepts one signed archive request and exits; reinstall the user socket unit if it is stale.",
+                            "the broker accepts one signed archive request and exits; reinstall the socket unit if it is stale.",
                         );
                         2
                     }
@@ -66,14 +66,52 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 0
             }
             Err(error) => {
-                theme.error("shared-store status failed", &error.to_string(), "repair the user-owned shared-store config.");
+                theme.error("shared-store status failed", &error.to_string(), "repair the administrator-installed shared-store config.");
                 2
             }
         },
+        "enroll" => {
+            let Some(uid) = parsed.positional.get(1) else {
+                theme.error(
+                    "shared-store enrollment needs a uid",
+                    "no user id was supplied",
+                    "run `jet shared-store enroll <uid>` as the administrator.",
+                );
+                return 2;
+            };
+            let read_only = parsed.positional.iter().any(|item| item == "--read-only");
+            let unknown = parsed
+                .positional
+                .iter()
+                .skip(1)
+                .any(|item| item != uid && item != "--read-only");
+            if unknown {
+                theme.error(
+                    "shared-store enrollment has an unknown argument",
+                    "enrollment accepts one uid and optional `--read-only`",
+                    "run `jet shared-store enroll <uid> [--read-only]`.",
+                );
+                return 2;
+            }
+            match Store::enroll_shared_store(&Store::resolve(), uid, !read_only) {
+                Ok(path) => {
+                    theme.status(&format!("enrolled shared-store user {uid} at {}", path.display()));
+                    0
+                }
+                Err(error) => {
+                    theme.error(
+                        "shared-store enrollment failed",
+                        &error.to_string(),
+                        "run the command as the administrator after installing the broker.",
+                    );
+                    2
+                }
+            }
+        }
         other => {
             theme.error(
                 &format!("`shared-store {other}` is not a command"),
-                "the shared-store commands are `install`, `status`, and the socket-activated `broker` entrypoint.",
+                "the shared-store commands are `install`, `enroll`, `status`, and the socket-activated `broker` entrypoint.",
                 "run `jet shared-store install`.",
             );
             2

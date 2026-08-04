@@ -99,6 +99,24 @@ D-GENERIC-CALL1=A.
   keep audited unsafe internals behind safe APIs; require measured attribution.
   https://www.youtube.com/watch?v=l6tisoOzTuk
 
+**Visually Explained — Python mechanisms (4 videos, mined 2026-08-03).**
+Stepwise visual explanations checked Jet's source-local transformations,
+pull-driven streams, typed variadics, and JSON boundaries. Jet keeps one typed
+mechanism for each job and rejects Python's dynamic baggage.
+
+- Python Decorators - Visually Explained: keep transformations visible and
+  inspectable; reject a second runtime decorator mechanism.
+  https://www.youtube.com/watch?v=3tyaO-OE0K0
+- Python Generators - Visually Explained: teach suspend/resume and one-pass
+  streams; reject memory claims until Jet's thread-backed stream is measured.
+  https://www.youtube.com/watch?v=GWZf_B129zs
+- Python *args vs **kwargs - Visually Explained: use explicit typed parameters
+  by default and typed variadics only for genuine open arity.
+  https://www.youtube.com/watch?v=FFpDsC6B2qw
+- JSON in Python - Visually Explained: preserve missing versus explicit null;
+  reject object-only JSON roots and direct file truncation as safe defaults.
+  https://www.youtube.com/watch?v=4rmBOxn0PdI
+
 **Jonathan Blow on Jai** (The Standup w/ ThePrimeagen, transcript) — closed-beta
 migration discipline; staged spelling migration through coexistence → warning →
 removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow

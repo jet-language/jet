@@ -2177,7 +2177,7 @@ fn build_package_name(file: &str) -> String {
     };
     let mut directory = absolute.parent();
     while let Some(dir) = directory {
-        let path = dir.join(crate::Syntax::PAYLOAD_FILE);
+        let path = crate::PackageManifest::PackManifest::path_in(dir);
         if let Ok(source) = std::fs::read_to_string(&path) {
             if let Ok(manifest) = crate::PackageManifest::parse(&source) {
                 if !manifest.package.name.is_empty() {
@@ -2200,7 +2200,7 @@ fn package_build_entry_source(
     file: &str,
     project_root: &std::path::Path,
 ) -> Option<(std::path::PathBuf, String)> {
-    let package_path = project_root.join(crate::Syntax::PAYLOAD_FILE);
+    let package_path = crate::PackageManifest::PackManifest::path_in(project_root);
     let entry_path = std::path::Path::new(file);
     let entry_path = if entry_path.is_absolute() {
         entry_path.to_path_buf()
@@ -2221,7 +2221,10 @@ fn package_build_entry_source(
 
 fn package_manifest_build_overlay(file: &str) -> Option<(std::path::PathBuf, String)> {
     let path = std::path::Path::new(file);
-    if path.file_name().and_then(|name| name.to_str()) != Some(crate::Syntax::PAYLOAD_FILE) {
+    if !matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(crate::Syntax::PACKAGE_FILE) | Some(crate::Syntax::PAYLOAD_FILE)
+    ) {
         return None;
     }
     let path = if path.is_absolute() {
@@ -2245,7 +2248,7 @@ fn package_manifest_has_build_entry(file: &str, project_root: &std::path::Path) 
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(entry_path)
     };
-    let package_path = project_root.join(crate::Syntax::PAYLOAD_FILE);
+    let package_path = crate::PackageManifest::PackManifest::path_in(project_root);
     normalize_project_path(project_root, &entry_path)
         == normalize_project_path(project_root, &package_path)
         && std::fs::read_to_string(package_path)

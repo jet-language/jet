@@ -14,6 +14,7 @@ use super::workspace_sources::{cwd_table, load_workspace};
 use crate::EnvFile;
 use crate::EnvFiles;
 use crate::EnvHook;
+use crate::Bridge;
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
 use crate::Output::Theme;
@@ -571,8 +572,8 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
 /// U16 additions: `-p <pkg>...` folds ad-hoc nixpkgs packages into the plan
 /// (same trust gate, same realize path, as a manifest ref); `--flake` forces
 /// (and the absence of any declared `env.*` module otherwise triggers) a
-/// foreign `flake.nix`/`devenv.nix` fallback that shells straight to `nix
-/// develop` instead of composing jetpack's own env.
+/// foreign `flake.nix`/`devenv.nix` fallback that uses Jetpack's bounded native
+/// projection instead of composing a second shell model.
 pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // D-ENVHOOK1=A: `jet env hook <shell>` / `jet env export <shell>` route
     // through `jetpack enter` (D-JPK-DISPATCH1) as reserved first-positional
@@ -1339,29 +1340,17 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
     !ef.packages.is_empty() || ef.default_source.is_some() || !ef.named.is_empty()
 }
 
-/// U16: enter a foreign flake's default devShell directly through `nix
-/// develop` — the ratified stopgap (jetpack never parses/composes a foreign
-/// flake's devShell itself; `jetpack bridge flake` is the bounded native
-/// translator for users who want to adopt it as `env.*` instead). Gated on
-/// the same trust store as a declared env, keyed on the flake's content
-/// (`Trust::gate_flake`) since arbitrary flake.nix text is untrusted input
-/// the moment jetpack shells out to it.
+/// U16: enter a foreign flake's default devShell through the same bounded
+/// native evaluator as `jet bridge flake`. The projection is deliberately
+/// loss-recording: package lists become ordinary nixpkgs refs and fields with
+/// no `env.*` meaning are reported as L0204. Jetpack never delegates this
+/// product path to an installed `nix` binary.
 fn enter_foreign_flake(
     theme: &Theme,
     project_dir: &Path,
     flake_path: &Path,
     parsed: &Parsed,
 ) -> i32 {
-    if !Provider::nix_on_path() {
-        theme.error_coded(
-            "E1256",
-            "this project's foreign flake needs `nix`, which isn't on PATH",
-            "`jet env`'s foreign-flake fallback (U16) shells out to `nix develop`, the ratified \
-             stopgap; without `nix` there's no way to enter that shell.",
-            "install Nix from the official installer, or declare packages in env.* instead.",
-        );
-        return 2;
-    }
     if let Err(code) = Trust::gate_flake(
         theme,
         &Trust::store_path(),
@@ -1371,71 +1360,48 @@ fn enter_foreign_flake(
     ) {
         return code;
     }
+    let flake_dir = flake_path.parent().unwrap_or(project_dir);
+    let facts = match Bridge::read_devshell_facts(flake_dir, None) {
+        Ok(facts) => facts,
+        Err(error) => {
+            crate::CLI::report_provider_error(theme, &error);
+            return 1;
+        }
+    };
+    for field in &facts.unmapped {
+        theme.warning_coded(
+            "L0204",
+            &format!("`{field}` in `{}` has no `env.*` equivalent yet", flake_path.display()),
+            "the bounded native foreign-flake projection preserves unsupported fields as loss facts instead of executing them",
+            "declare the effect explicitly in `env.*` if the project needs it",
+        );
+    }
+    let mut plan = empty_task_plan();
+    plan.refs = facts
+        .packages
+        .into_iter()
+        .map(|package| RefSpec::RefSpec {
+            raw: format!("{package}@{}", Syntax::REF_SOURCE_NIXPKGS),
+            source: RefSpec::Source::Nixpkgs,
+            package,
+        })
+        .collect();
     theme.status(&format!(
-        "entering foreign flake shell: {}",
+        "entering native projection of foreign shell: {}",
         theme.bold(&flake_path.display().to_string())
     ));
-    let flake_dir = flake_path.parent().unwrap_or(project_dir);
-    let mut args = vec![flake_dir.display().to_string()];
-    if parsed.flags.pure {
-        args.push(Syntax::ENV_FLAG_PURE.to_string());
-    }
-    // A foreign flake's devShell is a real Nix shell underneath, but it must
-    // never be indistinguishable from a bare `nix develop` — brand the
-    // interactive case the same way the native path does (Shell::enter),
-    // so `jet env` always looks like `jet env`. A one-off `-- cmd` is
-    // non-interactive and needs no prompt.
-    let branded = if parsed.command.as_ref().is_none_or(|c| c.is_empty()) {
-        let b = Shell::branded_shell(ShellKind::detect(), Syntax::JETPACK_PROMPT_LABEL);
-        args.push("--command".to_string());
-        args.extend(b.command_tail.clone());
-        Some(b)
-    } else {
-        args.push("--command".to_string());
-        args.extend(parsed.command.clone().unwrap_or_default());
-        None
+    let roots = Store::resolve();
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
     };
-    let mut cmd = std::process::Command::new("nix");
-    cmd.arg("develop").args(&args);
-    if theme.color {
-        cmd.env_remove("NO_COLOR");
-    } else {
-        cmd.env("NO_COLOR", "");
-    }
-    if let Some(b) = &branded {
-        for (k, v) in &b.env_vars {
-            cmd.env(k, v);
+    match &parsed.command {
+        Some(command) if !command.is_empty() && parsed.flags.pure => {
+            Shell::run_clean_command(&env, command)
         }
-        // Interactive: the same threshold rule the native path draws, so a
-        // foreign flake's shell still unmistakably reads as `jet env`.
-        let file = flake_path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        theme.rule(&[
-            Syntax::JETPACK_PROMPT_LABEL,
-            &format!("foreign {file} shell"),
-            "exit to leave",
-        ]);
-    }
-    let result = cmd.status();
-    if let Some(b) = &branded {
-        b.cleanup();
-        theme.rule(&[
-            &format!("left {}", Syntax::JETPACK_PROMPT_LABEL),
-            "your machine is unchanged",
-        ]);
-    }
-    match result {
-        Ok(status) => status.code().unwrap_or(1),
-        Err(e) => {
-            theme.error(
-                "couldn't run `nix develop`",
-                &e.to_string(),
-                "check that `nix` is installed and on PATH.",
-            );
-            1
-        }
+        Some(command) if !command.is_empty() => Shell::run_command(&env, command),
+        _ if parsed.flags.pure => Shell::enter_clean(theme, &env, ShellKind::detect()),
+        _ => Shell::enter(theme, &env, ShellKind::detect()),
     }
 }
 

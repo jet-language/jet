@@ -39,8 +39,7 @@ pub fn fetch(
     opts: &FetchOptions,
 ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
     // Validate toolchain constraint.
-    let manifest_path = project_root
-        .join(Syntax::PAYLOAD_FILE)
+    let manifest_path = crate::PackageManifest::PackManifest::path_in(project_root)
         .display()
         .to_string();
     if let Err(d) = check_toolchain(manifest, &manifest_path) {
@@ -582,15 +581,15 @@ impl<'a> Resolver<'a> {
                 format!(
                     "dependency `{}` has no `{}`",
                     dep_name,
-                    crate::Syntax::PAYLOAD_FILE
+                    crate::Syntax::PACKAGE_FILE
                 ),
                 format!(
                     "every Jet package must have a `{}` manifest",
-                    crate::Syntax::PAYLOAD_FILE
+                    crate::Syntax::PACKAGE_FILE
                 ),
                 format!(
                     "add a `{}` to `{}`",
-                    crate::Syntax::PAYLOAD_FILE,
+                    crate::Syntax::PACKAGE_FILE,
                     dir.display()
                 ),
                 None,
@@ -817,7 +816,7 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             "the git ref may not exist or the URL may be unreachable".to_string(),
             format!(
                 "check the URL and ref name in {}",
-                crate::Syntax::PAYLOAD_FILE
+                crate::Syntax::PACKAGE_FILE
             ),
             None,
         ));
@@ -829,7 +828,7 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             "E1203",
             format!("git ref `{}` not found at `{}`", refname, url),
             "the tag or branch name must exist in the remote repository".to_string(),
-            format!("check the ref spelling in {}", crate::Syntax::PAYLOAD_FILE),
+            format!("check the ref spelling in {}", crate::Syntax::PACKAGE_FILE),
             None,
         ));
     }

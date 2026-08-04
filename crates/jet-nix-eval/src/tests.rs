@@ -275,6 +275,23 @@ fn native_devshell_rejects_truncated_expressions_without_panicking() {
 }
 
 #[test]
+fn native_evaluator_rejects_oversized_input_before_parsing() {
+    let source = "x".repeat((1 << 20) + 1);
+    assert!(matches!(
+        evaluate_devshell(&source, "x86_64-linux"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+    assert!(matches!(
+        evaluate_derivation(&source, "x86_64-linux"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+    assert!(matches!(
+        evaluate_derivation_output(&source, "x86_64-linux", "out"),
+        Err(EvaluationError::InputTooLarge)
+    ));
+}
+
+#[test]
 fn native_devshell_evaluates_indented_string_interpolation() {
     let evaluated = evaluate_devshell(
         r#"{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }"#,
@@ -589,6 +606,17 @@ fn native_devshell_rejects_unknown_systems_and_empty_flakes() {
 }
 
 #[test]
+fn pinned_inventory_has_no_implicit_skip_reason() {
+    let inventory = pinned_inventory();
+    assert!(inventory.iter().any(|entry| {
+        entry.surface == "overlays-devshells-multi-output-packages"
+            && entry.status == InventoryStatus::Covered
+    }));
+    assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
+    assert_eq!(evaluator_budget().input_bytes, 1 << 20);
+}
+
+#[test]
 fn native_derivation_builds_a_pure_request_with_required_builtins() {
     let evaluated = evaluate_derivation(
         r#"
@@ -682,7 +710,7 @@ fn native_required_string_builtins_match_nix_edge_ordering() {
 }
 
 #[test]
-fn native_derivation_rejects_noncanonical_inputs_and_multiple_outputs() {
+fn native_derivation_rejects_noncanonical_inputs_and_preserves_multiple_outputs() {
     let path_error = evaluate_derivation(
         r#"builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; src = "${pkgs.fd}"; }"#,
         "x86_64-linux",
@@ -690,12 +718,32 @@ fn native_derivation_rejects_noncanonical_inputs_and_multiple_outputs() {
     .expect_err("package placeholders must not become derivation inputs");
     assert!(matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("canonical store-path context")));
 
-    let output_error = evaluate_derivation(
+    let evaluated = evaluate_derivation(
         r#"builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }"#,
         "x86_64-linux",
     )
-    .expect_err("multi-output derivations belong to the later breadth stage");
-    assert!(matches!(output_error, EvaluationError::Unsupported(reason) if reason.contains("multiple derivation outputs")));
+    .expect("bounded evaluator must preserve non-fixed output declarations");
+    assert_eq!(
+        evaluated
+            .outputs()
+            .iter()
+            .map(|output| output.name())
+            .collect::<Vec<_>>(),
+        vec!["out", "dev"]
+    );
+    assert_eq!(evaluated.env().get("dev"), Some(&String::new()));
+}
+
+#[test]
+fn native_derivation_rejects_duplicate_or_invalid_outputs() {
+    for source in [
+        r#"builtins.derivation { name = "duplicate"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "out" ]; }"#,
+        r#"builtins.derivation { name = "invalid"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "bad/name" ]; }"#,
+    ] {
+        let error = evaluate_derivation(source, "x86_64-linux")
+            .expect_err("invalid output declarations must fail before materialization");
+        assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("output")));
+    }
 }
 
 #[test]
@@ -760,4 +808,64 @@ fn native_devshell_treats_indented_hooks_as_unsupported_loss() {
     .expect("indented shell hooks must not confuse package extraction");
     assert_eq!(evaluated.packages(), &["fd".to_string()]);
     assert_eq!(evaluated.unsupported(), &["shellHook".to_string()]);
+}
+
+#[test]
+fn native_devshell_applies_bounded_package_overlays() {
+    let evaluated = evaluate_devshell(
+        r#"
+        let overlay = final: prev: { custom = prev.fd; };
+        in {
+          devShells.x86_64-linux.default =
+            (import nixpkgs { overlays = [ overlay ]; }).mkShell {
+              packages = [ (import nixpkgs { overlays = [ overlay ]; }).custom ];
+            };
+        }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("bounded package overlays must project package identities");
+    assert_eq!(evaluated.packages(), &["fd".to_string()]);
+}
+
+#[test]
+fn native_devshell_merge_keeps_overlay_packages_lazy() {
+    let evaluated = evaluate_devshell(
+        r#"
+        let overlayPkgs = pkgs // { custom = pkgs.ripgrep; };
+        in { devShells.x86_64-linux.default = overlayPkgs.mkShell { packages = [ overlayPkgs.custom ]; }; }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("package-set merge must preserve explicit overlay fields");
+    assert_eq!(evaluated.packages(), &["ripgrep".to_string()]);
+}
+
+#[test]
+fn native_evaluator_rejects_fetchers_and_cross_system_packages_without_authority() {
+    let fetch_error = evaluate_devshell(
+        r#"{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.fetchurl { url = "https://example.invalid/source"; }) ];
+          };
+        }"#,
+        "x86_64-linux",
+    )
+    .expect_err("fetchers must not gain implicit network authority");
+    assert!(matches!(
+        fetch_error,
+        EvaluationError::Unsupported(reason)
+            if reason.contains("explicit fetch authority")
+    ));
+
+    let cross_error = evaluate_devshell(
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }; }",
+        "x86_64-linux",
+    )
+    .expect_err("cross-system packages need an explicit target boundary");
+    assert!(matches!(
+        cross_error,
+        EvaluationError::Unsupported(reason)
+            if reason.contains("explicit target")
+    ));
 }

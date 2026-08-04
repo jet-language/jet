@@ -212,7 +212,25 @@ pub fn index_repo_path(registry: &RegistryConfig) -> PathBuf {
             PathBuf::from(home).join(".jet").join("registry-index")
         }
     };
-    base.join(&registry.name)
+    // Registry names can come from environment-backed project policy. Keep
+    // the human-readable component for ordinary names, but never let an
+    // invalid name become a path component: a value such as `../shared` must
+    // not escape the configured cache root.
+    base.join(registry_cache_component(&registry.name))
+}
+
+fn registry_cache_component(name: &str) -> String {
+    let safe = !name.is_empty()
+        && name != "."
+        && name != ".."
+        && name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+        });
+    if safe {
+        name.to_string()
+    } else {
+        format!("registry-{}", SHA256::sha256_hex(name.as_bytes()))
+    }
 }
 
 /// Clone the registry index if we have no local cache, else `git pull --ff-only`

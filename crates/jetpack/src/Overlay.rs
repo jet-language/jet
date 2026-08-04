@@ -15,29 +15,59 @@ pub use jet_pkg_model::Overlay::{
 use super::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 pub fn apply_overlay_patches(
     workspace_root: &Path,
     source_root: &Path,
     package: &PackageOverride,
 ) -> Result<Vec<PatchApplication>, OverlayError> {
+    let workspace_root = canonical_directory(workspace_root, "workspace root")?;
+    let source_root = canonical_directory(source_root, "source root")?;
+    let mut staged = BTreeMap::new();
     let mut applied = Vec::new();
     for patch in &package.patches {
-        let patch_path = workspace_root.join(patch);
+        let patch_path = safe_existing_path(&workspace_root, patch, "patch")?;
         let text = std::fs::read_to_string(&patch_path).map_err(|e| {
             OverlayError::IO(format!(
                 "could not read patch `{}`: {e}",
                 patch_path.display()
             ))
         })?;
-        applied.extend(apply_unified_patch(source_root, &text)?);
+        applied.extend(apply_unified_patch_staged(
+            &source_root,
+            &text,
+            &mut staged,
+        )?);
     }
+    commit_staged(&staged)?;
     Ok(applied)
 }
 
 fn apply_unified_patch(
     source_root: &Path,
     patch_text: &str,
+) -> Result<Vec<PatchApplication>, OverlayError> {
+    let source_root = canonical_directory(source_root, "source root")?;
+    let mut staged = BTreeMap::new();
+    let applications = apply_unified_patch_staged(&source_root, patch_text, &mut staged)?;
+    commit_staged(&staged)?;
+    Ok(applications)
+}
+
+#[derive(Debug)]
+struct StagedFile {
+    path: std::path::PathBuf,
+    original: Vec<u8>,
+    output: Vec<u8>,
+}
+
+fn apply_unified_patch_staged(
+    source_root: &Path,
+    patch_text: &str,
+    staged: &mut BTreeMap<std::path::PathBuf, StagedFile>,
 ) -> Result<Vec<PatchApplication>, OverlayError> {
     let mut applications = Vec::new();
     let mut lines = patch_text.lines().peekable();
@@ -52,18 +82,65 @@ fn apply_unified_patch(
             return Err(OverlayError::Patch("patch missing `+++` line".to_string()));
         }
         let target = normalize_patch_path(next.trim_start_matches("+++ ").trim());
-        let path = source_root.join(&target);
-        let original = std::fs::read_to_string(&path).map_err(|e| {
+        let relative = safe_relative_path(&target, "patched file")?;
+        let path = source_root.join(&relative);
+        let mut cursor = source_root.to_path_buf();
+        for component in relative.components() {
+            cursor.push(component.as_os_str());
+            if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
+                if metadata.file_type().is_symlink() {
+                    return Err(OverlayError::Patch(format!(
+                        "patched file `{target}` contains a symlink"
+                    )));
+                }
+            }
+        }
+        let canonical_path = path.canonicalize().map_err(|e| {
             OverlayError::IO(format!(
-                "could not read patched file `{}`: {e}",
+                "could not resolve patched file `{}`: {e}",
                 path.display()
             ))
         })?;
-        let mut file_lines: Vec<String> = original.lines().map(|s| s.to_string()).collect();
-        let trailing_newline = original.ends_with('\n');
+        if !canonical_path.starts_with(source_root) {
+            return Err(OverlayError::Patch(format!(
+                "patched file `{target}` escapes the source root"
+            )));
+        }
+        if !staged.contains_key(&canonical_path) {
+            let original = std::fs::read(&canonical_path).map_err(|error| {
+                OverlayError::IO(format!(
+                    "could not read patched file `{}`: {error}",
+                    path.display()
+                ))
+            })?;
+            staged.insert(
+                canonical_path.clone(),
+                StagedFile {
+                    path: canonical_path.clone(),
+                    output: original.clone(),
+                    original,
+                },
+            );
+        }
+        let entry = staged
+            .get_mut(&canonical_path)
+            .expect("staged file was inserted or already present");
+        let original = entry.output.clone();
+        let mut file_lines: Vec<String> = String::from_utf8(original.clone())
+            .map_err(|_| {
+                OverlayError::Patch(format!(
+                    "patched file `{target}` is not valid UTF-8"
+                ))
+            })?
+            .lines()
+            .map(|s| s.to_string())
+            .collect();
+        let trailing_newline = original.ends_with(b'\n');
         let mut added = 0usize;
         let mut removed = 0usize;
+        let mut had_hunk = false;
         while matches!(lines.peek(), Some(l) if l.starts_with("@@ ")) {
+            had_hunk = true;
             let header = lines.next().ok_or_else(|| {
                 OverlayError::Patch("patch hunk header ended unexpectedly".to_string())
             })?;
@@ -127,23 +204,161 @@ fn apply_unified_patch(
                 }
             }
         }
+        if !had_hunk {
+            return Err(OverlayError::Patch(format!(
+                "patch for `{target}` has no hunks"
+            )));
+        }
         let mut output = file_lines.join("\n");
         if trailing_newline {
             output.push('\n');
         }
-        std::fs::write(&path, output).map_err(|e| {
-            OverlayError::IO(format!(
-                "could not write patched file `{}`: {e}",
-                path.display()
-            ))
-        })?;
+        entry.output = output.into_bytes();
         applications.push(PatchApplication {
             path: target,
             added,
             removed,
         });
     }
+    if applications.is_empty() {
+        return Err(OverlayError::Patch(
+            "patch contains no file hunks".to_string(),
+        ));
+    }
     Ok(applications)
+}
+
+fn canonical_directory(path: &Path, label: &str) -> Result<std::path::PathBuf, OverlayError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        OverlayError::IO(format!("could not inspect {label} `{}`: {error}", path.display()))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(OverlayError::IO(format!(
+            "{label} `{}` is not a real directory",
+            path.display()
+        )));
+    }
+    path.canonicalize().map_err(|error| {
+        OverlayError::IO(format!("could not resolve {label} `{}`: {error}", path.display()))
+    })
+}
+
+fn safe_relative_path(raw: &str, label: &str) -> Result<std::path::PathBuf, OverlayError> {
+    let path = Path::new(raw);
+    if raw.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::RootDir
+            )
+        })
+    {
+        return Err(OverlayError::Patch(format!(
+            "{label} path `{raw}` must be a non-empty relative path without `..`"
+        )));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn safe_existing_path(
+    root: &Path,
+    raw: &str,
+    label: &str,
+) -> Result<std::path::PathBuf, OverlayError> {
+    let relative = safe_relative_path(raw, label)?;
+    let candidate = root.join(&relative);
+    let mut cursor = root.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component.as_os_str());
+        if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
+            if metadata.file_type().is_symlink() {
+                return Err(OverlayError::Patch(format!(
+                    "{label} `{raw}` contains a symlink"
+                )));
+            }
+        }
+    }
+    let metadata = std::fs::symlink_metadata(&candidate).map_err(|error| {
+        OverlayError::IO(format!("could not inspect {label} `{}`: {error}", candidate.display()))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(OverlayError::Patch(format!(
+            "{label} `{}` must be a regular file inside the workspace",
+            candidate.display()
+        )));
+    }
+    let canonical = candidate.canonicalize().map_err(|error| {
+        OverlayError::IO(format!("could not resolve {label} `{}`: {error}", candidate.display()))
+    })?;
+    if !canonical.starts_with(root) {
+        return Err(OverlayError::Patch(format!(
+            "{label} `{raw}` escapes the workspace root"
+        )));
+    }
+    Ok(canonical)
+}
+
+fn commit_staged(staged: &BTreeMap<std::path::PathBuf, StagedFile>) -> Result<(), OverlayError> {
+    let mut committed: Vec<(&Path, &[u8])> = Vec::new();
+    for entry in staged.values() {
+        if entry.output == entry.original {
+            continue;
+        }
+        if let Err(error) = write_staged_file(entry) {
+            let mut rollback_errors = Vec::new();
+            for (path, original) in committed.iter().rev() {
+                if let Err(rollback) = write_bytes_atomically(path, original) {
+                    rollback_errors.push(format!("{}: {rollback}", path.display()));
+                }
+            }
+            let suffix = if rollback_errors.is_empty() {
+                String::new()
+            } else {
+                format!("; rollback failed: {}", rollback_errors.join("; "))
+            };
+            return Err(OverlayError::IO(format!(
+                "could not commit patched file `{}`: {error}{suffix}",
+                entry.path.display()
+            )));
+        }
+        committed.push((&entry.path, entry.original.as_slice()));
+    }
+    Ok(())
+}
+
+fn write_staged_file(entry: &StagedFile) -> std::io::Result<()> {
+    write_bytes_atomically(&entry.path, &entry.output)
+}
+
+fn write_bytes_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("patched file has no parent"))?;
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let serial = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(".{name}.jet-overlay-{}-{serial}", std::process::id()));
+    let result = (|| {
+        use std::io::Write as _;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            std::fs::set_permissions(&temporary, metadata.permissions())?;
+        }
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn parse_hunk_range(header: &str) -> Result<(usize, usize, usize), OverlayError> {
@@ -631,6 +846,70 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
             "one\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn patch_paths_cannot_escape_and_leave_source_unchanged() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-traversal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
+        let patch = "--- a/src/file.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+
+        let err = apply_unified_patch(&root, patch).unwrap_err();
+        assert!(err.message().contains("must be a non-empty relative path"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
+            "one\n"
+        );
+        assert!(!root.join("outside.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn multi_file_patch_failure_is_transactional() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-transaction-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/one.txt"), "one\n").unwrap();
+        std::fs::write(root.join("src/two.txt"), "two\n").unwrap();
+        let patch = "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-wrong\n+TWO\n";
+
+        assert!(apply_unified_patch(&root, patch).is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/one.txt")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/two.txt")).unwrap(),
+            "two\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn repeated_file_patches_compose_in_staging_order() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-repeat-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\ntwo\n").unwrap();
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/file.txt\n+++ b/src/file.txt\n@@ -2 +2 @@\n-two\n+TWO\n";
+
+        apply_unified_patch(&root, patch).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
+            "ONE\nTWO\n"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

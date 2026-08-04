@@ -27,8 +27,9 @@ use crate::Syntax;
 // T1 — frozen-forward identity block
 // ──────────────────────────────────────────────
 
-/// The contract-frozen identity of a `pkg.jet`: the `payload:` block's `name`
-/// and `version`, plus the `jet:` pin (a channel ref). Extracted by a reader
+/// The contract-frozen identity of a Package root: canonical `package.jet`
+/// stores `name`, `version`, and `jet` at top level; migration-era `pkg.jet`
+/// stores the same fields inside `payload`. Extracted by a reader
 /// whose grammar never narrows, so version dispatch can never be wedged by
 /// later manifest evolution (the Go `go.mod` contract).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -40,11 +41,11 @@ pub struct IdentityBlock {
     pub jet: Option<String>,
 }
 
-/// Frozen-forward identity pre-parse (T1). Reads only `payload:`'s `name`,
-/// `version`, and `jet` fields, tolerating any other top-level key, any unknown
-/// nested block, and any surrounding syntax. Independent of the full manifest
-/// parser on purpose: this grammar is CONTRACT-FROZEN (documented in
-/// `docs/spec/spec.md`) and must never be narrowed.
+/// Frozen-forward identity pre-parse (T1). Reads only the Package identity
+/// fields, tolerating any other top-level key, any unknown nested block, and
+/// any surrounding syntax. Independent of the full manifest parser on
+/// purpose: this grammar is CONTRACT-FROZEN (documented in `docs/spec/spec.md`)
+/// and must never be narrowed.
 pub fn identity_preparse(text: &str) -> IdentityBlock {
     let text = strip_line_comments(text);
     let mut id = IdentityBlock::default();
@@ -52,6 +53,10 @@ pub fn identity_preparse(text: &str) -> IdentityBlock {
         id.payload_name = simple_field(body, "name").unwrap_or_default();
         id.payload_version = simple_field(body, "version").unwrap_or_default();
         id.jet = simple_field(body, "jet");
+    } else {
+        id.payload_name = top_level_simple_field(&text, "name").unwrap_or_default();
+        id.payload_version = top_level_simple_field(&text, "version").unwrap_or_default();
+        id.jet = top_level_simple_field(&text, "jet");
     }
     id
 }
@@ -206,6 +211,63 @@ fn simple_field(body: &str, key: &str) -> Option<String> {
                     return Some(unquote(&body[vstart..j]));
                 }
                 continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Read a scalar `key: value` at document depth zero. Nested Package Output,
+/// Config, and policy fields cannot impersonate the identity block.
+fn top_level_simple_field(text: &str, key: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => depth -= 1,
+            _ if depth == 0 && is_ident_start(c) => {
+                let start = i;
+                while i < bytes.len() && is_ident_char(bytes[i]) {
+                    i += 1;
+                }
+                if &text[start..i] != key {
+                    continue;
+                }
+                let mut j = i;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j >= bytes.len() || bytes[j] != b':' {
+                    continue;
+                }
+                j += 1;
+                let value_start = j;
+                let mut quoted = false;
+                while j < bytes.len() {
+                    match bytes[j] {
+                        b'"' if j == value_start || bytes[j - 1] != b'\\' => {
+                            quoted = !quoted;
+                        }
+                        b',' | b'\n' if !quoted => break,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                return Some(unquote(&text[value_start..j]));
             }
             _ => {}
         }
@@ -462,7 +524,12 @@ pub fn handoff_line(channel: &str, pinned_version: &str, installed_version: &str
 }
 
 fn read_manifest(root: &Path) -> Option<String> {
-    std::fs::read_to_string(root.join(Syntax::PAYLOAD_FILE)).ok()
+    let path = if root.join(Syntax::PACKAGE_FILE).is_file() {
+        root.join(Syntax::PACKAGE_FILE)
+    } else {
+        root.join(Syntax::PAYLOAD_FILE)
+    };
+    std::fs::read_to_string(path).ok()
 }
 
 /// Realize the pinned toolchain object and return the path to its `jet`
@@ -555,15 +622,25 @@ pub fn move_pin(
     ))
 }
 
-/// `jet init` — write a `pkg.jet` pinning the running toolchain's channel by
+/// `jet init` — write a `package.jet` pinning the running toolchain's channel by
 /// default, so a lifted project is reproducible from birth (T4, U11 lift).
 /// Refuses to clobber an existing manifest.
 pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<String, Diagnostic> {
-    let path = dir.join(Syntax::PAYLOAD_FILE);
-    if path.exists() {
+    let path = dir.join(Syntax::PACKAGE_FILE);
+    if dir.join(Syntax::PAYLOAD_FILE).is_file() {
         return Err(Diagnostic::error(
             "E1252",
             format!("a `{}` already exists here", Syntax::PAYLOAD_FILE),
+            "`jet init` will not create a second manifest root beside migration-era input."
+                .to_string(),
+            format!("migrate or remove `{}` before running `jet init`", Syntax::PAYLOAD_FILE),
+            None,
+        ));
+    }
+    if path.exists() {
+        return Err(Diagnostic::error(
+            "E1252",
+            format!("a `{}` already exists here", Syntax::PACKAGE_FILE),
             "`jet init` writes a fresh package manifest; overwriting one would discard its \
              dependencies, pins, and identity."
                 .to_string(),
@@ -576,7 +653,7 @@ pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<Strin
     std::fs::write(&path, &body).map_err(|e| {
         Diagnostic::error(
             "E1252",
-            format!("couldn't write `{}`", Syntax::PAYLOAD_FILE),
+            format!("couldn't write `{}`", Syntax::PACKAGE_FILE),
             format!("the manifest could not be created: {e}"),
             "check directory permissions and try again.".to_string(),
             None,
@@ -584,15 +661,15 @@ pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<Strin
     })?;
     Ok(format!(
         "created {} (pinned jet {channel})",
-        Syntax::PAYLOAD_FILE
+        Syntax::PACKAGE_FILE
     ))
 }
 
-/// The `pkg.jet` body `jet init` writes: a payload identity with a `jet:`
-/// channel pin (the running toolchain's channel).
+/// The canonical `package.jet` body `jet init` writes: bare Package identity
+/// fields with a `jet:` channel pin (the running toolchain's channel).
 pub fn init_manifest(name: &str, channel: &str) -> String {
     format!(
-        "payload: {{\n    name:    \"{name}\",\n    version: \"0.1.0\",\n    jet:     {channel},\n}}\n\ndeps: {{\n}}\n"
+        "name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: .{{}}\n"
     )
 }
 
@@ -923,7 +1000,7 @@ deps: { textkit: "1.2.0" }
         // running toolchain 0.6.1 → pins channel 0.6
         let msg = write_init(&root, "myapp", "0.6.1").unwrap();
         assert!(msg.contains("0.6"), "{msg}");
-        let text = std::fs::read_to_string(root.join(Syntax::PAYLOAD_FILE)).unwrap();
+        let text = std::fs::read_to_string(root.join(Syntax::PACKAGE_FILE)).unwrap();
         let id = identity_preparse(&text);
         assert_eq!(id.payload_name, "myapp");
         assert_eq!(id.jet.as_deref(), Some("0.6"));

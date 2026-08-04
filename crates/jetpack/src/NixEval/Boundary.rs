@@ -157,8 +157,8 @@ fn materialize_derivation(
             crate::NixDrv::make_output_path(store_dir, name, hash, evaluation.name())
         };
     }
-    if let Some(output) = drv.outputs.get("out") {
-        let _ = drv.env.insert("out".into(), output.path.clone());
+    for (name, output) in &drv.outputs {
+        let _ = drv.env.insert(name.clone(), output.path.clone());
     }
     let aterm = crate::NixDrv::unparse_derive(&drv, false, None);
     let drv_path = crate::NixDrv::make_text_path(

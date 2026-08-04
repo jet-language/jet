@@ -24,6 +24,7 @@ const MAX_STRING_BYTES: usize = 1 << 20;
 const MAX_DERIVATION_ARGS: usize = 256;
 const MAX_DERIVATION_ENV: usize = 256;
 const MAX_DERIVATION_INPUTS: usize = 256;
+const MAX_DERIVATION_OUTPUTS: usize = 64;
 const NIX32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
 
 #[derive(Debug, Clone)]
@@ -1111,6 +1112,7 @@ enum Value {
     Path(String),
     Package(String),
     PackageNamespace(String),
+    PackageOverlay(String, BTreeMap<String, Thunk>),
     BuiltinsNamespace(String),
     LibraryNamespace,
     List(Vec<Thunk>),
@@ -1137,6 +1139,9 @@ struct FunctionValue {
 enum NativeFunction {
     MkShell,
     Import,
+    ImportPackage(Box<Value>),
+    ExtendPackage(Box<Value>),
+    Unsupported(&'static str),
     ToString,
     HasContext,
     Builtin(Builtin),
@@ -1678,10 +1683,47 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
     match value {
         Value::AttrSet(fields) => Ok(attr_field(&fields, field)),
         Value::PackageNamespace(prefix) => {
+            if matches!(field, "pkgsCross" | "crossSystem") {
+                return Err(Error::Unsupported(
+                    "cross-system packages require an explicit target and provider authority"
+                        .into(),
+                ));
+            }
             if field == "lib" {
                 Ok(Some(Thunk::value(Value::LibraryNamespace)))
             } else if field == "mkShell" {
                 Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
+            } else if field == "extend" {
+                Ok(Some(Thunk::value(Value::Native(
+                    NativeFunction::ExtendPackage(Box::new(Value::PackageNamespace(prefix))),
+                ))))
+            } else {
+                let name = if prefix.is_empty() {
+                    field.to_string()
+                } else {
+                    format!("{prefix}.{field}")
+                };
+                Ok(Some(Thunk::value(Value::Package(name))))
+            }
+        }
+        Value::PackageOverlay(prefix, fields) => {
+            if let Some(value) = fields.get(field) {
+                return Ok(Some(value.clone()));
+            }
+            if matches!(field, "pkgsCross" | "crossSystem") {
+                return Err(Error::Unsupported(
+                    "cross-system packages require an explicit target and provider authority"
+                        .into(),
+                ));
+            }
+            if field == "lib" {
+                Ok(Some(Thunk::value(Value::LibraryNamespace)))
+            } else if field == "mkShell" {
+                Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
+            } else if field == "extend" {
+                Ok(Some(Thunk::value(Value::Native(
+                    NativeFunction::ExtendPackage(Box::new(Value::PackageOverlay(prefix, fields))),
+                ))))
             } else {
                 let name = if prefix.is_empty() {
                     field.to_string()
@@ -1783,6 +1825,11 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                 "fromJSON" => Some(NativeFunction::Builtin(Builtin::FromJSON)),
                 "storePath" => Some(NativeFunction::Builtin(Builtin::StorePath)),
                 "throw" => Some(NativeFunction::Builtin(Builtin::Throw)),
+                "fetchurl" | "fetchTarball" | "fetchTree" | "fetchGit" => Some(
+                    NativeFunction::Unsupported(
+                        "fixed-output fetchers require explicit fetch authority and verified bytes",
+                    ),
+                ),
                 "currentSystem" => return Ok(Some(Thunk::value(Value::String(
                     system,
                 )))),
@@ -1863,13 +1910,48 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
         }
         Value::Native(NativeFunction::Import) => {
             let value = argument.force()?;
-            let Value::Path(path) = value else {
-                return Err(Error::Type {
-                    expected: "path import argument",
+            match value {
+                Value::Path(path) => evaluate_import(&path, arena),
+                Value::PackageNamespace(_) | Value::PackageOverlay(_, _) => Ok(Value::Native(
+                    NativeFunction::ImportPackage(Box::new(value)),
+                )),
+                value => Err(Error::Type {
+                    expected: "path or package-set import argument",
                     actual: value_name(&value),
+                }),
+            }
+        }
+        Value::Native(NativeFunction::ImportPackage(base)) => {
+            let base = *base;
+            let arguments = argument.force()?;
+            let Value::AttrSet(fields) = arguments else {
+                return Err(Error::Type {
+                    expected: "package import attribute set",
+                    actual: value_name(&arguments),
                 });
             };
-            evaluate_import(&path, arena)
+            let Some(overlays) = attr_field(&fields, "overlays") else {
+                return Ok(base);
+            };
+            let Value::List(overlays) = overlays.force()? else {
+                return Err(Error::Type {
+                    expected: "overlay list",
+                    actual: "non-list overlays",
+                });
+            };
+            let mut current = base;
+            for overlay in overlays {
+                current = apply_overlay(current, overlay.force()?, arena)?;
+            }
+            Ok(current)
+        }
+        Value::Native(NativeFunction::ExtendPackage(base)) => {
+            let base = *base;
+            let overlay = argument.force()?;
+            apply_overlay(base, overlay, arena)
+        }
+        Value::Native(NativeFunction::Unsupported(reason)) => {
+            Err(Error::Unsupported(reason.into()))
         }
         Value::Native(NativeFunction::ToString) => {
             let value = argument.force()?;
@@ -1900,6 +1982,35 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
         }
         value => Err(Error::Type {
             expected: "function",
+            actual: value_name(&value),
+        }),
+    }
+}
+
+/// Apply one bounded Nix overlay. The evaluator keeps the package namespace
+/// lazy: the overlay only replaces explicitly named attributes, while every
+/// untouched package still resolves through the canonical namespace.
+fn apply_overlay(
+    base: Value,
+    overlay: Value,
+    arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    let first = apply(overlay, Thunk::value(base.clone()), arena)?;
+    let result = apply(first, Thunk::value(base.clone()), arena)?;
+    let Value::AttrSet(fields) = result else {
+        return Err(Error::Type {
+            expected: "overlay attribute set",
+            actual: value_name(&result),
+        });
+    };
+    match base {
+        Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(prefix, fields)),
+        Value::PackageOverlay(prefix, mut previous) => {
+            previous.extend(fields);
+            Ok(Value::PackageOverlay(prefix, previous))
+        }
+        value => Err(Error::Type {
+            expected: "package namespace",
             actual: value_name(&value),
         }),
     }
@@ -1968,10 +2079,19 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         }
         None => vec!["out".into()],
     };
-    if output_names != ["out"] {
-        return Err(Error::Unsupported(
-            "multiple derivation outputs are reserved for the multi-output evaluator stage".into(),
-        ));
+    if output_names.is_empty() || output_names.len() > MAX_DERIVATION_OUTPUTS {
+        return Err(Error::ResourceLimit(format!(
+            "derivation must declare between one and {MAX_DERIVATION_OUTPUTS} outputs"
+        )));
+    }
+    let mut unique_outputs = BTreeMap::new();
+    for output_name in &output_names {
+        validate_derivation_output_name(output_name)?;
+        if unique_outputs.insert(output_name.clone(), ()).is_some() {
+            return Err(Error::Invalid(format!(
+                "derivation declares duplicate output `{output_name}`"
+            )));
+        }
     }
 
     let output_hash = optional_string_field(fields, "outputHash")?;
@@ -1979,6 +2099,11 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
     let output_hash_mode = optional_string_field(fields, "outputHashMode")?;
     let (method_algo, hash_hex) = match output_hash {
         Some(hash) => {
+            if output_names.len() != 1 || output_names[0] != "out" {
+                return Err(Error::Unsupported(
+                    "fixed-output derivations must declare exactly the `out` output".into(),
+                ));
+            }
             let algo = output_hash_algo
                 .clone()
                 .unwrap_or_else(|| "sha256".into());
@@ -2019,7 +2144,7 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
     ];
     let ignore_nulls = matches!(field_value(fields, "__ignoreNulls")?, Some(Value::Bool(true)));
     for (field, thunk) in fields {
-        if ignored.contains(&field.as_str()) {
+        if ignored.contains(&field.as_str()) || output_names.iter().any(|name| name == field) {
             continue;
         }
         let value = thunk.force()?;
@@ -2056,7 +2181,9 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
             output_hash_mode.unwrap_or_else(|| "flat".into()),
         );
     }
-    env.insert("out".into(), String::new());
+    for output_name in &output_names {
+        env.insert(output_name.clone(), String::new());
+    }
 
     if input_sources.len() > MAX_DERIVATION_INPUTS {
         return Err(Error::ResourceLimit(format!(
@@ -2073,11 +2200,14 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         args,
         env,
         input_sources,
-        outputs: vec![DerivationOutputEvaluation {
-            name: "out".into(),
-            method_algo,
-            hash_hex,
-        }],
+        outputs: output_names
+            .into_iter()
+            .map(|name| DerivationOutputEvaluation {
+                name,
+                method_algo: method_algo.clone(),
+                hash_hex: hash_hex.clone(),
+            })
+            .collect(),
     })
 }
 
@@ -2151,6 +2281,20 @@ fn validate_derivation_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+fn validate_derivation_output_name(name: &str) -> Result<(), Error> {
+    if name.is_empty()
+        || name.len() > MAX_PACKAGE_NAME_BYTES
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('=')
+        || name.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(Error::Invalid(format!("invalid derivation output name `{name}`")));
+    }
+    Ok(())
+}
+
 fn normalize_hash_hex(hash: &str) -> Result<String, Error> {
     if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(Error::Unsupported(
@@ -2197,7 +2341,10 @@ fn apply_builtin(
             operation: NativeOperation::HasAttr,
             arguments: vec![argument],
         })),
-        Builtin::IsAttrs => Ok(Value::Bool(matches!(argument, Value::AttrSet(_)))),
+        Builtin::IsAttrs => Ok(Value::Bool(matches!(
+            argument,
+            Value::AttrSet(_) | Value::PackageNamespace(_) | Value::PackageOverlay(_, _)
+        ))),
         Builtin::IsBool => Ok(Value::Bool(matches!(argument, Value::Bool(_)))),
         Builtin::IsFunction => Ok(Value::Bool(matches!(
             argument,
@@ -2543,6 +2690,7 @@ fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
             Ok(JSONValue::Object(output))
         }
         Value::PackageNamespace(_)
+        | Value::PackageOverlay(_, _)
         | Value::BuiltinsNamespace(_)
         | Value::LibraryNamespace
         | Value::Derivation(_)
@@ -2642,6 +2790,22 @@ fn encode_json_string(value: &str) -> String {
 }
 
 fn merge(left: Value, right: Value) -> Result<Value, Error> {
+    if matches!(&left, Value::PackageNamespace(_) | Value::PackageOverlay(_, _)) {
+        let Value::AttrSet(fields) = right else {
+            return Err(Error::Type {
+                expected: "package overlay attribute set",
+                actual: value_name(&right),
+            });
+        };
+        return match left {
+            Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(prefix, fields)),
+            Value::PackageOverlay(prefix, mut previous) => {
+                previous.extend(fields);
+                Ok(Value::PackageOverlay(prefix, previous))
+            }
+            _ => unreachable!(),
+        };
+    }
     let Value::AttrSet(mut left) = left else {
         return Err(Error::Type {
             expected: "attribute set",
@@ -2684,6 +2848,7 @@ fn value_name(value: &Value) -> &'static str {
         Value::Path(_) => "path",
         Value::Package(_) => "package",
         Value::PackageNamespace(_) => "package namespace",
+        Value::PackageOverlay(_, _) => "package namespace",
         Value::BuiltinsNamespace(_) => "builtins namespace",
         Value::LibraryNamespace => "library namespace",
         Value::List(_) => "list",

@@ -397,7 +397,7 @@ usage:
   {bin} test  <file> --shuffle      run tests in a random (printed) order
   {bin} test  <file> --serial       run one test at a time (default: parallel)
   {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
-  {bin} new   <name>                create a new project folder with pkg.jet
+  {bin} new   <name>                create a new project folder with package.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
@@ -983,7 +983,7 @@ fn main() {
         });
     let explain_partition = jet_argv.iter().any(|a| a == "--explain-partition");
     // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
-    // `--profile=<name>` selects a named profile. Resolved against pkg.jet
+    // `--profile=<name>` selects a named profile. Resolved against package.jet
     // in run_compile_cmd; only the name is collected here.
     let release_flag = jet_argv.iter().any(|a| a == "--release");
     let profile_flag: Option<String> = jet_argv
@@ -1372,7 +1372,9 @@ fn main() {
         // U11 (D-JPK-SCRIPTDEP1=A): `jet init <script.jet>` lifts that
         // script's inline `use pkg#version;` deps into the freshly written
         // `pkg.jet`; bare `jet init` is unchanged.
-        "init" => run_init(args.get(1).map(|s| s.as_str())),
+        "init" => run_init(args.get(1).map(|s| s.as_str()), &raw, mode),
+        "split" => run_split(&args, &raw, mode),
+        "fold" => run_fold(&args, &raw, mode),
         // D-CLI-STORE2=A: `jet lock`/`jet store lock` retired — script locking
         // is a `jet fetch` flag, not a separate verb.
         "lock" => {
@@ -1710,7 +1712,7 @@ fn main() {
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in package.jet");
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
@@ -2112,7 +2114,7 @@ fn main() {
             // of a plain boolean flag).
             let serial = jet_argv.iter().any(|a| a == "--serial");
             // A directory target is a project root ONLY when it has a
-            // `pkg.jet` manifest — resolve to that project's single entry
+            // Package root — resolve to that project's single entry
             // file, same as before (D-CLI1's existing project convenience).
             // A plain directory of loose `.jet` files (no manifest) is a
             // test folder instead: pass it straight through so
@@ -2120,7 +2122,7 @@ fn main() {
             // rather than erroring "no project entry".
             let target_path = Path::new(target);
             let is_project_dir =
-                target_path.is_dir() && target_path.join(jet::Syntax::PAYLOAD_FILE).is_file();
+                target_path.is_dir() && jet::Loader::manifest_path(target_path).is_some();
             let resolved = if target_path.is_dir() && !is_project_dir {
                 target.to_string()
             } else {
@@ -2221,7 +2223,7 @@ fn main() {
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in package.jet");
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
@@ -2315,7 +2317,7 @@ fn run_wants_watch(raw: &[String]) -> bool {
 /// exists, use that. If neither exists, return `raw` unchanged so the normal
 /// file-not-found diagnostic fires with the original name the user typed.
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
-/// `file`. Precedence: an explicit CLI flag always wins; else `pkg.jet`'s
+/// `file`. Precedence: an explicit CLI flag always wins; else `package.jet`'s
 /// `target: "web"` (a managed package's project-level default); else a
 /// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
 /// file's own default, for standalone examples with no manifest at all).
@@ -2400,13 +2402,13 @@ fn has_web_app_entry_fn(file: &str) -> bool {
     })
 }
 
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `pkg.jet`'s `target: "web"`, if `file` sits
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a Package root's `target: "web"`, if `file` sits
 /// inside a managed package (found via the same `find_manifest_root` walk
 /// `jet run`/`jet build` already use to resolve project-root mode).
 fn manifest_default_target(file: &str) -> Option<String> {
     let start = Path::new(file).parent().unwrap_or(Path::new("."));
     let root = jet::Loader::find_manifest_root(start)?;
-    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let pack_path = jet::Loader::manifest_path(&root)?;
     let raw = fs::read_to_string(&pack_path).ok()?;
     let manifest = jet::PackageManifest::parse(&raw).ok()?;
     manifest.package.target
@@ -2424,7 +2426,7 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
         // No entry: if there's no manifest either, surface a clean error; with
         // a manifest but no entry, fall through so the file-not-found path
         // names the missing `run.jet`.
-        if !path.join(jet::Syntax::PAYLOAD_FILE).is_file() {
+        if jet::Loader::manifest_path(path).is_none() {
             eprintln!(
                 "error: no `{entry}` entry in `{dir}`",
                 entry = jet::Syntax::DEFAULT_ENTRY_FILE,
@@ -2514,11 +2516,8 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
             return Ok(None);
         }
         Err(error) => {
-            let source = if root.join(jet::Syntax::PACKAGE_FILE).is_file() {
-                root.join(jet::Syntax::PACKAGE_FILE)
-            } else {
-                root.join(jet::Syntax::PAYLOAD_FILE)
-            };
+            let source = jet::Loader::manifest_path(root)
+                .unwrap_or_else(|| root.join(jet::Syntax::PACKAGE_FILE));
             return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
         }
     };
@@ -2622,7 +2621,7 @@ fn missing_bare_entry(cmd: &str, cwd: &Path) -> ! {
         eprint!("{}", msg);
         exit(ExitCodes::USAGE);
     }
-    eprintln!("error: no file given and no `pkg.jet` found in this directory or above");
+    eprintln!("error: no file given and no `package.jet` found in this directory or above");
     eprintln!(
         " fix: run `jet {} <file.{}>` or cd into a project",
         cmd,
@@ -2742,23 +2741,187 @@ fn run_toolchain() -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = require_manifest_root(
         &cwd,
-        "error: `jet self toolchain` needs a project — no `pkg.jet` found here or above",
+        "error: `jet self toolchain` needs a project — no `package.jet` found here or above",
     );
     print!("{}", jetpack::JetPin::report_pin(&root));
     exit(ExitCodes::OK);
 }
 
-/// `jet init` — write a `pkg.jet` here, pinning the running toolchain's channel
+/// `jet init` — write a `package.jet` here, pinning the running toolchain's channel
 /// (D-JPK-TOOLCHAIN1=A #179, U11 lift).
 /// `jet init [<script.jet>]` — U11 (D-JPK-SCRIPTDEP1=A): when a manifest-less
 /// script is named, its inline `use pkg#version;` refs are lifted into the
-/// freshly written `pkg.jet`'s `deps: {}` block (rung 0 → rung 1, per
+/// freshly written `package.jet`'s `deps: {}` block (rung 0 → rung 1, per
 /// docs/plans/epoch-4/vision.md). Lifting is best-effort: a lex/
 /// parse problem in the script is silently skipped here (`jet check`/`jet
 /// run` on the script itself is where that's diagnosed) so `jet init` never
 /// fails just because the *lift* half had nothing to do.
-fn run_init(script: Option<&str>) -> ! {
+fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
+    let target = match args.get(1).map(|value| value.as_str()) {
+        Some("env") => jet::Transition::SplitTarget::Environment,
+        Some("package") => {
+            let Some(name) = args.get(2) else {
+                eprintln!("error: jet split package needs a Package name");
+                exit(ExitCodes::USAGE);
+            };
+            jet::Transition::SplitTarget::Package {
+                name: (*name).clone(),
+            }
+        }
+        Some("hosts") => {
+            let Some(name) = args.get(2) else {
+                eprintln!("error: jet split hosts needs a host name");
+                exit(ExitCodes::USAGE);
+            };
+            jet::Transition::SplitTarget::Hosts {
+                name: (*name).clone(),
+            }
+        }
+        Some(other) => {
+            eprintln!("error: unknown split target {other}");
+            eprintln!(" fix: use jet split env, jet split package <name>, or jet split hosts <name>");
+            exit(ExitCodes::USAGE);
+        }
+        None => {
+            eprintln!("error: jet split needs a target");
+            exit(ExitCodes::USAGE);
+        }
+    };
+    let check_only = raw.iter().any(|arg| arg == "--check");
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match jet::Transition::split(&cwd, target, check_only) {
+        Ok(result) => print_transition_result(&result, check_only, mode),
+        Err(error) => {
+            eprintln!("error: {error}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+fn run_fold(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
+    let Some(path) = args.get(1) else {
+        eprintln!("error: jet fold needs a generated transition path");
+        eprintln!(" fix: use jet fold package/env.jet or jet fold packages/name/package.jet");
+        exit(ExitCodes::USAGE);
+    };
+    let check_only = raw.iter().any(|arg| arg == "--check");
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match jet::Transition::fold(&cwd, Path::new(path), check_only) {
+        Ok(result) => print_transition_result(&result, check_only, mode),
+        Err(error) => {
+            eprintln!("error: {error}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+fn print_transition_result(
+    result: &jet::Transition::TransitionResult,
+    check_only: bool,
+    mode: OutputMode,
+) -> ! {
+    if mode.json {
+        let changes = result
+            .summary
+            .changes
+            .iter()
+            .map(|change| {
+                format!(
+                    "{{\"path\":{},\"action\":{}}}",
+                    json_quote(&change.path.to_string_lossy()),
+                    json_quote(change.action)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"operation\":{},\"check\":{},\"before\":{},\"after\":{},\"journal\":{},\"changes\":[{}]}}",
+            json_quote(&result.summary.operation),
+            check_only,
+            json_quote(&result.summary.before_fingerprint),
+            json_quote(&result.summary.after_fingerprint),
+            json_quote(&result.summary.journal.to_string_lossy()),
+            changes
+        );
+    } else {
+        for change in &result.summary.changes {
+            if check_only {
+                println!("Would {}: {}", change.action, change.path.display());
+            } else {
+                println!("{}d {}.", change.action, change.path.display());
+            }
+        }
+        if result.summary.before_fingerprint == result.summary.after_fingerprint {
+            println!("package graph unchanged: {}", result.summary.after_fingerprint);
+        } else {
+            println!("package graph before: {}", result.summary.before_fingerprint);
+            println!("package graph after: {}", result.summary.after_fingerprint);
+        }
+        if check_only {
+            println!("No files changed.");
+        } else {
+            println!("Transition journal: {}", result.summary.journal.display());
+        }
+    }
+    exit(ExitCodes::OK)
+}
+
+fn json_quote(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+    )
+}
+
+fn run_init(
+    script: Option<&str>,
+    raw: &[String],
+    mode: OutputMode,
+) -> ! {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if raw.iter().any(|arg| arg == "--restore-role-files") {
+        let check_only = raw.iter().any(|arg| arg == "--check");
+        match jet::Transition::restore_role_files(&cwd, check_only) {
+            Ok(result) => print_transition_result(&result, check_only, mode),
+            Err(error) => {
+                eprintln!("error: {error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
+    if raw.iter().any(|arg| arg == "--check") {
+        let has_role_file = ["pkg.jet", "env.jet", "workspace.jet", "config.jet"]
+            .iter()
+            .any(|name| cwd.join(name).is_file());
+        if has_role_file {
+            match jet::Transition::init(&cwd, true) {
+                Ok(result) => print_transition_result(&result, true, mode),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
+        }
+        println!("No migration-era role files found.\nNo files changed.");
+        exit(ExitCodes::OK);
+    }
+    if script.is_none()
+        && ["pkg.jet", "env.jet", "workspace.jet", "config.jet"]
+            .iter()
+            .any(|name| cwd.join(name).is_file())
+        && !cwd.join(jet::Syntax::PACKAGE_FILE).is_file()
+    {
+        match jet::Transition::init(&cwd, false) {
+            Ok(result) => print_transition_result(&result, false, mode),
+            Err(error) => {
+                eprintln!("error: {error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
     let name = cwd
         .file_name()
         .and_then(|s| s.to_str())
@@ -2779,7 +2942,7 @@ fn run_init(script: Option<&str>) -> ! {
     }
 }
 
-/// U11: fold `script`'s inline deps into `<cwd>/pkg.jet`'s `deps: {}` block
+/// U11: fold `script`'s inline deps into `<cwd>/package.jet`'s `deps: {}` block
 /// (just written by `write_init`), preserving comments/formatting via the
 /// same comment-preserving editor `jet add` uses.
 fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
@@ -2798,7 +2961,9 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     if deps.is_empty() {
         return;
     }
-    let manifest_path = cwd.join(jet::Syntax::PAYLOAD_FILE);
+    let Some(manifest_path) = jet::Loader::manifest_path(cwd) else {
+        return;
+    };
     let Ok(mut raw) = fs::read_to_string(&manifest_path) else {
         return;
     };
@@ -2814,7 +2979,7 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
             "lifted {} inline dependenc{} into {}",
             deps.len(),
             if deps.len() == 1 { "y" } else { "ies" },
-            jet::Syntax::PAYLOAD_FILE
+            manifest_path.file_name().and_then(|name| name.to_str()).unwrap_or("package.jet")
         );
     }
 }
@@ -2906,7 +3071,7 @@ fn run_update_jet(channel: Option<&str>) -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = require_manifest_root(
         &cwd,
-        "error: `jet update jet` needs a project — no `pkg.jet` found here or above",
+        "error: `jet update jet` needs a project — no `package.jet` found here or above",
     );
     match jetpack::JetPin::move_pin(&root, channel, env!("CARGO_PKG_VERSION")) {
         Ok(msg) => {

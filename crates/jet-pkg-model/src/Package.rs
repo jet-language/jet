@@ -90,6 +90,9 @@ pub enum MemberRef {
 pub struct PackageFacts {
     pub name: String,
     pub version: Option<String>,
+    /// The optional Jet self-toolchain pin. It is a Package identity fact,
+    /// not a Config contribution (D-JPK-TOOLCHAIN1, D-ECO-FILEROOT1).
+    pub jet: Option<String>,
     pub source: Option<String>,
     pub deps: BTreeMap<String, String>,
     pub services: BTreeMap<String, ServiceFact>,
@@ -219,10 +222,18 @@ impl PackageFacts {
         Ok(facts)
     }
 
-    /// Load `package.jet`, falling back to the migration-era `pkg.jet`.
+    /// Load `package.jet`, falling back only when the migration-era `pkg.jet`
+    /// is the sole role file. Both names together are ambiguous and fail
+    /// closed before any composition or member discovery occurs.
     pub fn load(dir: &std::path::Path) -> Option<Result<Self, PackageParseError>> {
         let canonical = dir.join("package.jet");
         let legacy = dir.join("pkg.jet");
+        if canonical.is_file() && legacy.is_file() {
+            return Some(Err(PackageParseError::Composition(
+                "both `package.jet` and migration-era `pkg.jet` exist; keep one Package root"
+                    .to_string(),
+            )));
+        }
         let path = if canonical.is_file() { canonical } else { legacy };
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
@@ -234,7 +245,15 @@ impl PackageFacts {
             }
             Err(_) => return None,
         };
-        Some(Self::parse_uncomposed(&text, path.display().to_string()).and_then(|mut facts| {
+        let parsed = Self::parse_uncomposed(&text, path.display().to_string())
+            .or_else(|error| {
+                if path.file_name().and_then(|name| name.to_str()) == Some("pkg.jet") {
+                    legacy_package_facts(&text, path, error)
+                } else {
+                    Err(error)
+                }
+            });
+        Some(parsed.and_then(|mut facts| {
             facts.compose_configs(dir)?;
             facts
                 .validate_defaults()
@@ -626,6 +645,11 @@ impl PackageFacts {
                         "member reference `{relative}` resolves outside its Package root"
                     )));
                 }
+                if candidate.join("package.jet").is_file() && candidate.join("pkg.jet").is_file() {
+                    return Err(PackageParseError::Composition(format!(
+                        "member Package `{relative}` contains both `package.jet` and migration-era `pkg.jet`"
+                    )));
+                }
                 if physical.iter().any(|existing| existing == &candidate) {
                     return Err(PackageParseError::Composition(format!(
                         "member reference `{relative}` has the same physical identity as another member"
@@ -633,8 +657,11 @@ impl PackageFacts {
                 }
                 let (name, nested) = package_member_identity(&candidate)?;
                 if nested {
+                    let manifest = package_manifest_path(&candidate)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| candidate.display().to_string());
                     return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` declares members"
+                        "member Package `{relative}` at `{manifest}` declares members"
                     )));
                 }
                 if names.iter().any(|existing| existing == &name) {
@@ -736,6 +763,63 @@ fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     }
 }
 
+fn legacy_package_facts(
+    text: &str,
+    path: &std::path::Path,
+    canonical_error: PackageParseError,
+) -> Result<PackageFacts, PackageParseError> {
+    let manifest = crate::PackageManifest::parse(text).map_err(|error| {
+        PackageParseError::Composition(format!(
+            "migration-era Package `{}` is not a valid Package ({canonical_error}): {error}",
+            path.display()
+        ))
+    })?;
+    let mut facts = PackageFacts {
+        name: manifest.package.name,
+        version: Some(manifest.package.version),
+        jet: manifest.package.jet_constraint,
+        origin: path.display().to_string(),
+        ..PackageFacts::default()
+    };
+    for dependency in manifest.deps {
+        facts
+            .deps
+            .insert(dependency.name, legacy_dependency_value(&dependency.source));
+    }
+    let origin = facts.origin.clone();
+    record_provenance(&mut facts.provenance, "name", &origin);
+    record_provenance(&mut facts.provenance, "version", &origin);
+    if facts.jet.is_some() {
+        record_provenance(&mut facts.provenance, "jet", &origin);
+    }
+    for name in facts.deps.keys() {
+        record_provenance(&mut facts.provenance, &format!("deps.{name}"), &origin);
+    }
+    Ok(facts)
+}
+
+fn legacy_dependency_value(source: &crate::PackageManifest::DepSource) -> String {
+    match source {
+        crate::PackageManifest::DepSource::Version(value) => value.clone(),
+        crate::PackageManifest::DepSource::Provider { provider, target } => {
+            if matches!(provider, crate::RefSpec::Source::Path) {
+                target.clone()
+            } else {
+                format!("{target}@{}", provider.label())
+            }
+        }
+        crate::PackageManifest::DepSource::Git { url, selector } => {
+            let (field, value) = match selector {
+                crate::Manifest::GitSelector::Tag(value) => ("tag", value),
+                crate::Manifest::GitSelector::Branch(value) => ("branch", value),
+                crate::Manifest::GitSelector::Rev(value) => ("rev", value),
+            };
+            format!("{{ git: {url:?}, {field}: {value:?} }}")
+        }
+        crate::PackageManifest::DepSource::CLib { target } => format!("lib: {target}"),
+    }
+}
+
 fn legacy_package_name(text: &str, dir: &std::path::Path) -> String {
     text.lines()
         .find_map(|line| {
@@ -826,6 +910,8 @@ fn parse_common(
         match field.as_str() {
             "name" => facts.name = scalar(&value),
             "version" => facts.version = Some(scalar(&value)),
+            "jet" if !config => facts.jet = Some(scalar(&value)),
+            "jet" => return Err(PackageParseError::UnknownField(field.clone())),
             "source" => facts.source = Some(scalar(&value)),
             "deps" => facts.deps = parse_string_map("deps", &value)?,
             "services" => facts.services = parse_services(&value)?,
@@ -2249,6 +2335,55 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
         )
         .unwrap_err();
         assert!(error.to_string().contains("outputs.app.entry"));
+    }
+
+    #[test]
+    fn scalar_config_conflict_names_both_sources_and_does_not_mutate() {
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
+            .unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
+            .unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"2\" }", "configs/two.jet")
+            .unwrap();
+
+        let error = facts.compose([first, second]).unwrap_err();
+        match error {
+            ComposeError::Conflict {
+                field,
+                left_origin,
+                right_origin,
+                left,
+                right,
+            } => {
+                assert_eq!(field, "version");
+                assert_eq!(left_origin, "configs/one.jet");
+                assert_eq!(right_origin, "configs/two.jet");
+                assert_eq!(left, "1");
+                assert_eq!(right, "2");
+            }
+            other => panic!("expected scalar conflict, got {other:?}"),
+        }
+        assert_eq!(facts.version, None);
+        assert!(facts.field_provenance("version").is_empty());
+    }
+
+    #[test]
+    fn equal_scalar_config_contributors_keep_ordered_provenance() {
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
+            .unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
+            .unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/two.jet")
+            .unwrap();
+
+        facts.compose([first, second]).unwrap();
+        assert_eq!(facts.version.as_deref(), Some("1"));
+        let origins = facts
+            .field_provenance("version")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(origins, ["configs/one.jet", "configs/two.jet"]);
     }
 
     #[test]

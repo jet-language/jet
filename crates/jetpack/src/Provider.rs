@@ -780,11 +780,10 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
     explicit.or_else(|| std::env::var_os("JETPACK_FIXTURES").map(PathBuf::from))
 }
 
-/// Whether the `nix` binary is reachable on PATH (U16). Used by the two call
-/// sites that shell out to `nix` for something other than a package ref —
-/// `jet env`'s foreign-flake/devenv fallback and `jet bridge flake` — so both
-/// fail with a clean E1256 up front instead of a raw spawn error partway
-/// through.
+/// Whether the `nix` compatibility provider is reachable on PATH. The native
+/// foreign-flake bridge does not call this probe. Package references that
+/// still need the compatibility provider use it to fail with the bounded
+/// no-Nix diagnostic before a raw process spawn.
 pub fn nix_on_path() -> bool {
     Command::new("nix")
         .arg("--version")
@@ -815,9 +814,10 @@ pub(crate) trait Provider {
     ) -> Result<Realized, ProviderError>;
 }
 
-/// The Nix compatibility provider: translates a ref to a flake ref and shells
-/// out to `nix build --no-link --json` (R3 will remove the installed-`nix`
-/// requirement; the boundary here does not change).
+/// The Nix compatibility provider for package references that are not yet
+/// representable by the native provider. The no-Nix gate prevents this path
+/// from being reached accidentally; when selected explicitly it translates a
+/// ref to `nix build --no-link --json` and records the provider identity.
 pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {

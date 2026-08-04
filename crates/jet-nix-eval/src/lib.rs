@@ -84,6 +84,80 @@ const REQUIRED_SYSTEMS: [&str; 4] = [
 ];
 const MAX_EVALUATOR_INPUT_BYTES: usize = 1 << 20;
 
+/// The bounded compatibility inventory is part of the evaluator contract.
+/// A skipped surface has an explicit authority or semantic reason; it is not
+/// silently treated as an empty value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryStatus {
+    Covered,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InventoryEntry {
+    pub surface: &'static str,
+    pub status: InventoryStatus,
+    pub reason: &'static str,
+}
+
+pub const PINNED_INVENTORY: &[InventoryEntry] = &[
+    InventoryEntry {
+        surface: "stage-a-values-errors-locks-output-identities",
+        status: InventoryStatus::Covered,
+        reason: "pinned oracle manifest and stage-A differential fixtures",
+    },
+    InventoryEntry {
+        surface: "overlays-devshells-multi-output-packages",
+        status: InventoryStatus::Covered,
+        reason: "bounded native projection with private materialization",
+    },
+    InventoryEntry {
+        surface: "fixed-output-fetchers",
+        status: InventoryStatus::Skipped,
+        reason: "requires explicit fetch authority and verified bytes; no network authority is exposed here",
+    },
+    InventoryEntry {
+        surface: "cross-system-packages",
+        status: InventoryStatus::Skipped,
+        reason: "target package semantics require a declared target and provider facts beyond host projection",
+    },
+    InventoryEntry {
+        surface: "external-flakes",
+        status: InventoryStatus::Skipped,
+        reason: "remote source resolution remains an explicit provider boundary; local imports require authority",
+    },
+    InventoryEntry {
+        surface: "differential-fuzzing",
+        status: InventoryStatus::Skipped,
+        reason: "oracle-process fuzzing belongs to the host proof harness, not the no-std evaluator",
+    },
+];
+
+pub fn pinned_inventory() -> &'static [InventoryEntry] {
+    PINNED_INVENTORY
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvaluatorBudget {
+    pub input_bytes: usize,
+    pub tokens: usize,
+    pub expression_steps: usize,
+    pub imports: usize,
+    pub string_bytes: usize,
+}
+
+pub const EVALUATOR_BUDGET: EvaluatorBudget = EvaluatorBudget {
+    input_bytes: MAX_EVALUATOR_INPUT_BYTES,
+    tokens: 65_536,
+    expression_steps: 256,
+    imports: 64,
+    string_bytes: 1 << 20,
+};
+
+pub fn evaluator_budget() -> EvaluatorBudget {
+    EVALUATOR_BUDGET
+}
+
 pub type ImportAuthority = alloc::rc::Rc<dyn Fn(&str) -> core::result::Result<String, String>>;
 
 /// A typed projection of the supported, non-executing devShell surface.
@@ -237,8 +311,10 @@ pub fn evaluate_devshell_with_import_authority(
 /// Evaluate the bounded pure `builtins.derivation` surface.
 ///
 /// This is an internal compatibility seam. It never executes a builder,
-/// reads the host store, or shells out to Nix. Dynamic derivations, multiple
-/// outputs, and inputs without canonical store identities fail closed.
+/// reads the host store, or shells out to Nix. Dynamic derivations and inputs
+/// without canonical store identities fail closed. Multiple non-fixed outputs
+/// are preserved for the private materializer; fixed-output requests remain
+/// single-output.
 pub fn evaluate_derivation(
     source: &str,
     system: &str,
