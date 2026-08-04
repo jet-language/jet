@@ -130,7 +130,9 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
 
 fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[ActiveCleanup]) -> String {
     let rendered = emit_tir_expr(e, cx);
-    if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER) {
+    if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER)
+        && !rendered.contains(crate::Codegen::TIR::STREAM_CANCEL_MARKER)
+    {
         return rendered;
     }
     let mut cleanup = String::new();
@@ -142,10 +144,9 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
             ActiveCleanup::Resource(name) => cleanup.push_str(&format!("{}.close(); ", name)),
         }
     }
-    rendered.replace(
-        crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
-        &cleanup,
-    )
+    rendered
+        .replace(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER, &cleanup)
+        .replace(crate::Codegen::TIR::STREAM_CANCEL_MARKER, &cleanup)
 }
 
 /// Mutable list place for `SplitViews` owners. Nested `grid[i]` must use

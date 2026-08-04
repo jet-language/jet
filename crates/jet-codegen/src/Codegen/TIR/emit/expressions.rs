@@ -324,8 +324,9 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::SwitchSubjectValue => "(*_jet_switch_subject)".to_string(),
         THostCall::YieldSend { value } => {
             format!(
-                "let _ = __jet_yield_tx.send({});",
-                emit_tir_expr(value, cx)
+                "if !__jet_yield_tx.send_stream({}) {{ {} return; }}",
+                emit_tir_expr(value, cx),
+                crate::Codegen::TIR::STREAM_CANCEL_MARKER,
             )
         }
         THostCall::TypedTextInterp { kind, literals, holes } => {

@@ -92,6 +92,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) switch_subject: Option<(Value, Type)>,
     /// Sender handle for a native generator body.
     pub(crate) yield_sender: Option<Value>,
+    /// Open Stream consumers. A non-local return must close them because the
+    /// JIT ABI carries a raw channel handle rather than an owning Rust drop.
+    pub(crate) stream_consumers: Vec<Value>,
     pub(crate) in_shared_transaction: bool,
     pub(crate) shared_transaction_depth: u32,
     pub(crate) unsafe_depth: usize,
@@ -2224,6 +2227,18 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    fn emit_stream_consumer_closes(&mut self) {
+        if self.stream_consumers.is_empty() {
+            return;
+        }
+        let close = self
+            .module
+            .declare_func_in_func(self.host.conc.channel_close, self.b.func);
+        for channel in self.stream_consumers.iter().rev().copied() {
+            self.b.ins().call(close, &[channel]);
+        }
+    }
+
     fn is_shared_guard_ty(ty: &Type) -> bool {
         match ty {
             Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_GUARD => true,
@@ -2286,6 +2301,7 @@ impl LowerCtx<'_, '_> {
         if let Some(close_status) = self.emit_taskgroup_closes() {
             status = self.merge_exit_status(status, close_status);
         }
+        self.emit_stream_consumer_closes();
         self.in_lexical_exit = true;
         let guards = self.emit_scope_guards();
         self.in_lexical_exit = false;
@@ -2316,16 +2332,16 @@ impl LowerCtx<'_, '_> {
             .declare_func_in_func(self.host.conc.pending_exit_status, self.b.func);
         let call = self.b.ins().call(pending, &[]);
         status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
+        let status = status.expect("trap status always contributes");
 
         if let Some(sender) = self.yield_sender {
             let close = self
                 .module
                 .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-            self.b.ins().call(close, &[sender]);
+            self.b.ins().call(close, &[sender, status]);
         }
         self.emit_deadline_pops_to(0);
 
-        let status = status.expect("trap status always contributes");
         let zero = self.b.ins().iconst(types::I64, 0);
         let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
         let interrupted = self.b.create_block();
@@ -5028,7 +5044,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let channel = self.b.use_var(channel_var);
         let receive = self.module.declare_func_in_func(
-            self.host.conc.channel_receive_status,
+            self.host.conc.generator_receive_status,
             self.b.func,
         );
         let call = self.b.ins().call(receive, &[channel]);
@@ -5059,7 +5075,9 @@ impl LowerCtx<'_, '_> {
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
         });
+        self.stream_consumers.push(channel);
         self.lower_stmts_scoped(body)?;
+        self.stream_consumers.pop();
         self.loop_stack.pop();
         if !self.dead {
             self.b.ins().jump(header, &[]);

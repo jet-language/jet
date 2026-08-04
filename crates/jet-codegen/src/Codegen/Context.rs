@@ -1812,12 +1812,16 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
-            // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
-            // which is exactly `loop x; stream { }`'s pull-one-block-until-ready
-            // shape (no coroutine machinery needed).
+            // D-STREAMYIELD1: a generator's `Stream<T>` is the Prelude's
+            // rendezvous receiver. Its owned iterator closes the receiver when
+            // a consumer breaks or drops it, so a blocked producer observes the
+            // same cancellation rule on every emitted program.
             Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
-                format!("std::sync::mpsc::Receiver<{}>", self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetStream<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
             Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {

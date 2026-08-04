@@ -1908,10 +1908,12 @@ malformed block E1221.
 hand a value to the consumer and suspend until the next pull; falling off
 the end (or a bare `return;`) ends the stream; `return value;` is E0806.
 Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
-async/await coloring. Implemented on a real OS thread + a rendezvous
-channel (`std::sync::mpsc::sync_channel(0)`): `yield` blocks the producer
-thread until the consumer's loop pulls, exactly reproducing suspend/resume
-with zero coroutine machinery.
+async/await coloring. The emitted program uses the scheduler-backed Prelude
+receiver and an owned pull iterator: `yield` blocks the producer until the
+consumer pulls, and dropping the iterator on `break` closes the receiver. A
+failed producer send returns through the active lexical cleanups, so no
+statement after the last accepted pull runs. This is one pull/cancellation
+law for AOT, JIT, and the interpreter; it does not require coroutine syntax.
 
 ### Comptime & metaprogramming
 
