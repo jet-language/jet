@@ -5048,6 +5048,7 @@ impl LowerCtx<'_, '_> {
             self.b.func,
         );
         let call = self.b.ins().call(receive, &[channel]);
+        self.emit_trap_check()?;
         let packed = self.finish_wait_call(self.b.inst_results(call)[0]);
         let zero = self.b.ins().iconst(types::I64, 0);
         let closed = self.b.ins().icmp(IntCC::Equal, packed, zero);

@@ -356,10 +356,20 @@ extern "C" fn jet_jit_sender_close(s: i64, failed: i64) {
 extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
     let mut consumer = with_runtime_mut(|rt| rt.stream_consumers.remove(&ch))
         .expect("jit generator receive without active runtime");
+    let mut producer_failed = false;
     let status = wait_status(|| match consumer.pull() {
         Some(value) => value + 1,
-        None => 0,
+        None => {
+            producer_failed = consumer.failed();
+            0
+        }
     });
+    if status == JitWaitStatus::Ready as i64 && producer_failed {
+        // Match AOT `JetStreamIter::next`: a producer that completed with a
+        // failure must not become ordinary EOF in the resident adapter. The
+        // lowering checks this trap before dispatching the EOF branch.
+        trap_panic("stream producer failed");
+    }
     if status == JitWaitStatus::Ready as i64 {
         if WAIT_VALUE.with(|slot| slot.get()) == 0 {
             drop(consumer);
@@ -376,8 +386,6 @@ extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
     status
 }
 
-/// `0` = closed; otherwise `received + 1` (encoding avoids colliding with `0`).
-///
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
 extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
