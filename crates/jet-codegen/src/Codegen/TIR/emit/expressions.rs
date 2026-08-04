@@ -1683,6 +1683,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         "TextWidth"
                             | "TerminalSize"
                             | "TerminalPolicy"
+                            | "DataLineOptions"
                             | "AsyncPolicy"
                             | "FieldError"
                             | "CBOROptions"

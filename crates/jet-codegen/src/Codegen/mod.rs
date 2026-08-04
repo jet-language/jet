@@ -821,6 +821,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         // Encoding templates already in kernel closure.
     }
     if needs_data {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataPlot.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }

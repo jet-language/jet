@@ -693,6 +693,15 @@ fn load_line_options(options: i64) -> DataLineOptions {
     })
 }
 
+fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
+    result_data_err(DataError {
+        kind: error.kind,
+        operation: error.operation.to_string(),
+        reason: error.reason.to_string(),
+        index: error.index,
+    })
+}
+
 extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
     let groups = load_groups(groups);
     let options = load_line_options(options);
@@ -704,8 +713,7 @@ extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
         }
         Err(e) => {
-            let sid = rt.heap.alloc_string(e.to_string());
-            crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+            result_data_plot_err(e)
         }
     })
 }
@@ -721,8 +729,7 @@ extern "C" fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
         }
         Err(e) => {
-            let sid = rt.heap.alloc_string(e.to_string());
-            crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+            result_data_plot_err(e)
         }
     })
 }
