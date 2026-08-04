@@ -854,6 +854,7 @@ fn mk() {
             receiver: Box::new(Expr::Ident("b".to_string(), sp)),
             method: method.to_string(),
             method_span: sp,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: Vec::new(),
             recv_type: Some("Bag".to_string()),
@@ -2105,4 +2106,3 @@ fn run() {
             "wildcard enum-payload if-let not covered"
         );
     }
-
