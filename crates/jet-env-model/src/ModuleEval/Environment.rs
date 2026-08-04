@@ -910,6 +910,11 @@ impl LanguagePackCatalog {
         ] {
             catalog.register(pack).expect("built-in language pack names are unique");
         }
+        for name in extended_language_names() {
+            catalog
+                .register(extended_language_pack(name))
+                .expect("extended built-in language pack names are unique");
+        }
         catalog
     }
 
@@ -1239,6 +1244,152 @@ fn pack(name: &str, packages: &[&str]) -> LanguagePack {
         ],
         license,
         required_tools,
+        ..Default::default()
+    }
+}
+
+fn extended_language_names() -> &'static [&'static str] {
+    &[
+        "Ansible",
+        "C",
+        "Clojure",
+        "Cplusplus",
+        "Crystal",
+        "Cue",
+        "Dart",
+        "Deno",
+        "Dotnet",
+        "Elixir",
+        "Elm",
+        "Erlang",
+        "Fortran",
+        "Gawk",
+        "Gleam",
+        "Hare",
+        "Haskell",
+        "Helm",
+        "Idris",
+        "Java",
+        "Jsonnet",
+        "Julia",
+        "Kotlin",
+        "Lean4",
+        "Lobster",
+        "Lua",
+        "Nim",
+        "Nix",
+        "Ocaml",
+        "Odin",
+        "Opentofu",
+        "Pascal",
+        "Perl",
+        "Php",
+        "Pkl",
+        "Purescript",
+        "R",
+        "Racket",
+        "Raku",
+        "Robotframework",
+        "Ruby",
+        "Scala",
+        "Shell",
+        "Solidity",
+        "Standardml",
+        "Swift",
+        "Terraform",
+        "Texlive",
+        "Typescript",
+        "Typst",
+        "Unison",
+        "V",
+        "Vala",
+        "Zig",
+    ]
+}
+
+fn extended_language_pack(name: &str) -> LanguagePack {
+    let (packages, tools, license) = match name {
+        "Ansible" => (vec!["ansible@nixpkgs"], vec!["ansible", "ansible-playbook"], "GPL-3.0-or-later"),
+        "C" => (vec!["gcc@nixpkgs", "gnumake@nixpkgs"], vec!["gcc", "make"], "GPL-3.0-or-later"),
+        "Clojure" => (vec!["clojure@nixpkgs"], vec!["clojure"], "EPL-1.0"),
+        "Cplusplus" => (vec!["gcc@nixpkgs", "cmake@nixpkgs"], vec!["g++", "cmake"], "GPL-3.0-or-later"),
+        "Crystal" => (vec!["crystal@nixpkgs"], vec!["crystal"], "Apache-2.0"),
+        "Cue" => (vec!["cue@nixpkgs"], vec!["cue"], "Apache-2.0"),
+        "Dart" => (vec!["dart@nixpkgs"], vec!["dart"], "BSD-3-Clause"),
+        "Deno" => (vec!["deno@nixpkgs"], vec!["deno"], "MIT"),
+        "Dotnet" => (vec!["dotnet-sdk@nixpkgs"], vec!["dotnet"], "MIT"),
+        "Elixir" => (vec!["elixir@nixpkgs"], vec!["elixir", "mix"], "Apache-2.0"),
+        "Elm" => (vec!["elm@nixpkgs"], vec!["elm"], "BSD-3-Clause"),
+        "Erlang" => (vec!["erlang@nixpkgs", "rebar3@nixpkgs"], vec!["erl", "rebar3"], "Apache-2.0"),
+        "Fortran" => (vec!["gfortran@nixpkgs"], vec!["gfortran"], "GPL-3.0-or-later"),
+        "Gawk" => (vec!["gawk@nixpkgs"], vec!["gawk"], "GPL-3.0-or-later"),
+        "Gleam" => (vec!["gleam@nixpkgs"], vec!["gleam"], "Apache-2.0"),
+        "Hare" => (vec!["hare@nixpkgs"], vec!["hare"], "GPL-3.0-or-later"),
+        "Haskell" => (vec!["ghc@nixpkgs", "cabal-install@nixpkgs"], vec!["ghc", "cabal"], "BSD-3-Clause"),
+        "Helm" => (vec!["kubernetes-helm@nixpkgs"], vec!["helm"], "Apache-2.0"),
+        "Idris" => (vec!["idris2@nixpkgs"], vec!["idris2"], "BSD-3-Clause"),
+        "Java" => (vec!["jdk@nixpkgs", "maven@nixpkgs"], vec!["java", "javac", "mvn"], "GPL-2.0-with-classpath-exception"),
+        "Jsonnet" => (vec!["jsonnet@nixpkgs"], vec!["jsonnet"], "Apache-2.0"),
+        "Julia" => (vec!["julia@nixpkgs"], vec!["julia"], "MIT"),
+        "Kotlin" => (vec!["kotlin@nixpkgs"], vec!["kotlinc"], "Apache-2.0"),
+        "Lean4" => (vec!["lean4@nixpkgs"], vec!["lean", "lake"], "Apache-2.0"),
+        "Lobster" => (vec!["lobster@nixpkgs"], vec!["lobster"], "MIT"),
+        "Lua" => (vec!["lua@nixpkgs", "luarocks@nixpkgs"], vec!["lua", "luarocks"], "MIT"),
+        "Nim" => (vec!["nim@nixpkgs"], vec!["nim", "nimble"], "MIT"),
+        "Nix" => (vec!["nix@nixpkgs"], vec!["nix"], "LGPL-2.1-or-later"),
+        "Ocaml" => (vec!["ocaml@nixpkgs", "opam@nixpkgs"], vec!["ocaml", "opam"], "LGPL-2.1-with-linking-exception"),
+        "Odin" => (vec!["odin@nixpkgs"], vec!["odin"], "BSD-3-Clause"),
+        "Opentofu" => (vec!["opentofu@nixpkgs"], vec!["tofu"], "MPL-2.0"),
+        "Pascal" => (vec!["fpc@nixpkgs"], vec!["fpc"], "GPL-2.0-or-later"),
+        "Perl" => (vec!["perl@nixpkgs"], vec!["perl"], "Artistic-1.0 OR GPL-1.0-or-later"),
+        "Php" => (vec!["php@nixpkgs", "composer@nixpkgs"], vec!["php", "composer"], "PHP-3.01"),
+        "Pkl" => (vec!["pkl@nixpkgs"], vec!["pkl"], "Apache-2.0"),
+        "Purescript" => (vec!["purescript@nixpkgs", "spago@nixpkgs"], vec!["purs", "spago"], "BSD-3-Clause"),
+        "R" => (vec!["R@nixpkgs"], vec!["R"], "GPL-2.0-or-later"),
+        "Racket" => (vec!["racket@nixpkgs"], vec!["racket"], "LGPL-3.0-or-later"),
+        "Raku" => (vec!["rakudo@nixpkgs"], vec!["raku"], "Artistic-2.0"),
+        "Robotframework" => (vec!["robotframework@nixpkgs"], vec!["robot"], "Apache-2.0"),
+        "Ruby" => (vec!["ruby@nixpkgs", "bundler@nixpkgs"], vec!["ruby", "bundle"], "BSD-2-Clause"),
+        "Scala" => (vec!["scala@nixpkgs", "sbt@nixpkgs"], vec!["scala", "sbt"], "Apache-2.0"),
+        "Shell" => (vec!["bash@nixpkgs", "shellcheck@nixpkgs"], vec!["bash", "shellcheck"], "GPL-3.0-or-later"),
+        "Solidity" => (vec!["solc@nixpkgs"], vec!["solc"], "GPL-3.0-or-later"),
+        "Standardml" => (vec!["smlnj@nixpkgs"], vec!["sml"], "BSD-3-Clause"),
+        "Swift" => (vec!["swift@nixpkgs"], vec!["swiftc"], "Apache-2.0"),
+        "Terraform" => (vec!["terraform@nixpkgs"], vec!["terraform"], "MPL-2.0"),
+        "Texlive" => (vec!["texlive@nixpkgs"], vec!["pdflatex"], "GPL-3.0-or-later"),
+        "Typescript" => (vec!["nodejs@nixpkgs", "nodePackages.typescript@nixpkgs"], vec!["node", "npm", "tsc"], "Apache-2.0"),
+        "Typst" => (vec!["typst@nixpkgs"], vec!["typst"], "Apache-2.0"),
+        "Unison" => (vec!["unison-language@nixpkgs"], vec!["unison"], "MIT"),
+        "V" => (vec!["vlang@nixpkgs"], vec!["v"], "MIT"),
+        "Vala" => (vec!["vala@nixpkgs"], vec!["valac"], "LGPL-2.1-or-later"),
+        "Zig" => (vec!["zig@nixpkgs"], vec!["zig"], "MIT"),
+        _ => panic!("unknown extended language pack: {name}"),
+    };
+    catalog_pack(name, &packages, &tools, license)
+}
+
+fn catalog_pack(
+    name: &str,
+    packages: &[&str],
+    tools: &[&str],
+    license: &str,
+) -> LanguagePack {
+    LanguagePack {
+        name: name.to_string(),
+        packages: packages.iter().map(|package| (*package).to_string()).collect(),
+        commands: tools
+            .iter()
+            .map(|tool| ((*tool).to_string(), (*tool).to_string()))
+            .collect(),
+        host: "native".to_string(),
+        platforms: vec![
+            "aarch64-macos".to_string(),
+            "aarch64-linux".to_string(),
+            "x86_64-macos".to_string(),
+            "x86_64-linux".to_string(),
+        ],
+        license: license.to_string(),
+        required_tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
         ..Default::default()
     }
 }
@@ -2188,7 +2339,7 @@ mod tests {
     #[test]
     fn catalog_has_the_core_language_families() {
         let catalog = LanguagePackCatalog::builtin();
-        assert_eq!(catalog.names().len(), 4);
+        assert_eq!(catalog.names().len(), 58);
         for name in ["Rust", "Python", "Go", "JavaScript"] {
             assert!(catalog.get(name).is_some());
         }
@@ -2208,6 +2359,34 @@ mod tests {
             .unwrap();
         assert!(expanded.packages.contains(&"rustc@nixpkgs".to_string()));
         assert!(expanded.packages.contains(&"python@nixpkgs".to_string()));
+    }
+
+    #[test]
+    fn catalog_covers_the_extended_language_families_with_tool_facts() {
+        let catalog = LanguagePackCatalog::builtin();
+        assert_eq!(extended_language_names().len(), 54);
+        for name in extended_language_names() {
+            let pack = catalog.get(name).unwrap_or_else(|| panic!("missing pack {name}"));
+            assert!(!pack.packages.is_empty(), "{name} has no package facts");
+            assert!(!pack.commands.is_empty(), "{name} has no command facts");
+            assert!(!pack.license.is_empty(), "{name} has no license fact");
+            assert_eq!(pack.required_tools.len(), pack.commands.len(), "{name} tool facts drift");
+        }
+        let selections = catalog
+            .names()
+            .into_iter()
+            .map(|name| LanguageSpec {
+                name,
+                enable: true,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let expansion = catalog.expand(&selections).unwrap();
+        assert_eq!(expansion.applied.len(), 58);
+        assert!(expansion
+            .projections
+            .iter()
+            .all(|projection| projection.missing_tools.is_empty()));
     }
 
     #[test]

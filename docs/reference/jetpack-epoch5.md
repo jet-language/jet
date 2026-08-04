@@ -81,9 +81,14 @@ closed catalog into ordinary package references. Disabled records remain in
 the plan and in the trust fingerprint, but missing tools for a disabled pack do
 not block the environment.
 
-Each Rust, Python, Go, and JavaScript pack discloses its host kind, supported
-platform list, license summary, and required commands. Go exposes `go`,
-`gofmt`, and `gopls`; JavaScript exposes `node`, `npm`, and `npx`. An
+The built-in catalog covers 58 language families: Ansible, C, Clojure,
+Cplusplus, Crystal, Cue, Dart, Deno, Dotnet, Elixir, Elm, Erlang, Fortran,
+Gawk, Gleam, Go, Hare, Haskell, Helm, Idris, Java, JavaScript, Jsonnet, Julia,
+Kotlin, Lean4, Lobster, Lua, Nim, Nix, Ocaml, Odin, Opentofu, Pascal, Perl,
+Php, Pkl, Purescript, Python, R, Racket, Raku, Robotframework, Ruby, Rust,
+Scala, Shell, Solidity, Standardml, Swift, Terraform, Texlive, Typescript,
+Typst, Unison, V, Vala, and Zig. Each pack discloses its host kind, supported
+platform list, license summary, package facts, and required commands. An
 unsupported host or an enabled catalog pack with a missing required command
 fails during planning; it does not create a partial PATH or claim a tool that
 is absent.
