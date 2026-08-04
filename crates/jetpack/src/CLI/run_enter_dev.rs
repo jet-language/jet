@@ -615,6 +615,10 @@ fn task_undeclared_accesses(
             } else {
                 task_cwd.join(path)
             };
+            let Some(path) = normalize_trace_path(&path) else {
+                unexpected.insert(path.to_string_lossy().replace('\\', "/"));
+                continue;
+            };
             let path = if path.exists() {
                 path.canonicalize().unwrap_or(path)
             } else {
@@ -635,6 +639,24 @@ fn task_undeclared_accesses(
     Ok(unexpected.into_iter().collect())
 }
 
+fn normalize_trace_path(path: &Path) -> Option<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::Normal(_)
+            | std::path::Component::Prefix(_)
+            | std::path::Component::RootDir => normalized.push(component.as_os_str()),
+        }
+    }
+    Some(normalized)
+}
+
 fn strace_paths(line: &str) -> Vec<PathBuf> {
     let Some(open) = line.find('(') else {
         return Vec::new();
@@ -644,13 +666,13 @@ fn strace_paths(line: &str) -> Vec<PathBuf> {
     };
     let args = strace_argument_tokens(&line[open + 1..]);
     let indices: Vec<usize> = match name {
-        "execve" | "open" | "creat" | "stat" | "lstat" | "statx" | "access"
+        "execve" | "open" | "creat" | "stat" | "lstat" | "access"
         | "readlink" | "unlink" | "rmdir" | "truncate" | "chmod" | "chown"
         | "lchown" | "mknod" | "mkdir" | "chdir" | "getxattr" | "lgetxattr"
         | "setxattr" | "lsetxattr" | "listxattr" | "llistxattr" | "removexattr" => {
             vec![0]
         }
-        "execveat" | "openat" | "openat2" | "newfstatat" | "fstatat64"
+        "execveat" | "openat" | "openat2" | "statx" | "newfstatat" | "fstatat64"
         | "faccessat" | "faccessat2" | "readlinkat" | "unlinkat" | "mkdirat"
         | "fchmodat" | "fchownat" | "utimensat" => vec![1],
         "rename" | "renameat2" | "link" | "linkat" => vec![0, 1, 3],
@@ -2636,12 +2658,20 @@ mod tests {
             vec![PathBuf::from("space name")]
         );
         assert_eq!(
+            strace_paths(r#"123 statx(AT_FDCWD, "hidden.txt", AT_STATX_SYNC_AS_STAT, STATX_ALL, {}) = 0"#),
+            vec![PathBuf::from("hidden.txt")]
+        );
+        assert_eq!(
             strace_paths(r#"123 linkat(AT_FDCWD, "src", AT_FDCWD, "dest", 0) = 0"#),
             vec![PathBuf::from("src"), PathBuf::from("dest")]
         );
         assert_eq!(
             strace_paths(r#"123 open("caf\303\251", O_RDONLY) = 3"#),
             vec![PathBuf::from("café")]
+        );
+        assert_eq!(
+            normalize_trace_path(Path::new("/project/work/../../outside")),
+            Some(PathBuf::from("/outside"))
         );
     }
 
