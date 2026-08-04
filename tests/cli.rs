@@ -62,11 +62,44 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 #[test]
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
-    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
+    let file = dir.join("main.jet");
+    fs::write(&file, "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
+    let human = Command::new(jet()).args(["inspect", "unsafe", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    let human = String::from_utf8(human.stdout).unwrap();
+    assert!(human.contains("main.jet:4:2"), "{human}");
+    assert!(human.contains("main.jet:5:14"), "{human}");
+    assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+    assert!(stdout.contains("\"location\":{\"start\":{\"line\":4,\"column\":2}"), "{stdout}");
+    let repeat = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(repeat.status.code(), Some(0));
+    assert_eq!(stdout, String::from_utf8(repeat.stdout).unwrap());
+}
+
+#[test]
+fn inspect_unsafe_loader_failures_use_standard_diagnostics() {
+    let dir = isolated_cwd("inspect_unsafe_loader");
+    let file = dir.join("malformed.jet");
+    fs::write(&file, "fn run( {\n").unwrap();
+    let malformed = Command::new(jet()).args(["inspect", "unsafe", "malformed.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(malformed.status.code(), Some(1));
+    let stderr = String::from_utf8(malformed.stderr).unwrap();
+    assert!(stderr.contains("Error [E0003]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("malformed.jet:1:9"), "{stderr}");
+
+    let missing = Command::new(jet()).args(["inspect", "unsafe", "missing.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    let stderr = String::from_utf8(missing.stderr).unwrap();
+    assert!(stderr.contains("Error [E0603]") && stderr.contains("Why:") && stderr.contains("Fix:"), "{stderr}");
+
+    fs::write(dir.join("missing_reason.jet"), "fn run() {\n #Unsafe { print(\"unchecked\") }\n}\n").unwrap();
+    let missing_reason = Command::new(jet()).args(["inspect", "unsafe", "missing_reason.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing_reason.status.code(), Some(1));
+    let stderr = String::from_utf8(missing_reason.stderr).unwrap();
+    assert!(stderr.contains("Error [E3112]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("missing_reason.jet:2:2"), "{stderr}");
 }
 
 #[test]
