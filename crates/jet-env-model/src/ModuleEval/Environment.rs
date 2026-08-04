@@ -2426,7 +2426,13 @@ mod tests {
             .register(LanguagePack {
                 name: "JetExperimental".to_string(),
                 packages: vec!["jet-tool@nixpkgs".to_string()],
+                venv_packages: vec!["jet-tool-venv@nixpkgs".to_string()],
+                variables: BTreeMap::from([("JET_EXPERIMENTAL".to_string(), "1".to_string())]),
+                commands: BTreeMap::from([("jet".to_string(), "jet".to_string())]),
+                host: "native".to_string(),
+                platforms: vec![jet_pkg_model::Platform::host_key()],
                 license: "MIT".to_string(),
+                required_tools: vec!["jet".to_string()],
                 ..Default::default()
             })
             .unwrap();
@@ -2445,6 +2451,62 @@ mod tests {
             }])
             .unwrap();
         assert_eq!(expansion.packages, vec!["jet-tool@nixpkgs"]);
+    }
+
+    #[test]
+    fn catalog_contribution_projects_every_declared_fact_and_fingerprints_it() {
+        let mut catalog = LanguagePackCatalog::default();
+        let pack = LanguagePack {
+            name: "Contributed".to_string(),
+            packages: vec!["compiler@nixpkgs".to_string()],
+            venv_packages: vec!["compiler-tools@nixpkgs".to_string()],
+            variables: BTreeMap::from([("COMPILER_MODE".to_string(), "strict".to_string())]),
+            commands: BTreeMap::from([
+                ("compiler".to_string(), "compiler".to_string()),
+                ("compiler-fmt".to_string(), "compiler-fmt".to_string()),
+            ]),
+            host: "native".to_string(),
+            platforms: vec![jet_pkg_model::Platform::host_key()],
+            license: "MIT".to_string(),
+            required_tools: vec!["compiler".to_string(), "compiler-fmt".to_string()],
+        };
+        let original_fingerprint = pack.fingerprint();
+        catalog.register(pack).unwrap();
+
+        let expansion = catalog
+            .expand(&[LanguageSpec {
+                name: "contributed".to_string(),
+                enable: true,
+                venv: true,
+                ..Default::default()
+            }])
+            .unwrap();
+        assert_eq!(expansion.applied, vec!["Contributed"]);
+        assert_eq!(
+            expansion.packages,
+            vec!["compiler@nixpkgs", "compiler-tools@nixpkgs"]
+        );
+        assert_eq!(
+            expansion.variables.get("COMPILER_MODE").map(String::as_str),
+            Some("strict")
+        );
+        assert_eq!(
+            expansion.commands.get("compiler-fmt").map(String::as_str),
+            Some("compiler-fmt")
+        );
+        let projection = &expansion.projections[0];
+        assert_eq!(projection.host, "native");
+        assert_eq!(projection.platform, jet_pkg_model::Platform::host_key());
+        assert_eq!(projection.license, "MIT");
+        assert!(projection.missing_tools.is_empty());
+        assert!(projection
+            .included
+            .contains(&"compiler-tools@nixpkgs".to_string()));
+        assert!(expansion.fingerprint().contains(&original_fingerprint));
+
+        let mut changed = catalog.get("Contributed").unwrap().clone();
+        changed.variables.insert("COMPILER_MODE".to_string(), "fast".to_string());
+        assert_ne!(changed.fingerprint(), original_fingerprint);
     }
 
     #[test]

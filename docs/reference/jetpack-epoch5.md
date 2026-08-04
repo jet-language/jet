@@ -93,6 +93,16 @@ unsupported host or an enabled catalog pack with a missing required command
 fails during planning; it does not create a partial PATH or claim a tool that
 is absent.
 
+Contributors add a pack to the same typed `LanguagePackCatalog` used by the
+built-in entries. A contribution must declare its package and optional venv
+package references, command mappings, required commands, host/platform facts,
+and license. Expansion validates the required-command mapping before it adds
+packages, carries variables and commands into the ordinary environment plan,
+and includes the complete pack fingerprint in trust identity. Duplicate names,
+unsupported platforms, missing command mappings, and missing licenses fail
+closed; a contribution does not create a second resolver or an untracked PATH
+shortcut.
+
 ```text
 module env.dev {
     profiles: {
