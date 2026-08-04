@@ -86,6 +86,10 @@ pub(crate) struct Cx {
     pub(crate) fn_types: HashMap<String, Type>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// Method-owned type parameters in declaration order. Owner parameters are
+    /// kept separately in `struct_type_param_order`.
+    pub(crate) method_type_params:
+        HashMap<(String, String), Vec<crate::AST::TypeParam>>,
     pub(crate) method_self_convs: HashMap<(String, String), AccessConvention>,
     /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
     /// for a unit-returning method). Used by TIR lowering to give a method-call
@@ -225,7 +229,7 @@ pub(crate) struct Cx {
     /// Concrete generic owner methods reached while lowering executable TIR.
     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
     pub(crate) jit_method_calls:
-        std::cell::RefCell<std::collections::BTreeMap<String, (Type, String)>>,
+        std::cell::RefCell<std::collections::BTreeMap<String, (Type, String, Vec<Type>)>>,
     /// Concrete argument types at calls to generic free functions. TIR uses
     /// these facts to admit one native specialization per concrete call shape.
     pub(crate) jit_generic_calls:
@@ -240,6 +244,10 @@ pub(crate) struct Cx {
     /// Free-function type parameter names, used to give generic call results
     /// their concrete TIR type at the call site.
     pub(crate) fn_type_params: HashMap<String, HashSet<String>>,
+    /// The same free-function parameters in declaration order. HashSet is still
+    /// useful for structural binding, but explicit `call<T>(…)` must map each
+    /// source argument to the matching binder deterministically.
+    pub(crate) fn_type_param_order: HashMap<String, Vec<String>>,
     /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
     /// `TStmt::LineMarker` before every lowered statement, and emission turns each
     /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
@@ -378,8 +386,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TempDir" => Some("TempDir"),
         "TempFile" => Some("TempFile"),
         "FileLock" => Some("FileLock"),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data values.
         "DataGroup" => Some("DataGroup"),
+        "DataLineOptions" => Some("DataLineOptions"),
         "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
         "DataSummary" => Some("DataSummary"),
@@ -1804,12 +1813,16 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
-            // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
-            // which is exactly `loop x; stream { }`'s pull-one-block-until-ready
-            // shape (no coroutine machinery needed).
+            // D-STREAMYIELD1: a generator's `Stream<T>` is the Prelude's
+            // rendezvous receiver. Its owned iterator closes the receiver when
+            // a consumer breaks or drops it, so a blocked producer observes the
+            // same cancellation rule on every emitted program.
             Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
-                format!("std::sync::mpsc::Receiver<{}>", self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetStream<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
             Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {
@@ -2728,6 +2741,7 @@ pub(crate) fn build_cx_items(
         sigs: HashMap::new(),
         fn_types: HashMap::new(),
         method_sigs: HashMap::new(),
+        method_type_params: HashMap::new(),
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
@@ -2792,6 +2806,7 @@ pub(crate) fn build_cx_items(
         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,
         fn_type_params: HashMap::new(),
+        fn_type_param_order: HashMap::new(),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OSTarget::host(),
@@ -3026,6 +3041,10 @@ pub(crate) fn build_cx_items(
         match item {
             Item::Func(f) => {
                 cx.fn_type_params.insert(
+                    f.name.clone(),
+                    f.type_params.iter().map(|param| param.name.clone()).collect(),
+                );
+                cx.fn_type_param_order.insert(
                     f.name.clone(),
                     f.type_params.iter().map(|param| param.name.clone()).collect(),
                 );
@@ -3318,6 +3337,14 @@ pub(crate) fn build_cx_items(
                     for inner in body {
                         if let Item::Func(f) = inner {
                             let mangled = format!("{}__{}", cm.name, f.name);
+                            cx.fn_type_params.insert(
+                                mangled.clone(),
+                                f.type_params.iter().map(|param| param.name.clone()).collect(),
+                            );
+                            cx.fn_type_param_order.insert(
+                                mangled.clone(),
+                                f.type_params.iter().map(|param| param.name.clone()).collect(),
+                            );
                             cx.sigs.insert(
                                 mangled.clone(),
                                 f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
@@ -3385,6 +3412,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((s.name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
@@ -3466,6 +3495,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((e.name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((e.name.clone(), m.name.clone()), m.return_type.clone());
                 }
@@ -3480,6 +3511,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((i.type_name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((i.type_name.clone(), m.name.clone()), m.return_type.clone());
                     // S62: track trait-impl methods so call sites know not to mangle.

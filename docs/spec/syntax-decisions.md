@@ -186,6 +186,16 @@ type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
 
+**D-CALLDUAL1=E — marked receiver for reversible calls** *(ratified
+2026-08-03, card #1401)*: a top-level free function may mark its first
+bare-read parameter with `#Root`. The function then accepts both `f(value, …)`
+and `value.f(…)`. Dot-call lookup is limited to functions visible through the
+current module's imports; it is never a global search. A real method with the
+same name is an error, and more than one matching imported function is an
+ambiguity error. Resolution never uses the return type. `#Root` is not valid on
+a write or move parameter, on a later parameter, or on a method. Formatting
+preserves the declaration and never rewrites either call spelling.
+
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).
@@ -601,9 +611,11 @@ always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 reserved for collections/indexing/shorthands. Calls infer type arguments by
 default. **D-GENERIC-CALL1=A** *(ratified 2026-08-03)* allows explicit
 `call<T>(…)` arguments on every generic free, namespaced, and method call.
-Jet does not use Rust's `::<T>` separator. This final uniform law supersedes
-S45's ban, D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved
-general ban.
+The callee, `<…>`, and `(...)` stay adjacent, so spaced `a < B > (c)` remains
+a comparison. The formatter writes `call<T>(…)`. Jet does not use Rust's
+`::<T>` separator. This final uniform law supersedes S45's ban,
+D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved general
+ban.
 
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
@@ -1915,10 +1927,12 @@ malformed block E1221.
 hand a value to the consumer and suspend until the next pull; falling off
 the end (or a bare `return;`) ends the stream; `return value;` is E0806.
 Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
-async/await coloring. Implemented on a real OS thread + a rendezvous
-channel (`std::sync::mpsc::sync_channel(0)`): `yield` blocks the producer
-thread until the consumer's loop pulls, exactly reproducing suspend/resume
-with zero coroutine machinery.
+async/await coloring. The emitted program uses the scheduler-backed Prelude
+receiver and an owned pull iterator: `yield` blocks the producer until the
+consumer pulls, and dropping the iterator on `break` closes the receiver. A
+failed producer send returns through the active lexical cleanups, so no
+statement after the last accepted pull runs. This is one pull/cancellation
+law for AOT, JIT, and the interpreter; it does not require coroutine syntax.
 
 ### Comptime & metaprogramming
 
@@ -3976,7 +3990,11 @@ implementation.
     is the D-WD dossier lens `jet inspect dossier data`.
   - **D-DATA-PLOT1 (=A, ratified 2026-07-06, #237)**: Core plotting starts with
     first-party deterministic SVG plus a text backend; bitmap export may layer
-    on the same model later.
+    on the same model later. The shipped line family is `line_text(groups,
+    options)` / `line_svg(groups, options)` over `DataGroup`; `DataLineOptions`
+    carries title, x/y labels, point markers, an optional horizontal reference,
+    line style, color, and legend. Bar and line renderers use deterministic
+    output and the same checked geometry rules on every execution tier.
 - **D-WD10**: `core.game` is a stable game substrate: assets, ECS, input,
   fixed-step timing, deterministic replay, editor hooks, and budgets; renderer,
   audio, and editor backends remain replaceable packages.

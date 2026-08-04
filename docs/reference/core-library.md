@@ -1921,6 +1921,7 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
 | `require_bridge(provider)` | `() ? DataError` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
 | `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
+| `line_text(groups, options)` / `line_svg(groups, options)` | `String ? DataError` | Deterministic line output with x labels, title, axis labels, markers, optional reference line, style, color, and legend |
 
 `DataStream<T>.next()` returns `T? ? DataError`: clean EOF is stable `None`,
 terminal errors latch, and complete rows already returned stay valid. Edition
@@ -1945,7 +1946,9 @@ type (including when that element is itself a struct). Empty tables and series
 still report the static element model — schema is type-driven, not sample-driven.
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
-`.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
+`.mean: Float`. `DataLineOptions` fields are `.title`, `.x_label`, `.y_label`,
+`.markers`, `.reference: Float?`, `.style` (`solid`, `dashed`, or `dotted`),
+`.color`, and `.legend`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
 left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.copy`,
 `.ownership`, `.trust`, `.fallback`, `.replacement`. Bridge rows are separate
 `py.*`, `r.*`, and `gpu.*` entries (D-DATA-BRIDGE1); unavailable bridges keep
@@ -2054,7 +2057,8 @@ fn run() {
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
-**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? [FieldError]` for
+**Typed decode** — `decode<T>(text)` (D-GENERIC-CALL1; D-SERDE6 owns the codec
+model) returns `T ? [FieldError]` for
 json/toml/yaml, and `[T] ? [FieldError]` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
 cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no

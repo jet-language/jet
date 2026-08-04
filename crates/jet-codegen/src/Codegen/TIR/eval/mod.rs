@@ -1564,6 +1564,14 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                 .map(|parameter| parameter.name.clone())
                 .collect(),
         );
+        cx.fn_type_param_order.insert(
+            name.clone(),
+            function
+                .type_params
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect(),
+        );
         cx.sigs.insert(
             name.clone(),
             function

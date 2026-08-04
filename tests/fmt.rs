@@ -15,6 +15,18 @@ fn fixed_interpolation_selector_is_stable() {
 }
 
 #[test]
+fn fmt_preserves_root_receiver_declarations() {
+    let src = "fn show(#Root value: Int) { print(value) }\n";
+    let once = jet::format_source(src).expect("#Root declaration should format");
+    assert!(
+        once.contains("fn show(#Root value: Int)"),
+        "formatter dropped the #Root marker:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted #Root declaration should re-format");
+    assert_eq!(once, twice, "#Root formatting must be stable");
+}
+
+#[test]
 fn fmt_parallel_collection_adapters_are_stable() {
     let src = r#"fn run() {
     values := [1, 2, 3, 4]
@@ -1715,6 +1727,40 @@ fn fmt_comptime_splice_stability() {
     assert_eq!(
         splice_once, splice_twice,
         "`$name` expression must be fmt-idempotent"
+    );
+}
+
+#[test]
+fn fmt_layout_compiler_fact_and_field_selector_stability() {
+    let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+    let once = jet::format_source(src).expect("layout compiler fact should parse");
+    assert!(once.contains("T.$layout"), "fact spelling was lost:\n{once}");
+    assert!(once.contains("info[.count]"), "typed selector spelling was lost:\n{once}");
+    assert!(once.contains("T.reflect().layout"), "reflection projection was lost:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted layout fact should parse");
+    assert_eq!(once, twice, "layout fact formatting must be idempotent");
+}
+
+#[test]
+fn layout_compiler_fact_rejects_unknown_and_user_owned_dollar_members() {
+    let unknown = jet::Compiler::parse_source(
+        "derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n",
+    );
+    let unknown = unknown
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0302")
+        .expect("unknown compiler fact should have a registered diagnostic");
+    assert!(unknown.message.contains("$unknown"), "{unknown:?}");
+    assert!(unknown.fix.contains("$layout"), "{unknown:?}");
+
+    let user_member = jet::Compiler::parse_source(
+        "struct Bad { $layout: Int }\nfn run() {}\n",
+    );
+    assert!(
+        user_member.diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+        "user declarations must not claim the compiler-owned dollar member: {:?}",
+        user_member.diagnostics
     );
 }
 

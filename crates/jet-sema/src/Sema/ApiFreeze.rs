@@ -741,6 +741,7 @@ mod tests {
     fn param(name: &str, conv: AccessConvention, ty: Type) -> Param {
         Param {
             convention: conv,
+            root: false,
             name: name.to_string(),
             name_span: zero(),
             ty,

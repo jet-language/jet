@@ -381,6 +381,7 @@ impl<'a> Checker<'a> {
                 let mut call = Call {
                     name: Syntax::BUILTIN_PANIC.to_string(),
                     name_span: *name_span,
+                    type_args: Vec::new(),
                     args: std::mem::take(args),
                     range_checked: false,
                 };

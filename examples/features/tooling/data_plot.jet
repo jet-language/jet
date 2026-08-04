@@ -1,0 +1,33 @@
+// D-DATA-PLOT1=A: deterministic line plots over grouped typed data.
+use core.data as data
+
+#Codable
+struct Sale {
+    month: String
+    value: Float
+}
+
+fn run() {
+    rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0\nMar,5.0") ?? panic("csv")
+    groups :: data.group_mean(rows, sale => sale.month, sale => sale.value) ?? panic("groups")
+    options :: DataLineOptions.{
+        title: "Sales",
+        x_label: "month",
+        y_label: "value",
+        markers: true,
+        reference: Val(6.0),
+        style: "dashed",
+        color: "#2f6f73",
+        legend: "revenue"
+    }
+    print(data.line_text(groups, options) ?? panic("line text"))
+svg :: data.line_svg(groups, options) ?? panic("line svg")
+print("svg bytes: {svg.len()}")
+
+invalid_options :: DataLineOptions.{title: "Sales", x_label: "month", y_label: "value", markers: false, reference: None, style: "zig", color: "#2f6f73", legend: ""}
+invalid :: data.line_text(groups, invalid_options)
+if invalid == {
+    .Ok(_) -> { print("invalid line: ok") }
+    .Err(error) -> { print("invalid line: {error}") }
+}
+}

@@ -48,6 +48,12 @@ const LENSES: &[Lens] = &[
         render: render_web,
         render_json: render_web_json,
     },
+    Lens {
+        name: "layout",
+        summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts",
+        render: render_layout,
+        render_json: render_layout_json,
+    },
 ];
 
 pub(crate) fn run_expand(args: &[String], json: bool) {
@@ -65,7 +71,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                         print_json_cli_error(
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
-                            "pass `--facts inline`, `--facts memory`, or `--facts web`",
+                            "pass `--facts inline`, `--facts memory`, `--facts web`, or `--facts layout`",
                         );
                     }
                     eprintln!("error: `--facts` needs a lens name");
@@ -89,6 +95,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
         eprintln!("error: `jet inspect expand` needs an entry file");
         eprintln!(" Fix: jet inspect expand examples/features/basics/hello.jet");
         eprintln!(" Fix: jet inspect expand --facts inline examples/features/basics/hello.jet");
+        eprintln!(" Fix: jet inspect expand --facts layout examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 
@@ -100,7 +107,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                     print_json_cli_error(
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
-                        "use `inline`, `memory`, or `web`",
+                        "use `inline`, `memory`, `web`, or `layout`",
                     );
                 }
                 eprintln!("error: unknown lens `{}`", name);
@@ -466,6 +473,142 @@ fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<St
         }
     }
     out
+}
+
+fn ct_field<'a>(value: &'a jet::CtValue, name: &str) -> Option<&'a jet::CtValue> {
+    let jet::CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+}
+
+fn ct_display(value: Option<&jet::CtValue>) -> String {
+    match value {
+        Some(jet::CtValue::Str(value)) => value.clone(),
+        Some(jet::CtValue::Int(value)) => value.to_string(),
+        Some(jet::CtValue::None(_)) | None => "unknown".to_string(),
+        Some(value) => value.jet_show(),
+    }
+}
+
+fn ct_to_expand(value: &jet::CtValue) -> ExpandValue {
+    match value {
+        jet::CtValue::Int(value) if *value >= 0 => ExpandValue::Number(*value as usize),
+        jet::CtValue::Int(value) => ExpandValue::String(value.to_string()),
+        jet::CtValue::Bool(value) => ExpandValue::Bool(*value),
+        jet::CtValue::Str(value) => ExpandValue::String(value.clone()),
+        jet::CtValue::None(_) => ExpandValue::Null,
+        jet::CtValue::List(values) => {
+            ExpandValue::Array(values.iter().map(ct_to_expand).collect())
+        }
+        jet::CtValue::Struct { fields, .. } => ExpandValue::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), ct_to_expand(value)))
+                .collect(),
+        ),
+        value => ExpandValue::String(value.jet_show()),
+    }
+}
+
+fn layout_text(layout: &jet::CtValue) -> String {
+    let header = ["kind", "size", "alignment", "stride", "target", "guarantee", "source"]
+        .iter()
+        .map(|name| format!("{name}={}", ct_display(ct_field(layout, name))))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let fields = match ct_field(layout, "fields") {
+        Some(jet::CtValue::List(values)) => values
+            .iter()
+            .map(|field| {
+                let name = ct_display(ct_field(field, "name"));
+                let ty = ct_display(ct_field(field, "ty"));
+                format!(
+                    "{name}:{ty}(offset={},size={})",
+                    ct_display(ct_field(field, "offset")),
+                    ct_display(ct_field(field, "size")),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => String::new(),
+    };
+    format!("{header} fields=[{fields}]")
+}
+
+struct LayoutRow {
+    module: String,
+    source: String,
+    name: String,
+    span: jet::Diagnostics::Span,
+    layout: jet::CtValue,
+}
+
+fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
+    let mut rows = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            let (name, span, layout) = match item {
+                Item::Struct(def) => (
+                    def.name.clone(),
+                    def.name_span,
+                    jet::Comptime::build_struct_layout_info(def),
+                ),
+                Item::Enum(def) => (
+                    def.name.clone(),
+                    def.name_span,
+                    jet::Comptime::build_enum_layout_info(def),
+                ),
+                _ => continue,
+            };
+            rows.push(LayoutRow {
+                module: module.display.clone(),
+                source: module.source.clone(),
+                name,
+                span,
+                layout,
+            });
+        }
+    }
+    rows.sort_by(|a, b| {
+        a.module
+            .cmp(&b.module)
+            .then(a.span.start.cmp(&b.span.start))
+            .then(a.name.cmp(&b.name))
+    });
+    rows
+}
+
+fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<String> {
+    collect_layout_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let (line, column) = jet::Diagnostics::span_line_col(&row.source, row.span.start);
+            format!(
+                "{}:{}:{}   {}.$layout   {}",
+                row.module,
+                line,
+                column,
+                row.name,
+                layout_text(&row.layout)
+            )
+        })
+        .collect()
+}
+
+fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+    collect_layout_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let location = Some(jet::Diagnostics::span_line_col(&row.source, row.span.start));
+            expand_object(vec![
+                ("type", expand_string(&row.name)),
+                ("source", expand_string(&row.module)),
+                ("span", expand_span(row.span, location)),
+                ("layout", ct_to_expand(&row.layout)),
+            ])
+        })
+        .collect()
 }
 
 fn render_inline_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {

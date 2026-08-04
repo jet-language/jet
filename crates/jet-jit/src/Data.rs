@@ -6,6 +6,34 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::BTreeMap;
 
+mod data_plot_rt {
+    pub(crate) mod jet_std {
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataGroup {
+            pub(crate) key: String,
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+        }
+
+        #[derive(Clone, Debug, Default)]
+        pub(crate) struct DataLineOptions {
+            pub(crate) title: String,
+            pub(crate) x_label: String,
+            pub(crate) y_label: String,
+            pub(crate) markers: bool,
+            pub(crate) reference: Option<f64>,
+            pub(crate) style: String,
+            pub(crate) color: String,
+            pub(crate) legend: String,
+        }
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
+}
+
+use data_plot_rt::jet_std::{DataGroup, DataLineOptions};
+
 #[derive(Clone, Debug)]
 struct DataError {
     kind: &'static str,
@@ -225,14 +253,6 @@ fn describe_checked(values: &[f64]) -> Result<DataSummary, DataError> {
         variance,
         stddev: normalize_zero(variance.sqrt()),
     })
-}
-
-#[derive(Clone)]
-struct DataGroup {
-    key: String,
-    count: i64,
-    sum: f64,
-    mean: f64,
 }
 
 fn bar_text_checked(groups: &[DataGroup]) -> Result<String, DataError> {
@@ -620,6 +640,96 @@ extern "C" fn jet_jit_data_bar_svg(groups: i64) -> i64 {
         Err(e) => {
             let sid = rt.heap.alloc_string(e.to_string());
             crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
+        }
+    })
+}
+
+fn load_line_options(options: i64) -> DataLineOptions {
+    Concurrency::with_runtime_mut(|rt| {
+        let title = rt
+            .heap
+            .record_get_string(options, 0)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let x_label = rt
+            .heap
+            .record_get_string(options, 1)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let y_label = rt
+            .heap
+            .record_get_string(options, 2)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let style = rt
+            .heap
+            .record_get_string(options, 5)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let color = rt
+            .heap
+            .record_get_string(options, 6)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let legend = rt
+            .heap
+            .record_get_string(options, 7)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let reference = rt.heap.record_get_int(options, 4).and_then(|raw| {
+            (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))
+        });
+        let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
+        DataLineOptions {
+            title,
+            x_label,
+            y_label,
+            markers,
+            reference,
+            style,
+            color,
+            legend,
+        }
+    })
+}
+
+fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
+    result_data_err(DataError {
+        kind: error.kind,
+        operation: error.operation.to_string(),
+        reason: error.reason.to_string(),
+        index: error.index,
+    })
+}
+
+extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
+    let groups = load_groups(groups);
+    let options = load_line_options(options);
+    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_text_plot_checked(
+        &groups, &options,
+    ) {
+        Ok(s) => {
+            let sid = rt.heap.alloc_string(s);
+            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+        }
+        Err(e) => {
+            result_data_plot_err(e)
+        }
+    })
+}
+
+extern "C" fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
+    let groups = load_groups(groups);
+    let options = load_line_options(options);
+    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_svg_plot_checked(
+        &groups, &options,
+    ) {
+        Ok(s) => {
+            let sid = rt.heap.alloc_string(s);
+            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+        }
+        Err(e) => {
+            result_data_plot_err(e)
         }
     })
 }
@@ -1264,6 +1374,8 @@ pub(crate) struct DataHostFns {
     pub describe: FuncId,
     pub bar_text: FuncId,
     pub bar_svg: FuncId,
+    pub line_text: FuncId,
+    pub line_svg: FuncId,
     pub group_reduce: FuncId,
     pub group_reduce_limited: FuncId,
     pub error_show: FuncId,
@@ -1293,6 +1405,8 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_data_describe", jet_jit_data_describe as *const u8);
     builder.symbol("jet_jit_data_bar_text", jet_jit_data_bar_text as *const u8);
     builder.symbol("jet_jit_data_bar_svg", jet_jit_data_bar_svg as *const u8);
+    builder.symbol("jet_jit_data_line_text", jet_jit_data_line_text as *const u8);
+    builder.symbol("jet_jit_data_line_svg", jet_jit_data_line_svg as *const u8);
     builder.symbol(
         "jet_jit_data_group_reduce",
         jet_jit_data_group_reduce as *const u8,
@@ -1376,6 +1490,8 @@ pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
         describe: import("jet_jit_data_describe", &sig_unary)?,
         bar_text: import("jet_jit_data_bar_text", &sig_unary)?,
         bar_svg: import("jet_jit_data_bar_svg", &sig_unary)?,
+        line_text: import("jet_jit_data_line_text", &sig_binary)?,
+        line_svg: import("jet_jit_data_line_svg", &sig_binary)?,
         group_reduce: import("jet_jit_data_group_reduce", &sig_ternary)?,
         group_reduce_limited: import("jet_jit_data_group_reduce_limited", &sig_ternary)?,
         error_show: import("jet_jit_data_error_show", &sig_unary)?,

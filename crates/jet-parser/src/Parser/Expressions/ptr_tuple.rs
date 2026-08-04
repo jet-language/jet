@@ -107,6 +107,26 @@ impl<'a> Parser<'a> {
                 self.emit_numeric_field_error(span);
                 return Ok(("0".to_string(), span));
             }
+            // D-LAYOUT-FACTS1=B: `$layout` is the one compiler-owned fact
+            // member. `$name` remains the separate comptime splice form; a
+            // dollar after `.` is not a general user-member escape hatch.
+            if matches!(self.peek().kind, TokKind::Dollar) {
+                let dollar = self.bump().span;
+                let (name, name_span) = self.expect_ident("after `$` in a compiler fact")?;
+                let member = format!("${name}");
+                if member != Syntax::COMPILER_FACT_LAYOUT {
+                    return Err(Diagnostic::error(
+                        "E0302",
+                        format!("`{member}` is not a compiler-owned fact"),
+                        "focused compiler facts use the ratified `$layout` member"
+                            .to_string(),
+                        "write `T.$layout`, or use `T.reflect()` for full reflection"
+                            .to_string(),
+                        Some(Span::new(dollar.start, name_span.end)),
+                    ));
+                }
+                return Ok((member, Span::new(dollar.start, name_span.end)));
+            }
             // D-ITER1: `take` is `KwMove` in the lexer but is valid as a method name
             // in dot position (`xs.take(n)`). Accept it as an identifier here.
             if matches!(self.peek().kind, TokKind::KwMove) {

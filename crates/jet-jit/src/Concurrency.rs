@@ -207,9 +207,13 @@ extern "C" fn jet_jit_channel_bounded(capacity: i64) -> i64 {
 
 extern "C" fn jet_jit_generator_channel_new() -> i64 {
     with_runtime_mut(|rt| {
-        let id = rt.channels.len() as i64;
-        rt.channels.push(JetSchedulerChannel::bounded(0));
-        id
+        let (producer, consumer) = jet_codegen::scheduler::jet_stream::<i64>();
+        let channel = rt.next_stream_channel;
+        rt.next_stream_channel -= 1;
+        rt.stream_consumers.insert(channel, consumer);
+        rt.stream_producers
+            .insert(channel, Arc::new(producer));
+        channel
     })
 }
 
@@ -251,6 +255,19 @@ thread_local! {
 }
 
 extern "C" fn jet_jit_channel_close(ch: i64) {
+    if ch < 0 {
+        let (consumer, pending_producer) = with_runtime_mut(|rt| {
+            (
+                rt.stream_consumers.remove(&ch),
+                rt.stream_producers.remove(&ch),
+            )
+        });
+        // Drop the producer first when the wrapper has not claimed it yet, so
+        // the canonical consumer Drop can receive completion immediately.
+        drop(pending_producer);
+        drop(consumer);
+        return;
+    }
     with_runtime_mut(|rt| {
         if let Some(channel) = rt.channels.get(ch as usize) {
             channel.close();
@@ -260,18 +277,30 @@ extern "C" fn jet_jit_channel_close(ch: i64) {
 
 extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
     with_runtime_mut(|rt| {
-        let ch = rt
+        if let Some(producer) = rt.stream_producers.remove(&ch) {
+            let id = rt.next_stream_sender;
+            rt.next_stream_sender -= 1;
+            rt.stream_senders.insert(id, producer);
+            return id;
+        }
+        let channel = rt
             .channels
             .get(ch as usize)
             .expect("jit channel sender: bad handle");
         let id = rt.senders.len() as i64;
-        rt.senders.push(Some(ch.sender()));
+        rt.senders.push(Some(channel.sender()));
         id
     })
 }
 
 extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
     with_runtime_mut(|rt| {
+        if let Some(sender) = rt.stream_senders.get(&s).cloned() {
+            let id = rt.next_stream_sender;
+            rt.next_stream_sender -= 1;
+            rt.stream_senders.insert(id, sender);
+            return id;
+        }
         let tx = rt
             .senders
             .get(s as usize)
@@ -285,10 +314,14 @@ extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
+    if s < 0 {
+        let sender = with_runtime_mut(|rt| rt.stream_senders.get(&s).cloned())
+            .expect("jit stream sender send without active runtime");
+        return wait_status(|| i64::from(sender.send_stream(v)));
+    }
     let tx = with_runtime_mut(|rt| {
         Some(
-            rt
-            .senders
+            rt.senders
             .get(s as usize)
             .and_then(Option::as_ref)
             .expect("jit sender send: bad handle")
@@ -299,7 +332,17 @@ extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
     wait_status(|| i64::from(tx.send(v)))
 }
 
-extern "C" fn jet_jit_sender_close(s: i64) {
+extern "C" fn jet_jit_sender_close(s: i64, failed: i64) {
+    if s < 0 {
+        let sender = with_runtime_mut(|rt| rt.stream_senders.remove(&s));
+        if failed != 0 {
+            if let Some(sender) = sender.as_ref() {
+                sender.fail();
+            }
+        }
+        drop(sender);
+        return;
+    }
     with_runtime_mut(|rt| {
         if let Some(sender) = rt.senders.get_mut(s as usize) {
             *sender = None;
@@ -307,8 +350,42 @@ extern "C" fn jet_jit_sender_close(s: i64) {
     });
 }
 
-/// `0` = closed; otherwise `received + 1` (encoding avoids colliding with `0`).
-///
+/// `0` = closed; otherwise `received + 1`. A Stream pull acknowledges the
+/// preceding value before waiting for the next one. That acknowledgement is
+/// the exact suspension boundary after `yield`.
+extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
+    let mut consumer = with_runtime_mut(|rt| rt.stream_consumers.remove(&ch))
+        .expect("jit generator receive without active runtime");
+    let mut producer_failed = false;
+    let status = wait_status(|| match consumer.pull() {
+        Some(value) => value + 1,
+        None => {
+            producer_failed = consumer.failed();
+            0
+        }
+    });
+    if status == JitWaitStatus::Ready as i64 && producer_failed {
+        // Match AOT `JetStreamIter::next`: a producer that completed with a
+        // failure must not become ordinary EOF in the resident adapter. The
+        // lowering checks this trap before dispatching the EOF branch.
+        trap_panic("stream producer failed");
+    }
+    if status == JitWaitStatus::Ready as i64 {
+        if WAIT_VALUE.with(|slot| slot.get()) == 0 {
+            drop(consumer);
+        } else {
+            with_runtime_mut(|rt| {
+                rt.stream_consumers.insert(ch, consumer);
+            });
+        }
+    } else {
+        with_runtime_mut(|rt| {
+            rt.stream_consumers.insert(ch, consumer);
+        });
+    }
+    status
+}
+
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
 extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
@@ -786,6 +863,7 @@ pub(crate) struct ConcurrencyHostFns {
     pub sender_clone: cranelift_module::FuncId,
     pub sender_send: cranelift_module::FuncId,
     pub sender_close: cranelift_module::FuncId,
+    pub generator_receive_status: cranelift_module::FuncId,
     pub channel_receive: cranelift_module::FuncId,
     pub channel_receive_status: cranelift_module::FuncId,
     pub panic_channel_closed: cranelift_module::FuncId,
@@ -843,6 +921,10 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_sender_clone", jet_jit_sender_clone as *const u8);
     builder.symbol("jet_jit_sender_send", jet_jit_sender_send as *const u8);
     builder.symbol("jet_jit_sender_close", jet_jit_sender_close as *const u8);
+    builder.symbol(
+        "jet_jit_generator_channel_receive_status",
+        jet_jit_generator_channel_receive_status as *const u8,
+    );
     builder.symbol(
         "jet_jit_channel_receive",
         jet_jit_channel_receive as *const u8,
@@ -963,7 +1045,8 @@ pub(crate) fn declare_concurrency_host_fns(
         channel_sender: import("jet_jit_channel_sender", &sig_i64)?,
         sender_clone: import("jet_jit_sender_clone", &sig_i64)?,
         sender_send: import("jet_jit_sender_send", &sig_send)?,
-        sender_close: import("jet_jit_sender_close", &sig_void_i64)?,
+        sender_close: import("jet_jit_sender_close", &sig_void_i64_i64)?,
+        generator_receive_status: import("jet_jit_generator_channel_receive_status", &sig_i64)?,
         channel_receive: import("jet_jit_channel_receive", &sig_recv)?,
         channel_receive_status: import("jet_jit_channel_receive_status", &sig_i64)?,
         panic_channel_closed: import("jet_jit_panic_channel_closed", &sig_panic_line)?,

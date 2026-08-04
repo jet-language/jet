@@ -330,6 +330,28 @@ fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Result<String, 
     Ok(jet_data_bar_svg(groups))
 }
 
+fn jet_data_plot_error(error: DataPlotError) -> jet_std::DataError {
+    let kind = match error.kind {
+        "NonFinite" => jet_std::DataErrorKind::NonFinite,
+        _ => jet_std::DataErrorKind::InvalidArgument,
+    };
+    jet_data_error_at(kind, error.operation, error.index, error.reason)
+}
+
+fn jet_data_line_text_checked(
+    groups: &Vec<jet_std::DataGroup>,
+    options: &jet_std::DataLineOptions,
+) -> Result<String, jet_std::DataError> {
+    jet_data_line_text_plot_checked(groups, options).map_err(jet_data_plot_error)
+}
+
+fn jet_data_line_svg_checked(
+    groups: &Vec<jet_std::DataGroup>,
+    options: &jet_std::DataLineOptions,
+) -> Result<String, jet_std::DataError> {
+    jet_data_line_svg_plot_checked(groups, options).map_err(jet_data_plot_error)
+}
+
 fn jet_data_pivot_sum_checked<T, FR, FC, FV>(
     rows: &Vec<T>,
     row_key: FR,

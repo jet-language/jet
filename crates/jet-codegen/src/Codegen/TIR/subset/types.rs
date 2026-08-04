@@ -24,8 +24,9 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
 /// Char, String, a covered *plain user struct* (c109 Phase 3), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
-/// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
-/// recursive (boxed) types are still out.
+/// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Generic type variables
+/// are admitted when active in the enclosing function; generic struct
+/// applications and recursive (boxed) types are still out.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     let ty = cx.expand_type_aliases(ty);
     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
@@ -452,6 +453,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     matches!(
         name,
         "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+            | "DataLineOptions"
             | "AsyncPolicy" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"

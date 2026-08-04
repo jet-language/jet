@@ -122,6 +122,9 @@ impl ViewSourcePath {
 #[derive(Debug, Clone)]
 pub struct FuncSig {
     pub params: Vec<(AccessConvention, Type)>,
+    /// D-CALLDUAL1=E: the function has a `#Root` first parameter and may be
+    /// selected by the receiver-first call spelling.
+    pub root_param: bool,
     pub return_type: Option<Type>,
     /// Sema-proved stable source for a returned view. Callers compose the
     /// parameter index onto the corresponding actual argument place.

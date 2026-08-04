@@ -102,6 +102,7 @@ pub(crate) fn lower_variadic_bound_call(
         ty: ret,
         kind: TExprKind::Call {
             name: variadic_bound_fn_name(&call.name, arity),
+            type_args: Vec::new(),
             args,
         },
     }
@@ -155,6 +156,7 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
         });
         params.push(Param {
             convention: last.convention,
+            root: false,
             name: variadic_slot_name(&last.name, i),
             name_span: last.name_span,
             ty: Type::Named(tname),

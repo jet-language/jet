@@ -1526,6 +1526,11 @@ fn check_bundle_opts_for_output_inner(
                                 let mangled = format!("{}__{}", cm.name, f.name);
                                 st.func_spans.insert(mangled.clone(), f.name_span);
                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
+                                if !f.type_params.is_empty() {
+                                    st.trait_reg
+                                        .fn_params
+                                        .insert(mangled.clone(), f.type_params.clone());
+                                }
                                 st.func_pub.insert(mangled, f.is_pub && !f.is_package_pub);
                                 st.func_pkg_pub
                                     .insert(format!("{}__{}", cm.name, f.name), f.is_package_pub);

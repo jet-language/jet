@@ -12,6 +12,8 @@
 // KW_COMPTIME, KW_DERIVE, ATTR_TRACK, ATTR_LOCAL, ATTR_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
+// D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
+// call-site type-argument markers; they reuse the existing angle tokens.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
@@ -47,6 +49,8 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
+// D-GENERIC-CALL1=A adds no token: `call<T>(...)` reuses the existing angle and
+// call tokens for explicit type arguments on every generic call family.
 // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
 // receiver arguments only when ordinary input/expected-type inference is unique.
 // D-SHAPE-CTORVERB1=C closes fresh-value construction under the `new` prefix:
@@ -138,6 +142,13 @@
 // `#Task` are retired spellings.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
+
+/// D-CALLDUAL1=E: sema-only metadata carried on `Expr::MethodCall` until TIR
+/// lowers a resolved `#Root` call to the ordinary free-function/module-call
+/// shape. These strings are never source syntax.
+pub const INTERNAL_ROOT_CALL_LOCAL: &str = "__jet_root_call_local";
+pub const INTERNAL_ROOT_CALL_IMPORT_PREFIX: &str = "__jet_root_call_import:";
+pub const INTERNAL_ROOT_CALL_CORE_PREFIX: &str = "__jet_root_call_core:";
 
 // D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from

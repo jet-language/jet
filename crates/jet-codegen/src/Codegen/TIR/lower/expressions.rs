@@ -10,7 +10,7 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::mangle;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::call_return_type;
+use crate::Codegen::TIR::{call_return_type, call_return_type_with_args};
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -142,6 +142,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -154,6 +155,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             *method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -316,12 +318,26 @@ pub(crate) fn join_print_args(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
-    let mut parts = Vec::with_capacity(args.len() * 2);
-    for (index, arg) in args.iter().enumerate() {
+    join_print_values(
+        args.iter()
+            .map(|arg| lower_expr(&arg.expr, cx, env)),
+        cx,
+    )
+}
+
+pub(crate) fn join_print_values(
+    values: impl IntoIterator<Item = TExpr>,
+    cx: &Cx,
+) -> TExpr {
+    let values: Vec<TExpr> = values
+        .into_iter()
+        .map(|value| lower_display_value(value, cx))
+        .collect();
+    let mut parts = Vec::with_capacity(values.len() * 2);
+    for (index, value) in values.into_iter().enumerate() {
         if index > 0 {
             parts.push(TStrPart::Lit("\n".to_string()));
         }
-        let value = lower_display_value(lower_expr(&arg.expr, cx, env), cx);
         parts.push(TStrPart::Interp(value, crate::AST::StrFormat::Display));
     }
     TExpr {
@@ -348,6 +364,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
         kind: TExprKind::MethodCall {
             recv: Box::new(value),
             method: TMethodRef::bare("display"),
+            type_args: Vec::new(),
             args: Vec::new(),
             source_first_string_literal: None,
             operator_line: None,
@@ -1219,7 +1236,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `unqualified_inline` arm) → `{root}user_{mangled}(args)`.
                 if let Some(mangled_key) = cx.unqualified_inline.get(&call.name).cloned() {
                     let sig = cx.sigs.get(&mangled_key).cloned();
-                    let args = call
+                    let args: Vec<_> = call
                         .args
                         .iter()
                         .enumerate()
@@ -1232,11 +1249,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         })
                         .collect();
                     return TExpr {
-                        ty: call_return_type(cx, &mangled_key),
+                        ty: call_return_type_with_args(
+                            cx,
+                            &mangled_key,
+                            &call.type_args,
+                            &args,
+                        ),
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::InlineMangled {
                                 mangled: mangled_key,
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
@@ -1274,6 +1297,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 rust_mod,
                                 rust_fn: mangle(&fn_name).to_string(),
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
@@ -1389,39 +1413,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .entry(call.name.clone())
                 .or_default()
                 .push(
-                    args.iter()
-                        .map(|arg| {
-                            if arg.widen_to_vec {
-                                if let Type::FixedList { elem, .. } = &arg.value.ty {
-                                    return Type::List(elem.clone());
+                    {
+                        let mut shape: Vec<Type> = args
+                            .iter()
+                            .map(|arg| {
+                                if arg.widen_to_vec {
+                                    if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                        return Type::List(elem.clone());
+                                    }
                                 }
-                            }
-                            arg.value.ty.clone()
-                        })
-                        .collect(),
+                                arg.value.ty.clone()
+                            })
+                            .collect();
+                        shape.extend(call.type_args.iter().cloned());
+                        shape
+                    },
                 );
-            let declared_ret = call_return_type(cx, &call.name);
-            let ret = match (
-                cx.fn_type_params.get(&call.name),
-                cx.sigs.get(&call.name),
-            ) {
-                (Some(params), Some(sig)) if !params.is_empty() => {
-                    let mut subst = std::collections::HashMap::new();
-                    if sig.iter().zip(&args).all(|((_, template), actual)| {
-                        crate::Codegen::TIR::bind_generic_type(
-                            template,
-                            &actual.value.ty,
-                            params,
-                            &mut subst,
-                        )
-                    }) {
-                        crate::Generics::substitute_type(&declared_ret, &subst)
-                    } else {
-                        declared_ret
-                    }
-                }
-                _ => declared_ret,
-            };
+            let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
             TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
@@ -1429,6 +1437,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         || call.name.clone(),
                         |prefix| format!("{prefix}{}", mangle(&call.name)),
                     ),
+                    type_args: call.type_args.clone(),
                     args,
                 },
             }
@@ -1789,6 +1798,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // covered function never reaches here with a non-struct receiver (sema
         // guarantees field reads target struct values).
         Expr::Field(receiver, member, _) => {
+            // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
+            // comptime `TypeInfo` value, but fragment lowering has no ordinary
+            // local type fact for that binding. Keep `$layout` on the field
+            // path so `T.$layout` is not mistaken for an enum literal.
+            let compiler_fact_receiver = match receiver.as_ref() {
+                // A qualified type path lowers as a field chain. The final
+                // segment is still the type name (`module.Packet`), while a
+                // value path such as `info.layout` remains lowercase.
+                Expr::Ident(name, _) | Expr::Field(_, name, _) => {
+                    name.chars().next().is_some_and(char::is_uppercase)
+                }
+                _ => false,
+            };
+            if member == Syntax::COMPILER_FACT_LAYOUT && compiler_fact_receiver {
+                let recv = lower_expr(receiver, cx, env);
+                return TExpr {
+                    ty: Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+                    kind: TExprKind::Field {
+                        recv: Box::new(recv),
+                        field: member.clone(),
+                        boxed: false,
+                    },
+                };
+            }
             // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
             // a `Field` whose receiver is the enum-name ident (sema re-types but does
             // not rewrite the node). The gate proved this is a covered enum + unit
@@ -2044,6 +2077,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::MethodCall {
                             recv: Box::new(recv),
                             method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                            type_args: Vec::new(),
                             args: vec![],
                             source_first_string_literal: None,
                             operator_line: None,
@@ -2333,6 +2367,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
+            // D-LAYOUT-FACTS1=B: the parser stores `[.field]` as an internal
+            // selector identifier. Project it through the same `Field` TIR
+            // node used by every other comptime struct read; the evaluator
+            // resolves the selected `LayoutField` from `LayoutInfo.fields`.
+            if let Expr::Ident(name, _) = index.as_ref() {
+                if let Some(field_name) = Syntax::layout_selector_name(name) {
+                    let base_t = lower_expr(base, cx, env);
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string()),
+                        kind: TExprKind::Field {
+                            recv: Box::new(base_t),
+                            field: format!(
+                                "{}{}",
+                                Syntax::LAYOUT_FIELD_PROJECTION_PREFIX,
+                                field_name
+                            ),
+                            boxed: false,
+                        },
+                    };
+                }
+            }
             // Sema's IndexKind::Unknown must not abort the interpreter path;
             // treat it as a list index and let runtime miss if wrong.
             let kind = if matches!(kind, IndexKind::Unknown) {

@@ -182,7 +182,7 @@ renumbered, and no new `W` code may be allocated.
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` needs at least one argument (variadic, D-VERDICT-1321-1) |
 | E0104 | sema  | wrong number of arguments                 |
-| E0105 | sema  | duplicate definition                      |
+| E0105 | sema  | duplicate definition or ambiguous `#Root` dispatch |
 | E0106 | sema  | redefining a built-in                     |
 | E0107 | sema  | unknown name (with suggestion)            |
 | E0108 | sema  | binding type doesn't match its value      |

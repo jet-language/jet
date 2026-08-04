@@ -182,7 +182,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "reader",
             "writer",
         ],
-        // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
+        // D-GENERIC-CALL1 owns the `decode<T>` call grammar; D-SERDE6 owns the
+        // typed codec surface in every format submodule alongside `parse`.
         "core.encoding.csv" => &[
             "CSVReader",
             "CSVWriter",
@@ -244,6 +245,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "csv_reader",
             "json_reader",
             "DataLimits",
+            "DataLineOptions",
             "DataError",
             "DataErrorKind",
             "DataStream",
@@ -282,6 +284,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "require_bridge",
             "bar_text",
             "bar_svg",
+            "line_text",
+            "line_svg",
         ],
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D (#443): one compute family; Tensor owns storage.
         "core.compute" => &[

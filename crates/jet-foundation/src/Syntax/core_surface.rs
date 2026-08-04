@@ -47,6 +47,12 @@ pub fn artifact_kind(path: &str) -> Option<ArtifactKind> {
 /// S1 (ratified): keyword that starts a function definition.
 pub const KW_FN: &str = "fn";
 
+/// D-GENERIC-CALL1=A (ratified 2026-08-03): explicit call-site type arguments
+/// use the existing angle tokens and must stay adjacent to the call parens.
+/// These constants name the source surface; Jet does not use Rust's `::<T>`.
+pub const GENERIC_CALL_OPEN: &str = "<";
+pub const GENERIC_CALL_CLOSE: &str = ">";
+
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
@@ -669,3 +675,27 @@ pub const TYPE_BUILD_PROBE: &str = "BuildProbe";
 pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
 pub const TYPE_TYPE_INFO: &str = "TypeInfo";
 pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
+
+/// D-LAYOUT-FACTS1=B: the one focused compiler-owned type fact. The parser
+/// accepts this after `.` only in the contextual `$layout` form; it is not a
+/// user-declarable member name.
+pub const COMPILER_FACT_LAYOUT: &str = "$layout";
+pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
+pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
+
+/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
+/// Keeping the selector in an existing `Expr::Ident` avoids a second AST
+/// variant for a compile-time-only projection. It is never formatted as this
+/// sentinel and never appears in generated Jet source.
+pub const LAYOUT_SELECTOR_PREFIX: &str = "\u{0}jet.layout.selector.";
+
+pub fn layout_selector(name: &str) -> String {
+    format!("{LAYOUT_SELECTOR_PREFIX}{name}")
+}
+
+pub fn layout_selector_name(name: &str) -> Option<&str> {
+    name.strip_prefix(LAYOUT_SELECTOR_PREFIX)
+}
+
+/// Internal TIR field spelling for a selected `LayoutField`.
+pub const LAYOUT_FIELD_PROJECTION_PREFIX: &str = "\u{0}jet.layout.field.";

@@ -3724,6 +3724,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
     let call = Expr::Call(Call {
         name: entry_fn.to_string(),
         name_span: target.name_span,
+        type_args: Vec::new(),
         args,
         range_checked: false,
     });

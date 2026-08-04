@@ -67,8 +67,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
-            // D-ENC1 / D-SERDE6: typed encode/decode return types depend on the value
-            // type / call-site `<T>`, so codegen reads them from resolved_ret (I3).
+            // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
+            // types depend on the value type / call-site `<T>`, so codegen reads
+            // them from resolved_ret (I3).
             // D-MIGRATE3=A: `decode_traced` is the same call-site-typed shape, one
             // layer deeper (`DecodeResult<T>`).
             | (
@@ -1308,6 +1309,17 @@ pub fn core_fixed_sig(
                 read,
                 Type::List(Box::new(Type::Named("DataGroup".to_string()))),
             )];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
+            } else {
+                Some((args, Some(Type::String)))
+            }
+        }
+        ("core.data", "line_text" | "line_svg") => {
+            let args = vec![
+                (read, Type::List(Box::new(Type::Named("DataGroup".to_string())))),
+                (read, Type::Named("DataLineOptions".to_string())),
+            ];
             if super::super::Edition::edition_at_least("2027") {
                 Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
             } else {

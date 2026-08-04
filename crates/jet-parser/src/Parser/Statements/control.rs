@@ -1622,6 +1622,7 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Expr(Expr::Call(Call {
                     name: Syntax::INTERNAL_DEFER_CLOSE.to_string(),
                     name_span: defer_span,
+                    type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
                         expr: close,
@@ -1653,6 +1654,7 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Expr(Expr::Call(Call {
                     name: Syntax::INTERNAL_UNSAFE_ASSERT.to_string(),
                     name_span: assert_span,
+                    type_args: Vec::new(),
                     args,
                     range_checked: false,
                 })))

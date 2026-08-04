@@ -66,6 +66,25 @@ fn known_list_len(checker: &Checker<'_>, expr: &crate::AST::Expr) -> Option<usiz
     }
 }
 
+fn exactly_one_type_arg(
+    checker: &mut Checker<'_>,
+    name: &str,
+    type_args: &[Type],
+    span: Span,
+) -> Option<Type> {
+    if type_args.len() != 1 {
+        checker.diags.push(Diagnostic::error(
+            "E0119",
+            format!("`{name}` expects exactly one type argument, got {}", type_args.len()),
+            "a typed decode call needs one target type".to_string(),
+            format!("write `{name}<Target>(...)` with one target type"),
+            Some(span),
+        ));
+        return None;
+    }
+    Some(type_args[0].clone())
+}
+
 fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     match expr {
         crate::AST::Expr::Int(value, ..) => Some(*value),
@@ -731,7 +750,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -745,7 +766,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -823,7 +846,9 @@ impl<'a> Checker<'a> {
                     if !(1..=2).contains(&args.len()) { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
                     if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -940,7 +965,8 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::String);
                 }
-                // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
+                // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode over
+                // the Encode/Decode model.
                 // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
                 // `JSON` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
                 // codegen routes by the lowered arg type. `decode<T>` is the typed decode
@@ -1023,7 +1049,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     let inner = if module == "core.encoding.csv" {
                         Type::List(Box::new(t))
@@ -1048,7 +1076,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     let inner = if module == "core.encoding.csv" {
                         Type::List(Box::new(t))
@@ -1070,7 +1100,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.expect_core_arg(name, 0, &Type::String, a);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(Type::List(Box::new(t)), decode_error_ty()));
                 }
@@ -1084,7 +1116,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("DataLimits".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(
                         Type::Apply {

@@ -8,6 +8,9 @@ use crate::{Diagnostics::Span, Syntax};
 pub struct Call {
     pub name: String,
     pub name_span: Span,
+    /// D-GENERIC-CALL1=A: optional explicit type arguments on every generic
+    /// free call (\`identity<Int>(value)\`). Empty means infer as usual.
+    pub type_args: Vec<Type>,
     pub args: Vec<CallArg>,
     /// D-RANGETYPE1: sema sets this on a range-constrained distinct
     /// constructor when it appears under postfix `?`. Codegen then emits the
@@ -433,9 +436,12 @@ pub enum Expr {
         receiver: Box<Expr>,
         method: String,
         method_span: Span,
-        /// D-SERDE6 (= C): call-site type arguments — `decode<Order>(text)`. Jet's
-        /// first turbofish; empty for an ordinary call. Drives the typed encoding
-        /// decoders and is available for any generic call going forward.
+        /// Generic arguments on a type receiver, such as `Pool<Int>.new()`.
+        /// These belong to the receiver type, not to the method call.
+        owner_type_args: Vec<Type>,
+        /// D-GENERIC-CALL1=A: call-site type arguments — `decode<Order>(text)` or
+        /// any other generic method. Empty for an ordinary call. Jet uses adjacent
+        /// angle brackets, not Rust's `::<T>` separator.
         type_args: Vec<Type>,
         args: Vec<CallArg>,
         /// Filled by sema when the method resolves to a user-defined type,

@@ -75,6 +75,9 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
+            if external_type.is_some() {
+                self.reject_root_method_params(&params);
+            }
     
             // D-ARROW-CONTROL1=A: an optional `=[Net, DB]=>` callable effect
             // arrow. Effect names are validated in sema. D-EFF2 keeps `via f`
@@ -399,6 +402,19 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
+            let root = if matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::CONTRACT_ROOT)
+            {
+                let marker = self.parse_rule_marker()?;
+                self.bind_rule_fact(
+                    marker.name_span,
+                    None,
+                    crate::Policy::RuleSite::Parameter,
+                );
+                true
+            } else {
+                false
+            };
             let mut convention = self.parse_access_prefix();
             let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
                 let span = self.bump().span;
@@ -482,6 +498,7 @@ impl<'a> Parser<'a> {
             }
             Ok(Param {
                 convention,
+                root,
                 name,
                 name_span,
                 ty,
@@ -505,6 +522,41 @@ impl<'a> Parser<'a> {
                         Some(p.name_span),
                     ));
                 }
+                if p.root && i != 0 {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!("`#{}` must mark the first parameter", Syntax::CONTRACT_ROOT),
+                        "a reversible dot call has one receiver, and it is always the first value parameter"
+                            .to_string(),
+                        format!("move `#{}` to the first parameter", Syntax::CONTRACT_ROOT),
+                        Some(p.name_span),
+                    ));
+                }
+                if p.root && p.convention != AccessConvention::Read {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!("`#{}` must mark a bare-read parameter", Syntax::CONTRACT_ROOT),
+                        "dot-call syntax never hides a write or move capability behind the receiver"
+                            .to_string(),
+                        format!("remove `&` or `^` from the `#{}` parameter", Syntax::CONTRACT_ROOT),
+                        Some(p.name_span),
+                    ));
+                }
+            }
+        }
+
+        pub(super) fn reject_root_method_params(&mut self, params: &[Param]) {
+            for param in params.iter().filter(|param| param.root) {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`#{}` is only valid on a top-level function", Syntax::CONTRACT_ROOT),
+                    "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous".to_string(),
+                    format!(
+                        "remove `#{}`, or move the function to module scope",
+                        Syntax::CONTRACT_ROOT
+                    ),
+                    Some(param.name_span),
+                ));
             }
         }
     

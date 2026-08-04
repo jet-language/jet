@@ -429,6 +429,10 @@ impl<'a> Interp<'a> {
                         span,
                     );
                 }
+                if module == "core.data" && matches!(method, "line_text" | "line_svg") {
+                    let checked = matches!(resolved_ret, Some(Type::Result { .. }));
+                    return apply_data_line_call(method, argv, span, checked);
+                }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`
                 // to an integer list, so generic by-value dispatch cannot

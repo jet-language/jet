@@ -389,6 +389,10 @@ pub(crate) fn lower_method_for_owner(
     owner_ty: Type,
     cx: &Cx,
 ) -> TFunc {
+    let previous_type_params = cx.current_type_params.borrow().clone();
+    let mut method_type_params = previous_type_params.clone();
+    method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
+    cx.current_type_params.replace(method_type_params);
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.clone();
@@ -434,6 +438,8 @@ pub(crate) fn lower_method_for_owner(
     let mut body = resource_param_guards;
     body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
+    let generics = render_generics(&f.type_params, &clone_types);
+    cx.current_type_params.replace(previous_type_params);
     // An instance method carries `Some(conv)`; a static method carries `None`.
     let kind = TFuncKind::Method {
         self_conv: if is_static { None } else { self_conv },
@@ -450,9 +456,10 @@ pub(crate) fn lower_method_for_owner(
             .map(|t| resolve_self_ty(t, type_name)),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
-        // The enclosing type params live on `impl<T>`. `emit_type_impl` fills a
-        // per-method `where T: Clone` suffix only for lowered clone operations.
-        generics: String::new(),
+        // The enclosing owner params live on `impl<T>`. Method-owned params
+        // remain on the method itself; `emit_type_impl` appends any owner
+        // `Clone` bounds required by this body.
+        generics,
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),

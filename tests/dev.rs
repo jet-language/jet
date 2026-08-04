@@ -4468,6 +4468,82 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
 }
 
 #[test]
+fn stream_pull_hostile_matrix_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let stem = "streams/generators";
+    let file = example_path(stem);
+    let expected = golden_stdout(stem);
+    match dev_iteration_with_timeout(stem, &file, true) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert_eq!(stdout, expected, "hostile Stream matrix drifted from its golden");
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("hostile Stream matrix did not run in the interpreter: {diags:?}");
+        }
+    }
+    assert_cranelift_three_way(&file, stem);
+}
+
+#[test]
+fn stream_producer_failure_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let source = r#"fn failing() => Stream<Int> {
+    yield 1
+    if true {
+        panic("producer failure")
+    }
+}
+
+fn run() {
+    loop value, failing() {
+        print("value: {value}")
+    }
+}
+"#;
+    let file = std::env::temp_dir().join(format!("jet_stream_failure_{}.jet", std::process::id()));
+    fs::write(&file, source).expect("write Stream failure fixture");
+    let file = file.to_string_lossy().into_owned();
+    let interpreted = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("Stream producer failure did not run in the interpreter: {diags:?}");
+        }
+    };
+
+    let bundle = checked_bundle_from_path(&file);
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(std::slice::from_ref(&file), || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("Stream producer failure did not run in JIT: {diags:?}");
+            }
+        }
+    });
+    let aot_dir = std::env::temp_dir().join(format!("jet_stream_failure_aot_{}", std::process::id()));
+    let aot = compiled_binary_output(&aot_dir, "stream_failure", 0, "streams/generators", &file);
+
+    assert_eq!(jit, interpreted, "Stream producer failure drifted in JIT");
+    assert_eq!(aot, interpreted, "Stream producer failure drifted in AOT");
+    assert_eq!(interpreted.exit_code, 70, "producer failure must remain a panic");
+    assert_eq!(interpreted.stdout, "value: 1\n");
+    assert!(interpreted.stderr.contains("panic: producer failure"));
+}
+
+#[test]
 fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
     const CHILD_STEM: &str = "JET_1222_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
@@ -5056,6 +5132,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/data_hostile",
         "tooling/data_json",
         "tooling/data_pipeline",
+        "tooling/data_plot",
         "tooling/data_schema",
         "tooling/data_stream_bounds",
         // #1224 — parsing / reflection / tooling

@@ -385,6 +385,7 @@ impl<'a> Fmt<'a> {
                         .enumerate()
                         .map(|(index, ty)| crate::AST::Param {
                             convention: crate::AST::AccessConvention::Read,
+                            root: false,
                             name: format!("_{index}"),
                             name_span: crate::Diagnostics::Span::new(0, 0),
                             ty: ty.clone(),
@@ -720,7 +721,16 @@ impl<'a> Fmt<'a> {
             Expr::Index { base, index, .. } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
-                self.fmt_expr(index, Prec::OrFallback);
+                if let Expr::Ident(name, _) = index.as_ref() {
+                    if let Some(field) = Syntax::layout_selector_name(name) {
+                        self.write(".");
+                        self.write(field);
+                    } else {
+                        self.fmt_expr(index, Prec::OrFallback);
+                    }
+                } else {
+                    self.fmt_expr(index, Prec::OrFallback);
+                }
                 self.write("]");
             }
             Expr::Slice {
@@ -893,21 +903,13 @@ impl<'a> Fmt<'a> {
                 receiver,
                 method,
                 method_span,
+                owner_type_args,
                 type_args,
                 args,
                 ..
             } => {
                 self.fmt_expr(receiver, Prec::Postfix);
-                let receiver_type_args = method == Syntax::MEM_ALLOC_NEW
-                    && matches!(
-                        receiver.as_ref(),
-                        Expr::Ident(name, _)
-                            if name.chars().next().is_some_and(char::is_uppercase)
-                    )
-                    && !type_args.is_empty();
-                if receiver_type_args {
-                    self.fmt_method_type_args(type_args);
-                }
+                self.fmt_call_type_args(owner_type_args);
                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
                 if self.chain_break_between(receiver.span().end, method_span.start) {
                     // The receiver's own trailing comment (e.g. `.step()  // note`)
@@ -917,17 +919,13 @@ impl<'a> Fmt<'a> {
                         f.newline();
                         f.write(".");
                         f.write(method);
-                        if !receiver_type_args {
-                            f.fmt_method_type_args(type_args);
-                        }
+                        f.fmt_call_type_args(type_args);
                         f.fmt_method_args(method, args);
                     });
                 } else {
                     self.write(".");
                     self.write(method);
-                    if !receiver_type_args {
-                        self.fmt_method_type_args(type_args);
-                    }
+                    self.fmt_call_type_args(type_args);
                     self.fmt_method_args(method, args);
                 }
             }
@@ -1623,12 +1621,13 @@ impl<'a> Fmt<'a> {
 
     fn fmt_call(&mut self, c: &Call) {
         self.write(&c.name);
+        self.fmt_call_type_args(&c.type_args);
         self.fmt_call_args_or_trailing_block(&c.args);
     }
 
-    /// D-SERDE6: call-site turbofish `<T, …>` on a method call (`decode<Order>(…)`).
+    /// D-GENERIC-CALL1=A: call-site type arguments `<T, …>` on any generic call.
     /// No-op when the call carries no type arguments.
-    fn fmt_method_type_args(&mut self, type_args: &[crate::AST::Type]) {
+    fn fmt_call_type_args(&mut self, type_args: &[crate::AST::Type]) {
         if type_args.is_empty() {
             return;
         }

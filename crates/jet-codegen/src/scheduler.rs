@@ -1469,9 +1469,80 @@ pub fn jet_scheduler_drain() {
     }
 }
 
+// Keep Stream suspension and cancellation in the same Prelude source that is
+// embedded into AOT programs. The compiled scheduler is only the JIT adapter's
+// copy of that source.
+mod stream;
+pub use stream::{
+    jet_stream, JetStream, JetStreamCompletion, JetStreamIter, JetStreamSender,
+};
+
 #[cfg(test)]
 mod interrupt_boundary_tests {
     use super::*;
+
+    #[test]
+    fn stream_pull_releases_exactly_one_yield_at_a_time() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (sender, mut consumer) = jet_stream::<i64>();
+        let producer_events = Arc::clone(&events);
+        let producer = std::thread::spawn(move || {
+            producer_events.lock().unwrap().push("before-1");
+            assert!(sender.send_stream(1));
+            producer_events.lock().unwrap().push("after-1");
+            assert!(!sender.send_stream(2));
+            producer_events.lock().unwrap().push("after-2");
+        });
+
+        assert_eq!(consumer.pull(), Some(1));
+        assert_eq!(*events.lock().unwrap(), vec!["before-1"]);
+        assert_eq!(consumer.pull(), Some(2));
+        assert_eq!(*events.lock().unwrap(), vec!["before-1", "after-1"]);
+
+        drop(consumer);
+        producer.join().unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec!["before-1", "after-1", "after-2"]
+        );
+    }
+
+    #[test]
+    fn stream_sender_observes_explicit_consumer_close() {
+        let (sender, mut consumer) = jet_stream::<i64>();
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        let producer = std::thread::spawn(move || {
+            assert!(!sender.send_stream(1));
+            done_tx.send(()).unwrap();
+        });
+
+        assert_eq!(consumer.pull(), Some(1));
+        drop(consumer);
+        done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("closed Stream did not release its producer");
+        producer.join().unwrap();
+    }
+
+    #[test]
+    fn stream_producer_failure_still_completes_consumer() {
+        let (sender, mut consumer) = jet_stream::<i64>();
+        let producer = std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert!(sender.send_stream(1));
+                panic!("producer failure");
+            }));
+            if result.is_err() {
+                sender.fail();
+            }
+        });
+
+        assert_eq!(consumer.pull(), Some(1));
+        assert_eq!(consumer.pull(), None);
+        assert!(consumer.failed());
+        drop(consumer);
+        producer.join().unwrap();
+    }
 
     #[test]
     fn spawned_deadline_keeps_its_rendered_diagnostic() {

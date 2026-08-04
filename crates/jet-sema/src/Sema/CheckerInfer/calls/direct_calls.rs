@@ -545,6 +545,7 @@ impl<'a> Checker<'a> {
                         &mangled,
                         call.name_span,
                         call.name_span,
+                        &call.type_args,
                         &mut call.args,
                     );
                     return Some(result);
@@ -556,7 +557,7 @@ impl<'a> Checker<'a> {
                         &fn_name,
                         call.name_span,
                         call.name_span,
-                        &[],
+                        &call.type_args,
                         &mut call.args,
                     );
                     return Some(result);
@@ -1012,7 +1013,45 @@ impl<'a> Checker<'a> {
             let mut call_access = self.call_access_frame();
             let mut generic_subst = HashMap::new();
             let mut pre_inferred: Vec<Option<Type>> = Vec::new();
-            if !fn_type_params.is_empty() {
+            if !fn_type_params.is_empty() && !call.type_args.is_empty() {
+                if call.type_args.len() != fn_type_params.len() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!(
+                            "{} expects {} type argument{}, got {}",
+                            call.name,
+                            fn_type_params.len(),
+                            if fn_type_params.len() == 1 { "" } else { "s" },
+                            call.type_args.len()
+                        ),
+                        "a generic call must provide one type for every declared type parameter"
+                            .to_string(),
+                        format!(
+                            "write {} with {} type argument{}",
+                            call.name,
+                            fn_type_params.len(),
+                            if fn_type_params.len() == 1 { "" } else { "s" }
+                        ),
+                        Some(call.name_span),
+                    ));
+                } else {
+                    for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
+                        let actual = self.resolve_type(actual.clone());
+                        self.check_declared_type(&actual, call.name_span);
+                        for bound in &param.bounds {
+                            if !self.type_satisfies_bound(&actual, bound) {
+                                self.diags.push(e0905(
+                                    &actual.name(),
+                                    bound,
+                                    call.name_span,
+                                    false,
+                                ));
+                            }
+                        }
+                        generic_subst.insert(param.name.clone(), actual);
+                    }
+                }
+            } else if !fn_type_params.is_empty() {
                 for (index, arg) in call.args.iter_mut().enumerate() {
                     pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
                         if let Some((param_conv, param_ty)) = sig.params.get(index) {
@@ -1063,6 +1102,15 @@ impl<'a> Checker<'a> {
                         Err(p) => self.diags.push(e0904(call.name_span, &p)),
                     }
                 }
+            } else if !call.type_args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("{} is not generic", call.name),
+                    "only functions declared with type parameters accept call-site type arguments"
+                        .to_string(),
+                    format!("call {} without type arguments", call.name),
+                    Some(call.name_span),
+                ));
             }
             let effective_params: Vec<(AccessConvention, Type)> = if generic_subst.is_empty() {
                 sig.params.clone()

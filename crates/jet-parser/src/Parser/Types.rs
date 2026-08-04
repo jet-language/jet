@@ -265,11 +265,14 @@ impl<'a> Parser<'a> {
     }
 
     /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
-    /// D-SERDE6 (= C): true when the cursor (on `<`) begins a call-site turbofish
-    /// `<T, …>(` — a balanced `<…>` immediately followed by `(`. Used to read `<`
-    /// as type arguments on a call (`decode<Order>(s)`) rather than a comparison.
+    /// D-GENERIC-CALL1=A: true when the cursor (on `<`) begins explicit call type
+    /// arguments `<T, …>(`. Both angle-bracket edges must be adjacent to the call
+    /// name, so spaced comparisons such as `f < T > (x)` keep their meaning.
     pub(super) fn at_turbofish(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Lt) {
+            return false;
+        }
+        if self.pos == 0 || self.toks[self.pos - 1].span.end != self.peek().span.start {
             return false;
         }
         let mut depth = 0i32;
@@ -280,19 +283,19 @@ impl<'a> Parser<'a> {
                 TokKind::Gt => {
                     depth -= 1;
                     if depth == 0 {
-                        return matches!(
-                            self.toks.get(i + 1).map(|t| &t.kind),
-                            Some(TokKind::LParen)
-                        );
+                        return self.toks.get(i + 1).is_some_and(|next| {
+                            matches!(next.kind, TokKind::LParen)
+                                && self.toks[i].span.end == next.span.start
+                        });
                     }
                 }
                 TokKind::Shr => {
                     depth -= 2;
                     if depth <= 0 {
-                        return matches!(
-                            self.toks.get(i + 1).map(|t| &t.kind),
-                            Some(TokKind::LParen)
-                        );
+                        return self.toks.get(i + 1).is_some_and(|next| {
+                            matches!(next.kind, TokKind::LParen)
+                                && self.toks[i].span.end == next.span.start
+                        });
                     }
                 }
                 // Tokens that never appear inside a type-argument list → not a turbofish.
@@ -304,8 +307,8 @@ impl<'a> Parser<'a> {
         false
     }
 
-    /// D-SERDE6: parse a call-site turbofish `<T, …>` (cursor on `<`). Callers must
-    /// first confirm [`Self::at_turbofish`].
+    /// D-GENERIC-CALL1=A: parse call-site type arguments `<T, …>` (cursor on `<`).
+    /// Callers must first confirm [`Self::at_turbofish`].
     pub(super) fn parse_turbofish(&mut self) -> Result<Vec<crate::AST::Type>, Diagnostic> {
         self.expect_type_args_open("for type arguments")?;
         let mut args = Vec::new();
@@ -803,6 +806,7 @@ impl<'a> Parser<'a> {
             .enumerate()
             .map(|(index, (name, ty))| crate::AST::Param {
                 convention: crate::AST::AccessConvention::Read,
+                root: false,
                 name: name.unwrap_or_else(|| format!("_{index}")),
                 name_span: crate::Diagnostics::Span::new(0, 0),
                 ty: ty.clone(),

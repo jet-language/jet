@@ -483,13 +483,13 @@ pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
 pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
         TExprKind::Print(inner) => resident_safe_expr(inner, callees),
-        TExprKind::Call { name, args } => {
+        TExprKind::Call { name, args, .. } => {
             if !callees.contains(name) {
                 return false;
             }
             args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
-        TExprKind::ModuleCall { form, args } => {
+        TExprKind::ModuleCall { form, args, .. } => {
             let target = match form {
                 TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                     format!("{rust_mod}::{rust_fn}")
@@ -650,11 +650,15 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     "status" if args.is_empty() => true,
                     "csv" | "json" | "count" | "mean" | "sum" | "min" | "max" | "median"
                     | "variance" | "stddev" | "describe" | "bar_text" | "bar_svg"
+                    | "line_text" | "line_svg"
                     | "require_bridge" | "table" | "rows" | "schema" | "series"
                     | "missing_count" | "lazy" | "collect" | "plan" | "values"
                         if args.len() == 1 =>
                     {
                         resident_safe_expr(&args[0], callees)
+                    }
+                    "line_text" | "line_svg" if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
                     }
                     "quantile" | "filter" | "sort_by" | "rolling_mean" if args.len() == 2 => {
                         // filter/sort_by carry lambdas — still resident-safe when

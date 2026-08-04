@@ -1603,6 +1603,30 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_data_bar_svg"), arg(0))
             }
         }
+        ("core.data", "line_text") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), &({}))",
+                    helper("jet_data_line_text_checked"),
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                format!("{}(&({}), &({}))", helper("jet_data_line_text"), arg(0), arg(1))
+            }
+        }
+        ("core.data", "line_svg") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), &({}))",
+                    helper("jet_data_line_svg_checked"),
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                format!("{}(&({}), &({}))", helper("jet_data_line_svg"), arg(0), arg(1))
+            }
+        }
         ("core.data", "csv_reader") => {
             format!(
                 "{}({}, {})",

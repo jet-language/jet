@@ -1636,7 +1636,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Bool(true))
             }
-            TExprKind::Call { name, args } => self.eval_call(name, args, scope),
+            TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
             TExprKind::IfExpr {
                 cond,
                 then_body,
@@ -2418,6 +2418,115 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Field { recv, field, .. } => {
                 let r = self.eval_expr(recv, scope)?;
+                // D-LAYOUT-FACTS1=B: `$layout` is a contextual projection of
+                // the TypeInfo value bound to a derive type parameter. It is
+                // not a second stored TypeInfo member; ordinary `.layout`
+                // remains the full-reflection projection.
+                if field == crate::Syntax::COMPILER_FACT_LAYOUT {
+                    let CtValue::Struct { type_name, fields } = r else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "`$layout` needs a reflected type value".to_string(),
+                            "compiler facts attach to the type parameter in a derive body"
+                                .to_string(),
+                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    if type_name != crate::Syntax::TYPE_TYPE_INFO {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "`$layout` needs a reflected type value".to_string(),
+                            "compiler facts attach to the type parameter in a derive body"
+                                .to_string(),
+                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    }
+                    return fields
+                        .into_iter()
+                        .find(|(name, _)| name == "layout")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| {
+                            Diagnostic::error(
+                                "E0302",
+                                "the reflected type has no `$layout` fact".to_string(),
+                                "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
+                                    .to_string(),
+                                "use `T.reflect().layout` for the full reflection object"
+                                    .to_string(),
+                                Some(self.span()),
+                            )
+                        });
+                }
+                // D-LAYOUT-FACTS1=B: `LayoutInfo[.field]` is lowered as an
+                // ordinary field read with an internal projection name. The
+                // value still comes from the one reflected `fields` list, so
+                // source and `jet inspect expand` cannot drift.
+                if let Some(selected) = field
+                    .strip_prefix(crate::Syntax::LAYOUT_FIELD_PROJECTION_PREFIX)
+                {
+                    let CtValue::Struct { type_name, fields } = r else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "layout field selector needs a `LayoutInfo` value".to_string(),
+                            "typed field selection is only defined on compiler layout facts"
+                                .to_string(),
+                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    if type_name != crate::Syntax::TYPE_LAYOUT_INFO {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "layout field selector needs a `LayoutInfo` value".to_string(),
+                            "typed field selection is only defined on compiler layout facts"
+                                .to_string(),
+                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            Some(self.span()),
+                        ));
+                    }
+                    let Some(CtValue::List(layout_fields)) = fields
+                        .into_iter()
+                        .find(|(name, _)| name == "fields")
+                        .map(|(_, value)| value)
+                    else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "the reflected layout has no field facts".to_string(),
+                            "typed selectors read the canonical `LayoutInfo.fields` list"
+                                .to_string(),
+                            "use `T.reflect().layout.fields` for dynamic field iteration"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    return layout_fields
+                        .into_iter()
+                        .find(|value| {
+                            matches!(
+                                value,
+                                CtValue::Struct { type_name, fields }
+                                    if type_name == crate::Syntax::TYPE_LAYOUT_FIELD
+                                        && fields.iter().any(|(name, value)| {
+                                            name == "name"
+                                                && matches!(value, CtValue::Str(value) if value == selected)
+                                        })
+                            )
+                        })
+                        .ok_or_else(|| {
+                            Diagnostic::error(
+                                "E0302",
+                                format!("the reflected layout has no field `{selected}`"),
+                                "typed selectors must name a field declared by the reflected type"
+                                    .to_string(),
+                                "use one of the names in `T.reflect().fields`".to_string(),
+                                Some(self.span()),
+                            )
+                        });
+                }
                 match r {
                     // TupleLit stores Rust-mangled `user_<f>` names (emit needs them);
                     // Field TIR keeps Jet names. Accept either so named-tuple reads work.
@@ -4132,6 +4241,7 @@ impl<'a> EvalCtx<'a> {
                 owner_type,
                 method,
                 args,
+                ..
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -4498,7 +4608,7 @@ impl<'a> EvalCtx<'a> {
                     self.call_callable(&callable, argv)
                 }
             },
-            TExprKind::ModuleCall { form, args } => {
+            TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {
                     TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                         format!("{rust_mod}::{rust_fn}")

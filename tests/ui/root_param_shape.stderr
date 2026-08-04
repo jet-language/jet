@@ -1,0 +1,15 @@
+Error [E0103]: `#Root` must mark the first parameter
+  --> tests/ui/root_param_shape.jet:1:26
+    |
+  1 | fn bad(after: Int, #Root value: Int) {
+    |                          ^^^^^
+ Why: a reversible dot call has one receiver, and it is always the first value parameter
+ Fix: move `#Root` to the first parameter
+
+Error [E0103]: `#Root` must mark a bare-read parameter
+  --> tests/ui/root_param_shape.jet:5:20
+    |
+  5 | fn also_bad(#Root &value: Int) {
+    |                    ^^^^^
+ Why: dot-call syntax never hides a write or move capability behind the receiver
+ Fix: remove `&` or `^` from the `#Root` parameter

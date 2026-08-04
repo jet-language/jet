@@ -1348,6 +1348,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -1356,6 +1357,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
             receiver: Box::new(resugar_layout_expr(layout_name, receiver)),
             method: method.clone(),
             method_span: *method_span,
+            owner_type_args: owner_type_args.clone(),
             type_args: type_args.clone(),
             args: args
                 .iter()

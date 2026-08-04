@@ -1266,6 +1266,7 @@ pub(crate) fn synthesize_delegation_method(
         )),
         method: sig.name.clone(),
         method_span: zero,
+        owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args,
         recv_type: None,
@@ -1282,6 +1283,7 @@ pub(crate) fn synthesize_delegation_method(
     // Build the `self` param.
     let self_param = Param {
         convention: AccessConvention::Read,
+        root: false,
         name: Syntax::KW_SELF.to_string(),
         name_span: zero,
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
@@ -1360,6 +1362,7 @@ pub(crate) fn synthesize_default_method(
     let zero = Span::new(0, 0);
     let self_param = Param {
         convention: AccessConvention::Read,
+        root: false,
         name: Syntax::KW_SELF.to_string(),
         name_span: zero,
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
