@@ -66,6 +66,17 @@ pub fn path_separator() -> char {
     path_separator_for_os(std::env::consts::OS)
 }
 
+/// The minimal host-independent PATH available to clean child processes.
+/// This is platform plumbing, not inherited user state; declared Jet bins are
+/// prepended by the caller.
+pub fn clean_path() -> &'static str {
+    if cfg!(windows) {
+        r"C:\Windows\System32;C:\Windows"
+    } else {
+        "/usr/bin:/bin"
+    }
+}
+
 pub fn exe_suffix_for_os(os: &str) -> &'static str {
     if os == OS_WINDOWS {
         ".exe"

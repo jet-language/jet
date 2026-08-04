@@ -6,7 +6,8 @@ use super::realize::{
 };
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
-    project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    project_task_declared, project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    run_lifecycle_hooks_silent,
     validate_declared_secrets,
     wait_for_services_ready,
 };
@@ -155,9 +156,13 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -192,6 +197,32 @@ pub(super) fn run_project_task(
     entry: &Path,
     task: &str,
 ) -> i32 {
+    run_project_task_with_mode(theme, parsed, roots, project_dir, entry, task, false, false)
+}
+
+pub(super) fn run_project_task_with_mode(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    task: &str,
+    clean: bool,
+    silent: bool,
+) -> i32 {
+    if project_task_declared(entry, task) == Some(false) {
+        let declared_tasks = list_project_tasks(entry);
+        theme.error_coded(
+            "E1294",
+            &format!("no task named `{task}`"),
+            "lifecycle task names must refer to a declared top-level #Job function.",
+            "declare the task with #Job, or remove it from the environment lifecycle.",
+        );
+        if !declared_tasks.is_empty() {
+            theme.detail(&format!("declared tasks: {}", declared_tasks.join(", ")));
+        }
+        return 2;
+    }
     let metadata = project_task_metadata(entry, task).unwrap_or_default();
     if let Some(reason) = metadata.skip.as_deref() {
         theme.status(&format!("skipping task {}: {}", theme.bold(task), reason));
@@ -335,7 +366,15 @@ pub(super) fn run_project_task(
         argv.push("--".to_string());
         argv.extend(task_args);
     }
-    let code = Shell::run_command_in(&env, &argv, Some(&task_cwd));
+    let code = if clean && silent {
+        Shell::run_clean_command_in_silent(&env, &argv, Some(&task_cwd))
+    } else if clean {
+        Shell::run_clean_command_in(&env, &argv, Some(&task_cwd))
+    } else if silent {
+        Shell::run_command_in_silent(&env, &argv, Some(&task_cwd))
+    } else {
+        Shell::run_command_in(&env, &argv, Some(&task_cwd))
+    };
     if code == 0 {
         if metadata.cache != crate::AST::TaskCachePolicy::Uncached {
             if !task_outputs_exist(project_dir, &metadata) {
@@ -696,9 +735,13 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -749,9 +792,13 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks_clean(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -760,7 +807,10 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     if let Err(code) = run_lifecycle_hooks_clean(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.checks,
         "check",
@@ -974,11 +1024,15 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             .iter()
             .map(|pack| {
                 format!(
-                    "{{\"name\":{},\"fingerprint\":{},\"packages\":[{}],\"venv_packages\":[{}]}}",
+                    "{{\"name\":{},\"fingerprint\":{},\"packages\":[{}],\"venv_packages\":[{}],\"host\":{},\"platforms\":[{}],\"license\":{},\"required_tools\":[{}]}}",
                     crate::JSON::quote(&pack.name),
                     crate::JSON::quote(&pack.fingerprint()),
                     quote_strings(&pack.packages),
                     quote_strings(&pack.venv_packages),
+                    crate::JSON::quote(&pack.host),
+                    quote_strings(&pack.platforms),
+                    crate::JSON::quote(&pack.license),
+                    quote_strings(&pack.required_tools),
                 )
             })
             .collect::<Vec<_>>()
@@ -1000,13 +1054,17 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                     .map(crate::JSON::quote)
                     .unwrap_or_else(|| "null".to_string());
                 format!(
-                    "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"pack_fingerprint\":{},\"included\":[{}],\"omitted\":[{}],\"changed\":[{}]}}",
+                    "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"pack_fingerprint\":{},\"host\":{},\"platform\":{},\"license\":{},\"missing_tools\":[{}],\"included\":[{}],\"omitted\":[{}],\"changed\":[{}]}}",
                     crate::JSON::quote(&selection.name),
                     selection.enable,
                     version,
                     channel,
                     selection.venv,
                     crate::JSON::quote(&projection.pack.fingerprint()),
+                    crate::JSON::quote(&projection.host),
+                    crate::JSON::quote(&projection.platform),
+                    crate::JSON::quote(&projection.license),
+                    quote_strings(&projection.missing_tools),
                     quote_strings(&projection.included),
                     quote_strings(&projection.omitted),
                     quote_strings(&projection.changed),
@@ -1313,7 +1371,9 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             &plan.secrets,
             &plan.environment,
         );
-        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
+        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty())
+            || !plan.environment.lifecycle.on_enter.is_empty()
+            || !plan.environment.lifecycle.checks.is_empty();
         let trusted = !sensitive
             || Trust::is_environment_trusted(
                 &store,
@@ -1364,9 +1424,13 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             return 0;
         }
         let plan_hash = target_hash.clone().unwrap_or_default();
-        if run_lifecycle_hooks(
+        let entry = find_project_entry(&root);
+        if run_lifecycle_hooks_silent(
             theme,
+            parsed,
+            &roots,
             &root,
+            &entry,
             &env,
             &plan.environment.lifecycle.on_enter,
             "on_enter",
@@ -1596,7 +1660,10 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",

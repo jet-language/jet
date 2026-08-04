@@ -101,6 +101,10 @@ pub struct PackageFacts {
     pub environments: BTreeMap<String, EnvironmentFact>,
     pub defaults: BTreeMap<String, String>,
     pub configs: Vec<String>,
+    /// Resolved file-backed Config paths. These are relative to the Package
+    /// root and keep discovery provenance available to source enumeration.
+    #[doc(hidden)]
+    pub resolved_config_paths: Vec<String>,
     /// Inline `name :: Config.{ ... }` contributions. The merged fields stay
     /// in the parent facts; this map preserves the declaration identity so a
     /// `configs: [...]` list can refer to either inline or file-backed Configs.
@@ -351,6 +355,14 @@ impl PackageFacts {
                     value: path.display().to_string(),
                 });
             }
+            let relative_path = path
+                .strip_prefix(&root)
+                .expect("validated Config path must stay below Package root")
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            if !self.resolved_config_paths.contains(&relative_path) {
+                self.resolved_config_paths.push(relative_path);
+            }
             let text = std::fs::read_to_string(&path).map_err(|error| {
                 PackageParseError::Composition(format!(
                     "couldn't read Config `{}`: {error}",
@@ -572,12 +584,16 @@ impl PackageFacts {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "package.jet" || name == "pkg.jet");
-            let config = self.configs.iter().any(|name| {
-                let candidate = root.join(name);
-                path == &candidate
-                    || (candidate.extension().is_none()
-                        && path == &candidate.with_extension("jet"))
-            });
+            let config = self
+                .resolved_config_paths
+                .iter()
+                .chain(self.configs.iter())
+                .any(|name| {
+                    let candidate = root.join(name);
+                    path == &candidate
+                        || (candidate.extension().is_none()
+                            && path == &candidate.with_extension("jet"))
+                });
             !reserved && !config
         });
         files.sort();
@@ -1936,6 +1952,13 @@ fn discover_config_path(
         if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("jet") {
             continue;
         }
+        if path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.starts_with('_'))
+        {
+            continue;
+        }
         let text = std::fs::read_to_string(&path).map_err(|error| {
             PackageParseError::Composition(format!("couldn't read Config `{}`: {error}", path.display()))
         })?;
@@ -2373,6 +2396,68 @@ dev :: Config.{
         assert_eq!(facts.version.as_deref(), Some("1"));
         assert_eq!(facts.inline_configs["dev"].name.as_deref(), Some("dev"));
         assert_eq!(facts.defaults["run"], "app");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn named_config_discovery_skips_leading_underscore_files() {
+        let dir = temp_dir("config-discovery");
+        std::fs::write(
+            dir.join("package.jet"),
+            "name: \"demo\"\nconfigs: [dev]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("_dev.jet"),
+            "pub dev :: Config.{ version: \"ignored\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("one.jet"),
+            "pub dev :: Config.{ version: \"selected\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("ordinary.jet"),
+            "pub run() { }\n",
+        )
+        .unwrap();
+
+        let facts = PackageFacts::load(&dir).unwrap().unwrap();
+        assert_eq!(facts.version.as_deref(), Some("selected"));
+        assert!(facts
+            .provenance
+            .get("version")
+            .is_some_and(|origins| origins.contains(&dir.join("one.jet").display().to_string())));
+        assert!(facts
+            .source_files(&dir)
+            .iter()
+            .all(|path| path.file_name().and_then(|name| name.to_str()) != Some("one.jet")));
+        assert!(facts
+            .source_files(&dir)
+            .iter()
+            .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("ordinary.jet")));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn ambiguous_named_config_discovery_fails_before_composition() {
+        let dir = temp_dir("config-ambiguous");
+        std::fs::write(
+            dir.join("package.jet"),
+            "name: \"demo\"\nconfigs: [dev]\n",
+        )
+        .unwrap();
+        for file in ["one.jet", "two.jet"] {
+            std::fs::write(
+                dir.join(file),
+                "pub dev :: Config.{ version: \"same\" }\n",
+            )
+            .unwrap();
+        }
+
+        let error = PackageFacts::load(&dir).unwrap().unwrap_err().to_string();
+        assert!(error.contains("Config `dev` is ambiguous"), "{error}");
         std::fs::remove_dir_all(dir).ok();
     }
 

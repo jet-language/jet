@@ -758,6 +758,7 @@ module.exports = grammar({
         $.primitive_type,
         $.call_expr,
         $.turbofish_call,
+        $.build_recipe_expr,
         $.struct_literal,
         $.list_literal,
         $.map_literal,
@@ -928,6 +929,55 @@ module.exports = grammar({
           $.arg_list,
         ),
       ),
+
+    // D-JPK-BUILDRECIPE1: the finite adapter recipe surface. Keep these
+    // lower-case leading-dot values scoped to Recipe.build.
+    build_recipe_expr: ($) =>
+      prec(
+        6,
+        seq(
+          "Recipe",
+          ".",
+          "build",
+          "(",
+          "steps",
+          ":",
+          "[",
+          commaSep($.build_step_value),
+          optional(","),
+          "]",
+          ")",
+        ),
+      ),
+
+    build_step_value: ($) =>
+      seq(
+        ".",
+        choice("fetch", "exec", "install", "install_tree"),
+        optional($.build_step_args),
+      ),
+
+    build_step_args: ($) =>
+      seq(
+        "(",
+        optional(
+          seq(
+            $.build_step_arg,
+            repeat(seq(",", $.build_step_arg)),
+            optional(","),
+          ),
+        ),
+        ")",
+      ),
+
+    build_step_arg: ($) =>
+      choice(
+        seq(choice("url", "sha256", "tool", "src", "dest"), ":", $.string_literal),
+        seq("args", ":", $.build_step_string_list),
+      ),
+
+    build_step_string_list: ($) =>
+      seq("[", commaSep($.string_literal), optional(","), "]"),
 
     // Turbofish: `decode<Order>(raw)`, `make_pair<Int>(…)`. The `<` is adjacent
     // (no space) so a spaced comparison `c < 3` stays a `binary_expr`.

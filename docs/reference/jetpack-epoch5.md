@@ -24,6 +24,8 @@ members: find("./packages")
 
 `Config` files add typed facts to the Package. Equal facts merge. Conflicting
 facts fail before realization. A Config cannot declare `members`.
+Discovery follows the nearest `package.jet` and declared Config roots; a `.jet`
+file whose name starts with `_` is skipped without changing its contents.
 Scalar conflicts name both contributing source files and their values. Successful
 fields retain ordered contributor provenance for lock and explain projections;
 failed composition never mutates the Package facts.
@@ -74,7 +76,13 @@ matches merge in deterministic name order. Conflicting facts fail closed.
 
 Language selections are typed records. Enabled records expand through the
 closed catalog into ordinary package references. Disabled records remain in
-the plan and in the trust fingerprint.
+the plan and in the trust fingerprint, but missing tools for a disabled pack do
+not block the environment.
+
+Each Rust and Python pack discloses its host kind, supported platform list,
+license summary, and required commands. An unsupported host or an enabled
+catalog pack with a missing required command fails during planning; it does not
+create a partial PATH or claim a tool that is absent.
 
 ```text
 module env.dev {
@@ -91,7 +99,7 @@ module env.dev {
 
 ## Lifecycle and managed files
 
-Lifecycle facts include dotenv allowlists, unset names, enter and check hooks,
+Lifecycle facts include dotenv allowlists, unset names, enter and check tasks,
 and reload policy. Secret values never enter the plan or information output.
 
 Managed files use project-relative destinations. `Symlink` points to an
@@ -102,12 +110,24 @@ after the first write. Jet refuses to replace an unmanaged destination.
 module env.dev {
     dotenv: [Dotenv.{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }]
     unset: ["RUST_LOG"]
+    on_enter: [prepare]
+    checks: [smoke]
     reload: .Watch.{ paths: ["env.jet"], debounce_ms: 250 }
     files: {
         "config/generated.txt": File.{ content: "generated\n", mode: .Copy }
     }
 }
 ```
+
+Lifecycle tasks run only after the environment is composed. Bare names resolve
+to declared `#Job fn`s and use the normal task metadata, trust, and clean-shell
+path. The explicit record form remains the one expert hook escape:
+`command`, `cwd`, and `trusted: true` are required after review. `jet env test`
+runs enter tasks, checks, and any explicit hook in a clean declared environment
+and rejects an untrusted hook with `E1329`. Hook working directories must stay
+inside the project, including after symlink resolution. A changed hook or
+lifecycle policy changes the environment trust identity, so the next entry
+needs a new trust decision.
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
