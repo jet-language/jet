@@ -9,7 +9,9 @@ use crate::RefSpec;
 use crate::Store;
 use crate::{Components, EnvFile, Image, Lock, Syntax};
 use jet_env_model::ModuleEval;
+use std::fs;
 use std::io::Read;
+use std::path::Path;
 
 enum ImagePushDestination {
     Local(std::path::PathBuf),
@@ -519,14 +521,21 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         None => None,
     };
 
-    // D-JPK-IMAGE1/D-ENV-IMAGE1: build from what `jet build` already realized.
-    // Jetpack has
-    // no dependency on the compiler's own build machinery (the dependency
-    // runs the other way — `jet` depends on `jet-driver`, not vice versa), so
-    // this mirrors, rather than calls into, `jet build`'s `build/<name>`
-    // output convention (`Source/CmdCompile.rs::bin_path`).
+    // D-JPK-IMAGE1: non-environment package images still read the compiler's
+    // project-local `build/<name>` output. Environment images below consume
+    // verified Hangar package outputs instead.
+    let roots = Store::resolve();
+    if !image.services.is_empty() {
+        theme.error_coded(
+            "E1336",
+            &format!("environment image {name} cannot project services"),
+            "the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy",
+            "run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime",
+        );
+        return 2;
+    }
     let mut files = if image.from_environment {
-        environment_image_files(theme, &dir, &plan, image, name)
+        environment_image_files(theme, &roots, &plan, name)
     } else {
         let bin_path = dir.join("build").join(&image.from);
         let bin_data = match read_project_image_file(&dir.join("build"), &image.from) {
@@ -550,14 +559,6 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             mode: 0o755,
         }]
     };
-    if !image.services.is_empty() {
-        theme.error(
-            &format!("environment image {name} cannot project services"),
-            "the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy",
-            "run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime",
-        );
-        return 2;
-    }
     let mut projection = Image::ProjectionReport::default();
     if image.from_environment {
         projection
@@ -764,101 +765,67 @@ fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec
 
 fn environment_image_files(
     theme: &Theme,
-    dir: &std::path::Path,
+    roots: &Store::Roots,
     plan: &ModuleEval::EnvPlan,
-    image: &ModuleEval::ImagePlan,
     name: &str,
 ) -> Vec<Image::LayerFile> {
-    let mut package_names = plan
-        .package_refs
-        .iter()
-        .filter_map(|reference| reference.split('@').next())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let mut service_aliases = Vec::new();
-    for service in &image.services {
-        let Some(declaration) = plan.dev_services.iter().find(|candidate| candidate.name == *service) else {
-            theme.error(
-                &format!("environment image `{name}` names unknown service `{service}`"),
-                "an image can project only services declared by the source environment",
-                "declare the service under `env.<name>`, or remove it from `services:`",
-            );
-            return Vec::new();
-        };
-        if !declaration.enable {
-            theme.error(
-                &format!("environment image `{name}` selects disabled service `{service}`"),
-                "disabled services are not part of the environment projection",
-                "enable the service or remove it from the image projection",
-            );
-            return Vec::new();
-        }
-        if let Some(reference) = crate::Services::catalog_pkg_ref(service) {
-            if let Some(package) = reference.split('@').next() {
-                package_names.push(package.to_string());
-                if let Some(executable) = crate::Services::catalog_executable(service) {
-                    service_aliases.push((package.to_string(), executable.to_string()));
-                }
-            }
-        }
-    }
-    package_names.sort();
-    package_names.dedup();
+    let mut package_refs = plan.package_refs.clone();
+    package_refs.sort();
+    package_refs.dedup();
 
     let mut files: Vec<Image::LayerFile> = Vec::new();
-    let mut built_packages = Vec::new();
     let mut shell_source = None;
-    for package in package_names {
-        let path = dir.join("build").join(&package);
-        let data = match read_project_image_file(&dir.join("build"), &package) {
-            Ok(data) => data,
-            Err(_) => {
-            theme.error(
-                &format!("environment package {package} isn't built yet"),
-                &format!("the environment image needs {} at {}", package, path.display()),
-                &format!("run jet build for the environment packages, then jet image {name}"),
+    for reference in package_refs {
+        let Some(entry) = Store::find_by_reference(roots, &reference) else {
+            theme.error_coded(
+                "E1336",
+                &format!("environment package `{reference}` is not realized"),
+                "environment images consume the verified Hangar package output; they do not read a project build scratch file",
+                &format!("run `jetpack build {reference}`, then `jet image {name}`"),
             );
             return Vec::new();
+        };
+        let binaries = match read_realized_package_binaries(&entry) {
+            Ok(binaries) => binaries,
+            Err(error) => {
+                theme.error_coded(
+                    "E1336",
+                    &format!("environment package `{reference}` has no usable binary output"),
+                    &error,
+                    &format!("realize an executable package for `{reference}`, then run `jet image {name}`"),
+                );
+                return Vec::new();
             }
         };
-        if shell_source.is_none() && matches!(package.as_str(), "bash" | "busybox" | "dash" | "sh") {
-            shell_source = Some(data.clone());
+        for (binary, data) in &binaries {
+            if matches!(binary.as_str(), "bash" | "busybox" | "dash" | "sh")
+                && shell_source.is_none()
+            {
+                shell_source = Some(data.clone());
+            }
+            let target = format!("usr/local/bin/{binary}");
+            if let Some(existing) = files.iter().find(|file| file.path == target) {
+                if existing.data != *data {
+                    theme.error_coded(
+                        "E1336",
+                        &format!("environment image `{name}` has conflicting binary `{binary}`"),
+                        "two realized package outputs would write different bytes to one image path",
+                        "remove the duplicate executable or select package outputs with one stable binary",
+                    );
+                    return Vec::new();
+                }
+                continue;
+            }
+            files.push(Image::LayerFile {
+                path: target,
+                data: data.clone(),
+                mode: 0o755,
+            });
         }
-        built_packages.push((package.clone(), data.clone()));
-        let target = format!("usr/local/bin/{package}");
-        if files.iter().any(|file| file.path == target) {
-            continue;
-        }
-        files.push(Image::LayerFile {
-            path: target,
-            data,
-            mode: 0o755,
-        });
-    }
-    for (package, executable) in service_aliases {
-        if package == executable {
-            continue;
-        }
-        let Some((_, data)) = built_packages.iter().find(|(name, _)| name == &package) else {
-            theme.error(
-                &format!("environment service package {package} is not built"),
-                "the selected service has no realized executable bytes to project",
-                &format!("run jet build for {package}, then jet image {name}"),
-            );
-            return Vec::new();
-        };
-        let target = format!("usr/local/bin/{executable}");
-        if files.iter().any(|file| file.path == target) {
-            continue;
-        }
-        files.push(Image::LayerFile {
-            path: target,
-            data: data.clone(),
-            mode: 0o755,
-        });
     }
     let Some(shell) = shell_source else {
-        theme.error(
+        theme.error_coded(
+            "E1336",
             &format!("environment image `{name}` has no shell"),
             "D-ENV-IMAGE1's beginner image is a runnable shell image and cannot copy a host shell or invent one",
             "add `bash`, `busybox`, `dash`, or `sh` to the environment packages and build it first",
@@ -871,4 +838,47 @@ fn environment_image_files(
         mode: 0o755,
     });
     files
+}
+
+fn read_realized_package_binaries(entry: &Store::StoreEntry) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if entry.bin.is_empty() {
+        return Err("the Hangar entry has no executable bin directory".to_string());
+    }
+    let bin = Path::new(&entry.bin);
+    let metadata = fs::symlink_metadata(bin).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("the Hangar bin projection is not a real directory".to_string());
+    }
+    let root = fs::canonicalize(bin).map_err(|error| error.to_string())?;
+    let mut paths = fs::read_dir(&root)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    paths.sort_by_key(|entry| entry.file_name());
+    let mut binaries = Vec::new();
+    for item in paths {
+        let path = item.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("the Hangar bin projection contains a non-regular entry".to_string());
+        }
+        let resolved = fs::canonicalize(&path).map_err(|error| error.to_string())?;
+        if !resolved.starts_with(&root) {
+            return Err("the Hangar bin projection escapes its package output".to_string());
+        }
+        if metadata.len() > 512 * 1024 * 1024 {
+            return Err("a realized package binary exceeds the 512 MiB layer limit".to_string());
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty() && !value.bytes().any(|byte| byte.is_ascii_control()))
+            .ok_or_else(|| "a realized package binary has an unsafe name".to_string())?
+            .to_string();
+        binaries.push((name, fs::read(resolved).map_err(|error| error.to_string())?));
+    }
+    if binaries.is_empty() {
+        return Err("the Hangar bin projection is empty".to_string());
+    }
+    Ok(binaries)
 }

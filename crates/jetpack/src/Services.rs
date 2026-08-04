@@ -261,6 +261,16 @@ fn supervisor_error_path(dir: &Path) -> PathBuf {
     dir.join("supervisor.error")
 }
 
+fn supervisor_failure(project_dir: &Path, plan: &DevServicePlan) -> Option<String> {
+    let error = read_text_bounded(
+        &supervisor_error_path(&service_dir(project_dir, &plan.name)),
+        4096,
+    )
+    .ok()?;
+    let error = error.trim();
+    (!error.is_empty()).then(|| error.to_string())
+}
+
 fn ports_path(dir: &Path) -> PathBuf {
     dir.join("ports")
 }
@@ -2050,6 +2060,9 @@ pub fn wait_healthy_with_env(
     }
     let deadline = Instant::now() + timeout;
     loop {
+        if supervisor_failure(project_dir, plan).is_some() {
+            return false;
+        }
         if matches!(health_one_with_env(project_dir, env, plan), Health::Healthy) {
             return true;
         }
@@ -2202,14 +2215,24 @@ where
                 Some(cleanup) => format!("{error}; cleanup failed: {cleanup}"),
             });
         }
-        // An explicit restart policy hands liveness and exhaustion to the
-        // supervisor. The service may exit between hand-off and its first
-        // restart, so waiting here would turn a valid supervisor start into
-        // a false readiness failure and hide the persisted exhaustion state.
-        if plan.restart.is_none() && !wait_healthy_with_env(project_dir, Some(env), plan, timeout) {
-            let current_error = format!("service `{}` did not become healthy", plan.name);
+        // Restart policy does not weaken the readiness contract. The
+        // supervisor owns retries and exhaustion, but the caller still waits
+        // for the same healthy state before starting dependents.
+        if !wait_healthy_with_env(project_dir, Some(env), plan, timeout) {
+            let supervisor_error = supervisor_failure(project_dir, plan);
+            let current_error = supervisor_error
+                .as_deref()
+                .map(|error| format!("service `{}` {error}", plan.name))
+                .unwrap_or_else(|| format!("service `{}` did not become healthy", plan.name));
             let mut cleanup_indexes = started.clone();
-            if !was_running {
+            // A supervisor that exhausted its bounded restart budget already
+            // removed its PID and wrote durable failure evidence. Preserve
+            // that evidence; only clean a still-running failed service.
+            let still_running = matches!(
+                health_one_with_env(project_dir, Some(env), plan),
+                Health::Healthy | Health::Unhealthy
+            );
+            if !was_running && supervisor_error.is_none() && still_running {
                 cleanup_indexes.push(index);
             }
             let cleanup = down_ordered(project_dir, plans, &cleanup_indexes).err();

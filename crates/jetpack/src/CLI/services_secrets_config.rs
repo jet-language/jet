@@ -96,7 +96,10 @@ pub(super) fn wait_for_services_ready(
 }
 
 fn report_service_start_error(theme: &Theme, title: &str, error: &str) {
-    if error.contains("did not become healthy") {
+    if error.contains("did not become healthy")
+        || error.contains("restart limit exhausted")
+        || error.contains("restart did not produce a running process")
+    {
         let name = error
             .strip_prefix("service `")
             .and_then(|rest| rest.split_once('`'))

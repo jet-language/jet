@@ -150,6 +150,11 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
     let mut layout = broker_layout(roots);
     if layout.admin {
         ensure_system_dir(layout.base.parent().unwrap_or(Path::new("/")))?;
+        // The administrator boundary itself is private. Only its parent and
+        // the systemd socket directory are root-owned system directories;
+        // creating the base with 0755 would make the later private-mode
+        // validation fail on a fresh install.
+        ensure_private_dir(&layout.base)?;
         ensure_system_dir(layout.config.parent().unwrap_or(Path::new("/")))?;
         ensure_system_dir(layout.socket.parent().unwrap_or(Path::new("/")))?;
     } else {

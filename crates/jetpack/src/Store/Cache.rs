@@ -434,7 +434,7 @@ pub fn verify_cache_transfer(
                 bytes: bytes.len() as u64,
             });
         }
-        match verify_nix_endpoint(&endpoint, &expected) {
+        match verify_nix_endpoint(&endpoint, &expected, &key) {
             Ok(Some(transfer)) => {
                 return Ok(CacheTransferReport {
                     role: binding.role.clone(),
@@ -503,7 +503,7 @@ pub fn substitute_cache_entry(
                 bytes: bytes.len() as u64,
             });
         }
-        if let Some(transfer) = substitute_nix_endpoint(&endpoint, &expected, destination)? {
+        if let Some(transfer) = substitute_nix_endpoint(&endpoint, &expected, destination, &key)? {
             return Ok(CacheTransferReport {
                 role: binding.role.clone(),
                 mirror: mirror.clone(),
@@ -1103,8 +1103,9 @@ fn publish_endpoint(
         )),
         CacheEndpoint::Nix(uri) => {
             let stats = super::validate_nar(nar)?;
+            require_nix_store_path(&entry.out)?;
             nix_copy(uri, "--to", &entry.out)?;
-            prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes)
+            prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes, key)
         }
         CacheEndpoint::Http(_) | CacheEndpoint::Ssh { .. } | CacheEndpoint::S3(_) => {
             let signed = info.clone().signed(key)?;
@@ -1202,17 +1203,19 @@ fn promote_remote(
 fn verify_nix_endpoint(
     endpoint: &CacheEndpoint,
     entry: &StoreEntry,
+    key: &TrustKey,
 ) -> io::Result<Option<NixTransfer>> {
     let CacheEndpoint::Nix(uri) = endpoint else {
         return Ok(None);
     };
+    require_nix_store_path(&entry.out)?;
     nix_copy(uri, "--from", &entry.out)?;
     let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
     if actual != entry.envelope.output_hash {
         return Err(invalid("Nix store output hash disagrees with the Hangar identity"));
     }
     let (nar, stats) = super::write_nar(Path::new(&entry.out))?;
-    let proof = prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes)?;
+    let proof = prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes, key)?;
     Ok(Some(NixTransfer {
         nar,
         nar_hash: stats.digest,
@@ -1269,12 +1272,13 @@ fn substitute_nix_endpoint(
     endpoint: &CacheEndpoint,
     entry: &StoreEntry,
     destination: &Path,
+    key: &TrustKey,
 ) -> io::Result<Option<NixTransfer>> {
     if !matches!(endpoint, CacheEndpoint::Nix(_)) {
         return Ok(None);
     }
     let result = (|| {
-        let transfer = verify_nix_endpoint(endpoint, entry)?
+        let transfer = verify_nix_endpoint(endpoint, entry, key)?
             .ok_or_else(|| invalid("Nix substitution was called for a non-Nix endpoint"))?;
         super::read_nar(&transfer.nar, destination)?;
         let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
@@ -1309,8 +1313,11 @@ fn prove_nix_transfer(
     path: &str,
     expected_nar_hash: &str,
     expected_bytes: u64,
+    key: &TrustKey,
 ) -> io::Result<TransferProof> {
+    require_nix_store_path(path)?;
     let info = nix_path_info(uri, path)?;
+    nix_verify_path(uri, path)?;
     let normalized = nix_nar_hash_to_jet(&info.nar_hash)?;
     if normalized != expected_nar_hash {
         return Err(invalid(&format!(
@@ -1322,9 +1329,30 @@ fn prove_nix_transfer(
         return Err(invalid("Nix NarSize disagrees with the canonical NAR size"));
     }
     Ok(TransferProof {
-        nix_nar_hash: Some(info.nar_hash),
-        signed_fingerprint: info.signed_fingerprint,
+        nix_nar_hash: Some(info.nar_hash.clone()),
+        signed_fingerprint: nix_admission_fingerprint(uri, path, &info, key),
     })
+}
+
+/// Jetpack and Nix use different trust domains. Nix verifies its own signed
+/// path against the host's configured trusted keys; this HMAC binds that
+/// verified Nix fact to the cache binding that admitted it. The HMAC tag is
+/// an admission proof, not a replacement for Nix's signature check.
+fn nix_admission_fingerprint(
+    uri: &str,
+    path: &str,
+    info: &NixPathInfo,
+    key: &TrustKey,
+) -> String {
+    let message = format!(
+        "jetpack-nix-transfer-v1\n{uri}\n{path}\n{}\n{}",
+        info.nar_hash, info.signed_fingerprint
+    );
+    let signature = key.sign(message.as_bytes());
+    format!(
+        "{};jetpack:{}:{}",
+        info.signed_fingerprint, signature.key_id, signature.sig_hex
+    )
 }
 
 fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
@@ -1409,15 +1437,10 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
             .collect::<io::Result<Vec<_>>>()?,
         None => Vec::new(),
     };
-    let signed_fingerprint = if signatures.is_empty() {
-        if matches!(object.get("ultimate"), Some(crate::JSON::JSONValue::Bool(true))) {
-            "nix:ultimate".to_string()
-        } else {
-            return Err(invalid("Nix store metadata has no signed fingerprint"));
-        }
-    } else {
-        signatures.join(",")
-    };
+    if signatures.is_empty() {
+        return Err(invalid("Nix store metadata has no signed fingerprint"));
+    }
+    let signed_fingerprint = signatures.join(",");
     Ok(NixPathInfo {
         nar_hash,
         nar_size,
@@ -1443,7 +1466,53 @@ fn nix_nar_hash_to_jet(value: &str) -> io::Result<String> {
     Ok(format!("sha256:{}", bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()))
 }
 
+fn require_nix_store_path(path: &str) -> io::Result<()> {
+    let path = Path::new(path);
+    if !path.starts_with("/nix/store")
+        || path == Path::new("/nix/store")
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir | Component::ParentDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(invalid(
+            "Nix cache transfer requires an existing canonical /nix/store path; Hangar outputs cannot be relocated into Nix",
+        ));
+    }
+    Ok(())
+}
+
+fn nix_verify_path(uri: &str, path: &str) -> io::Result<()> {
+    require_nix_store_path(path)?;
+    let child = Command::new("nix")
+        .args([
+            "store",
+            "verify",
+            "--store",
+            uri,
+            "--sigs-needed",
+            "1",
+            path,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| invalid(&format!("Nix trust verifier could not start: {error}")))?;
+    let (status, _, stderr) = run_bounded_output(child, 4096, "Nix trust verifier response")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(invalid(&format!(
+            "Nix trust verifier rejected path {path}: {}",
+            bounded_stderr(&stderr)
+        )))
+    }
+}
+
 fn nix_copy(uri: &str, direction: &str, path: &str) -> io::Result<()> {
+    require_nix_store_path(path)?;
     if path.is_empty() || path.starts_with('-') {
         return Err(invalid("Nix store transfer has no path"));
     }
@@ -2164,5 +2233,12 @@ mod tests {
         ] {
             assert!(!endpoint.capabilities().remote_execute);
         }
+    }
+
+    #[test]
+    fn nix_cache_rejects_hangar_path_relocation() {
+        assert!(require_nix_store_path("/nix/store/abcd-package").is_ok());
+        assert!(require_nix_store_path("/tmp/jet-hangar/abcd-package").is_err());
+        assert!(require_nix_store_path("/nix/store/../tmp/abcd-package").is_err());
     }
 }

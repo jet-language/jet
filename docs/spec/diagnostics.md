@@ -630,6 +630,7 @@ renumbered, and no new `W` code may be allocated.
 | E1333 | sema | a dotenv declaration has an unsafe path or invalid allowlist/secret shape (D-ENV-LIFECYCLE2) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
 | E1335 | sema/jetpack | a first-party environment integration has conflicting facts or an invalid host projection (D-ENV-INTEGRATIONS1) |
+| E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -902,6 +903,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1333 | a dotenv declaration is invalid | Dotenv is part of the typed lifecycle plan. Paths stay inside the project, and expert allowlists make secret handling explicit. | Use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
 | E1335 | an environment integration has conflicting facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies for one integration. | Merge the declarations or select a target and policy supported by the integration. |
+| E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 

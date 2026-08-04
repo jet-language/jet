@@ -317,6 +317,7 @@ fn services_restart_exhaustion_cleans_state() {
     let env = [
         ("JETPACK_ROOT", root.path.display().to_string()),
         ("HOME", home.path.display().to_string()),
+        ("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500".to_string()),
     ];
     let up = jetpack()
         .args(["services", "up", "--no-color"])
@@ -324,7 +325,12 @@ fn services_restart_exhaustion_cleans_state() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(!up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        String::from_utf8_lossy(&up.stderr).contains("E1261"),
+        "stderr: {}",
+        String::from_utf8_lossy(&up.stderr)
+    );
     let pid = proj.path.join(".jet/services/fixture/pid");
     wait_for_missing(&pid);
     assert!(
