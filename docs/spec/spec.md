@@ -1596,8 +1596,11 @@ floor rejects `.Skip`. CI/admins provide that floor explicitly through
 `policy: .{ unsafe: .Obligations }`, its path is retained as provenance, and a
 configured unreadable or malformed file fails closed. `jet inspect unsafe FILE`
 reports every gate, operation, discharge state, and effective-policy provenance
-in stable human or `--json` form. Assertions erase in sema before the shared
-AOT/dev TIR boundary.
+in stable human or `--json` form. Human rows use the source file's
+`file:line:column` location; JSON keeps the byte span and adds matching 1-based
+start/end line and column objects. Loader failures use the ordinary diagnostic
+renderer, including the source frame, Why, Fix, and `NO_COLOR` behavior.
+Assertions erase in sema before the shared AOT/dev TIR boundary.
 
 ## Web browser API (D-FLAGSHIP-WEBAPI1, implemented)
 
