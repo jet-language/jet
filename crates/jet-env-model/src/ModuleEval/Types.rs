@@ -100,8 +100,7 @@ pub enum AdapterRecipe {
     /// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
     /// `bin/<as>`.
     Prebuilt { bin: String, as_name: String },
-    /// Curated future recipes parse as a concrete `BuildRecipe` once their
-    /// tool deps can be represented. The current U20 slice uses copy/prebuilt.
+    /// `Recipe.build(steps: […])`: a finite, digestable executable action graph.
     Build(BuildRecipe),
 }
 

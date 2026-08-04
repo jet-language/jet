@@ -964,7 +964,7 @@ pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<ExtractedPacka
         if item.is_empty() {
             continue;
         }
-        if item.starts_with("Pkg.adapt") {
+        if item.starts_with(Syntax::PKG_ADAPT) {
             out.adapters.push(parse_adapter(item)?);
         } else {
             plain.push(item);
@@ -1008,7 +1008,8 @@ fn split_top_level(body: &str) -> Vec<&str> {
 }
 
 fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
-    let args = call_args(item, "Pkg.adapt").ok_or_else(|| adapter_shape(item))?;
+    let args = call_args(item, Syntax::PKG_ADAPT).ok_or_else(|| adapter_shape(item))?;
+    validate_fields(args, &["name", "source", "deps", "recipe"])?;
     let name = named_string(args, "name").ok_or_else(|| adapter_shape(item))?;
     let source = named_raw(args, "source").ok_or_else(|| adapter_shape(item))?;
     let source = unquote(source.trim()).unwrap_or(source);
@@ -1034,10 +1035,19 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
 
 fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     let raw = raw.trim();
-    if raw.starts_with("Recipe.copy") {
-        return Ok(AdapterRecipe::Copy);
+    if let Some(args) = call_args(raw, Syntax::RECIPE_BUILD) {
+        validate_fields(args, &["steps"])?;
+        let steps = parse_build_steps(args)?;
+        return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe { steps }));
     }
-    if let Some(args) = call_args(raw, "Recipe.prebuilt") {
+    if let Some(args) = call_args(raw, Syntax::RECIPE_COPY) {
+        if args.trim().is_empty() {
+            return Ok(AdapterRecipe::Copy);
+        }
+        return Err(adapter_shape(raw));
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_PREBUILT) {
+        validate_fields(args, &["bin", "as", "as_name"])?;
         let bin = named_string(args, "bin").ok_or_else(|| adapter_shape(raw))?;
         let as_name = named_string(args, "as")
             .or_else(|| named_string(args, "as_name"))
@@ -1053,11 +1063,121 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     Err(adapter_shape(raw))
 }
 
+fn parse_build_steps(args: &str) -> Result<Vec<super::super::Recipe::BuildStep>, Diagnostic> {
+    let raw = named_field(args, "steps").ok_or_else(|| adapter_shape(args))?;
+    let body = raw
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| adapter_shape(args))?;
+    let mut steps = Vec::new();
+    for item in split_top_level(body) {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        steps.push(parse_build_step(item)?);
+    }
+    if steps.is_empty() {
+        return Err(adapter_shape(args));
+    }
+    Ok(steps)
+}
+
+fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagnostic> {
+    use super::super::Recipe::BuildStep;
+
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_FETCH) {
+        validate_fields(args, &["url", "sha256"])?;
+        return Ok(BuildStep::Fetch {
+            url: required_field_string(args, "url")?,
+            sha256: required_field_string(args, "sha256")?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_EXEC) {
+        validate_fields(args, &["tool", "args"])?;
+        return Ok(BuildStep::Exec {
+            tool: required_field_string(args, "tool")?,
+            args: required_field_strings(args, "args")?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL) {
+        validate_fields(args, &["src", "dest"])?;
+        return Ok(BuildStep::Install {
+            src: required_field_string(args, "src")?,
+            dest: required_field_string(args, "dest")?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL_TREE) {
+        validate_fields(args, &["src", "dest"])?;
+        return Ok(BuildStep::InstallTree {
+            src: required_field_string(args, "src")?,
+            dest: required_field_string(args, "dest")?,
+        });
+    }
+    Err(adapter_shape(raw))
+}
+
+fn named_field<'a>(args: &'a str, key: &str) -> Option<&'a str> {
+    let fields = named_fields(args)?;
+    let mut found = None;
+    for (name, value) in fields {
+        if name == key {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(value);
+        }
+    }
+    found
+}
+
+fn named_fields<'a>(args: &'a str) -> Option<Vec<(&'a str, &'a str)>> {
+    split_top_level(args)
+        .into_iter()
+        .filter(|item| !item.trim().is_empty())
+        .map(|item| {
+            let (name, value) = item.trim().split_once(':')?;
+            let name = name.trim();
+            let value = value.trim();
+            (!name.is_empty() && !value.is_empty()).then_some((name, value))
+        })
+        .collect()
+}
+
+fn validate_fields(args: &str, allowed: &[&str]) -> Result<(), Diagnostic> {
+    let fields = named_fields(args).ok_or_else(|| adapter_shape(args))?;
+    let mut seen = HashSet::new();
+    if fields.iter().any(|(name, _)| {
+        !allowed.contains(name) || !seen.insert(*name)
+    }) {
+        return Err(adapter_shape(args));
+    }
+    Ok(())
+}
+
+fn required_field_string(args: &str, key: &str) -> Result<String, Diagnostic> {
+    let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+    unquote(value.trim()).ok_or_else(|| adapter_shape(args))
+}
+
+fn required_field_strings(args: &str, key: &str) -> Result<Vec<String>, Diagnostic> {
+    let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+    let body = value
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| adapter_shape(args))?;
+    split_top_level(body)
+        .into_iter()
+        .map(|item| unquote(item.trim()).ok_or_else(|| adapter_shape(args)))
+        .collect()
+}
+
 fn call_args<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = raw.trim().strip_prefix(prefix)?.trim_start();
     let rest = rest.strip_prefix('(')?;
-    let end = rest.rfind(')')?;
-    Some(&rest[..end])
+    rest.strip_suffix(')')
 }
 
 fn named_raw(args: &str, key: &str) -> Option<String> {
@@ -1085,7 +1205,7 @@ fn adapter_shape(_raw: &str) -> Diagnostic {
     Diagnostic::error(
         "E1270",
         "adapter package declaration is not complete".to_string(),
-        "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; this U20 slice supports `Recipe.copy()` and `Recipe.prebuilt(bin:, as:)`.".to_string(),
+        "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; recipes are `Recipe.copy()`, `Recipe.prebuilt(bin:, as:)`, or a finite `Recipe.build(steps: […])`.".to_string(),
         "write `Pkg.adapt(name: \"tool\", source: \"./vendor/tool\", recipe: Recipe.copy())`.".to_string(),
         None,
     )

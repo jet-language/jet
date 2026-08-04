@@ -57,6 +57,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         block_depth: 0,
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
+        allow_lowercase_leading_dot: false,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
@@ -96,6 +97,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         block_depth: 0,
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
+        allow_lowercase_leading_dot: false,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
@@ -225,6 +227,10 @@ struct Parser<'a> {
     /// application instead of becoming a comparison. Nested expressions can
     /// still use `>` normally.
     module_arg_expr_depth: Option<usize>,
+    /// D-JPK-BUILDRECIPE1: lower-case leading-dot build steps are values only
+    /// inside the ratified `Recipe.build(steps: [...])` surface. Ordinary
+    /// expressions keep the existing upper-case enum-variant grammar.
+    allow_lowercase_leading_dot: bool,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
@@ -1044,6 +1050,7 @@ fn run() {
             block_depth: 0,
             callable_tail_block_depth: None,
             module_arg_expr_depth: None,
+            allow_lowercase_leading_dot: false,
             policy_declarations: Vec::new(),
             applied_rules: Vec::new(),
             rule_facts: Vec::new(),

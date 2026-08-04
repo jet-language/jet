@@ -3798,14 +3798,15 @@ never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
 stored-ref-field mechanism it reported on (`--facts refs` is an
 unknown-lens usage error today).
 
-**Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
+**Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-BUILDRECIPE1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
 D-JPK-OFFLINE1, U5, D-MONOREF1)*: `jetpack` is its own binary
 (`run/build/list/clean/add/remove` + `enter`); Jetpack owns the user model,
 refs, lock, shells — Nix is one provider behind the `core`-first resolver
 trait (tvix shim scoped I6 waiver for the no-installed-nix goal). Ad-hoc
 adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
-(`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`). Hangar GC by age
+(`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`) and finite executable
+`Recipe.build(steps: […])` actions. Hangar GC by age
 (default 30 days), `jet clean` (one verb: garbage-collect + optimize the
 hangar via hardlink/dedup, `nix store optimise` equivalent; owner amendment
 2026-07-03 — there is no `jet store gc`), `jet hangar du`; no daemon, no root
@@ -4000,10 +4001,17 @@ implementation.
   Jet package can replace a foreign surface without call-site rewrites.
 
 **D-JPK-ADAPTNAME1 (=A, ratified 2026-07-03, c9jetpackgates)**: adapter
-spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the `Recipe.*`
-family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
-`Recipe.build(fn(b: BuildContext))`) — the vision-doc spelling is now law;
+spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the curated
+`Recipe.*` family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`).
 `jet add <ref> --adapt` drafts one.
+
+**D-JPK-BUILDRECIPE1 (=A, ratified 2026-08-03)**: an executable adapter uses
+the finite public form `Recipe.build(steps: […])`. Its steps are `.fetch(url:,
+sha256:)`, `.exec(tool:, args:)`, `.install(src:, dest:)`, and
+`.install_tree(src:, dest:)`. The parser lowers these values into the existing
+`BuildStep` action graph. Unknown fields, missing fields, unlocked fetches,
+invalid paths, cycles, and partial outputs remain errors; the recipe does not
+add ambient authority or a second build mechanism.
 
 **U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
 

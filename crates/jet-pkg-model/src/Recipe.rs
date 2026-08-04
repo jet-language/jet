@@ -12,7 +12,7 @@
 use crate::SHA256;
 
 /// One step of a build recipe. Names are internal; the user-facing spellings are
-/// D-JPK-ADAPTNAME1 (card #176).
+/// the finite `Recipe.build(steps: […])` forms from D-JPK-BUILDRECIPE1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildStep {
     /// A locked network fetch. `sha256` must be present; an empty hash is

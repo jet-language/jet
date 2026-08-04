@@ -493,6 +493,56 @@ module dev {
     }
 
     #[test]
+    fn evaluate_env_captures_finite_build_recipe() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "wiretool",
+                source: "./vendor/wiretool",
+                recipe: Recipe.build(steps: [
+                    .fetch(url: "https://example.test/wiretool.tar", sha256: "sha256-source"),
+                    .exec(tool: "cc", args: ["-O2", "main.c", "-o", "wiretool"]),
+                    .install(src: "wiretool", dest: "bin/wiretool"),
+                    .install_tree(src: "share", dest: "share"),
+                ])
+            )
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        let AdapterRecipe::Build(recipe) = &plan.adapters[0].recipe else {
+            panic!("expected a finite build recipe");
+        };
+        assert_eq!(recipe.steps.len(), 4);
+        assert!(matches!(recipe.steps[0], super::super::Recipe::BuildStep::Fetch { .. }));
+        assert!(matches!(recipe.steps[1], super::super::Recipe::BuildStep::Exec { .. }));
+        assert!(matches!(recipe.steps[2], super::super::Recipe::BuildStep::Install { .. }));
+        assert!(matches!(recipe.steps[3], super::super::Recipe::BuildStep::InstallTree { .. }));
+    }
+
+    #[test]
+    fn evaluate_env_rejects_unknown_build_step_fields() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [Pkg.adapt(
+            name: "tool",
+            source: "./vendor/tool",
+            recipe: Recipe.build(steps: [
+                .exec(tool: "cc", args: [], shell: "sh"),
+            ])
+        )],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
+    }
+
+    #[test]
     fn evaluate_env_bad_adapter_is_e1270() {
         let src = r#"
 module dev {
@@ -509,6 +559,8 @@ module dev {
 "#;
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E1270");
+        let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
+        check_diagnostic_snapshot("E1270", &rendered);
     }
 
     #[test]

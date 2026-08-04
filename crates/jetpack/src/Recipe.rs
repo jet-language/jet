@@ -1,10 +1,10 @@
 //! Build recipe substrate + sandbox (D-JPK-ADAPTER1=A safety contract).
 //!
 //! A `BuildRecipe` turns a staged source tree into a realized package under a
-//! confined, auditable build. This is the *internal* substrate the ad-hoc
-//! adapter surface (`Recipe.*`, card #176 / D-JPK-ADAPTNAME1) will sit on — the
-//! constructor spellings are owner ballot surface and are **not** hardcoded
-//! here; callers build `BuildStep`s directly.
+//! confined, auditable build. This is the internal substrate for the ad-hoc
+//! adapter surface (`Recipe.*`, D-JPK-ADAPTNAME1 and D-JPK-BUILDRECIPE1);
+//! callers build `BuildStep`s directly after the public finite recipe is
+//! lowered.
 //!
 //! The safety contract (D-JPK-ADAPTER1=A), enforced structurally:
 //! - **network** is denied except a locked `fetch(url, sha256:)` — a fetch with

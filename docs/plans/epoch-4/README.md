@@ -78,7 +78,7 @@ unratified role filenames.
 | U17 | `D-JPK-OSNAME1` | A | Spell the OS `jetos`. |
 | U18 | `D-JPK-TWONAMES1` + follow-ups | amended | Reserved files are `pkg.jet`, `env.jet`, and `workspace.jet`; role modules are shaped by declaration; engines dispatched as executables. |
 | U19 | `D-JPK-DEVCOMPOSE1` | D | `jet env [name]` enters a tools-only shell and never runs project functions; `jet dev` explicitly runs `fn dev()` inside `env(base + env.dev)`. |
-| U20 | `D-JPK-ADAPTER1` | A | Ad-hoc adapters: `Pkg.adapt(source:, recipe:)` turns fetched bytes into packages for refs with no `pkg.jet`/flake/nixpkgs path; `jet add <ref> --adapt` drafts from read-only probes; curated recipes over one `Recipe.build(fn(BuildContext))`; constructor names are follow-up ballot surface. |
+| U20 | `D-JPK-ADAPTER1` + `D-JPK-BUILDRECIPE1` | A | Ad-hoc adapters: `Pkg.adapt(source:, recipe:)` turns fetched bytes into packages for refs with no `pkg.jet`/flake/nixpkgs path; `jet add <ref> --adapt` drafts from read-only probes; executable adapters use finite `Recipe.build(steps: […])` actions. |
 | U21 | `D-JPK-CHANNEL1` | A | Channel refs (`#latest`, `#v0.x`, `#main`) resolve only in `jet update` / first `add`; lock stays exact; `jet outdated` read-only; unlocked channel ref in CI is an error. |
 | U22 | `D-JPK-GC1` | B (amended 2026-07-03) | Hangar disk contract: auto-GC ages out unreferenced objects (30d default, opportunistic, no daemon) + manual `jet clean` (GC + hangar optimize: hardlink/dedup, `nix store optimise` equivalent, one pass) + honest `jet hangar du`; lockfile/generation-reachable never collected; zero-/tmp guarantee golden-tested; build scratch hangar-scoped and crash-cleaned. |
 | U23 | `D-JPK-NONIX1` | A | No-Nix machines: everything Nix-free realizes; bridge-needing packages fail with one E12xx naming them + both fixes (install Nix / `--adapt`); never holds realized packages hostage. |
@@ -153,10 +153,10 @@ Edges:
 - U22 (disk contract) and U29 (offline guarantee) are Phase A constraints with
   golden tests; U28 (no daemon / no root) is a standing constraint CI asserts
   from Phase A onward.
-- U20 adapters land with Phase B; `Recipe.prebuilt`/`copy` first (no
-  BuildContext), `Recipe.build(fn)` waits for the D-BUILDPOLICY1 authority
-  slice from e5's build-as-Jet card. U21 channels and U27 build debugging ride
-  the same wave. U26 discovery follows once provider metadata is indexable.
+- U20 adapters land with Phase B; `Recipe.prebuilt`/`copy` and the finite
+  `Recipe.build(steps: […])` action surface use the existing digest-bound
+  sandbox and trust gate. U21 channels and U27 build debugging ride the same
+  wave. U26 discovery follows once provider metadata is indexable.
 - U25 platform tiers: Windows/macOS CI lanes stand up in Phase A; the Nix
   bridge is exempt (Linux/macOS by nature) and U23's diagnostic covers the gap.
 

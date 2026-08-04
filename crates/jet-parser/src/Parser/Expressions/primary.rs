@@ -455,6 +455,17 @@ impl<'a> Parser<'a> {
                             type_args
                         };
                         if matches!(self.peek().kind, TokKind::LParen) {
+                            // D-JPK-BUILDRECIPE1: the finite build-step values
+                            // use lower-case leading-dot names (`.exec(...)`,
+                            // `.install(...)`). Keep that spelling scoped to
+                            // the ratified Recipe.build call; ordinary value
+                            // expressions retain the existing upper-case-only
+                            // leading-dot enum grammar.
+                            let recipe_build = type_name == "Recipe" && member == "build";
+                            let previous_lowercase = self.allow_lowercase_leading_dot;
+                            if recipe_build {
+                                self.allow_lowercase_leading_dot = true;
+                            }
                             self.bump();
                             let mut args = Vec::new();
                             if member == Syntax::METHOD_TAKE_PATTERN {
@@ -519,7 +530,7 @@ impl<'a> Parser<'a> {
                                 }
                             }
                             self.expect(TokKind::RParen, "to finish the call")?;
-                            return Ok(Expr::MethodCall {
+                            let result = Expr::MethodCall {
                                 receiver: Box::new(Expr::Ident(type_name, span)),
                                 method: member,
                                 method_span: member_span,
@@ -527,7 +538,9 @@ impl<'a> Parser<'a> {
                                 args,
                                 recv_type: None,
                                 resolved_ret: None,
-                            });
+                            };
+                            self.allow_lowercase_leading_dot = previous_lowercase;
+                            return Ok(result);
                         }
                         return Ok(Expr::Field(
                             Box::new(Expr::Ident(type_name, span)),
@@ -563,7 +576,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        fn str_expr_from_parts(
+        pub(super) fn str_expr_from_parts(
             &mut self,
             parts: Vec<StrTokPart>,
             span: Span,
@@ -588,6 +601,7 @@ impl<'a> Parser<'a> {
                             block_depth: 0,
                             callable_tail_block_depth: None,
                             module_arg_expr_depth: None,
+                            allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
                             policy_declarations: Vec::new(),
                             applied_rules: Vec::new(),
                             rule_facts: Vec::new(),
