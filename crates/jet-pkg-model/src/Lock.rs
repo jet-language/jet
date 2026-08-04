@@ -6,6 +6,7 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Manifest::{DepSpec, GitSelector, Manifest};
+use crate::Overlay::{OverlayPolicy, OverlaySet, PackageOverride, ProviderOverride};
 use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use std::collections::BTreeSet;
@@ -160,6 +161,12 @@ pub struct LockFile {
     /// D-WORKSPACELOCK1=A: monorepo workspace members live in this same
     /// lockfile, not in a separate `.jet/workspace.lock`.
     pub workspace_members: Vec<LockedWorkspaceMember>,
+    /// D-WORKSPACELOCK1=A: the workspace source identity is retained even
+    /// when a valid workspace has no members.
+    pub workspace_source_digest: Option<String>,
+    /// D-JPK-OVERLAY1=A: the checked workspace overlay policy is part of the
+    /// same lock model used by read-only consumers.
+    pub workspace_overlay_policy: OverlayPolicy,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs hashed at compile
     /// time. An entry per `embed_file`/`embed_bytes` call, recording the
     /// relative path and the sha256 of the file bytes. Verifying builds can
@@ -179,6 +186,8 @@ pub struct LockedWorkspaceMember {
     pub path: String,
     pub source_digest: String,
     pub canonical_path: String,
+    /// Digest of the fully composed typed Package facts for this member.
+    pub package_digest: String,
 }
 
 // ──────────────────────────────────────────────
@@ -306,19 +315,6 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str(&format!("exact = \"{}\"\n", escape_str(&source.exact)));
     }
 
-    out.push('\n');
-    out.push_str("[root]\n");
-    if !lock.root_dependencies.is_empty() {
-        let deps: Vec<String> = lock
-            .root_dependencies
-            .iter()
-            .map(|d| format!("\"{}\"", d))
-            .collect();
-        out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
-    } else {
-        out.push_str("dependencies = []\n");
-    }
-
     for member in &lock.workspace_members {
         out.push('\n');
         out.push_str("[[workspace_member]]\n");
@@ -332,6 +328,32 @@ pub fn write(lock: &LockFile) -> String {
             "canonical_path = \"{}\"\n",
             escape_str(&member.canonical_path)
         ));
+        out.push_str(&format!(
+            "package_digest = \"{}\"\n",
+            escape_str(&member.package_digest)
+        ));
+    }
+
+    if let Some(digest) = &lock.workspace_source_digest {
+        out.push_str(&format!(
+            "\nworkspace_source_digest = \"{}\"\n",
+            escape_str(digest)
+        ));
+    }
+
+    write_workspace_overlay_policy(&mut out, &lock.workspace_overlay_policy);
+
+    out.push('\n');
+    out.push_str("[root]\n");
+    if !lock.root_dependencies.is_empty() {
+        let deps: Vec<String> = lock
+            .root_dependencies
+            .iter()
+            .map(|d| format!("\"{}\"", d))
+            .collect();
+        out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
+    } else {
+        out.push_str("dependencies = []\n");
     }
 
     // D-CTEFFECT1 Tier-1: embed inputs.
@@ -343,6 +365,84 @@ pub fn write(lock: &LockFile) -> String {
     }
 
     out
+}
+
+fn write_string_array(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", escape_str(value)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
+    if !policy.allow_unfree.is_empty() {
+        out.push_str(&format!(
+            "workspace_policy_allow_unfree = {}\n",
+            write_string_array(&policy.allow_unfree)
+        ));
+    }
+    if !policy.build_deny.is_empty() {
+        out.push_str(&format!(
+            "workspace_policy_build_deny = {}\n",
+            write_string_array(&policy.build_deny)
+        ));
+    }
+    for (package, grants) in &policy.build_grants {
+        out.push_str("\n[[workspace_build_grant]]\n");
+        out.push_str(&format!("package = \"{}\"\n", escape_str(package)));
+        out.push_str(&format!("effects = {}\n", write_string_array(grants)));
+    }
+    for overlay in &policy.overlays {
+        out.push_str("\n[[workspace_overlay]]\n");
+        out.push_str(&format!("name = \"{}\"\n", escape_str(&overlay.name)));
+        if let Some(provider) = &overlay.provider {
+            out.push_str(&format!("provider = \"{}\"\n", escape_str(&provider.provider)));
+            if let Some(channel) = &provider.channel {
+                out.push_str(&format!("channel = \"{}\"\n", escape_str(channel)));
+            }
+        }
+        for package in &overlay.packages {
+            out.push_str("\n[[workspace_overlay_package]]\n");
+            out.push_str(&format!("overlay = \"{}\"\n", escape_str(&overlay.name)));
+            out.push_str(&format!("package = \"{}\"\n", escape_str(&package.package)));
+            if let Some(source) = &package.source {
+                out.push_str(&format!("source = \"{}\"\n", escape_str(source)));
+            }
+            if let Some(version) = &package.version {
+                out.push_str(&format!("version = \"{}\"\n", escape_str(version)));
+            }
+            if !package.flags.is_empty() {
+                out.push_str(&format!("flags = {}\n", write_string_array(&package.flags)));
+            }
+            out.push_str(&format!("priority = {}\n", package.priority));
+            if !package.field_priorities.is_empty() {
+                let values = package
+                    .field_priorities
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>();
+                out.push_str(&format!("field_priorities = {}\n", write_string_array(&values)));
+            }
+            if !package.env.is_empty() {
+                let values = package
+                    .env
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>();
+                out.push_str(&format!("env = {}\n", write_string_array(&values)));
+            }
+            if !package.patches.is_empty() {
+                out.push_str(&format!("patches = {}\n", write_string_array(&package.patches)));
+            }
+            if package.allow_unfree {
+                out.push_str("allow_unfree = true\n");
+            }
+        }
+    }
 }
 
 fn escape_str(s: &str) -> String {
@@ -377,6 +477,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut packages: Vec<LockedPackage> = Vec::new();
     let mut root_deps: Vec<String> = Vec::new();
     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
+    let mut workspace_source_digest: Option<String> = None;
+    let mut workspace_overlay_sets: Vec<PartialWorkspaceOverlay> = Vec::new();
+    let mut workspace_overlay_packages: Vec<PartialWorkspaceOverlayPackage> = Vec::new();
+    let mut workspace_build_grants: Vec<PartialWorkspaceBuildGrant> = Vec::new();
+    let mut workspace_policy_allow_unfree = Vec::new();
+    let mut workspace_policy_build_deny = Vec::new();
     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
     let mut toolchains: Vec<LockedToolchain> = Vec::new();
     let mut browsers: Vec<LockedBrowser> = Vec::new();
@@ -387,6 +493,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut current_toolchain: Option<PartialToolchain> = None;
     let mut current_browser: Option<PartialBrowser> = None;
     let mut current_source_channel: Option<PartialSourceChannel> = None;
+    let mut current_workspace_overlay: Option<PartialWorkspaceOverlay> = None;
+    let mut current_workspace_overlay_package: Option<PartialWorkspaceOverlayPackage> = None;
+    let mut current_workspace_build_grant: Option<PartialWorkspaceBuildGrant> = None;
     let mut in_root = false;
 
     for line in raw.lines() {
@@ -420,6 +529,21 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     source_channels.push(c);
                 }
             }
+            if let Some(package) = current_workspace_overlay_package.take() {
+                if let Some(package) = package.finish() {
+                    workspace_overlay_packages.push(package);
+                }
+            }
+            if let Some(overlay) = current_workspace_overlay.take() {
+                if let Some(overlay) = overlay.finish() {
+                    workspace_overlay_sets.push(overlay);
+                }
+            }
+            if let Some(grant) = current_workspace_build_grant.take() {
+                if let Some(grant) = grant.finish() {
+                    workspace_build_grants.push(grant);
+                }
+            }
             in_root = false;
             match line {
                 "[[comptime_inputs]]" => current_ci = Some(PartialCi::default()),
@@ -431,6 +555,16 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "[[browser]]" => current_browser = Some(PartialBrowser::default()),
                 "[[source_channel]]" => {
                     current_source_channel = Some(PartialSourceChannel::default())
+                }
+                "[[workspace_overlay]]" => {
+                    current_workspace_overlay = Some(PartialWorkspaceOverlay::default())
+                }
+                "[[workspace_overlay_package]]" => {
+                    current_workspace_overlay_package =
+                        Some(PartialWorkspaceOverlayPackage::default())
+                }
+                "[[workspace_build_grant]]" => {
+                    current_workspace_build_grant = Some(PartialWorkspaceBuildGrant::default())
                 }
                 "[root]" => in_root = true,
                 _ => {}
@@ -447,9 +581,24 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             && current_pkg.is_none()
             && current_toolchain.is_none()
             && current_browser.is_none()
+            && current_workspace_overlay_package.is_none()
             && !in_root
         {
             version = val.trim_matches('"').parse().ok();
+            continue;
+        }
+
+        if key == "workspace_source_digest" && current_pkg.is_none() && !in_root {
+            workspace_source_digest = Some(val.trim_matches('"').to_string());
+            continue;
+        }
+
+        if key == "workspace_policy_allow_unfree" && current_pkg.is_none() && !in_root {
+            workspace_policy_allow_unfree = parse_string_array(val);
+            continue;
+        }
+        if key == "workspace_policy_build_deny" && current_pkg.is_none() && !in_root {
+            workspace_policy_build_deny = parse_string_array(val);
             continue;
         }
 
@@ -474,6 +623,40 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "path" => wm.path = Some(val.trim_matches('"').to_string()),
                 "source_digest" => wm.source_digest = Some(val.trim_matches('"').to_string()),
                 "canonical_path" => wm.canonical_path = Some(val.trim_matches('"').to_string()),
+                "package_digest" => wm.package_digest = Some(val.trim_matches('"').to_string()),
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut overlay) = current_workspace_overlay {
+            match key {
+                "name" => overlay.name = Some(val.trim_matches('"').to_string()),
+                "provider" => overlay.provider = Some(val.trim_matches('"').to_string()),
+                "channel" => overlay.channel = Some(val.trim_matches('"').to_string()),
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut package) = current_workspace_overlay_package {
+            match key {
+                "overlay" => package.overlay = Some(val.trim_matches('"').to_string()),
+                "package" => package.package = Some(val.trim_matches('"').to_string()),
+                "source" => package.source = Some(val.trim_matches('"').to_string()),
+                "version" => package.version = Some(val.trim_matches('"').to_string()),
+                "flags" => package.flags = parse_string_array(val),
+                "priority" => package.priority = val.parse().ok(),
+                "field_priorities" => package.field_priorities = parse_string_array(val),
+                "env" => package.env = parse_string_array(val),
+                "patches" => package.patches = parse_string_array(val),
+                "allow_unfree" => package.allow_unfree = val == "true",
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut grant) = current_workspace_build_grant {
+            match key {
+                "package" => grant.package = Some(val.trim_matches('"').to_string()),
+                "effects" => grant.effects = parse_string_array(val),
                 _ => {}
             }
             continue;
@@ -575,11 +758,37 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
     }
 
+    if let Some(package) = current_workspace_overlay_package {
+        if let Some(package) = package.finish() {
+            workspace_overlay_packages.push(package);
+        }
+    }
+    if let Some(overlay) = current_workspace_overlay {
+        if let Some(overlay) = overlay.finish() {
+            workspace_overlay_sets.push(overlay);
+        }
+    }
+    if let Some(grant) = current_workspace_build_grant {
+        if let Some(grant) = grant.finish() {
+            workspace_build_grants.push(grant);
+        }
+    }
+
+    let workspace_overlay_policy = build_workspace_overlay_policy(
+        workspace_overlay_sets,
+        workspace_overlay_packages,
+        workspace_build_grants,
+        workspace_policy_allow_unfree,
+        workspace_policy_build_deny,
+    )?;
+
     Ok(LockFile {
         version: version.unwrap_or(0),
         packages,
         root_dependencies: root_deps,
         workspace_members,
+        workspace_source_digest,
+        workspace_overlay_policy,
         comptime_inputs,
         toolchains,
         browsers,
@@ -592,10 +801,36 @@ fn parse_string_array(val: &str) -> Vec<String> {
     if val.trim().is_empty() {
         return Vec::new();
     }
-    val.split(',')
-        .map(|s| s.trim().trim_matches('"').to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for character in val.chars() {
+        if escaped {
+            current.push(match character {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+        } else if quoted && character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            quoted = !quoted;
+        } else if character == ',' && !quoted {
+            if !current.trim().is_empty() {
+                values.push(current.trim().to_string());
+            }
+            current.clear();
+        } else if quoted || !character.is_whitespace() {
+            current.push(character);
+        }
+    }
+    if !current.trim().is_empty() {
+        values.push(current.trim().to_string());
+    }
+    values
 }
 
 #[derive(Default)]
@@ -619,6 +854,7 @@ struct PartialWorkspaceMember {
     path: Option<String>,
     source_digest: Option<String>,
     canonical_path: Option<String>,
+    package_digest: Option<String>,
 }
 
 impl PartialWorkspaceMember {
@@ -628,8 +864,131 @@ impl PartialWorkspaceMember {
             path: self.path?,
             source_digest: self.source_digest?,
             canonical_path: self.canonical_path?,
+            package_digest: self.package_digest.unwrap_or_default(),
         })
     }
+}
+
+#[derive(Default)]
+struct PartialWorkspaceOverlay {
+    name: Option<String>,
+    provider: Option<String>,
+    channel: Option<String>,
+}
+
+impl PartialWorkspaceOverlay {
+    fn finish(self) -> Option<Self> {
+        self.name.map(|name| Self {
+            name: Some(name),
+            provider: self.provider,
+            channel: self.channel,
+        })
+    }
+}
+
+#[derive(Default)]
+struct PartialWorkspaceOverlayPackage {
+    overlay: Option<String>,
+    package: Option<String>,
+    source: Option<String>,
+    version: Option<String>,
+    flags: Vec<String>,
+    priority: Option<i32>,
+    field_priorities: Vec<String>,
+    env: Vec<String>,
+    patches: Vec<String>,
+    allow_unfree: bool,
+}
+
+impl PartialWorkspaceOverlayPackage {
+    fn finish(self) -> Option<Self> {
+        Some(self)
+    }
+}
+
+#[derive(Default)]
+struct PartialWorkspaceBuildGrant {
+    package: Option<String>,
+    effects: Vec<String>,
+}
+
+impl PartialWorkspaceBuildGrant {
+    fn finish(self) -> Option<Self> {
+        self.package.map(|package| Self {
+            package: Some(package),
+            effects: self.effects,
+        })
+    }
+}
+
+fn split_fact(value: &str) -> Option<(String, String)> {
+    let (key, value) = value.split_once('=')?;
+    Some((key.to_string(), value.to_string()))
+}
+
+fn build_workspace_overlay_policy(
+    overlays: Vec<PartialWorkspaceOverlay>,
+    packages: Vec<PartialWorkspaceOverlayPackage>,
+    grants: Vec<PartialWorkspaceBuildGrant>,
+    allow_unfree: Vec<String>,
+    build_deny: Vec<String>,
+) -> Result<OverlayPolicy, String> {
+    let mut policy = OverlayPolicy {
+        overlays: overlays
+            .into_iter()
+            .map(|overlay| OverlaySet {
+                name: overlay.name.unwrap_or_default(),
+                provider: overlay.provider.map(|provider| ProviderOverride {
+                    provider,
+                    channel: overlay.channel.clone(),
+                }),
+                packages: Vec::new(),
+            })
+            .collect(),
+        allow_unfree,
+        build_deny,
+        build_grants: grants
+            .into_iter()
+            .filter_map(|grant| Some((grant.package?, grant.effects)))
+            .collect(),
+    };
+    for package in packages {
+        let overlay_name = package.overlay.unwrap_or_default();
+        let target = policy
+            .overlays
+            .iter_mut()
+            .find(|overlay| overlay.name == overlay_name)
+            .ok_or_else(|| format!("workspace overlay package names unknown overlay `{overlay_name}`"))?;
+        let mut field_priorities = std::collections::BTreeMap::new();
+        for fact in package.field_priorities {
+            let (key, value) = split_fact(&fact)
+                .ok_or_else(|| format!("invalid workspace overlay field priority `{fact}`"))?;
+            let priority = value
+                .parse()
+                .map_err(|_| format!("invalid workspace overlay field priority `{fact}`"))?;
+            field_priorities.insert(key, priority);
+        }
+        let env = package
+            .env
+            .into_iter()
+            .map(|fact| {
+                split_fact(&fact)
+                    .ok_or_else(|| format!("invalid workspace overlay environment fact `{fact}`"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        target.packages.push(PackageOverride {
+            package: package.package.unwrap_or_default(),
+            source: package.source,
+            version: package.version,
+            flags: package.flags,
+            priority: package.priority.unwrap_or_default(),
+            field_priorities,
+            env,
+            patches: package.patches,
+            allow_unfree: package.allow_unfree,
+        });
+    }
+    Ok(policy)
 }
 
 #[derive(Default)]
@@ -927,6 +1286,8 @@ pub fn record_nix_realization(
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1066,6 +1427,8 @@ pub fn record_cran_realization(
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1143,6 +1506,8 @@ pub fn record_luarocks_realization(
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1221,6 +1586,8 @@ pub fn record_registry_realization(
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1303,6 +1670,8 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1338,6 +1707,8 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1405,6 +1776,8 @@ pub fn record_generated_inputs(
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1484,6 +1857,8 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
             packages: Vec::new(),
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),
@@ -1736,6 +2111,8 @@ mod a4_envelope_tests {
             packages,
             root_dependencies: Vec::new(),
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains,
             browsers: Vec::new(),
@@ -1810,6 +2187,42 @@ mod a4_envelope_tests {
         assert_eq!(back.toolchains, vec![tc]);
         // The toolchain's `version` key must not be mistaken for the lockfile version.
         assert_eq!(back.version, LOCK_VERSION);
+    }
+
+    #[test]
+    fn lock_roundtrips_workspace_overlay_policy() {
+        let policy = crate::Overlay::OverlayPolicy {
+            overlays: vec![crate::Overlay::OverlaySet {
+                name: "rust".to_string(),
+                provider: Some(crate::Overlay::ProviderOverride {
+                    provider: "nixpkgs".to_string(),
+                    channel: Some("unstable".to_string()),
+                }),
+                packages: vec![crate::Overlay::PackageOverride {
+                    package: "rustc".to_string(),
+                    source: Some("rust-overlay".to_string()),
+                    version: Some("1.82".to_string()),
+                    flags: vec!["llvm".to_string()],
+                    priority: 20,
+                    field_priorities: std::collections::BTreeMap::from([
+                        ("version".to_string(), 20),
+                        ("env.RUST_SRC".to_string(), 10),
+                    ]),
+                    env: vec![("RUST_SRC".to_string(), "src".to_string())],
+                    patches: vec!["patches/rust.patch".to_string()],
+                    allow_unfree: true,
+                }],
+            }],
+            allow_unfree: vec!["cuda".to_string()],
+            build_deny: vec!["network".to_string()],
+            build_grants: vec![("rustc".to_string(), vec!["filesystem".to_string()])],
+        };
+        let mut lock = base_lock(Vec::new(), Vec::new());
+        lock.workspace_source_digest = Some("sha256-workspace".to_string());
+        lock.workspace_overlay_policy = policy.clone();
+        let back = parse(&write(&lock)).expect("workspace overlay lock must parse");
+        assert_eq!(back.workspace_source_digest, lock.workspace_source_digest);
+        assert_eq!(back.workspace_overlay_policy, policy);
     }
 
     /// `record_envelope` backfills a realized object's envelope into an

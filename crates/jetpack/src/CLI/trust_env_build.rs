@@ -297,7 +297,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
             );
             return Err(2);
         }
-        let dotenv_path = std::env::current_dir().unwrap_or_default().join(relative);
+        let dotenv_path = plan.project_root.join(relative);
         match read_dotenv(&dotenv_path) {
             Ok(values) => {
                 for (name, value) in values {
@@ -584,6 +584,7 @@ pub(crate) fn compose_refs_for_test(roots: &Roots, refs: Vec<RefSpec::RefSpec>) 
         roots,
         &parsed.flags,
         &RunPlan {
+            project_root: std::env::current_dir().unwrap_or_default(),
             refs,
             adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
@@ -723,6 +724,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
             Ok(s) => RunPlan {
+                project_root: dir.clone(),
                 refs: vec![s],
                 adapters: Vec::new(),
                 table: cwd_table(),

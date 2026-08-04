@@ -1,6 +1,8 @@
 //! D-SEMINDEX1: stable public query types (versioned independently of LSP internals).
 
 use jet_foundation::Diagnostics::Span;
+use jet_pkg_model::Overlay::OverlayPolicy;
+use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
@@ -419,6 +421,10 @@ pub struct SemIndex {
     bypasses: Vec<BypassFact>,
     instances: Vec<InstanceFact>,
     outputs: Vec<OutputFact>,
+    /// Canonical Package/Config facts for the owning source tree, when this
+    /// index was built for a package entry.
+    package_facts: Option<PackageFacts>,
+    workspace_overlay_policy: Option<OverlayPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,6 +456,8 @@ impl SemIndex {
             bypasses: Vec::new(),
             instances: Vec::new(),
             outputs: Vec::new(),
+            package_facts: None,
+            workspace_overlay_policy: None,
         }
     }
 
@@ -464,6 +472,27 @@ impl SemIndex {
     pub fn instances(&self) -> &[InstanceFact] { &self.instances }
     pub(crate) fn set_outputs(&mut self, outputs: Vec<OutputFact>) { self.outputs = outputs; }
     pub fn outputs(&self) -> &[OutputFact] { &self.outputs }
+
+    pub fn package_facts(&self) -> Option<&PackageFacts> {
+        self.package_facts.as_ref()
+    }
+
+    /// Attach the shared typed package model after the compiler facts exist.
+    /// Existing package-neutral constructors remain valid.
+    pub fn attach_package_facts(&mut self, facts: PackageFacts) {
+        self.package_facts = Some(facts);
+    }
+
+    pub fn workspace_overlay_policy(&self) -> Option<&OverlayPolicy> {
+        self.workspace_overlay_policy.as_ref()
+    }
+
+    /// Attach the persisted workspace policy consumed by package-facing
+    /// tooling. The lock is the authority; source evaluation is not repeated
+    /// here.
+    pub fn attach_workspace_overlay_policy(&mut self, policy: OverlayPolicy) {
+        self.workspace_overlay_policy = Some(policy);
+    }
 
     pub fn bypasses(&self) -> &[BypassFact] {
         &self.bypasses

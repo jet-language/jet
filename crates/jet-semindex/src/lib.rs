@@ -8,6 +8,7 @@ mod JSON;
 mod Symbols;
 mod Types;
 
+pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
     build_index, build_symbol_db, structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef,
@@ -28,6 +29,7 @@ pub use Symbols::{
 
 use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::AST::ProgramBundle;
+use jet_pkg_model::Package::PackageFacts;
 use std::path::Path;
 
 /// Structured errors for project loading / I/O only (compiler diagnostics stay
@@ -52,6 +54,53 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
     build_index(bundle, facts)
 }
 
+/// Load the canonical Package facts that own an entry. Standalone source has
+/// no package projection; malformed package source remains the responsibility
+/// of the package/Canvas diagnostic path.
+pub fn package_facts_for_entry(entry: &Path) -> Option<PackageFacts> {
+    let mut dir = entry
+        .canonicalize()
+        .unwrap_or_else(|_| entry.to_path_buf());
+    if !dir.is_dir() {
+        dir = dir.parent()?.to_path_buf();
+    }
+    loop {
+        if dir.join("package.jet").is_file() || dir.join("pkg.jet").is_file() {
+            return PackageFacts::load(&dir).and_then(Result::ok);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+/// Find the nearest validated workspace lock for a source entry. Overlay
+/// policy is deliberately read from the persisted lock so Canvas, the
+/// semantic index, and Jetpack do not each reparse workspace policy.
+pub fn workspace_overlay_policy_for_entry(
+    entry: &Path,
+) -> Option<jet_pkg_model::Overlay::OverlayPolicy> {
+    let mut dir = entry.parent()?.to_path_buf();
+    loop {
+        if let Some(plan) = jet_pkg_model::WorkspaceLock::load(&dir) {
+            if !plan.overlay_policy.is_empty() {
+                return Some(plan.overlay_policy);
+            }
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+}
+
+fn attach_package_facts(index: &mut SemIndex, entry: &Path) {
+    if let Some(facts) = package_facts_for_entry(entry) {
+        index.attach_package_facts(facts);
+    }
+    if let Some(policy) = workspace_overlay_policy_for_entry(entry) {
+        index.attach_workspace_overlay_policy(policy);
+    }
+}
+
 /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
 pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
@@ -62,7 +111,9 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry);
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -97,7 +148,9 @@ pub fn open_with_overlays(
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry);
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -117,7 +170,9 @@ pub fn open_structural_with_overlays(
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry);
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -151,7 +206,9 @@ pub fn open_with_overlays_diagnostics_and_inputs(
                 .iter()
                 .map(|module| module.path.clone())
                 .collect();
-            Ok((build_index(&bundle, &facts), diags, inputs))
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry);
+            Ok((index, diags, inputs))
         }
         None => Err(SemIndexError::Load(diags)),
     }
@@ -203,7 +260,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":11"));
+        assert!(json.contains("\"schema_version\":12"));
         assert!(json.contains("\"outputs\""));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
@@ -213,6 +270,78 @@ mod tests {
         assert!(json.contains("\"members\""));
         assert!(json.contains("\"instances\""));
         assert!(json.contains("\"run\""));
+    }
+
+    #[test]
+    fn package_config_facts_are_shared_with_the_index_json() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_package_facts_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.jet"),
+            "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("release.jet"),
+            "Config.{ outputs: .{ app: .Executable.{ entry: run } } }\n",
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let index = open(&entry).expect("package entry should index");
+        let facts = index.package_facts().expect("package facts attached");
+        assert_eq!(facts.name, "demo");
+        assert!(facts.outputs.contains_key("app"));
+        assert_eq!(facts.configs, vec!["release.jet"]);
+        assert!(facts
+            .field_provenance("outputs.app")
+            .iter()
+            .any(|origin| origin.ends_with("release.jet")));
+        let json = index.to_json();
+        assert!(json.contains("\"package_facts\""));
+        assert!(json.contains("\"semantic_digest\":\""));
+        assert!(json.contains("release.jet"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn semantic_index_consumes_persisted_workspace_overlay_facts() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_workspace_overlay_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        let workspace_digest = jet_pkg_model::SHA256::sha256_hex(
+            std::fs::read(root.join("workspace.jet")).unwrap().as_slice(),
+        );
+        std::fs::write(
+            root.join(".jet/lock"),
+            format!(
+                "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\n"
+            ),
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let index = open(&entry).expect("workspace source should index");
+        let policy = index
+            .workspace_overlay_policy()
+            .expect("overlay facts must come from the lock");
+        assert_eq!(policy.allow_unfree, vec!["discord"]);
+        assert_eq!(policy.overlays[0].name, "beta");
+        let json = index.to_json();
+        assert!(json.contains("\"workspace_overlays\""));
+        assert!(json.contains("plasma-beta"));
+        assert!(json.contains("discord"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

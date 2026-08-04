@@ -197,6 +197,13 @@ impl std::error::Error for ComposeError {}
 impl std::error::Error for PackageParseError {}
 
 impl PackageFacts {
+    /// Stable digest of the fully composed typed facts used by workspace
+    /// locks. Source origins remain in the digest because a moved Config is a
+    /// different provenance fact even when its values happen to match.
+    pub fn semantic_digest(&self) -> String {
+        crate::SHA256::sha256_hex(format!("{self:?}").as_bytes())
+    }
+
     /// Parse the canonical `package.jet` root shape.
     pub fn parse(text: &str, origin: impl Into<String>) -> Result<Self, PackageParseError> {
         let facts = Self::parse_uncomposed(text, origin)?;
@@ -441,28 +448,25 @@ impl PackageFacts {
     ) -> Result<Option<std::path::PathBuf>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
-        if let Some(entry) = self.legacy_run_entry(root) {
-            return Ok(Some(entry));
-        }
-        if !self
+        if self
             .outputs
             .values()
             .any(|output| intent_accepts_kind("run", output.kind))
         {
-            return Ok(None);
+            let output = self
+                .select_output("run", None, None)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+            let Some(entry) = self.entry_path(root, output) else {
+                return Err(format!(
+                    "{}: typed output `{}` has no unique source entry for `{}`",
+                    self.origin,
+                    output.name,
+                    output.entry.as_deref().unwrap_or("<missing>")
+                ));
+            };
+            return Ok(Some(entry));
         }
-        let output = self
-            .select_output("run", None, None)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
-        let Some(entry) = self.entry_path(root, output) else {
-            return Err(format!(
-                "{}: typed output `{}` has no unique source entry for `{}`",
-                self.origin,
-                output.name,
-                output.entry.as_deref().unwrap_or("<missing>")
-            ));
-        };
-        Ok(Some(entry))
+        Ok(self.legacy_run_entry(root))
     }
 
     fn legacy_run_entry(&self, root: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -736,6 +740,9 @@ impl ConfigFacts {
         let stripped = strip_comments(text);
         let (declared_name, body) = match config_wrapper(&stripped)? {
             Some((name, body)) => (Some(name), body),
+            None if stripped.trim_start().starts_with("Config") => {
+                (None, record_body(stripped.trim(), "Config")?)
+            }
             None => (None, stripped.as_str()),
         };
         let facts = parse_common(body, origin, true)?;
@@ -2402,7 +2409,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
     }
 
     #[test]
-    fn legacy_run_precedes_a_sole_typed_output() {
+    fn typed_output_precedes_a_legacy_run_entry() {
         let dir = temp_dir("legacy-run");
         std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
         std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
@@ -2414,7 +2421,7 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         .unwrap();
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
-            Some(dir.join("main.jet"))
+            Some(dir.join("serve.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
     }

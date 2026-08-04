@@ -668,7 +668,7 @@ fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<Str
         .collect::<Vec<_>>()
         .join(",");
     Some(format!(
-        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"effects_enabled\":false,\"diagnostics\":[]}}",
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":[]}}",
         json_str(&rel_path(project_root, dir)),
         json_str(&rel_path(project_root, &dir.join("package.jet"))),
         json_str(&facts.name),
@@ -695,6 +695,10 @@ fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<Str
             })
             .collect::<Vec<_>>()
             .join(","),
+        jet_semindex::package_facts_json(&facts),
+        jet_semindex::workspace_overlay_policy_for_entry(&dir.join("package.jet"))
+            .map(|policy| jet_semindex::workspace_overlay_policy_json(&policy))
+            .unwrap_or_else(|| "null".to_string()),
     ))
 }
 

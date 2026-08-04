@@ -1017,6 +1017,8 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         packages: Vec::new(),
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
         browsers: Vec::new(),

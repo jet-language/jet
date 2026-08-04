@@ -11,7 +11,7 @@ use crate::Services;
 use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
 /// current project's env file so `jetpack run ripgrep@stable` works there, and
@@ -35,6 +35,15 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     } else {
         None
     }
+}
+
+/// Resolve the nearest directory that owns an `env.jet` manifest.
+///
+/// Environment commands are allowed from a project subdirectory. Keep the
+/// root explicit so planning, trust, dotenv composition, and managed state
+/// all use the same project identity.
+pub(super) fn project_env_root(start: &Path) -> PathBuf {
+    crate::EnvHook::find_env_root(start).unwrap_or_else(|| start.to_path_buf())
 }
 
 /// Realize one ref, recording it in the store and printing progress. `table`
@@ -476,6 +485,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "for now use a `…@nixpkgs` or `…@github` ref while the native builder lands.",
         ),
+        ProviderError::ForeignProjection(reason) => theme.error_coded(
+            "E1256",
+            "couldn't project the foreign environment",
+            reason,
+            "use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`.",
+        ),
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",
             reason,
@@ -543,6 +558,10 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
 /// The refs to realize, the table that resolves their named sources, and the
 /// prompt label for the resulting shell.
 pub(super) struct RunPlan {
+    /// Canonical project root for project-relative lifecycle files. Keeping
+    /// this beside the typed facts prevents nested hook commands from
+    /// resolving `.env` against the caller's subdirectory.
+    pub(super) project_root: std::path::PathBuf,
     pub(super) refs: Vec<RefSpec::RefSpec>,
     pub(super) adapters: Vec<ModuleEval::AdapterPlan>,
     pub(super) table: RefSpec::SourceTable,
@@ -573,7 +592,8 @@ pub(super) fn load_project_plan_with_profile(
     theme: &Theme,
     requested_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let dir = project_env_root(&cwd);
 
     // Load jetpack.toml [sources] first so they are available as defaults.
     // If the file exists but is malformed, surface the diagnostics and bail out.
@@ -607,6 +627,7 @@ pub(super) fn load_project_plan_with_profile(
     table.merge_defaults(toml_table);
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
+        project_root: dir.clone(),
         refs,
         adapters: Vec::new(),
         table,
@@ -698,6 +719,7 @@ fn typed_plan_with_defaults(
     }
     let refs = classify_all(theme, package_refs.iter().map(String::as_str), &table)?;
     Ok(RunPlan {
+        project_root: dir.to_path_buf(),
         refs,
         adapters: plan.adapters,
         table,
@@ -710,6 +732,8 @@ fn typed_plan_with_defaults(
         secrets: plan.secrets,
         environment: ModuleEval::EnvironmentFacts {
             environment_names: plan.environment_names,
+            active_environment: plan.active_environment,
+            active_environment_provenance: plan.active_environment_provenance,
             source_files: plan.source_files,
             dev_services: plan.dev_services,
             lifecycle: plan.lifecycle,

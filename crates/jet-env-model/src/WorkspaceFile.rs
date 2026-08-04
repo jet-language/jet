@@ -7,7 +7,8 @@
 //!   - Any comptime expression that evaluates to a `[String]`
 //!
 //! The result is a `WorkspacePlan` listing the member packages with their
-//! names (read from each member's `pkg.jet`) and relative paths.
+//! names (read from each member's `package.jet`, with `pkg.jet` retained only
+//! as an explicit migration fallback) and relative paths.
 //!
 //! This replaces the `[packages]` table in `jetpack.toml` (D-WORKSPACE1=B
 //! clean break: when `workspace.jet` is present, it is the sole index).
@@ -344,6 +345,9 @@ fn validate_member_path(
         }
     }
     let path = package_file(&abs).expect("package file checked above");
+    // Diagnostics use the same physical identity as membership validation.
+    // This removes harmless `./` spelling from the reported manifest path.
+    let path = path.canonicalize().unwrap_or(path);
     let text = std::fs::read_to_string(&path).map_err(|error| {
         Diagnostic::error(
             "E1334",

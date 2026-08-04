@@ -904,6 +904,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
 | E1335 | an environment integration has conflicting facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies for one integration. | Merge the declarations or select a target and policy supported by the integration. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
+| E1337 | the requested environment facet is not declared | One environment plan activates one `env.<name>` facet; silently merging sibling facets would mix unrelated packages and variables. | Select one of the declared facet names, or omit the selector to use `dev`, then `default`, then lexical order. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1648,7 +1649,7 @@ exists but can't be evaluated to a valid `WorkspacePlan`.
 |------|------|-----|-----|
 | E0995 | `workspace.jet` has no `module workspace { … }` declaration. | `workspace.jet` is the monorepo index (D-WORKSPACE2=A); it must contain exactly one `module workspace { members: … }` body. | Write `module workspace { members: find("./packages") }` (or an explicit list) in `workspace.jet`. |
 | E0996 | `members:` evaluated to something other than a list of strings. | The `members:` value must evaluate to `[String]` — a list of relative package directory paths. | Use `find("./packages")` or a list literal like `["./packages/hello", "./packages/ranker"]`. |
-| E0997 | `find("…")` in `members:` names a directory that doesn't exist. | `find` scans that directory for subdirectories containing `pkg.jet`; the directory must exist relative to `workspace.jet`. | Create the directory or correct the path in `members: find("…")`. |
+| E0997 | `find("…")` in `members:` names a directory that doesn't exist. | `find` scans that directory for subdirectories containing `package.jet` (or the explicit migration-era `pkg.jet`); the directory must exist relative to `workspace.jet`. | Create the directory or correct the path in `members: find("…")`. |
 
 ### E0995 — No workspace module
 

@@ -74,6 +74,7 @@ fn tool_run(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let roots = Store::resolve();
     let plan = RunPlan {
+        project_root: std::env::current_dir().unwrap_or_default(),
         refs: vec![spec.clone()],
         adapters: Vec::new(),
         table: RefSpec::SourceTable::empty(),
@@ -125,6 +126,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     let roots = Store::resolve();
     let plan = RunPlan {
+        project_root: project_dir.clone(),
         refs: vec![spec.clone()],
         adapters: Vec::new(),
         table: RefSpec::SourceTable::empty(),

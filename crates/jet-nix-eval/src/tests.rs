@@ -608,9 +608,38 @@ fn native_devshell_rejects_unknown_systems_and_empty_flakes() {
 #[test]
 fn pinned_inventory_has_no_implicit_skip_reason() {
     let inventory = pinned_inventory();
+    let manifest = JSON::parse(PINNED_INVENTORY_MANIFEST).expect("inventory manifest JSON");
+    let object = manifest.as_object().expect("inventory manifest object");
+    assert_eq!(object.get("schema"), Some(&JSONValue::Num(1.0)));
+    assert_eq!(object.get("nix_version"), Some(&JSONValue::Str(NIX_VERSION.into())));
+    let entries = object
+        .get("entries")
+        .expect("inventory entries")
+        .as_array()
+        .expect("inventory entries array");
+    assert_eq!(entries.len(), 16);
+    assert_eq!(inventory.len(), entries.len());
+    let counts = object
+        .get("expected_counts")
+        .expect("inventory expected counts")
+        .as_object()
+        .expect("inventory expected counts object");
+    assert_eq!(counts.get("evaluable"), Some(&JSONValue::Num(7.0)));
+    assert_eq!(counts.get("buildable"), Some(&JSONValue::Num(3.0)));
+    assert_eq!(counts.get("skipped"), Some(&JSONValue::Num(6.0)));
+    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Covered).count(), 10);
+    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Skipped).count(), 6);
+    for (entry, manifest_entry) in inventory.iter().zip(entries) {
+        let fields = manifest_entry.as_object().expect("inventory entry object");
+        assert_eq!(fields.get("surface").unwrap().as_str().unwrap(), entry.surface);
+        assert!(!entry.reason.trim().is_empty());
+        assert_eq!(
+            fields.get("reason").unwrap().as_str().unwrap(),
+            entry.reason
+        );
+    }
     assert!(inventory.iter().any(|entry| {
-        entry.surface == "overlays-devshells-multi-output-packages"
-            && entry.status == InventoryStatus::Covered
+        entry.surface == "devshells" && entry.status == InventoryStatus::Covered
     }));
     assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
     assert_eq!(evaluator_budget().input_bytes, 1 << 20);

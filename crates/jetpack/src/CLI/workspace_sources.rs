@@ -22,9 +22,15 @@ pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan,
     let result = WorkspaceFile::load(dir)?;
     match result {
         Ok(plan) => {
-            // Best-effort: write the generated lock for external tools.
-            WorkspaceLock::write(dir, &plan);
-            Some(Ok(plan))
+            match WorkspaceLock::write(dir, &plan) {
+                Ok(()) => Some(Ok(plan)),
+                Err(error) => {
+                    eprintln!(
+                        "error: workspace evaluation succeeded but its unified lock could not be written: {error}"
+                    );
+                    Some(Err(2))
+                }
+            }
         }
         Err(d) => {
             eprint!(
@@ -102,8 +108,41 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
         Some(Ok(plan)) => Some(plan),
         // A malformed `workspace.jet` is source failure, never permission to
         // reuse a stale lock mirror.
-        Some(Err(_)) => None,
-        None => WorkspaceLock::load(&dir),
+        Some(Err(diagnostic)) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    Syntax::WORKSPACE_FILE,
+                    "",
+                    std::slice::from_ref(&diagnostic)
+                )
+            );
+            std::process::exit(2);
+        }
+        None => {
+            let lock = WorkspaceLock::load(&dir);
+            if lock.is_none() {
+                let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+                let looks_like_workspace_lock = std::fs::read_to_string(&path)
+                    .map(|source| {
+                        source.contains("[[workspace_member]]")
+                            || source.contains("workspace_source_digest")
+                            || source.contains("workspace_overlay")
+                    })
+                    .unwrap_or(false);
+                if looks_like_workspace_lock {
+                    eprintln!(
+                        "error: workspace lock `{}` is malformed or stale; refusing an empty member index",
+                        path.display()
+                    );
+                    eprintln!(
+                        " fix: run `jetpack env` from the workspace root to regenerate it after fixing workspace/package sources"
+                    );
+                    std::process::exit(2);
+                }
+            }
+            lock
+        }
     };
     match plan {
         Some(plan) => RefSpec::WorkspaceIndex::from_members(

@@ -1,7 +1,8 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
 use super::realize::{
-    apply_locked_channels, classify_or_report, load_project_plan_with_profile, RunPlan,
+    apply_locked_channels, classify_or_report, load_project_plan_with_profile, project_env_root,
+    RunPlan,
 };
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
@@ -39,7 +40,8 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let select_req = SelectRequest {
         packages: parsed.flags.workspace_members.clone(),
         affected: parsed.flags.affected,
@@ -112,6 +114,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             Ok(spec) => {
                 explicit_package = Some(spec.short_name().to_string());
                 RunPlan {
+                    project_root: project_dir.clone(),
                     refs: vec![spec],
                     adapters: Vec::new(),
                     table: cwd_table(),
@@ -360,6 +363,7 @@ pub(super) fn run_project_task(
 
 fn empty_task_plan() -> RunPlan {
     RunPlan {
+        project_root: std::env::current_dir().unwrap_or_default(),
         refs: Vec::new(),
         adapters: Vec::new(),
         table: RefSpec::SourceTable::empty(),
@@ -587,7 +591,8 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         _ => {}
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
 
     // U16: a project's own `env.*` always wins; the foreign-flake fallback
     // only kicks in when it declares none, or when `--flake` forces it. An
@@ -635,6 +640,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     } else {
         RunPlan {
+            project_root: project_dir.clone(),
             refs: Vec::new(),
             adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
@@ -714,7 +720,8 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
 /// child environment. A command is optional; without one the declared checks
 /// are the complete operation.
 fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let roots = Store::resolve();
     let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
         Ok(plan) => plan,
@@ -769,7 +776,8 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
 
 /// `jet env sync`: show and optionally apply the complete managed-file plan.
 fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
         Ok(plan) => plan,
         Err(code) => return code,
@@ -881,6 +889,13 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 .collect::<Vec<_>>()
                 .join(",")
         };
+        let quote_strings = |values: &[String]| {
+            values
+                .iter()
+                .map(|value| crate::JSON::quote(value))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
         let files = plan
             .environment
             .files
@@ -939,6 +954,66 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 )
             })
             .collect::<Vec<_>>();
+        let catalog = ModuleEval::LanguagePackCatalog::builtin();
+        let language_catalog = catalog
+            .names()
+            .into_iter()
+            .filter_map(|name| {
+                let pack = catalog.get(&name)?.clone();
+                Some(format!(
+                    "{{\"name\":{},\"fingerprint\":{}}}",
+                    crate::JSON::quote(&pack.name),
+                    crate::JSON::quote(&pack.fingerprint()),
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let language_packs = plan
+            .environment
+            .language_packs
+            .iter()
+            .map(|pack| {
+                format!(
+                    "{{\"name\":{},\"fingerprint\":{},\"packages\":[{}],\"venv_packages\":[{}]}}",
+                    crate::JSON::quote(&pack.name),
+                    crate::JSON::quote(&pack.fingerprint()),
+                    quote_strings(&pack.packages),
+                    quote_strings(&pack.venv_packages),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let language_projections = plan
+            .environment
+            .language_projections
+            .iter()
+            .map(|projection| {
+                let selection = &projection.selection;
+                let version = selection
+                    .version
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                let channel = selection
+                    .channel
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                format!(
+                    "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"pack_fingerprint\":{},\"included\":[{}],\"omitted\":[{}],\"changed\":[{}]}}",
+                    crate::JSON::quote(&selection.name),
+                    selection.enable,
+                    version,
+                    channel,
+                    selection.venv,
+                    crate::JSON::quote(&projection.pack.fingerprint()),
+                    quote_strings(&projection.included),
+                    quote_strings(&projection.omitted),
+                    quote_strings(&projection.changed),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         let integrations = plan
             .environment
             .integrations
@@ -987,14 +1062,31 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             })
             .collect::<Vec<_>>();
         println!(
-            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"sources\":[{}],\"languages\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(profile),
             quote_list(&selected_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
+            plan.environment
+                .active_environment
+                .as_deref()
+                .map(crate::JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
+            quote_list(
+                &plan
+                    .environment
+                    .active_environment_provenance
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ),
             quote_list(&plan.environment.source_files.iter().map(String::as_str).collect::<Vec<_>>()),
+            crate::JSON::quote(&catalog.fingerprint()),
+            language_catalog,
             languages.join(","),
+            language_packs,
+            language_projections,
             quote_list(&packages),
             quote_list(&files),
             dotenv.join(","),
@@ -1016,6 +1108,18 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     theme.detail(&format!("selected profiles: {selected}"));
     theme.detail(&format!("profiles: {applied}"));
+    theme.detail(&format!(
+        "active environment: {} (from {})",
+        plan.environment
+            .active_environment
+            .as_deref()
+            .unwrap_or("<none>"),
+        if plan.environment.active_environment_provenance.is_empty() {
+            "<none>".to_string()
+        } else {
+            plan.environment.active_environment_provenance.join(", ")
+        }
+    ));
     let languages = plan
         .environment
         .languages
@@ -1037,7 +1141,27 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             label
         })
         .collect::<Vec<_>>();
+    let catalog = ModuleEval::LanguagePackCatalog::builtin();
+    theme.detail(&format!(
+        "language catalog: {} ({})",
+        catalog.names().join(", "),
+        catalog.fingerprint()
+    ));
     theme.detail(&format!("languages: {}", if languages.is_empty() { "<none>".to_string() } else { languages.join(", ") }));
+    let expanded = plan
+        .environment
+        .language_projections
+        .iter()
+        .map(|projection| {
+            format!(
+                "{}: +{} -{}",
+                projection.selection.name,
+                if projection.included.is_empty() { "<none>".to_string() } else { projection.included.join(",") },
+                if projection.omitted.is_empty() { "<none>".to_string() } else { projection.omitted.join(",") },
+            )
+        })
+        .collect::<Vec<_>>();
+    theme.detail(&format!("language projections: {}", if expanded.is_empty() { "<none>".to_string() } else { expanded.join("; ") }));
     theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
     theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
     let integrations = plan
@@ -1424,7 +1548,8 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let entry = find_project_entry(&project_dir);
     if !has_dev_or_run_entry(&entry) {
         theme.error_coded(

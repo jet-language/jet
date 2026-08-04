@@ -5082,6 +5082,64 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     );
 }
 
+#[test]
+fn malformed_workspace_never_falls_back_to_an_ordinary_entry() {
+    let dir = isolated_cwd("workspace_no_fallback");
+    fs::write(dir.join("workspace.jet"), "module workspace { members: [\n").unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        "fn run() { print(\"SHOULD-NOT-RUN\") }\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["run"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("SHOULD-NOT-RUN"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E0995") || stderr.contains("E0003"), "{stderr}");
+}
+
+#[test]
+fn stale_workspace_lock_never_becomes_an_empty_member_index() {
+    let dir = isolated_cwd("workspace_lock_no_fallback");
+    fs::create_dir_all(dir.join(".jet")).unwrap();
+    fs::write(
+        dir.join(".jet/lock"),
+        "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), "fn run() { print(\"SHOULD-NOT-RUN\") }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["run"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("SHOULD-NOT-RUN"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("malformed or stale"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn scene_probe_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();

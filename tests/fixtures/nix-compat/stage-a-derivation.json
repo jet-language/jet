@@ -52,12 +52,12 @@
   ],
   "errors": [
     {
-      "name": "multiple_outputs",
+      "name": "invalid_output_name",
       "system": "x86_64-linux",
-      "source": "builtins.derivation { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" ]; }",
-      "nix_expression": "builtins.attrNames (builtins.derivation { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" ]; })",
-      "nix_value": ["all", "builder", "dev", "drvAttrs", "drvPath", "name", "out", "outPath", "outputName", "outputs", "system", "type"],
-      "jet_error_contains": "multiple derivation outputs"
+      "source": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_expression": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_value": ["all", "bad/name", "builder", "drvAttrs", "drvPath", "name", "out", "outPath", "outputName", "outputs", "system", "type"],
+      "jet_error_contains": "invalid derivation output name"
     }
   ]
 }

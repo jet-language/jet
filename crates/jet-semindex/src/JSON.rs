@@ -1,6 +1,8 @@
 //! Stable JSON encoding for `SemIndex` (no external crates — I6 path deps only).
 
 use jet_foundation::JSON::json_escape;
+use jet_pkg_model::Overlay::OverlayPolicy;
+use jet_pkg_model::Package::{OutputPayload, PackageFacts};
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
@@ -39,6 +41,159 @@ fn json_definition_fact(f: &DefinitionFact) -> String {
 
 fn json_str(s: &str) -> String {
     format!("\"{}\"", json_escape(s))
+}
+
+fn json_output_payload(value: &OutputPayload) -> String {
+    match value {
+        OutputPayload::Null => "null".to_string(),
+        OutputPayload::Bool(value) => value.to_string(),
+        OutputPayload::Number(value) => value.clone(),
+        OutputPayload::String(value) => json_str(value),
+        OutputPayload::Array(values) => format!(
+            "[{}]",
+            values.iter().map(json_output_payload).collect::<Vec<_>>().join(",")
+        ),
+        OutputPayload::Object(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(name, value)| format!("{}:{}", json_str(name), json_output_payload(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
+}
+
+/// Canonical package/config projection shared by semantic-index and Canvas.
+/// The typed PackageFacts model remains the only source of these values.
+pub fn package_facts_json(facts: &PackageFacts) -> String {
+    let deps = facts
+        .deps
+        .iter()
+        .map(|(name, source)| format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(source)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let outputs = facts
+        .outputs
+        .iter()
+        .map(|(name, output)| {
+            let provenance = facts
+                .field_provenance(&format!("outputs.{name}"))
+                .iter()
+                .map(|origin| json_str(origin))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"name\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":[{}]}}",
+                json_str(&output.name),
+                json_str(&format!("{:?}", output.kind).to_lowercase()),
+                output.entry.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+                json_output_payload(&output.payload),
+                provenance,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let provenance = facts
+        .provenance
+        .iter()
+        .map(|(field, origins)| {
+            format!(
+                "{}:[{}]",
+                json_str(field),
+                origins.iter().map(|origin| json_str(origin)).collect::<Vec<_>>().join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let configs = facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(",");
+    let members = facts
+        .members
+        .iter()
+        .map(|member| match member {
+            jet_pkg_model::Package::MemberRef::Path(path) => json_str(path),
+            jet_pkg_model::Package::MemberRef::Find(path) => json_str(path),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"name\":{},\"version\":{},\"source\":{},\"deps\":[{}],\"outputs\":[{}],\"configs\":[{}],\"members\":[{}],\"provenance\":{{{}}},\"origin\":{},\"semantic_digest\":{}}}",
+        json_str(&facts.name),
+        facts.version.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+        facts.source.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+        deps,
+        outputs,
+        configs,
+        members,
+        provenance,
+        json_str(&facts.origin),
+        json_str(&facts.semantic_digest()),
+    )
+}
+
+/// Canonical projection of the persisted workspace overlay facts. This is a
+/// disclosure record, not a second resolver; package realization still owns
+/// the policy application.
+pub fn workspace_overlay_policy_json(policy: &OverlayPolicy) -> String {
+    let strings = |values: &[String]| {
+        values.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",")
+    };
+    let grants = policy
+        .build_grants
+        .iter()
+        .map(|(package, effects)| {
+            format!("{{\"package\":{},\"effects\":[{}]}}", json_str(package), strings(effects))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let overlays = policy
+        .overlays
+        .iter()
+        .map(|overlay| {
+            let provider = overlay.provider.as_ref().map(|provider| {
+                format!(
+                    "{{\"provider\":{},\"channel\":{}}}",
+                    json_str(&provider.provider),
+                    provider.channel.as_deref().map(json_str).unwrap_or_else(|| "null".to_string())
+                )
+            }).unwrap_or_else(|| "null".to_string());
+            let packages = overlay
+                .packages
+                .iter()
+                .map(|package| {
+                    let env = package
+                        .env
+                        .iter()
+                        .map(|(name, value)| format!("[{},{}]", json_str(name), json_str(value)))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let priorities = format!("{:?}", package.field_priorities);
+                    format!(
+                        "{{\"package\":{},\"source\":{},\"version\":{},\"flags\":[{}],\"priority\":{},\"field_priorities\":{},\"env\":[{}],\"patches\":[{}],\"allow_unfree\":{}}}",
+                        json_str(&package.package),
+                        package.source.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+                        package.version.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+                        strings(&package.flags),
+                        package.priority,
+                        json_str(&priorities),
+                        env,
+                        strings(&package.patches),
+                        package.allow_unfree,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"name\":{},\"provider\":{},\"packages\":[{}]}}",
+                json_str(&overlay.name), provider, packages
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"allow_unfree\":[{}],\"build_deny\":[{}],\"build_grants\":[{}],\"overlays\":[{}]}}",
+        strings(&policy.allow_unfree), strings(&policy.build_deny), grants, overlays
+    )
 }
 
 fn json_span(span: SourceSpan) -> String {
@@ -299,16 +454,26 @@ impl SemIndex {
         let definition_facts: Vec<String> = self.definition_facts().iter().map(json_definition_fact).collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
+        let package = self
+            .package_facts()
+            .map(package_facts_json)
+            .unwrap_or_else(|| "null".to_string());
+        let workspace_overlays = self
+            .workspace_overlay_policy()
+            .map(workspace_overlay_policy_json)
+            .unwrap_or_else(|| "null".to_string());
         let expand = expand
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
         format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
             instances.join(","),
             outputs.join(","),
+            package,
+            workspace_overlays,
             refs.join(","),
             calls.join(","),
             effects.join(","),

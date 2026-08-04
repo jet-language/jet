@@ -29,7 +29,10 @@ mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
-pub use Source::{evaluate_env, evaluate_env_with_profile, is_module_surface};
+pub use Source::{
+    evaluate_env, evaluate_env_with_facet, evaluate_env_with_profile,
+    evaluate_env_with_profile_and_facet, is_module_surface,
+};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
@@ -133,6 +136,33 @@ module dev {
             entry.settings.get("prompt"),
             Some(&vec![Scalar::normal("wordstats")])
         );
+    }
+
+    #[test]
+    fn selects_one_environment_facet_and_discloses_its_provenance() {
+        let source = r#"
+module dev {
+    env.dev: Env.{ packages: [default.ripgrep], prompt: "dev" }
+}
+module full {
+    env.full: Env.{ packages: [default.fd], prompt: "full" }
+}
+"#;
+        let default_plan = evaluate_env(source, &base_dir()).unwrap();
+        assert_eq!(default_plan.active_environment.as_deref(), Some("dev"));
+        assert_eq!(default_plan.package_refs, vec!["ripgrep@default"]);
+        assert_eq!(default_plan.prompt.as_deref(), Some("dev"));
+        assert_eq!(default_plan.active_environment_provenance, vec!["dev"]);
+
+        let full_plan = evaluate_env_with_facet(source, &base_dir(), Some("full")).unwrap();
+        assert_eq!(full_plan.active_environment.as_deref(), Some("full"));
+        assert_eq!(full_plan.package_refs, vec!["fd@default"]);
+        assert_eq!(full_plan.prompt.as_deref(), Some("full"));
+        assert_eq!(full_plan.active_environment_provenance, vec!["full"]);
+
+        let error = evaluate_env_with_facet(source, &base_dir(), Some("missing"))
+            .expect_err("unknown facet must not fall through to another facet");
+        assert_eq!(error.code, "E1337");
     }
 
     #[test]

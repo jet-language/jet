@@ -206,6 +206,13 @@ impl<'a> Resolver<'a> {
                 .existing_lock
                 .map(|lock| lock.workspace_members.clone())
                 .unwrap_or_default(),
+            workspace_source_digest: self
+                .existing_lock
+                .and_then(|lock| lock.workspace_source_digest.clone()),
+            workspace_overlay_policy: self
+                .existing_lock
+                .map(|lock| lock.workspace_overlay_policy.clone())
+                .unwrap_or_default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: self

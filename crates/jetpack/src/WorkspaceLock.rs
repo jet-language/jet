@@ -15,17 +15,16 @@ use std::path::Path;
 
 /// Write workspace members into `.jet/lock` from a freshly evaluated
 /// `WorkspacePlan`.
-/// Creates `.jet/` if it doesn't exist. Silently ignores write failures
-/// (the lock is best-effort; the source of truth is `workspace.jet`).
-pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
+/// Creates `.jet/` if it doesn't exist. A failed write is returned to the
+/// caller because a stale or partial workspace lock must never masquerade as
+/// a valid index.
+pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> {
     let lock_path = workspace_root.join(WORKSPACE_LOCK);
     let Some(lock_dir) = lock_path.parent().map(Path::to_path_buf) else {
-        return;
+        return Err("workspace lock has no parent directory".to_string());
     };
-    let _ = super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
-        if std::fs::create_dir_all(lock_dir).is_err() {
-            return Ok(());
-        }
+    super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
+        std::fs::create_dir_all(&lock_dir)?;
         let mut lock = Lock::load(workspace_root).unwrap_or_else(empty_lock);
         lock.version = Lock::LOCK_VERSION;
         let source_digest = if !plan.source_digest.is_empty() {
@@ -51,8 +50,19 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
                         .map(|path| path.to_string_lossy().into_owned())
                         .unwrap_or_default()
                 },
+                package_digest: jet_pkg_model::Package::PackageFacts::load(
+                    &workspace_root
+                        .join(&m.path)
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace_root.join(&m.path)),
+                )
+                .and_then(Result::ok)
+                .map(|package| package.semantic_digest())
+                .unwrap_or_default(),
             })
             .collect();
+        lock.workspace_source_digest = Some(source_digest);
+        lock.workspace_overlay_policy = plan.overlay_policy.clone();
         // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
         // into the lock, keeping any inputs already recorded by other call sites.
         // Dedup by path so re-writing the lock is idempotent.
@@ -62,7 +72,8 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
             }
         }
         std::fs::write(lock_path, Lock::write(&lock))
-    });
+    })
+    .map_err(|error| format!("could not write workspace lock: {error}"))
 }
 
 fn empty_lock() -> LockFile {
@@ -71,6 +82,8 @@ fn empty_lock() -> LockFile {
         packages: Vec::new(),
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
         browsers: Vec::new(),
@@ -118,7 +131,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let lock_path = tmp.join(Syntax::UNIFIED_LOCK_FILE);
         assert!(
             lock_path.exists(),
@@ -149,7 +162,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         write_member_manifest(&tmp, "packages/hello", "hello");
         write_member_manifest(&tmp, "packages/ranker", "ranker");
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let loaded = load(&tmp).unwrap();
         assert_eq!(loaded.members.len(), 2);
         assert_eq!(loaded.members[0].name, "hello");
@@ -174,7 +187,7 @@ mod tests {
             members: vec![member("root", ".")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let loaded = load(&tmp).expect("lock reload must preserve a root member");
         assert_eq!(loaded.members.len(), 1);
         assert_eq!(loaded.members[0].name, "root");
@@ -194,11 +207,16 @@ mod tests {
         std::fs::create_dir_all(tmp.join(".jet")).unwrap();
         write_member_manifest(&tmp, "packages/hello", "hello");
         let canonical = tmp.join("packages/hello").canonicalize().unwrap();
+        let package_digest = jet_pkg_model::Package::PackageFacts::load(&canonical)
+            .unwrap()
+            .unwrap()
+            .semantic_digest();
         std::fs::write(
             tmp.join(Syntax::UNIFIED_LOCK_FILE),
             format!(
-                "version = 1\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"{}\"\n",
-                canonical.display()
+                "version = 1\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"{}\"\npackage_digest = \"{}\"\n",
+                canonical.display(),
+                package_digest,
             ),
         )
         .unwrap();
@@ -229,7 +247,7 @@ mod tests {
             overlay_policy: Default::default(),
             source_digest: String::new(),
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
         assert!(raw.contains("[[comptime_inputs]]"), "{raw}");
         assert!(raw.contains("assets/index.json"), "{raw}");
@@ -237,7 +255,7 @@ mod tests {
         assert_eq!(loaded.comptime_inputs.len(), 1);
         assert_eq!(loaded.comptime_inputs[0].path, "assets/index.json");
         // Idempotent re-write does not duplicate the input.
-        write(&tmp, &loaded);
+        write(&tmp, &loaded).unwrap();
         let reloaded = load(&tmp).unwrap();
         assert_eq!(reloaded.comptime_inputs.len(), 1);
         std::fs::remove_dir_all(&tmp).ok();
@@ -258,7 +276,7 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
 
         std::fs::write(
             tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
@@ -276,6 +294,25 @@ mod tests {
         std::fs::write(
             tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
             "name: \"hello\"\nmembers: [\"child\"]\n",
+        )
+        .unwrap();
+        assert!(load(&tmp).is_none());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn lock_load_rejects_a_workspace_digest_when_the_source_is_missing() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-missing-source-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join(".jet")).unwrap();
+        std::fs::write(
+            tmp.join(Syntax::UNIFIED_LOCK_FILE),
+            "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
         )
         .unwrap();
         assert!(load(&tmp).is_none());
@@ -301,7 +338,7 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
         assert!(raw.contains("[[package]]"), "{raw}");
         assert!(raw.contains("name = \"dep\""), "{raw}");

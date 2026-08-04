@@ -27,7 +27,13 @@ pub(super) fn project_checked(
     facts: &SemIndexEffectFacts,
     runtime_events: Option<&str>,
 ) -> Projection {
-    let index = jet_semindex::from_checked(bundle, facts);
+    let mut index = jet_semindex::from_checked(bundle, facts);
+    if let Some(package) = jet_semindex::package_facts_for_entry(path) {
+        index.attach_package_facts(package);
+    }
+    if let Some(policy) = jet_semindex::workspace_overlay_policy_for_entry(path) {
+        index.attach_workspace_overlay_policy(policy);
+    }
     let mut graph_json = Vec::new();
     let mut inline_spans = Vec::new();
     let mut anchors = Vec::new();
@@ -171,12 +177,22 @@ fn canvas_blueprint_facts_json(
     );
     let task_flows = task_flow_facts(src).join(",");
     let outputs = index.outputs().iter().map(output_fact_json).collect::<Vec<_>>().join(",");
+    let package_facts = index
+        .package_facts()
+        .map(jet_semindex::package_facts_json)
+        .unwrap_or_else(|| "null".to_string());
+    let workspace_overlays = index
+        .workspace_overlay_policy()
+        .map(jet_semindex::workspace_overlay_policy_json)
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"runtime_events\":{},\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"source_truth\":\"ordinary_jet_source\"}}",
+        "{{\"runtime_events\":{},\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
         interfaces.join(","),
         task_flows,
         outputs,
+        package_facts,
+        workspace_overlays,
     )
 }
 

@@ -164,6 +164,47 @@ fn export_activates_nearest_env_from_root_and_subdir() {
 }
 
 #[test]
+fn enter_from_nested_directory_projects_allowlisted_dotenv_and_unsets() {
+    let scratch = Scratch::new("dotenv-nested");
+    let inner = scratch.path.join("src").join("inner");
+    fs::create_dir_all(&inner).unwrap();
+    fs::write(
+        scratch.path.join(".env"),
+        "VISIBLE=from-dotenv\nSECRET=hidden\nUNLISTED=must-not-load\n",
+    )
+    .unwrap();
+    fs::write(
+        scratch.path.join("env.jet"),
+        "module env.dev {\n  dotenv: Dotenv.{ file: \".env\", allow: [\"VISIBLE\", \"SECRET\"], secrets: [\"SECRET\"] }\n  unset: [\"REMOVE_ME\"]\n}\n",
+    )
+    .unwrap();
+    let out = export_cmd(&inner)
+        .args([
+            "enter",
+            "--trust",
+            "--no-color",
+            "--",
+            "sh",
+            "-c",
+            "printf '%s|%s|%s|%s' \"$VISIBLE\" \"$SECRET\" \"${UNLISTED:-unset}\" \"${REMOVE_ME:-unset}\"",
+        ])
+        .env("VISIBLE", "from-parent")
+        .env("REMOVE_ME", "remove-me")
+        .env("UNLISTED", "from-parent")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "from-dotenv|hidden|from-parent|unset"
+    );
+}
+
+#[test]
 fn export_disable_unloads_active_env() {
     let scratch = Scratch::new("disable");
     write_prompt_only_env(&scratch.path);

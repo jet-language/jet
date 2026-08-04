@@ -375,6 +375,8 @@ mod tests {
             packages: pkgs,
             root_dependencies: vec![],
             workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
             browsers: Vec::new(),

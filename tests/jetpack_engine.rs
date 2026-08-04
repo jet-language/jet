@@ -1629,6 +1629,130 @@ fn enter_flake_flag_requires_trust_before_native_projection() {
 
 
 #[test]
+fn enter_flake_native_projection_runs_without_nix_on_path() {
+    // U16 product proof: `enter --flake --trust` uses the bounded native
+    // evaluator, even when the host cannot resolve `nix`.
+    let project = Scratch::new("flake-native-enter");
+    fs::write(
+        project.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = { }; }",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args([
+            "enter",
+            "--flake",
+            "--trust",
+            "--no-color",
+            "--",
+            "sh",
+            "-c",
+            "printf native-flake",
+        ])
+        .current_dir(&project.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "native-flake");
+}
+
+#[test]
+fn bridge_flake_projects_imported_flake_parts_module_and_preserves_last_lock_on_failure() {
+    let project = Scratch::new("flake-parts-bridge");
+    fs::create_dir_all(project.join("parts")).unwrap();
+    fs::write(
+        project.join("flake.nix"),
+        r#"
+let marker = "flake-parts mkFlake"; in {
+  imports = [ ./parts/dev.nix ];
+  systems = [ "x86_64-linux" ];
+  perSystem = true;
+  outputs = import ./parts/dev.nix;
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("parts/dev.nix"),
+        "{ devShells.x86_64-linux.default = { packages = [ pkgs.fd ]; }; }\n",
+    )
+    .unwrap();
+
+    let first = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&project.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&first.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&first.stdout)
+    );
+    let lock_path = project.join(".jet/lock");
+    let before = fs::read(&lock_path).expect("successful bridge must commit a semantic lock");
+    let lock_text = String::from_utf8(before.clone()).unwrap();
+    assert!(lock_text.contains("flake-composition:flake-parts"), "{lock_text}");
+    assert!(lock_text.contains("./parts/dev.nix"), "{lock_text}");
+    let previous = jetpack::SemanticLock::parse(&lock_text);
+    let previous_graph = jetpack::SemanticLock::FlakeGraph::from_semantic_lock(
+        "flake.nix",
+        &previous,
+    )
+    .expect("the committed imported-module projection must remain usable");
+    assert!(previous_graph
+        .named_dev_shells()
+        .iter()
+        .any(|output| output.provenance.contains("./parts/dev.nix")));
+
+    fs::write(
+        project.join("parts/dev.nix"),
+        "{ devShells.x86_64-linux.default = { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }\n",
+    )
+    .unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&project.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert_eq!(fs::read(&lock_path).unwrap(), before);
+}
+
+#[test]
+fn enter_flake_dynamic_projection_reports_e1256_without_nix() {
+    let project = Scratch::new("flake-dynamic-enter");
+    fs::write(
+        project.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "--flake", "--trust", "--no-color"])
+        .current_dir(&project.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+}
+
+#[test]
 fn enter_flake_with_no_foreign_flake_present_is_friendly() {
     let root = Scratch::new("flake-none-root");
     let proj = Scratch::new("flake-none-proj");
@@ -1641,6 +1765,50 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+}
+
+#[test]
+fn env_info_json_discloses_one_profile_facet_and_language_projection() {
+    let project = Scratch::new("env-info-composition");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    profiles: [
+        "host": .{ hostname: "epoch5-host" },
+        "user": .{ user: "epoch5-user" }
+    ]
+    languages: [
+        "rust": Lang.{ enable: true, channel: .Stable }
+    ]
+    packages: [nixpkgs.ripgrep]
+}
+module env.full {
+    packages: [nixpkgs.fd]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("HOSTNAME", "epoch5-host")
+        .env("USER", "epoch5-user")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"profile\":\"host\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"active_environment\":\"dev\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"fingerprint\":\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"language_projections\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"included\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
 }
 
 

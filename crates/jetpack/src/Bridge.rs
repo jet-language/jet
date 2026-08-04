@@ -94,7 +94,21 @@ pub fn read_devshell_facts(
                 &system,
                 Some(import_authority),
             )
-                .map_err(|error| ProviderError::Unsupported(error.to_string()))?;
+                .map_err(|error| {
+                    let reason = error.to_string();
+                    // Project-root authority failures are boundary violations,
+                    // not unsupported foreign semantics. Keep them on the
+                    // existing safety diagnostic; semantic and budget limits
+                    // are the E1256 projection surface.
+                    if reason.contains("project-root authority")
+                        || reason.contains("project-root")
+                        || reason.contains("symlink")
+                    {
+                        ProviderError::Unsupported(reason)
+                    } else {
+                        ProviderError::ForeignProjection(reason)
+                    }
+                })?;
             Ok(DevShellFacts {
                 packages: evaluation.packages().to_vec(),
                 unmapped: evaluation.unsupported().to_vec(),
@@ -828,6 +842,17 @@ mod tests {
         .unwrap();
         let facts = read_devshell_facts(&dir, None).expect("native evaluator must not need Nix");
         assert_eq!(facts.packages, vec!["fd"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn native_projection_budget_failure_is_e1256() {
+        let dir = scratch("native_budget");
+        let source = "x".repeat((1 << 20) + 1);
+        std::fs::write(dir.join("flake.nix"), source).unwrap();
+        let error = read_devshell_facts(&dir, None).expect_err("oversized foreign input must fail");
+        assert_eq!(error.code(), Some("E1256"));
+        assert!(matches!(error, ProviderError::ForeignProjection(reason) if reason.contains("evaluator limit")));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

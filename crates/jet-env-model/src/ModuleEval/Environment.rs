@@ -548,9 +548,8 @@ pub struct ProfileSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResolvedProfile {
     pub name: String,
-    /// Ambient selection order before inheritance expansion. Explicit CLI
-    /// selection contains one name; hostname and user matching can contain
-    /// both names in deterministic order.
+    /// Ambient selection before inheritance expansion. Explicit CLI selection
+    /// and hostname/user/default fallback each choose one profile.
     pub selected_profiles: Vec<String>,
     pub applied: Vec<String>,
     pub packages: Vec<String>,
@@ -626,11 +625,12 @@ impl ProfileSet {
         self.auto_select_many(hostname, user).into_iter().next()
     }
 
-    /// Select all matching ambient profiles. Hostname matches are applied
-    /// before user matches; the BTreeMap keeps each group deterministic. The
-    /// default profile is a fallback only when neither ambient selector matches.
+    /// Select one ambient profile. Hostname wins over user, user wins over the
+    /// named `default`, and the BTreeMap makes duplicate matches deterministic.
+    /// Selecting one fact avoids silently merging unrelated host and user
+    /// environments on a shared machine.
     pub fn auto_select_many(&self, hostname: &str, user: &str) -> Vec<String> {
-        let mut selected = self
+        let hostname_match = self
             .profiles
             .values()
             .filter(|profile| {
@@ -640,8 +640,12 @@ impl ProfileSet {
                     .is_some_and(|candidate| candidate == hostname)
             })
             .map(|profile| profile.name.clone())
-            .collect::<Vec<_>>();
-        for name in self
+            .next();
+        if let Some(name) = hostname_match {
+            return vec![name];
+        }
+
+        let user_match = self
             .profiles
             .values()
             .filter(|profile| {
@@ -651,15 +655,15 @@ impl ProfileSet {
                     .is_some_and(|candidate| candidate == user)
             })
             .map(|profile| profile.name.clone())
-        {
-            if !selected.iter().any(|existing| existing == &name) {
-                selected.push(name);
-            }
+            .next();
+        if let Some(name) = user_match {
+            return vec![name];
         }
-        if selected.is_empty() && self.profiles.contains_key("default") {
-            selected.push("default".to_string());
+
+        if self.profiles.contains_key("default") {
+            return vec!["default".to_string()];
         }
-        selected
+        Vec::new()
     }
 
     fn resolve_into(
@@ -881,6 +885,17 @@ impl LanguagePackCatalog {
 
     pub fn names(&self) -> Vec<String> {
         self.packs.keys().cloned().collect()
+    }
+
+    /// Stable catalog identity disclosed by `jet env info`; changing a pack's
+    /// packages or host variables changes this fingerprint.
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::from("jet-language-catalog-v1\n");
+        for pack in self.packs.values() {
+            text.push_str(&pack.fingerprint());
+            text.push('\n');
+        }
+        jet_pkg_model::SHA256::sha256_hex(text.as_bytes())
     }
 
     pub fn expand(&self, selections: &[LanguageSpec]) -> Result<LanguageExpansion, String> {
@@ -1895,7 +1910,7 @@ mod tests {
     }
 
     #[test]
-    fn ambient_hostname_and_user_profiles_merge_without_overrides() {
+    fn ambient_hostname_takes_precedence_over_user() {
         let mut set = ProfileSet::default();
         set.insert(ProfileSpec {
             name: "host".to_string(),
@@ -1915,13 +1930,13 @@ mod tests {
         .unwrap();
 
         let selected = set.auto_select_many("build-01", "sam");
-        assert_eq!(selected, vec!["host", "sam"]);
+        assert_eq!(selected, vec!["host"]);
         let resolved = set.resolve_many(&selected).unwrap();
-        assert_eq!(resolved.name, "host+sam");
+        assert_eq!(resolved.name, "host");
         assert_eq!(resolved.selected_profiles, selected);
-        assert_eq!(resolved.packages, vec!["git@nixpkgs", "ripgrep@nixpkgs"]);
+        assert_eq!(resolved.packages, vec!["git@nixpkgs"]);
         assert_eq!(resolved.variables.get("HOST_MODE"), Some(&"host".to_string()));
-        assert_eq!(resolved.variables.get("USER_MODE"), Some(&"user".to_string()));
+        assert!(!resolved.variables.contains_key("USER_MODE"));
     }
 
     #[test]
@@ -1943,10 +1958,28 @@ mod tests {
         .unwrap();
 
         let selected = set.auto_select_many("build-01", "sam");
-        assert!(matches!(
-            set.resolve_many(&selected),
-            Err(ProfileError::Conflict { .. })
-        ));
+        assert_eq!(selected, vec!["host"]);
+        assert_eq!(set.resolve_many(&selected).unwrap().variables.get("MODE"), Some(&"host".to_string()));
+    }
+
+    #[test]
+    fn ambient_user_precedes_default_and_default_is_last_resort() {
+        let mut set = ProfileSet::default();
+        set.insert(ProfileSpec {
+            name: "default".to_string(),
+            packages: vec!["default@nixpkgs".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+        set.insert(ProfileSpec {
+            name: "sam".to_string(),
+            user: Some("sam".to_string()),
+            packages: vec!["user@nixpkgs".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(set.auto_select_many("other", "sam"), vec!["sam"]);
+        assert_eq!(set.auto_select_many("other", "other"), vec!["default"]);
     }
 
     #[test]

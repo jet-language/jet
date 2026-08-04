@@ -408,11 +408,18 @@ pub struct EnvPlan {
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
     pub environment_names: Vec<String>,
+    /// The one environment facet whose packages/settings are active for this
+    /// plan. `dev` is the deterministic beginner default when present.
+    pub active_environment: Option<String>,
+    /// Module names that contributed the selected facet, in source order.
+    pub active_environment_provenance: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnvironmentFacts {
     pub environment_names: Vec<String>,
+    pub active_environment: Option<String>,
+    pub active_environment_provenance: Vec<String>,
     pub source_files: Vec<String>,
     pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,

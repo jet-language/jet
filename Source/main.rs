@@ -2546,6 +2546,30 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
 /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
 /// caller keeps today's "no file given" usage error verbatim.
 fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
+    // A workspace lock is a checked member index, not an optional cache. If
+    // its source identity is stale while the workspace source is absent, do
+    // not fall through to an ordinary package entry and run the wrong file.
+    if !cwd.join(jet::Syntax::WORKSPACE_FILE).is_file() {
+        let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
+        let stale_workspace_lock = jetpack::WorkspaceLock::load(cwd).is_none()
+            && std::fs::read_to_string(&lock_path)
+                .map(|source| {
+                    source.contains("[[workspace_member]]")
+                        || source.contains("workspace_source_digest")
+                        || source.contains("workspace_overlay")
+                })
+                .unwrap_or(false);
+        if stale_workspace_lock {
+            eprintln!(
+                "error: workspace lock `{}` is malformed or stale; refusing an empty member index",
+                lock_path.display()
+            );
+            eprintln!(
+                " fix: run `jetpack env` from the workspace root to regenerate it after fixing workspace/package sources"
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
     // D-BUILDSCOPE1: an explicit workspace build entry is the workspace
     // authority. Member selection (`-p`) remains an explicit escape to one
     // package and therefore bypasses this root orchestration path.
@@ -2557,7 +2581,21 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             }
         }
     }
-    if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(cwd) {
+    if let Some(workspace) = jetpack::WorkspaceFile::load(cwd) {
+        let plan = match workspace {
+            Ok(plan) => plan,
+            Err(diagnostic) => {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(
+                        jet::Syntax::WORKSPACE_FILE,
+                        "",
+                        &[diagnostic]
+                    )
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
         let runnable: Vec<(String, PathBuf)> = plan
             .members
             .iter()

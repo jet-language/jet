@@ -2227,6 +2227,50 @@ fn canvas_project_json_reports_single_file_without_manifest() {
 }
 
 #[test]
+fn canvas_and_semindex_share_composed_package_facts() {
+    let dir = temp_dir("package_facts_parity");
+    let entry = dir.join("main.jet");
+    fs::create_dir_all(dir.join(".jet")).unwrap();
+    let workspace = "module workspace { members: [] }\n";
+    fs::write(dir.join("workspace.jet"), workspace).unwrap();
+    let workspace_digest = jetpack::SHA256::sha256_hex(workspace.as_bytes());
+    fs::write(
+        dir.join(".jet/lock"),
+        format!(
+            "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("release.jet"),
+        "Config.{ outputs: .{ app: .Executable.{ entry: run } } }\n",
+    )
+    .unwrap();
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let graph = jet::Canvas::graph_json_for_file(&entry).expect("Canvas graph");
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    let digest = |json: &str| {
+        json.split_once("\"semantic_digest\":\"")
+            .and_then(|(_, rest)| rest.split_once('"').map(|(value, _)| value.to_string()))
+            .expect("shared package semantic digest")
+    };
+    assert_eq!(digest(&graph), digest(&project));
+    for json in [&graph, &project] {
+        assert!(json.contains("\"package_facts\""), "{json}");
+        assert!(json.contains("\"workspace_overlays\""), "{json}");
+        assert!(json.contains("plasma-beta"), "{json}");
+        assert!(json.contains("release.jet"), "{json}");
+        assert!(json.contains("\"name\":\"demo\""), "{json}");
+    }
+}
+
+#[test]
 fn canvas_project_reports_and_filters_internal_parts() {
     let dir = temp_dir("project_internal_parts");
     let entry = dir.join("main.jet");
