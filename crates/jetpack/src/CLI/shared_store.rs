@@ -40,7 +40,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                         theme.error(
                             "shared-store broker failed",
                             &error.to_string(),
-                            "the broker accepts one signed archive request and exits; reinstall the socket unit if it is stale.",
+                            "the broker verifies one provenance-bound archive request and exits; reinstall the socket unit if it is stale.",
                         );
                         2
                     }
