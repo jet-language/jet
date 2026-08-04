@@ -57,7 +57,11 @@ pub(super) fn wait_for_services_ready(
     env: &Env,
     services: &[ModuleEval::DevServicePlan],
 ) -> Result<(), i32> {
-    let selected = (0..services.len()).collect::<Vec<_>>();
+    let selected = services
+        .iter()
+        .enumerate()
+        .filter_map(|(index, service)| service.enable.then_some(index))
+        .collect::<Vec<_>>();
     let result = Services::up_ordered_with(
         project_dir,
         env,

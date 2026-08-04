@@ -197,7 +197,7 @@ fn jet_run_task_typed_cli_args() {
         r#"
 #CLI
 struct MigrateArgs {
-    #[Doc("target")] to: String = "latest"
+    #Doc("target") to: String = "latest"
 }
 #Job
 fn migrate(args: MigrateArgs) {

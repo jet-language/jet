@@ -1112,7 +1112,7 @@ enum Value {
     Path(String),
     Package(String),
     PackageNamespace(String),
-    PackageOverlay(String, BTreeMap<String, Thunk>),
+    PackageOverlay(String, Rc<RefCell<BTreeMap<String, Thunk>>>),
     BuiltinsNamespace(String),
     LibraryNamespace,
     List(Vec<Thunk>),
@@ -1679,59 +1679,53 @@ fn select(value: Value, field: &str) -> Result<Thunk, Error> {
     try_select(value, field)?.ok_or_else(|| Error::Missing(field.to_string()))
 }
 
+fn package_field(
+    prefix: &str,
+    overrides: Option<&BTreeMap<String, Thunk>>,
+    field: &str,
+) -> Result<Option<Thunk>, Error> {
+    if let Some(overrides) = overrides {
+        if let Some(value) = overrides.get(field) {
+            return Ok(Some(value.clone()));
+        }
+    }
+    if matches!(field, "pkgsCross" | "crossSystem") {
+        return Err(Error::Unsupported(
+            "cross-system packages require an explicit target and provider authority".into(),
+        ));
+    }
+    if field == "lib" {
+        Ok(Some(Thunk::value(Value::LibraryNamespace)))
+    } else if field == "mkShell" {
+        Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
+    } else if field == "extend" {
+        let base = match overrides {
+            Some(fields) => Value::PackageOverlay(
+                prefix.to_string(),
+                Rc::new(RefCell::new(fields.clone())),
+            ),
+            None => Value::PackageNamespace(prefix.to_string()),
+        };
+        Ok(Some(Thunk::value(Value::Native(
+            NativeFunction::ExtendPackage(Box::new(base)),
+        ))))
+    } else {
+        let name = if prefix.is_empty() {
+            field.to_string()
+        } else {
+            format!("{prefix}.{field}")
+        };
+        Ok(Some(Thunk::value(Value::Package(name))))
+    }
+}
+
 fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
     match value {
         Value::AttrSet(fields) => Ok(attr_field(&fields, field)),
-        Value::PackageNamespace(prefix) => {
-            if matches!(field, "pkgsCross" | "crossSystem") {
-                return Err(Error::Unsupported(
-                    "cross-system packages require an explicit target and provider authority"
-                        .into(),
-                ));
-            }
-            if field == "lib" {
-                Ok(Some(Thunk::value(Value::LibraryNamespace)))
-            } else if field == "mkShell" {
-                Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
-            } else if field == "extend" {
-                Ok(Some(Thunk::value(Value::Native(
-                    NativeFunction::ExtendPackage(Box::new(Value::PackageNamespace(prefix))),
-                ))))
-            } else {
-                let name = if prefix.is_empty() {
-                    field.to_string()
-                } else {
-                    format!("{prefix}.{field}")
-                };
-                Ok(Some(Thunk::value(Value::Package(name))))
-            }
-        }
+        Value::PackageNamespace(prefix) => package_field(&prefix, None, field),
         Value::PackageOverlay(prefix, fields) => {
-            if let Some(value) = fields.get(field) {
-                return Ok(Some(value.clone()));
-            }
-            if matches!(field, "pkgsCross" | "crossSystem") {
-                return Err(Error::Unsupported(
-                    "cross-system packages require an explicit target and provider authority"
-                        .into(),
-                ));
-            }
-            if field == "lib" {
-                Ok(Some(Thunk::value(Value::LibraryNamespace)))
-            } else if field == "mkShell" {
-                Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
-            } else if field == "extend" {
-                Ok(Some(Thunk::value(Value::Native(
-                    NativeFunction::ExtendPackage(Box::new(Value::PackageOverlay(prefix, fields))),
-                ))))
-            } else {
-                let name = if prefix.is_empty() {
-                    field.to_string()
-                } else {
-                    format!("{prefix}.{field}")
-                };
-                Ok(Some(Thunk::value(Value::Package(name))))
-            }
+            let fields = fields.borrow();
+            package_field(&prefix, Some(&fields), field)
         }
         Value::Package(prefix) => Ok(Some(Thunk::value(Value::Package(format!(
             "{prefix}.{field}"
@@ -1939,11 +1933,7 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
                     actual: "non-list overlays",
                 });
             };
-            let mut current = base;
-            for overlay in overlays {
-                current = apply_overlay(current, overlay.force()?, arena)?;
-            }
-            Ok(current)
+            apply_overlays(base, overlays, arena)
         }
         Value::Native(NativeFunction::ExtendPackage(base)) => {
             let base = *base;
@@ -1995,23 +1985,57 @@ fn apply_overlay(
     overlay: Value,
     arena: &Rc<EvaluationArena>,
 ) -> Result<Value, Error> {
-    let first = apply(overlay, Thunk::value(base.clone()), arena)?;
-    let result = apply(first, Thunk::value(base.clone()), arena)?;
+    let (prefix, previous) = package_parts(&base)?;
+    let final_fields = Rc::new(RefCell::new(previous));
+    let final_view = Value::PackageOverlay(prefix.clone(), final_fields.clone());
+    let first = apply(overlay, Thunk::value(final_view), arena)?;
+    let result = apply(first, Thunk::value(base), arena)?;
     let Value::AttrSet(fields) = result else {
         return Err(Error::Type {
             expected: "overlay attribute set",
             actual: value_name(&result),
         });
     };
-    match base {
-        Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(prefix, fields)),
-        Value::PackageOverlay(prefix, mut previous) => {
-            previous.extend(fields);
-            Ok(Value::PackageOverlay(prefix, previous))
-        }
+    final_fields.borrow_mut().extend(fields);
+    let snapshot = final_fields.borrow().clone();
+    Ok(Value::PackageOverlay(prefix, Rc::new(RefCell::new(snapshot))))
+}
+
+fn apply_overlays(
+    base: Value,
+    overlays: Vec<Thunk>,
+    arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    let (prefix, previous) = package_parts(&base)?;
+    let final_fields = Rc::new(RefCell::new(previous));
+    let mut current = base;
+    for overlay in overlays {
+        let final_view = Value::PackageOverlay(prefix.clone(), final_fields.clone());
+        let first = apply(overlay.force()?, Thunk::value(final_view), arena)?;
+        let result = apply(first, Thunk::value(current.clone()), arena)?;
+        let Value::AttrSet(fields) = result else {
+            return Err(Error::Type {
+                expected: "overlay attribute set",
+                actual: value_name(&result),
+            });
+        };
+        final_fields.borrow_mut().extend(fields);
+        let snapshot = final_fields.borrow().clone();
+        current = Value::PackageOverlay(
+            prefix.clone(),
+            Rc::new(RefCell::new(snapshot)),
+        );
+    }
+    Ok(current)
+}
+
+fn package_parts(value: &Value) -> Result<(String, BTreeMap<String, Thunk>), Error> {
+    match value {
+        Value::PackageNamespace(prefix) => Ok((prefix.clone(), BTreeMap::new())),
+        Value::PackageOverlay(prefix, fields) => Ok((prefix.clone(), fields.borrow().clone())),
         value => Err(Error::Type {
             expected: "package namespace",
-            actual: value_name(&value),
+            actual: value_name(value),
         }),
     }
 }
@@ -2798,9 +2822,12 @@ fn merge(left: Value, right: Value) -> Result<Value, Error> {
             });
         };
         return match left {
-            Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(prefix, fields)),
-            Value::PackageOverlay(prefix, mut previous) => {
-                previous.extend(fields);
+            Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(
+                prefix,
+                Rc::new(RefCell::new(fields)),
+            )),
+            Value::PackageOverlay(prefix, previous) => {
+                previous.borrow_mut().extend(fields);
                 Ok(Value::PackageOverlay(prefix, previous))
             }
             _ => unreachable!(),

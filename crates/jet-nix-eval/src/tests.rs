@@ -817,8 +817,8 @@ fn native_devshell_applies_bounded_package_overlays() {
         let overlay = final: prev: { custom = prev.fd; };
         in {
           devShells.x86_64-linux.default =
-            (import nixpkgs { overlays = [ overlay ]; }).mkShell {
-              packages = [ (import nixpkgs { overlays = [ overlay ]; }).custom ];
+              (import pkgs { overlays = [ overlay ]; }).mkShell {
+              packages = [ (import pkgs { overlays = [ overlay ]; }).custom ];
             };
         }
         "#,
@@ -826,6 +826,35 @@ fn native_devshell_applies_bounded_package_overlays() {
     )
     .expect("bounded package overlays must project package identities");
     assert_eq!(evaluated.packages(), &["fd".to_string()]);
+}
+
+#[test]
+fn native_devshell_overlay_final_sees_following_override_and_prev_stays_stable() {
+    let evaluated = evaluate_devshell(
+        r#"
+        let first = final: prev: {
+          from_prev = prev.fd;
+          from_final = final.future;
+        };
+        second = final: prev: {
+          future = prev.ripgrep;
+          second_view = final.future;
+        };
+        in {
+          devShells.x86_64-linux.default =
+            (import pkgs { overlays = [ first second ]; }).mkShell {
+              packages = [
+                (import pkgs { overlays = [ first second ]; }).from_prev
+                (import pkgs { overlays = [ first second ]; }).from_final
+                (import pkgs { overlays = [ first second ]; }).second_view
+              ];
+            };
+        }
+        "#,
+        "x86_64-linux",
+    )
+    .expect("overlay final/prev projections must remain deterministic");
+    assert_eq!(evaluated.packages(), &["fd", "ripgrep"]);
 }
 
 #[test]

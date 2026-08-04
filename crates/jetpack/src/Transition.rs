@@ -2011,13 +2011,9 @@ mod tests {
     fn legacy_open_role_file_is_rejected_before_writes() {
         let root = temp_root("legacy-open");
         fs::write(root.join("pkg.jet"), "name: \"demo\"\n").unwrap();
-        fs::write(
-            root.join("env.jet"),
-            "module env.dev { languages: [python] }\n",
-        )
-        .unwrap();
+        fs::write(root.join("config.jet"), "languages: [python]\n").unwrap();
         let error = init(&root, false).unwrap_err();
-        assert!(error.0.contains("open role fields"));
+        assert!(error.0.contains("open role fields"), "{}", error.0);
         assert!(!root.join(PACKAGE_FILE).exists());
         fs::remove_dir_all(root).unwrap();
     }

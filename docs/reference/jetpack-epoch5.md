@@ -279,12 +279,6 @@ and fact fingerprint, and applies all files atomically. `jet fold <generated
 file>` reverses the matching journal only when every recorded file still has
 the expected bytes. User-authored files added after a split are not consumed.
 
-The private native evaluator is bounded before parsing: source input is capped
-at 1 MiB, token and expression budgets are finite, imports require explicit
-project-root authority, and only the pinned Stage A systems are accepted.
-Unsupported or over-budget expressions fail with a typed evaluator error. The
-production boundary does not invoke `nix` or require it on `PATH`.
-
 ## Build hooks and images
 
 Build hooks lower to a finite action graph. Fetches need exact hashes. Exec

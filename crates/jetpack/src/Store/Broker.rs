@@ -227,7 +227,14 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
                 systemd_escape_path(&config.socket)
             )
         };
-        let service_identity = if layout.admin { "User=root\nPrivateUsers=no\n" } else { "" };
+        // The request process is short-lived and must not share the host
+        // identity. It receives only the AF_UNIX request and the narrow
+        // staging/promotion paths below.
+        let service_identity = if layout.admin {
+            "User=root\nPrivateUsers=yes\n"
+        } else {
+            "PrivateUsers=yes\n"
+        };
         let service_text = format!(
             "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\n{}NoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=read-only\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
             systemd_escape_path(&executable),
@@ -367,7 +374,7 @@ pub fn serve_shared_store_fd(roots: &Roots, fd: i32) -> io::Result<()> {
             authorize_peer(&config, uid, true)?;
             let mut archive = vec![0u8; length];
             stream.read_exact(&mut archive)?;
-            Archive::import_archive(&shared, &archive, Some(&key), false)?;
+            promote_staged_archive(&shared, &config, &key, &archive)?;
             write_response(&mut stream, "ok")
         }
         BrokerHeader::Read(reference) => {
@@ -380,6 +387,52 @@ pub fn serve_shared_store_fd(roots: &Roots, fd: i32) -> io::Result<()> {
             let (archive, _) = Archive::export_archive(&shared, &entry.id, true, Some(&key))?;
             write_archive_response(&mut stream, &archive)
         }
+    }
+}
+
+fn promote_staged_archive(
+    shared: &Roots,
+    config: &SharedStoreConfig,
+    key: &str,
+    archive: &[u8],
+) -> io::Result<()> {
+    let incoming = config.shared_root.join(".incoming");
+    ensure_real_dir(&incoming)?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or_default();
+    let stage = incoming.join(format!("{}-{}", std::process::id(), nonce));
+    fs::create_dir(&stage)?;
+    let staged = Roots {
+        root: stage.clone(),
+        dev_mode: false,
+    };
+    let result = (|| {
+        // Admission happens in an ephemeral root first. The archive is
+        // bounded, signed, and digest-checked before the shared root is
+        // reachable by the promotion step.
+        Archive::import_archive(&staged, archive, Some(key), false)?;
+        let entries = super::list_checked(&staged)?;
+        if entries.is_empty() {
+            return Err(invalid("shared-store archive contains no verified entry"));
+        }
+        for entry in &entries {
+            super::verify_hangar_object(&staged, entry)
+                .map_err(|error| io::Error::other(error.what()))?;
+        }
+        crate::RuntimePolicy::with_lock(&shared.root, "shared-store-promote", || {
+            Archive::import_archive(shared, archive, Some(key), false)?;
+            Ok(())
+        })
+    })();
+    let cleanup = fs::remove_dir_all(&stage);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(invalid(&format!(
+            "shared-store staging cleanup failed: {error}"
+        ))),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 

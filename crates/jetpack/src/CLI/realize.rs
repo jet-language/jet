@@ -26,12 +26,11 @@ pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::Re
 
 fn current_project_dir() -> Option<std::path::PathBuf> {
     let dir = std::env::current_dir().ok()?;
-    if EnvFile::path_in(&dir).is_file()
-        || dir.join(Syntax::JETPACK_TOML).is_file()
-        || dir.join(Syntax::PACKAGE_FILE).is_file()
-        || dir.join(Syntax::PAYLOAD_FILE).is_file()
-        || dir.join(Syntax::WORKSPACE_FILE).is_file()
-    {
+    // The current directory is the project lock context for realization
+    // commands, even before the first project file exists. The filesystem
+    // root is the one deliberate no-project context used by the CLI tests and
+    // must not receive a `/.jet/lock`.
+    if dir.parent().is_some() {
         Some(dir)
     } else {
         None

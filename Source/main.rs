@@ -2789,12 +2789,9 @@ fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
     };
     let check_only = raw.iter().any(|arg| arg == "--check");
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match jet::Transition::split(&cwd, target, check_only) {
+    match jetpack::Transition::split(&cwd, target, check_only) {
         Ok(result) => print_transition_result(&result, check_only, mode),
-        Err(error) => {
-            eprintln!("error: {error}");
-            exit(ExitCodes::USER_ERROR);
-        }
+        Err(error) => report_transition_error(&error),
     }
 }
 
@@ -2806,17 +2803,14 @@ fn run_fold(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
     };
     let check_only = raw.iter().any(|arg| arg == "--check");
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match jet::Transition::fold(&cwd, Path::new(path), check_only) {
+    match jetpack::Transition::fold(&cwd, Path::new(path), check_only) {
         Ok(result) => print_transition_result(&result, check_only, mode),
-        Err(error) => {
-            eprintln!("error: {error}");
-            exit(ExitCodes::USER_ERROR);
-        }
+        Err(error) => report_transition_error(&error),
     }
 }
 
 fn print_transition_result(
-    result: &jet::Transition::TransitionResult,
+    result: &jetpack::Transition::TransitionResult,
     check_only: bool,
     mode: OutputMode,
 ) -> ! {
@@ -2864,6 +2858,37 @@ fn print_transition_result(
         }
     }
     exit(ExitCodes::OK)
+}
+
+fn report_transition_error(error: &jetpack::Transition::TransitionError) -> ! {
+    let message = error.0.as_str();
+    let (code, why, fix) = if message.contains("pkg.jet") || message.contains("retired") {
+        (
+            "E1226",
+            "the package transition accepts only the current package manifest and its recorded migration path.",
+            "rename the retired manifest to `package.jet`, or run `jet init --check` in the project root.",
+        )
+    } else if message.contains("already exists") {
+        (
+            "E1252",
+            "a transition never overwrites an existing package manifest or generated role file.",
+            "review the existing file, or run the transition in an empty package root.",
+        )
+    } else if message.contains("journal") || message.contains("fingerprint") {
+        (
+            "E1204",
+            "a recorded package transition no longer matches the files on disk, so Jet refuses a stale or tampered replay.",
+            "restore the recorded files or remove the stale transition journal and make a fresh checked transition.",
+        )
+    } else {
+        (
+            "E1206",
+            "the package manifest or transition input does not have the required typed shape.",
+            "fix the named package or role file, then rerun the transition with `--check` first.",
+        )
+    };
+    eprintln!("Error [{code}]: {message}\n Why: {why}\n Fix: {fix}");
+    exit(ExitCodes::USER_ERROR);
 }
 
 fn json_quote(value: &str) -> String {

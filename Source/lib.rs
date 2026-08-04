@@ -76,7 +76,6 @@ pub use jet_driver::{
     FFI,
     SHA256,
 };
-pub use jetpack::Transition;
 pub use jet_queries as Queries;
 // D-ARCH-SOURCE1=A: full debugger subsystem and stable exit policy live in
 // inward workspace seams. Preserve public paths without root-owned wrappers.

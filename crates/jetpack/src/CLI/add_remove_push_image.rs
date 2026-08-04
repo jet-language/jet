@@ -458,6 +458,15 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             );
             return 2;
         }
+        Some(push_ref) if looks_like_registry_reference(push_ref) => {
+            theme.error_coded(
+                "E1268",
+                &format!("`jet image {name}` cannot push remote OCI reference `{push_ref}`"),
+                "remote registry TLS/transport requires an explicit verified HTTP(S) endpoint; Jet never treats a registry name as a local path.",
+                "use `--push https://registry.example/repository:tag` for the configured transport, or `--push file:///path/to/layout` for a local copy.",
+            );
+            return 2;
+        }
         Some(push_ref) => Some(ImagePushDestination::Local(if let Some(path) =
             push_ref.strip_prefix("file://")
         {
@@ -541,6 +550,14 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             mode: 0o755,
         }]
     };
+    if !image.services.is_empty() {
+        theme.error(
+            &format!("environment image {name} cannot project services"),
+            "the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy",
+            "run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime",
+        );
+        return 2;
+    }
     let mut projection = Image::ProjectionReport::default();
     if image.from_environment {
         projection
@@ -557,8 +574,29 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         if !plan.integrations.is_empty() {
             projection.omitted.push("environment.integrations".to_string());
         }
-        if !plan.languages.is_empty() {
-            projection.omitted.push("environment.languages".to_string());
+        for language in &plan.language_projections {
+            let prefix = format!("language:{}", language.selection.name);
+            projection
+                .changed
+                .push(format!("{prefix}:pack={}", language.pack.fingerprint()));
+            projection.included.extend(
+                language
+                    .included
+                    .iter()
+                    .map(|fact| format!("{prefix}:included:{fact}")),
+            );
+            projection.changed.extend(
+                language
+                    .changed
+                    .iter()
+                    .map(|fact| format!("{prefix}:changed:{fact}")),
+            );
+            projection.omitted.extend(
+                language
+                    .omitted
+                    .iter()
+                    .map(|fact| format!("{prefix}:omitted:{fact}")),
+            );
         }
         if !plan.profiles.is_empty() {
             projection.omitted.push("environment.profiles".to_string());
@@ -606,48 +644,10 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         projection.included.push(format!("file:{rel}"));
     }
 
-    let service_commands = if image.from_environment {
-        match image_service_commands(&plan, image, name) {
-            Ok(commands) => commands,
-            Err(error) => {
-                theme.error(
-                    &format!("environment image {name} cannot supervise its services"),
-                    &error,
-                    "give each selected service a real executable package and a foreground run command.",
-                );
-                return 2;
-            }
-        }
-    } else if image.services.is_empty() {
-        Vec::new()
-    } else {
-        theme.error(
-            &format!("package image {name} cannot select environment services"),
-            "services is an Environment projection field, not a package-image input.",
-            "use from: env.<name> for a supervised environment image.",
-        );
-        return 2;
-    };
-    if !service_commands.is_empty() {
-        files.push(Image::LayerFile {
-            path: "jet/supervise".to_string(),
-            data: supervisor_script(&service_commands).into_bytes(),
-            mode: 0o755,
-        });
-        projection
-            .included
-            .push("services:jet/supervise".to_string());
-        projection
-            .changed
-            .push(format!("services:{}", image.services.join(",")));
-    }
-
     let spec = Image::BuildSpec {
         files,
         entrypoint: vec![image.entrypoint.clone().unwrap_or_else(|| {
-            if !service_commands.is_empty() {
-                "/jet/supervise".to_string()
-            } else if image.from_environment {
+            if image.from_environment {
                 "/bin/sh".to_string()
             } else {
                 format!("/usr/local/bin/{}", image.from)
@@ -718,6 +718,11 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+fn looks_like_registry_reference(reference: &str) -> bool {
+    let authority = reference.split('/').next().unwrap_or_default();
+    authority == "localhost" || authority.contains('.')
+}
+
 fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec<u8>, String> {
     let path = std::path::Path::new(relative);
     if relative.is_empty()
@@ -755,98 +760,6 @@ fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec
         return Err("image file exceeded the 512 MiB layer limit while being read".to_string());
     }
     Ok(data)
-}
-
-fn image_service_commands(
-    plan: &ModuleEval::EnvPlan,
-    image: &ModuleEval::ImagePlan,
-    _image_name: &str,
-) -> Result<Vec<Vec<String>>, String> {
-    let selected = image
-        .services
-        .iter()
-        .map(|name| {
-            plan.dev_services
-                .iter()
-                .find(|candidate| candidate.name == *name)
-                .cloned()
-                .ok_or_else(|| format!("service {name} is not declared by the environment"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let order = crate::Services::dependency_order(&selected)?;
-    let package_names = plan
-        .package_refs
-        .iter()
-        .filter_map(|reference| reference.split('@').next())
-        .collect::<Vec<_>>();
-    let mut commands = Vec::new();
-    for index in order {
-        let service = &selected[index];
-        let mut command = crate::Services::image_run_command(service)?;
-        if command
-            .iter()
-            .any(|argument| argument.bytes().any(|byte| byte.is_ascii_control()))
-        {
-            return Err(format!(
-                "service {} has a command argument with a control character",
-                service.name
-            ));
-        }
-        let executable = command
-            .first()
-            .cloned()
-            .ok_or_else(|| format!("service {} has an empty run command", service.name))?;
-        if executable.starts_with('/') {
-            let path = std::path::Path::new(&executable);
-            if path.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
-                )
-            }) {
-                return Err(format!("service {} has an unsafe executable path", service.name));
-            }
-        } else if executable == "sh" {
-            command[0] = "/bin/sh".to_string();
-        } else if let Some(executable) = crate::Services::catalog_executable(&service.name)
-        {
-            command[0] = format!("/usr/local/bin/{executable}");
-        } else if package_names
-            .iter()
-            .any(|package| *package == executable.as_str())
-        {
-            command[0] = format!("/usr/local/bin/{executable}");
-        } else {
-            return Err(format!(
-                "service {} executable {executable} is not a projected package",
-                service.name
-            ));
-        }
-        commands.push(command);
-    }
-    Ok(commands)
-}
-
-fn supervisor_script(commands: &[Vec<String>]) -> String {
-    let mut script = String::from(
-        "#!/bin/sh\nset -eu\npids=\"\"\ncleanup() {\n  code=$?\n  for pid in $pids; do kill \"$pid\" 2>/dev/null || true; done\n  for pid in $pids; do wait \"$pid\" 2>/dev/null || true; done\n  exit \"$code\"\n}\ntrap cleanup EXIT INT TERM\nstart() {\n  \"$@\" &\n  pids=\"$pids $!\"\n}\n",
-    );
-    for command in commands {
-        script.push_str("start");
-        for argument in command {
-            script.push(' ');
-            script.push_str(&shell_quote(argument));
-        }
-        script.push('\n');
-    }
-    script.push_str(
-        "while :; do\n  for pid in $pids; do\n    kill -0 \"$pid\" 2>/dev/null || exit 1\n  done\n  sleep 1\ndone\n",
-    );
-    script
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn environment_image_files(

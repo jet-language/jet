@@ -1152,7 +1152,11 @@ mod tests {
     fn ref_spec(raw: &str) -> RefSpec {
         RefSpec {
             source: Source::Nixpkgs,
-            package: raw.to_string(),
+            package: raw
+                .split_once('@')
+                .map(|(package, _)| package)
+                .unwrap_or(raw)
+                .to_string(),
             raw: raw.to_string(),
         }
     }
