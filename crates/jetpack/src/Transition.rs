@@ -2207,6 +2207,67 @@ mod tests {
     }
 
     #[test]
+    fn hosts_split_and_fold_restore_exact_root() {
+        let root = temp_root("hosts");
+        let original =
+            b"name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        split(
+            &root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+        let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
+        assert!(fleet.contains("hosts: .{ server: systems.server }"), "{fleet}");
+        fold(&root, Path::new("package/fleet.jet"), false).unwrap();
+        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(!root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hosts_split_rejects_invalid_and_ambiguous_targets_before_writes() {
+        let invalid_root = temp_root("hosts-invalid");
+        fs::write(
+            invalid_root.join(PACKAGE_FILE),
+            "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        )
+        .unwrap();
+        let invalid = split(
+            &invalid_root,
+            SplitTarget::Hosts {
+                name: "server/name".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(invalid.0.contains("invalid host name"), "{invalid}");
+        assert!(!invalid_root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(invalid_root).unwrap();
+
+        let ambiguous_root = temp_root("hosts-ambiguous");
+        fs::write(
+            ambiguous_root.join(PACKAGE_FILE),
+            "name: \"demo\"\noutputs: .{ server: .Executable.{ name: \"server\", entry: run } }\n",
+        )
+        .unwrap();
+        let ambiguous = split(
+            &ambiguous_root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(ambiguous.0.contains("host extraction needs a System Output"), "{ambiguous}");
+        assert!(!ambiguous_root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(ambiguous_root).unwrap();
+    }
+
+    #[test]
     fn legacy_open_role_file_is_rejected_before_writes() {
         let root = temp_root("legacy-open");
         fs::write(root.join("pkg.jet"), "name: \"demo\"\n").unwrap();

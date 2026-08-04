@@ -2880,6 +2880,148 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
     );
 }
 
+#[test]
+fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
+    let env_project = Scratch::new("transition-cli-env");
+    let env_original = "name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
+    fs::write(env_project.join("package.jet"), env_original).unwrap();
+
+    let checked = jet()
+        .args(["split", "env", "--check"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "stderr: {}", String::from_utf8_lossy(&checked.stderr));
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("No files changed."));
+    assert!(!env_project.join("package/env.jet").exists());
+
+    let split = jet()
+        .args(["split", "env"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(split.status.success(), "stderr: {}", String::from_utf8_lossy(&split.stderr));
+    assert!(env_project.join("package/env.jet").is_file());
+
+    let fold_check = jet()
+        .args(["fold", "package/env.jet", "--check"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(fold_check.status.success(), "stderr: {}", String::from_utf8_lossy(&fold_check.stderr));
+    assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
+
+    let fold = jet()
+        .args(["fold", "package/env.jet"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(fold.status.success(), "stderr: {}", String::from_utf8_lossy(&fold.stderr));
+    assert_eq!(fs::read_to_string(env_project.join("package.jet")).unwrap(), env_original);
+    assert!(!env_project.join("package/env.jet").exists());
+
+    let package_project = Scratch::new("transition-cli-package");
+    let package_original = "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n";
+    fs::write(package_project.join("package.jet"), package_original).unwrap();
+    let package_split = jet()
+        .args(["split", "package", "app", "--check"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    let package_split = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    assert!(package_project.join("packages/app/package.jet").is_file());
+    let package_fold = jet()
+        .args(["fold", "packages/app/package.jet"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&package_fold.stderr));
+    assert_eq!(fs::read_to_string(package_project.join("package.jet")).unwrap(), package_original);
+
+    let hosts_project = Scratch::new("transition-cli-hosts");
+    fs::write(
+        hosts_project.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let hosts_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&hosts_project.path)
+        .output()
+        .unwrap();
+    assert!(hosts_split.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_split.stderr));
+    assert!(hosts_project.join("package/fleet.jet").is_file());
+    let hosts_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&hosts_project.path)
+        .output()
+        .unwrap();
+    assert!(hosts_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_fold.stderr));
+
+    let invalid_hosts = Scratch::new("transition-cli-invalid-host");
+    fs::write(
+        invalid_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let invalid = jet()
+        .args(["split", "hosts", "server/name"])
+        .current_dir(&invalid_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(1));
+    let invalid_stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(invalid_stderr.contains("E1206"), "{invalid_stderr}");
+    assert!(!invalid_hosts.join("package/fleet.jet").exists());
+
+    let legacy_project = Scratch::new("transition-cli-legacy");
+    let originals = [
+        ("pkg.jet", "payload: { name: \"demo\", version: \"0.1.0\" }\n"),
+        ("env.jet", "module env.dev { tools: [\"git@nixpkgs\"] }\n"),
+        ("workspace.jet", "module workspace { members: [] }\n"),
+        ("config.jet", "Config.{ }\n"),
+    ];
+    for (name, source) in originals {
+        fs::write(legacy_project.join(name), source).unwrap();
+    }
+    let init_check = jet()
+        .args(["init", "--check"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(init_check.status.success(), "stderr: {}", String::from_utf8_lossy(&init_check.stderr));
+    assert!(String::from_utf8_lossy(&init_check.stdout).contains("No files changed."));
+    let init = jet()
+        .args(["init"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "stderr: {}", String::from_utf8_lossy(&init.stderr));
+    assert!(legacy_project.join("package.jet").is_file());
+    let restore_check = jet()
+        .args(["init", "--restore-role-files", "--check"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(restore_check.status.success(), "stderr: {}", String::from_utf8_lossy(&restore_check.stderr));
+    let restore = jet()
+        .args(["init", "--restore-role-files"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(restore.status.success(), "stderr: {}", String::from_utf8_lossy(&restore.stderr));
+    for (name, source) in originals {
+        assert_eq!(fs::read_to_string(legacy_project.join(name)).unwrap(), source);
+    }
+    assert!(!legacy_project.join("package.jet").exists());
+}
+
 
 #[test]
 fn mono_example_has_two_pkg_jet_members() {

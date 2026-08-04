@@ -2606,6 +2606,47 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
 }
 
 #[test]
+fn canvas_projects_typed_member_after_package_transition() {
+    let dir = temp_dir("package_transition_canvas_member");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace { members: [\"./packages/app\"] }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"workspace\")\n}\n").unwrap();
+    let member_entry = dir.join("packages/app/main.jet");
+    fs::create_dir_all(member_entry.parent().unwrap()).unwrap();
+    fs::write(&member_entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
+
+    jetpack::Transition::split(
+        &dir,
+        jetpack::Transition::SplitTarget::Package {
+            name: "app".to_string(),
+        },
+        false,
+    )
+    .expect("package transition");
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    assert!(project.contains("\"mode\":\"workspace\""), "{project}");
+    assert!(project.contains("\"name\":\"app\""), "{project}");
+    assert!(project.contains("\"manifest\":\"packages/app/package.jet\""), "{project}");
+
+    jetpack::Transition::fold(&dir, PathBuf::from("packages/app/package.jet").as_path(), false)
+        .expect("package fold");
+    assert!(!dir.join("packages/app/package.jet").exists());
+    assert!(fs::read_to_string(dir.join("package.jet"))
+        .unwrap()
+        .contains("app :: Config"));
+}
+
+#[test]
 fn canvas_project_json_projects_env_services_and_diagnostics() {
     let dir = temp_dir("project_env_services");
     fs::write(
