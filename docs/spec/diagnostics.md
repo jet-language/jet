@@ -629,7 +629,7 @@ renumbered, and no new `W` code may be allocated.
 | E1332 | sema | one named environment profile is composed with conflicting definitions (D-ENV-PROFILE1) |
 | E1333 | sema | a typed environment fact, language-pack selection, or dotenv declaration is invalid or conflicting (D-ENV-LIFECYCLE2/D-ENV-LANGPACK1) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
-| E1335 | sema/jetpack | a first-party environment integration has conflicting facts or an invalid host projection (D-ENV-INTEGRATIONS1) |
+| E1335 | sema/jetpack | a first-party environment integration has conflicting, lossy, or invalid projected facts (D-ENV-INTEGRATIONS1) |
 | E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -902,7 +902,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1332 | profile definitions conflict | Composition cannot silently choose one profile's packages or variables over another's. | Merge equal facts or give the profiles different names. |
 | E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
-| E1335 | an environment integration has conflicting facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies for one integration. | Merge the declarations or select a target and policy supported by the integration. |
+| E1335 | an environment integration has conflicting or lossy facts | Integrations lower into the shared package, file, secret, host-check, provider, and grant facts; one graph cannot choose two policies or silently discard a typed input. | Merge the declarations, use named secret references, or select a target and policy supported by the integration. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 | E1337 | the requested environment profile is not declared | One environment plan activates one `env.<name>` profile; silently merging sibling profiles would mix unrelated packages and variables. | Select one of the declared environment profile names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
 

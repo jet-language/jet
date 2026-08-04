@@ -723,6 +723,7 @@ module b {
 module mobile {
     imports: [
         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+        env.platform.apple(targets: [.IOS]),
         env.security.certificates([dev_certificate]),
         env.network.hosts(["api.local": "127.0.0.1"]),
         env.agent.codex(mcp: [repo_server]),
@@ -731,7 +732,7 @@ module mobile {
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
-        assert_eq!(plan.integrations.len(), 5);
+        assert_eq!(plan.integrations.len(), 6);
         assert!(plan
             .package_refs
             .iter()
@@ -747,6 +748,21 @@ module mobile {
         assert!(android.providers.iter().any(|value| value == "nixpkgs"));
         assert!(android.validate_target("linux.x64").is_ok());
         assert!(android.validate_target("darwin.aarch64").is_err());
+        let apple = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Apple)
+            .unwrap_or_else(|| {
+                panic!("the Android/Apple integration proof must include an Apple preset")
+            });
+        assert_eq!(apple.options.get("targets").map(String::as_str), Some("IOS"));
+        assert_eq!(
+            apple.options.get("license").map(String::as_str),
+            Some("policy-required")
+        );
+        assert!(apple.packages.iter().any(|value| value == "apple-sdk@nixpkgs"));
+        assert!(apple.validate_target("darwin.aarch64").is_ok());
+        assert!(apple.validate_target("linux.x64").is_err());
         let certs = plan
             .integrations
             .iter()
@@ -766,6 +782,20 @@ module mobile {
             .find(|value| value.kind == IntegrationKind::CodexAgent)
             .unwrap();
         assert!(agent.grants.iter().any(|value| value == "mcp.read"));
+    }
+
+    #[test]
+    fn typed_integration_loss_is_reported_before_plan_persistence() {
+        let src = r#"
+module mobile {
+    imports: [env.security.certificates(42)]
+}
+"#;
+        let error = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(error.code, "E1335");
+        assert!(error.what.contains("integration lowering was lossy"));
+        assert!(error.why.contains("secret input must be a named reference"));
+        assert!(!error.why.contains("42"));
     }
 
     #[test]
