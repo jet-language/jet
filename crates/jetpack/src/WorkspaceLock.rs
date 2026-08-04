@@ -37,30 +37,73 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         lock.workspace_members = plan
             .members
             .iter()
-            .map(|m| LockedWorkspaceMember {
-                name: m.name.clone(),
-                path: m.path.clone(),
-                source_digest: source_digest.clone(),
-                canonical_path: if !m.canonical_path.is_empty() {
-                    m.canonical_path.clone()
+            .map(|m| {
+                let relative = std::path::Path::new(&m.path);
+                if relative.is_absolute()
+                    || relative
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} has an unsafe relative path", m.name),
+                    ));
+                }
+                let canonical_path = workspace_root.join(relative).canonicalize().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} cannot be canonicalized: {error}", m.name),
+                    )
+                })?;
+                let root = workspace_root.canonicalize().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace root cannot be canonicalized: {error}"),
+                    )
+                })?;
+                if !canonical_path.starts_with(&root) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} escapes the workspace root", m.name),
+                    ));
+                }
+                let canonical_relative = canonical_path
+                    .strip_prefix(&root)
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member {} has no relative identity: {error}", m.name),
+                        )
+                    })?
+                    .to_string_lossy()
+                    .into_owned();
+                let canonical_relative = if canonical_relative.is_empty() {
+                    ".".to_string()
                 } else {
-                    workspace_root
-                        .join(&m.path)
-                        .canonicalize()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                },
-                package_digest: jet_pkg_model::Package::PackageFacts::load(
-                    &workspace_root
-                        .join(&m.path)
-                        .canonicalize()
-                        .unwrap_or_else(|_| workspace_root.join(&m.path)),
-                )
-                .and_then(Result::ok)
-                .map(|package| package.semantic_digest())
-                .unwrap_or_default(),
+                    canonical_relative
+                };
+                let package = jet_pkg_model::Package::PackageFacts::load(&canonical_path)
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member `{}` has no valid Package facts", m.name),
+                        )
+                    })?
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member `{}` Package facts are invalid: {error}", m.name),
+                        )
+                    })?;
+                Ok(LockedWorkspaceMember {
+                    name: m.name.clone(),
+                    path: m.path.clone(),
+                    source_digest: source_digest.clone(),
+                    canonical_path: canonical_relative,
+                    package_digest: package.semantic_digest(),
+                })
             })
-            .collect();
+            .collect::<std::io::Result<Vec<_>>>()?;
         lock.workspace_source_digest = Some(source_digest);
         lock.workspace_overlay_policy = plan.overlay_policy.clone();
         // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
@@ -214,8 +257,7 @@ mod tests {
         std::fs::write(
             tmp.join(Syntax::UNIFIED_LOCK_FILE),
             format!(
-                "version = 1\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"{}\"\npackage_digest = \"{}\"\n",
-                canonical.display(),
+                "version = 1\nworkspace_source_digest = \"no-workspace-source\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{}\"\n",
                 package_digest,
             ),
         )
@@ -223,6 +265,30 @@ mod tests {
         let plan = load(&tmp).unwrap();
         assert_eq!(plan.members.len(), 1);
         assert_eq!(plan.members[0].name, "hello");
+        let moved = std::env::temp_dir().join(format!(
+            "wlock-moved-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(moved.join(".jet")).unwrap();
+        std::fs::create_dir_all(moved.join("packages/hello")).unwrap();
+        std::fs::copy(
+            tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
+            moved.join("packages/hello").join(Syntax::PACKAGE_FILE),
+        )
+        .unwrap();
+        std::fs::copy(
+            tmp.join(Syntax::UNIFIED_LOCK_FILE),
+            moved.join(Syntax::UNIFIED_LOCK_FILE),
+        )
+        .unwrap();
+        assert!(
+            load(&moved).is_some(),
+            "workspace lock must survive checkout relocation"
+        );
+        std::fs::remove_dir_all(moved).ok();
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -338,6 +404,7 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
+        write_member_manifest(&tmp, "packages/hello", "hello");
         write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
         assert!(raw.contains("[[package]]"), "{raw}");

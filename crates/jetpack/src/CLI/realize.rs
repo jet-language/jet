@@ -1,6 +1,6 @@
 use super::parse::Flags;
 use super::update_search_info::shell_on_failed_build;
-use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources};
+use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources, project_root};
 use crate::EnvFile;
 use crate::Lock;
 use jet_env_model::ModuleEval;
@@ -37,13 +37,14 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Resolve the nearest directory that owns an `env.jet` manifest.
+/// Resolve the nearest directory that owns an `env.jet` or `workspace.jet`.
 ///
-/// Environment commands are allowed from a project subdirectory. Keep the
-/// root explicit so planning, trust, dotenv composition, and managed state
-/// all use the same project identity.
+/// Environment and workspace commands are allowed from a project
+/// subdirectory. Keep the root explicit so planning, trust, dotenv
+/// composition, managed state, and explicit refs use the same project
+/// identity.
 pub(super) fn project_env_root(start: &Path) -> PathBuf {
-    crate::EnvHook::find_env_root(start).unwrap_or_else(|| start.to_path_buf())
+    project_root(start)
 }
 
 /// Realize one ref, recording it in the store and printing progress. `table`

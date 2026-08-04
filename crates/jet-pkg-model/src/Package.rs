@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageOutputKind {
@@ -197,11 +198,45 @@ impl std::error::Error for ComposeError {}
 impl std::error::Error for PackageParseError {}
 
 impl PackageFacts {
-    /// Stable digest of the fully composed typed facts used by workspace
-    /// locks. Source origins remain in the digest because a moved Config is a
-    /// different provenance fact even when its values happen to match.
+    /// Stable, checkout-portable digest of the fully composed typed facts
+    /// used by workspace locks. Source origins and provenance are audit
+    /// metadata, not Package meaning, so absolute checkout paths never enter
+    /// this identity.
     pub fn semantic_digest(&self) -> String {
-        crate::SHA256::sha256_hex(format!("{self:?}").as_bytes())
+        let mut semantic = String::new();
+        write!(
+            &mut semantic,
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};configs={:?};members={:?};",
+            self.name,
+            self.version,
+            self.jet,
+            self.source,
+            self.deps,
+            self.services,
+            self.outputs,
+            self.environments,
+            self.defaults,
+            self.configs,
+            self.members,
+        )
+        .expect("writing to a String cannot fail");
+        for (name, config) in &self.inline_configs {
+            write!(
+                &mut semantic,
+                "inline_config={:?};name={:?};version={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};",
+                name,
+                config.name,
+                config.version,
+                config.source,
+                config.deps,
+                config.services,
+                config.outputs,
+                config.environments,
+                config.defaults,
+            )
+            .expect("writing to a String cannot fail");
+        }
+        crate::SHA256::sha256_hex(semantic.as_bytes())
     }
 
     /// Parse the canonical `package.jet` root shape.
@@ -2284,6 +2319,14 @@ defaults: .{ run: app, test: check }
         assert_eq!(facts.outputs["app"].kind, PackageOutputKind::Executable);
         assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
         assert_eq!(facts.select_output("test", None, None).unwrap().name, "check");
+    }
+
+    #[test]
+    fn semantic_digest_ignores_checkout_origins() {
+        let source = "name: \"demo\"\nversion: \"1.0.0\"\n";
+        let left = PackageFacts::parse(source, "/checkout/one/package.jet").unwrap();
+        let right = PackageFacts::parse(source, "/checkout/two/package.jet").unwrap();
+        assert_eq!(left.semantic_digest(), right.semantic_digest());
     }
 
     #[test]

@@ -68,8 +68,9 @@ directories, duplicate Package names, and nested member roots.
 ## Environment profiles and language packs
 
 Profiles resolve parents before children. `--profile` selects one profile for
-the command. Without a flag, hostname, user, and then `default` choose a
-profile.
+the command. Without a flag, all hostname matches merge first, then all user
+matches merge in deterministic name order. Conflicting facts fail closed.
+`default` is used only when no hostname or user profile matches.
 
 Language selections are typed records. Enabled records expand through the
 closed catalog into ordinary package references. Disabled records remain in

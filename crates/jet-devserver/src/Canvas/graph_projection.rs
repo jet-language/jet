@@ -25,13 +25,15 @@ pub(super) fn project_checked(
     src: &str,
     bundle: &AST::ProgramBundle,
     facts: &SemIndexEffectFacts,
+    package_facts: Option<jet_driver::Package::PackageFacts>,
+    workspace_overlay_policy: Option<jet_env_model::Overlay::OverlayPolicy>,
     runtime_events: Option<&str>,
 ) -> Projection {
     let mut index = jet_semindex::from_checked(bundle, facts);
-    if let Some(package) = jet_semindex::package_facts_for_entry(path) {
+    if let Some(package) = package_facts {
         index.attach_package_facts(package);
     }
-    if let Some(policy) = jet_semindex::workspace_overlay_policy_for_entry(path) {
+    if let Some(policy) = workspace_overlay_policy {
         index.attach_workspace_overlay_policy(policy);
     }
     let mut graph_json = Vec::new();

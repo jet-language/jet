@@ -36,6 +36,8 @@ pub struct WorkspaceMember {
     pub name: String,
     /// Path to the package directory, relative to the workspace root.
     pub path: String,
-    /// Canonical physical directory identity used by the workspace lock.
+    /// Checkout-relative canonical directory identity used by the workspace
+    /// lock. Relative identity keeps a committed lock portable after a
+    /// checkout moves.
     pub canonical_path: String,
 }

@@ -2553,19 +2553,17 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
         let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
         let stale_workspace_lock = jetpack::WorkspaceLock::load(cwd).is_none()
             && std::fs::read_to_string(&lock_path)
-                .map(|source| {
-                    source.contains("[[workspace_member]]")
-                        || source.contains("workspace_source_digest")
-                        || source.contains("workspace_overlay")
-                })
+                .map(|source| jetpack::Lock::looks_like_workspace_lock(&source))
                 .unwrap_or(false);
         if stale_workspace_lock {
-            eprintln!(
-                "error: workspace lock `{}` is malformed or stale; refusing an empty member index",
-                lock_path.display()
-            );
-            eprintln!(
-                " fix: run `jetpack env` from the workspace root to regenerate it after fixing workspace/package sources"
+            let diagnostic = jetpack::Lock::e1202_workspace(&lock_path.display().to_string());
+            eprint!(
+                "{}",
+                jet::Diagnostics::render_all(
+                    jet::Syntax::WORKSPACE_FILE,
+                    "",
+                    std::slice::from_ref(&diagnostic),
+                )
             );
             exit(ExitCodes::USER_ERROR);
         }

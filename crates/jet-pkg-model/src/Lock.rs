@@ -511,9 +511,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
             }
             if let Some(wm) = current_workspace_member.take() {
-                if let Some(m) = wm.finish() {
-                    workspace_members.push(m);
-                }
+                workspace_members.push(wm.finish()?);
             }
             if let Some(p) = current_pkg.take() {
                 packages.push(p.finish()?);
@@ -530,19 +528,13 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
             }
             if let Some(package) = current_workspace_overlay_package.take() {
-                if let Some(package) = package.finish() {
-                    workspace_overlay_packages.push(package);
-                }
+                workspace_overlay_packages.push(package.finish()?);
             }
             if let Some(overlay) = current_workspace_overlay.take() {
-                if let Some(overlay) = overlay.finish() {
-                    workspace_overlay_sets.push(overlay);
-                }
+                workspace_overlay_sets.push(overlay.finish()?);
             }
             if let Some(grant) = current_workspace_build_grant.take() {
-                if let Some(grant) = grant.finish() {
-                    workspace_build_grants.push(grant);
-                }
+                workspace_build_grants.push(grant.finish()?);
             }
             in_root = false;
             match line {
@@ -633,7 +625,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "name" => overlay.name = Some(val.trim_matches('"').to_string()),
                 "provider" => overlay.provider = Some(val.trim_matches('"').to_string()),
                 "channel" => overlay.channel = Some(val.trim_matches('"').to_string()),
-                _ => {}
+                _ => return Err(format!("unknown workspace overlay field `{key}`")),
             }
             continue;
         }
@@ -644,12 +636,27 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "source" => package.source = Some(val.trim_matches('"').to_string()),
                 "version" => package.version = Some(val.trim_matches('"').to_string()),
                 "flags" => package.flags = parse_string_array(val),
-                "priority" => package.priority = val.parse().ok(),
+                "priority" => {
+                    package.priority = Some(
+                        val.parse()
+                            .map_err(|_| format!("invalid workspace overlay priority `{val}`"))?,
+                    )
+                }
                 "field_priorities" => package.field_priorities = parse_string_array(val),
                 "env" => package.env = parse_string_array(val),
                 "patches" => package.patches = parse_string_array(val),
-                "allow_unfree" => package.allow_unfree = val == "true",
-                _ => {}
+                "allow_unfree" => {
+                    package.allow_unfree = match val {
+                        "true" => true,
+                        "false" => false,
+                        _ => {
+                            return Err(format!(
+                                "invalid workspace overlay allow_unfree value `{val}`"
+                            ))
+                        }
+                    }
+                }
+                _ => return Err(format!("unknown workspace overlay package field `{key}`")),
             }
             continue;
         }
@@ -657,7 +664,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             match key {
                 "package" => grant.package = Some(val.trim_matches('"').to_string()),
                 "effects" => grant.effects = parse_string_array(val),
-                _ => {}
+                _ => return Err(format!("unknown workspace build grant field `{key}`")),
             }
             continue;
         }
@@ -739,9 +746,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
     }
     if let Some(wm) = current_workspace_member {
-        if let Some(m) = wm.finish() {
-            workspace_members.push(m);
-        }
+        workspace_members.push(wm.finish()?);
     }
     if let Some(p) = current_pkg {
         packages.push(p.finish()?);
@@ -759,19 +764,13 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     }
 
     if let Some(package) = current_workspace_overlay_package {
-        if let Some(package) = package.finish() {
-            workspace_overlay_packages.push(package);
-        }
+        workspace_overlay_packages.push(package.finish()?);
     }
     if let Some(overlay) = current_workspace_overlay {
-        if let Some(overlay) = overlay.finish() {
-            workspace_overlay_sets.push(overlay);
-        }
+        workspace_overlay_sets.push(overlay.finish()?);
     }
     if let Some(grant) = current_workspace_build_grant {
-        if let Some(grant) = grant.finish() {
-            workspace_build_grants.push(grant);
-        }
+        workspace_build_grants.push(grant.finish()?);
     }
 
     let workspace_overlay_policy = build_workspace_overlay_policy(
@@ -793,6 +792,23 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         toolchains,
         browsers,
         source_channels,
+    })
+}
+
+/// Identify a lock that claims workspace authority even when its typed parse
+/// fails. Callers use this only to report the malformed/stale lock instead of
+/// treating it as an ordinary package lock or an empty workspace.
+pub fn looks_like_workspace_lock(raw: &str) -> bool {
+    raw.lines().map(str::trim).any(|line| {
+        matches!(
+            line,
+            "[[workspace_member]]"
+                | "[[workspace_overlay]]"
+                | "[[workspace_overlay_package]]"
+                | "[[workspace_build_grant]]"
+        ) || line.starts_with("workspace_source_digest")
+            || line.starts_with("workspace_policy_allow_unfree")
+            || line.starts_with("workspace_policy_build_deny")
     })
 }
 
@@ -858,13 +874,18 @@ struct PartialWorkspaceMember {
 }
 
 impl PartialWorkspaceMember {
-    fn finish(self) -> Option<LockedWorkspaceMember> {
-        Some(LockedWorkspaceMember {
-            name: self.name?,
-            path: self.path?,
-            source_digest: self.source_digest?,
-            canonical_path: self.canonical_path?,
-            package_digest: self.package_digest.unwrap_or_default(),
+    fn finish(self) -> Result<LockedWorkspaceMember, String> {
+        let nonempty = |field: &str, value: Option<String>| {
+            value
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("workspace member is missing `{field}`"))
+        };
+        Ok(LockedWorkspaceMember {
+            name: nonempty("name", self.name)?,
+            path: nonempty("path", self.path)?,
+            source_digest: nonempty("source_digest", self.source_digest)?,
+            canonical_path: nonempty("canonical_path", self.canonical_path)?,
+            package_digest: nonempty("package_digest", self.package_digest)?,
         })
     }
 }
@@ -877,8 +898,17 @@ struct PartialWorkspaceOverlay {
 }
 
 impl PartialWorkspaceOverlay {
-    fn finish(self) -> Option<Self> {
-        self.name.map(|name| Self {
+    fn finish(self) -> Result<Self, String> {
+        let name = self
+            .name
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| "workspace overlay is missing `name`".to_string())?;
+        if self.channel.is_some() && self.provider.is_none() {
+            return Err(format!(
+                "workspace overlay `{name}` has `channel` without `provider`"
+            ));
+        }
+        Ok(Self {
             name: Some(name),
             provider: self.provider,
             channel: self.channel,
@@ -901,8 +931,37 @@ struct PartialWorkspaceOverlayPackage {
 }
 
 impl PartialWorkspaceOverlayPackage {
-    fn finish(self) -> Option<Self> {
-        Some(self)
+    fn finish(self) -> Result<Self, String> {
+        let Self {
+            overlay,
+            package,
+            source,
+            version,
+            flags,
+            priority,
+            field_priorities,
+            env,
+            patches,
+            allow_unfree,
+        } = self;
+        let overlay = overlay
+            .filter(|overlay| !overlay.is_empty())
+            .ok_or_else(|| "workspace overlay package is missing `overlay`".to_string())?;
+        let package = package
+            .filter(|package| !package.is_empty())
+            .ok_or_else(|| "workspace overlay package is missing `package`".to_string())?;
+        Ok(Self {
+            overlay: Some(overlay),
+            package: Some(package),
+            source,
+            version,
+            flags,
+            priority,
+            field_priorities,
+            env,
+            patches,
+            allow_unfree,
+        })
     }
 }
 
@@ -913,8 +972,12 @@ struct PartialWorkspaceBuildGrant {
 }
 
 impl PartialWorkspaceBuildGrant {
-    fn finish(self) -> Option<Self> {
-        self.package.map(|package| Self {
+    fn finish(self) -> Result<Self, String> {
+        let package = self
+            .package
+            .filter(|package| !package.is_empty())
+            .ok_or_else(|| "workspace build grant is missing `package`".to_string())?;
+        Ok(Self {
             package: Some(package),
             effects: self.effects,
         })
@@ -933,27 +996,58 @@ fn build_workspace_overlay_policy(
     allow_unfree: Vec<String>,
     build_deny: Vec<String>,
 ) -> Result<OverlayPolicy, String> {
+    let mut overlay_names = BTreeSet::new();
+    let mut build_grants = Vec::new();
     let mut policy = OverlayPolicy {
         overlays: overlays
             .into_iter()
-            .map(|overlay| OverlaySet {
-                name: overlay.name.unwrap_or_default(),
-                provider: overlay.provider.map(|provider| ProviderOverride {
-                    provider,
-                    channel: overlay.channel.clone(),
-                }),
-                packages: Vec::new(),
+            .map(|overlay| {
+                let name = overlay
+                    .name
+                    .ok_or_else(|| "workspace overlay is missing `name`".to_string())?;
+                if !overlay_names.insert(name.clone()) {
+                    return Err(format!("duplicate workspace overlay `{name}`"));
+                }
+                Ok(OverlaySet {
+                    name,
+                    provider: overlay.provider.map(|provider| ProviderOverride {
+                        provider,
+                        channel: overlay.channel.clone(),
+                    }),
+                    packages: Vec::new(),
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, String>>()?,
         allow_unfree,
         build_deny,
-        build_grants: grants
-            .into_iter()
-            .filter_map(|grant| Some((grant.package?, grant.effects)))
-            .collect(),
+        build_grants: Vec::new(),
     };
+    for grant in grants {
+        let package = grant
+            .package
+            .ok_or_else(|| "workspace build grant is missing `package`".to_string())?;
+        if build_grants
+            .iter()
+            .any(|(existing, _)| existing == &package)
+        {
+            return Err(format!("duplicate workspace build grant `{package}`"));
+        }
+        build_grants.push((package, grant.effects));
+    }
+    policy.build_grants = build_grants;
+    let mut package_keys = BTreeSet::new();
     for package in packages {
-        let overlay_name = package.overlay.unwrap_or_default();
+        let overlay_name = package
+            .overlay
+            .ok_or_else(|| "workspace overlay package is missing `overlay`".to_string())?;
+        let package_name = package
+            .package
+            .ok_or_else(|| "workspace overlay package is missing `package`".to_string())?;
+        if !package_keys.insert((overlay_name.clone(), package_name.clone())) {
+            return Err(format!(
+                "duplicate workspace overlay package `{overlay_name}/{package_name}`"
+            ));
+        }
         let target = policy
             .overlays
             .iter_mut()
@@ -963,6 +1057,11 @@ fn build_workspace_overlay_policy(
         for fact in package.field_priorities {
             let (key, value) = split_fact(&fact)
                 .ok_or_else(|| format!("invalid workspace overlay field priority `{fact}`"))?;
+            if field_priorities.contains_key(&key) {
+                return Err(format!(
+                    "duplicate workspace overlay field priority `{key}`"
+                ));
+            }
             let priority = value
                 .parse()
                 .map_err(|_| format!("invalid workspace overlay field priority `{fact}`"))?;
@@ -976,8 +1075,16 @@ fn build_workspace_overlay_policy(
                     .ok_or_else(|| format!("invalid workspace overlay environment fact `{fact}`"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let mut env_keys = BTreeSet::new();
+        for (key, _) in &env {
+            if !env_keys.insert(key) {
+                return Err(format!(
+                    "duplicate workspace overlay environment fact `{key}`"
+                ));
+            }
+        }
         target.packages.push(PackageOverride {
-            package: package.package.unwrap_or_default(),
+            package: package_name,
             source: package.source,
             version: package.version,
             flags: package.flags,
@@ -2039,6 +2146,28 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
     )
 }
 
+/// E1202 for a workspace lock whose source/index identity cannot be trusted.
+pub fn e1202_workspace(lock_path: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1202",
+        format!("the workspace lock `{lock_path}` is malformed or stale"),
+        "workspace membership and overlay facts must match the current `workspace.jet` and Package sources".to_string(),
+        "run `jetpack env` from the workspace root after fixing the workspace or Package sources".to_string(),
+        None,
+    )
+}
+
+/// E1202 for a workspace lock write that did not complete.
+pub fn e1202_workspace_write(lock_path: &str, error: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1202",
+        format!("the workspace lock `{lock_path}` could not be written"),
+        format!("the workspace index is not usable until the lock write succeeds: {error}"),
+        "fix the workspace lock directory permissions or storage error, then run `jetpack env` again".to_string(),
+        None,
+    )
+}
+
 /// E1203 — git not installed.
 pub fn e1203() -> Diagnostic {
     Diagnostic::error(
@@ -2223,6 +2352,41 @@ mod a4_envelope_tests {
         let back = parse(&write(&lock)).expect("workspace overlay lock must parse");
         assert_eq!(back.workspace_source_digest, lock.workspace_source_digest);
         assert_eq!(back.workspace_overlay_policy, policy);
+    }
+
+    #[test]
+    fn workspace_overlay_lock_rejects_missing_and_duplicate_identity() {
+        let missing_package = r#"
+version = 1
+
+[[workspace_overlay]]
+name = "beta"
+
+[[workspace_overlay_package]]
+overlay = "beta"
+priority = 0
+"#;
+        let error = parse(missing_package).expect_err("missing overlay package must fail closed");
+        assert!(error.contains("missing `package`"), "{error}");
+
+        let duplicate_package = r#"
+version = 1
+
+[[workspace_overlay]]
+name = "beta"
+
+[[workspace_overlay_package]]
+overlay = "beta"
+package = "openssl"
+priority = 1
+
+[[workspace_overlay_package]]
+overlay = "beta"
+package = "openssl"
+priority = 2
+"#;
+        let error = parse(duplicate_package).expect_err("duplicate overlay facts must fail closed");
+        assert!(error.contains("duplicate workspace overlay package"), "{error}");
     }
 
     /// `record_envelope` backfills a realized object's envelope into an

@@ -14,6 +14,28 @@ pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
 }
 
+/// Find the nearest environment or workspace root for commands run below a
+/// project directory. Explicit refs and workspace members must use the same
+/// source facts from that root as the plan loader.
+pub(super) fn project_root(start: &Path) -> PathBuf {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(Syntax::ENV_FILE).is_file()
+            || dir.join(Syntax::WORKSPACE_FILE).is_file()
+        {
+            return dir;
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    start.to_path_buf()
+}
+
 /// Load and evaluate `workspace.jet` from `dir`, emit workspace entries into
 /// `.jet/lock`, and return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
 /// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
@@ -25,8 +47,18 @@ pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan,
             match WorkspaceLock::write(dir, &plan) {
                 Ok(()) => Some(Ok(plan)),
                 Err(error) => {
-                    eprintln!(
-                        "error: workspace evaluation succeeded but its unified lock could not be written: {error}"
+                    let lock_path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+                    let diagnostic = crate::Lock::e1202_workspace_write(
+                        &lock_path.display().to_string(),
+                        &error,
+                    );
+                    eprint!(
+                        "{}",
+                        crate::Diagnostics::render_all(
+                            Syntax::WORKSPACE_FILE,
+                            "",
+                            std::slice::from_ref(&diagnostic),
+                        )
                     );
                     Some(Err(2))
                 }
@@ -84,7 +116,7 @@ pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (Ref
 /// Also merges any `[sources]` declared in `jetpack.toml` (additive — env.jet
 /// inline declarations win on conflict).
 pub(super) fn cwd_table() -> RefSpec::SourceTable {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let dir = project_root(&std::env::current_dir().unwrap_or_default());
     let mut table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
         .unwrap_or_else(RefSpec::SourceTable::empty);
@@ -103,7 +135,7 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let dir = project_root(&std::env::current_dir().unwrap_or_default());
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),
         // A malformed `workspace.jet` is source failure, never permission to
@@ -124,19 +156,17 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
             if lock.is_none() {
                 let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
                 let looks_like_workspace_lock = std::fs::read_to_string(&path)
-                    .map(|source| {
-                        source.contains("[[workspace_member]]")
-                            || source.contains("workspace_source_digest")
-                            || source.contains("workspace_overlay")
-                    })
+                    .map(|source| crate::Lock::looks_like_workspace_lock(&source))
                     .unwrap_or(false);
                 if looks_like_workspace_lock {
-                    eprintln!(
-                        "error: workspace lock `{}` is malformed or stale; refusing an empty member index",
-                        path.display()
-                    );
-                    eprintln!(
-                        " fix: run `jetpack env` from the workspace root to regenerate it after fixing workspace/package sources"
+                    let diagnostic = crate::Lock::e1202_workspace(&path.display().to_string());
+                    eprint!(
+                        "{}",
+                        crate::Diagnostics::render_all(
+                            Syntax::WORKSPACE_FILE,
+                            "",
+                            std::slice::from_ref(&diagnostic),
+                        )
                     );
                     std::process::exit(2);
                 }
@@ -149,5 +179,25 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
             plan.members.into_iter().map(|m| (m.name, m.path)),
         ),
         None => RefSpec::WorkspaceIndex::empty(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_root;
+    use std::fs;
+
+    #[test]
+    fn project_root_walks_from_nested_command_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-project-root-{}",
+            std::process::id()
+        ));
+        let nested = root.join("packages/app/src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join("env.jet"), "module env.dev {}\n").unwrap();
+        assert_eq!(project_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -549,7 +549,7 @@ pub struct ProfileSpec {
 pub struct ResolvedProfile {
     pub name: String,
     /// Ambient selection before inheritance expansion. Explicit CLI selection
-    /// and hostname/user/default fallback each choose one profile.
+    /// chooses one profile; ambient hostname and user matches may merge.
     pub selected_profiles: Vec<String>,
     pub applied: Vec<String>,
     pub packages: Vec<String>,
@@ -625,12 +625,10 @@ impl ProfileSet {
         self.auto_select_many(hostname, user).into_iter().next()
     }
 
-    /// Select one ambient profile. Hostname wins over user, user wins over the
-    /// named `default`, and the BTreeMap makes duplicate matches deterministic.
-    /// Selecting one fact avoids silently merging unrelated host and user
-    /// environments on a shared machine.
+    /// Select ambient profiles in deterministic priority order. All hostname
+    /// matches merge before all user matches; `default` is the last resort.
     pub fn auto_select_many(&self, hostname: &str, user: &str) -> Vec<String> {
-        let hostname_match = self
+        let mut selected = self
             .profiles
             .values()
             .filter(|profile| {
@@ -640,12 +638,8 @@ impl ProfileSet {
                     .is_some_and(|candidate| candidate == hostname)
             })
             .map(|profile| profile.name.clone())
-            .next();
-        if let Some(name) = hostname_match {
-            return vec![name];
-        }
-
-        let user_match = self
+            .collect::<Vec<_>>();
+        for name in self
             .profiles
             .values()
             .filter(|profile| {
@@ -655,9 +649,13 @@ impl ProfileSet {
                     .is_some_and(|candidate| candidate == user)
             })
             .map(|profile| profile.name.clone())
-            .next();
-        if let Some(name) = user_match {
-            return vec![name];
+        {
+            if !selected.iter().any(|existing| existing == &name) {
+                selected.push(name);
+            }
+        }
+        if !selected.is_empty() {
+            return selected;
         }
 
         if self.profiles.contains_key("default") {
@@ -1910,7 +1908,7 @@ mod tests {
     }
 
     #[test]
-    fn ambient_hostname_takes_precedence_over_user() {
+    fn ambient_hostname_profiles_merge_before_user_profiles() {
         let mut set = ProfileSet::default();
         set.insert(ProfileSpec {
             name: "host".to_string(),
@@ -1930,13 +1928,13 @@ mod tests {
         .unwrap();
 
         let selected = set.auto_select_many("build-01", "sam");
-        assert_eq!(selected, vec!["host"]);
+        assert_eq!(selected, vec!["host", "sam"]);
         let resolved = set.resolve_many(&selected).unwrap();
-        assert_eq!(resolved.name, "host");
+        assert_eq!(resolved.name, "host+sam");
         assert_eq!(resolved.selected_profiles, selected);
-        assert_eq!(resolved.packages, vec!["git@nixpkgs"]);
+        assert_eq!(resolved.packages, vec!["git@nixpkgs", "ripgrep@nixpkgs"]);
         assert_eq!(resolved.variables.get("HOST_MODE"), Some(&"host".to_string()));
-        assert!(!resolved.variables.contains_key("USER_MODE"));
+        assert_eq!(resolved.variables.get("USER_MODE"), Some(&"user".to_string()));
     }
 
     #[test]
@@ -1958,8 +1956,11 @@ mod tests {
         .unwrap();
 
         let selected = set.auto_select_many("build-01", "sam");
-        assert_eq!(selected, vec!["host"]);
-        assert_eq!(set.resolve_many(&selected).unwrap().variables.get("MODE"), Some(&"host".to_string()));
+        assert_eq!(selected, vec!["host", "sam"]);
+        assert!(matches!(
+            set.resolve_many(&selected),
+            Err(ProfileError::Conflict { name }) if name == "sam.MODE"
+        ));
     }
 
     #[test]

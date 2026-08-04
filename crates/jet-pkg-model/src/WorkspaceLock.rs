@@ -25,6 +25,9 @@ pub const WORKSPACE_LOCK: &str = Syntax::UNIFIED_LOCK_FILE;
 /// state as an empty workspace.
 pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     let lock = Lock::load(workspace_root)?;
+    if lock.workspace_source_digest.is_none() {
+        return None;
+    }
     let workspace_source = workspace_root.join(Syntax::WORKSPACE_FILE);
     let source_digest = match std::fs::read(&workspace_source) {
         Ok(source) => crate::SHA256::sha256_hex(&source),
@@ -65,7 +68,17 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             if !physical.starts_with(&root) {
                 return None;
             }
-            if physical.to_string_lossy() != member.canonical_path {
+            let canonical_relative = physical
+                .strip_prefix(&root)
+                .ok()?
+                .to_string_lossy()
+                .into_owned();
+            let canonical_relative = if canonical_relative.is_empty() {
+                ".".to_string()
+            } else {
+                canonical_relative
+            };
+            if canonical_relative != member.canonical_path {
                 return None;
             }
             let package = PackageFacts::load(&physical)?.ok()?;

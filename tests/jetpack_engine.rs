@@ -1801,7 +1801,8 @@ module env.full {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"profile\":\"host\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"profile\":\"host+user\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"selected_profiles\":[\"host\",\"user\"]"), "stdout: {stdout}");
     assert!(stdout.contains("\"active_environment\":\"dev\""), "stdout: {stdout}");
     assert!(stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"), "stdout: {stdout}");
     assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");

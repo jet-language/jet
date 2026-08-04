@@ -337,6 +337,20 @@ fn overlay_semantic_projection_uses_resolved_facts_and_provenance() {
         Some(&"2".to_string())
     );
     assert_eq!(loaded.rationales.len(), 2);
+    let explanation = SemanticLock::explain(
+        &SemanticLockFile::with_records(vec![loaded.clone()]),
+        "package-overlay:force:foo",
+    )
+    .expect("overlay explanation");
+    assert_eq!(explanation.contenders.len(), 2);
+    assert!(explanation
+        .contenders
+        .iter()
+        .any(|rationale| rationale.reason.contains("base")));
+    assert!(explanation
+        .contenders
+        .iter()
+        .any(|rationale| rationale.reason.contains("force")));
 }
 
 #[test]

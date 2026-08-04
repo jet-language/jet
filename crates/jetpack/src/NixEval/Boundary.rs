@@ -36,9 +36,13 @@ impl NativeDerivationEvaluation {
 
 impl NativeBoundary {
     pub(in crate::NixEval) fn embedded() -> Result<Self, BoundaryError> {
-        Ok(Self {
-            manifest: ValidatedOracleManifest::embedded()?,
-        })
+        let manifest = ValidatedOracleManifest::embedded()?;
+        if !manifest.product_ready() {
+            return Err(BoundaryError::Manifest(
+                "pinned Nix oracle is not product-ready".to_string(),
+            ));
+        }
+        Ok(Self { manifest })
     }
 
     pub(in crate::NixEval) fn product_ready(&self) -> bool {

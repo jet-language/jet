@@ -3146,6 +3146,10 @@ fn conflict_for(left: &SemanticRecord, right: &SemanticRecord) -> Option<LockCon
 pub struct ExplainFact {
     pub semantic_key: String,
     pub owners: Vec<String>,
+    /// Every rationale that competed for this resolved record. The first
+    /// rationale is not a sufficient explanation when overlays merge several
+    /// declarations into one winner.
+    pub contenders: Vec<LockRationale>,
     pub provider: String,
     pub platform: String,
     pub exact_artifact: String,
@@ -3171,6 +3175,7 @@ pub fn explain(lock: &SemanticLockFile, key: &str) -> Option<ExplainFact> {
     Some(ExplainFact {
         semantic_key: key.to_string(),
         owners,
+        contenders: rec.rationales.clone(),
         provider: first.provider,
         platform: rec.identity.platform.clone(),
         exact_artifact: rec.identity.exact.clone(),

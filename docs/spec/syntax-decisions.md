@@ -4367,7 +4367,8 @@ supported hosts. Terminal and editor debugging remain projections of one
 breakpoint, task, evaluator, exception, mapping, diagnostic, and process model.
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/
-call-graph/effects/member facts; `jet inspect semindex --json`, schema v3) —
+call-graph/effects/member facts plus typed Package and workspace-overlay facts;
+`jet inspect semindex --json`, schema v12) —
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
 (D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
 is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON

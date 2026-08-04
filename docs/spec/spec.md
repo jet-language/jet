@@ -3379,8 +3379,8 @@ subcommand or a new flag (I8).
 
 ## Semantic index, dossier, and codemods (D-SEMINDEX1, D-WD2, D-CODEMOD1)
 
-`jet inspect semindex --json <file.jet>` emits schema v3: definitions, references,
-call edges, effects, and member facts. Member facts stitch fields, variants,
+`jet inspect semindex --json <file.jet>` emits schema v12: definitions, references,
+call edges, effects, member facts, and typed Package/workspace-overlay facts. Member facts stitch fields, variants,
 inline methods, external inherent impl methods, trait impl methods, and trait
 requirements into one stable owner-ordered view. Every resolved reference also
 carries its definition identity; unresolved or ambiguous references carry no

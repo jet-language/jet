@@ -589,6 +589,7 @@ fn lock_explain_names_owner_policy_provider_platform() {
     assert_eq!(fact.provider, "core");
     assert_eq!(fact.platform, "x86_64-linux");
     assert_eq!(fact.policy_fingerprint, "policy-1");
+    assert_eq!(fact.contenders.len(), 1);
 }
 
 #[test]

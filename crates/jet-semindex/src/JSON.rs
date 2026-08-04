@@ -167,15 +167,20 @@ pub fn workspace_overlay_policy_json(policy: &OverlayPolicy) -> String {
                         .map(|(name, value)| format!("[{},{}]", json_str(name), json_str(value)))
                         .collect::<Vec<_>>()
                         .join(",");
-                    let priorities = format!("{:?}", package.field_priorities);
+                    let priorities = package
+                        .field_priorities
+                        .iter()
+                        .map(|(field, priority)| format!("{}:{}", json_str(field), priority))
+                        .collect::<Vec<_>>()
+                        .join(",");
                     format!(
-                        "{{\"package\":{},\"source\":{},\"version\":{},\"flags\":[{}],\"priority\":{},\"field_priorities\":{},\"env\":[{}],\"patches\":[{}],\"allow_unfree\":{}}}",
+                        "{{\"package\":{},\"source\":{},\"version\":{},\"flags\":[{}],\"priority\":{},\"field_priorities\":{{{}}},\"env\":[{}],\"patches\":[{}],\"allow_unfree\":{}}}",
                         json_str(&package.package),
                         package.source.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
                         package.version.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
                         strings(&package.flags),
                         package.priority,
-                        json_str(&priorities),
+                        priorities,
                         env,
                         strings(&package.patches),
                         package.allow_unfree,

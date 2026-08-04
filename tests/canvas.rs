@@ -592,6 +592,30 @@ fn canvas_graph_json_is_stable_and_typed() {
 }
 
 #[test]
+fn canvas_rejects_ambiguous_package_facts_before_projection() {
+    let dir = temp_dir("graph_ambiguous_package");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"canonical\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"legacy\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let diagnostics = jet::Canvas::graph_json_for_file(&entry)
+        .expect_err("Canvas must reject ambiguous package facts");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1206"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
     let projection_fixtures = [
         ("node_descriptor_coverage", CANVAS_COVERAGE_FIXTURE),

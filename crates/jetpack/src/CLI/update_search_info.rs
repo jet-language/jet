@@ -342,6 +342,16 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     };
     println!("{}", fact.semantic_key);
     println!("  owners: {}", fact.owners.join(", "));
+    println!("  winner: {}", empty_dash(&fact.exact_artifact));
+    for (index, contender) in fact.contenders.iter().enumerate() {
+        println!(
+            "  contender[{index}]: owner={} provider={} exact={} reason={}",
+            empty_dash(&contender.owner_package),
+            empty_dash(&contender.provider),
+            empty_dash(&contender.exact_output),
+            empty_dash(&contender.reason),
+        );
+    }
     println!("  provider: {}", empty_dash(&fact.provider));
     println!("  platform: {}", empty_dash(&fact.platform));
     println!("  exact: {}", empty_dash(&fact.exact_artifact));
