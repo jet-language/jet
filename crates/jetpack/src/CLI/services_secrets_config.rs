@@ -628,6 +628,34 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 Ok(env) => env,
                 Err(code) => return code,
             };
+            if parsed.flags.json {
+                let mut all_healthy = true;
+                let records = targets
+                    .iter()
+                    .map(|svc| {
+                        let (health, healthy) = match Services::health_one_with_env(
+                            &project_dir,
+                            Some(&env),
+                            svc,
+                        ) {
+                            Services::Health::Disabled => ("disabled", true),
+                            Services::Health::NotRunning => ("not-running", false),
+                            Services::Health::Unhealthy => ("unhealthy", false),
+                            Services::Health::Healthy => ("healthy", true),
+                        };
+                        all_healthy &= healthy;
+                        let lifecycle = Services::lifecycle_json(&project_dir, &svc.name)
+                            .unwrap_or_else(|| "null".to_string());
+                        format!(
+                            "{{\"service\":{},\"health\":{},\"lifecycle\":{lifecycle}}}",
+                            crate::JSON::quote(&svc.name),
+                            crate::JSON::quote(health),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                println!("[{}]", records.join(","));
+                return if all_healthy { 0 } else { 1 };
+            }
             let mut all_healthy = true;
             for svc in &targets {
                 let (label, healthy) = match Services::health_one_with_env(

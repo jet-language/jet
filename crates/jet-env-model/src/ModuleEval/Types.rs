@@ -172,16 +172,14 @@ pub struct DevServicePlan {
     pub watch: Vec<String>,
     /// Service names that must be healthy before this service starts.
     pub after: Vec<String>,
-    /// Compatibility spelling accepted by the older dev-only surface. New
-    /// declarations use `after`; both lists are merged before supervision.
-    pub depends_on: Vec<String>,
     /// Ordinary `#Task` names to run successfully immediately before start.
     pub before_start: Vec<String>,
     /// Named sockets reserved by the service.
     pub sockets: Vec<String>,
     /// Any further field, captured verbatim as a display string (open record,
     /// U12) — checked against the known keys above at supervision time, not
-    /// at field-check time (E1262).
+    /// at field-check time (E1262). This includes retired spellings such as
+    /// `depends_on`; `after` is the only dependency field.
     pub extra: Vec<(String, String)>,
 }
 

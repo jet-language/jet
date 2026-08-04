@@ -857,7 +857,6 @@ fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan)
         service
             .after
             .iter()
-            .chain(service.depends_on.iter())
             .map(|name| json_str(name))
             .collect::<Vec<_>>()
             .join(",")

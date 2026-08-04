@@ -14,6 +14,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
+#[cfg(not(test))]
+use std::hash::{Hash, Hasher};
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -32,6 +34,7 @@ const MAX_SERVICE_RESTARTS: u32 = 100;
 const MAX_SERVICE_BACKOFF_MS: u64 = 60_000;
 const MAX_SERVICE_RESTART_DELAY_MS: u64 = 60_000;
 const MAX_WATCH_DEPTH: usize = 64;
+const MAX_READY_PROBE_TIME: Duration = Duration::from_millis(750);
 
 /// A well-known dev dependency's default package, port, start command, and
 /// readiness probe — used only when the author's `services:` entry doesn't
@@ -301,6 +304,274 @@ fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> 
 struct ProcessState {
     pid: u32,
     start_identity: String,
+}
+
+/// Durable facts for one supervised generation. The process PID is only one
+/// fact: the authority, containment, phase, and recovery reason make a state
+/// record explainable after the supervisor or service has exited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LifecycleFacts {
+    backend: String,
+    generation: u64,
+    phase: String,
+    containment: String,
+    recovery: String,
+    pid: Option<u32>,
+    unit: Option<String>,
+    guardian: Option<u32>,
+    dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServiceAuthority {
+    TestProcessGroup,
+    LinuxSystemdUser { unit: String },
+    WindowsGuardianJobObject { guardian: u32 },
+    Unsupported,
+}
+
+impl ServiceAuthority {
+    fn backend(&self) -> &'static str {
+        match self {
+            Self::TestProcessGroup => "test-process-group",
+            Self::LinuxSystemdUser { .. } => "linux-systemd-user",
+            Self::WindowsGuardianJobObject { .. } => "windows-guardian-job-object",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    fn containment(&self) -> &'static str {
+        match self {
+            Self::TestProcessGroup => "process-group",
+            Self::LinuxSystemdUser { .. } => "delegated-cgroup",
+            Self::WindowsGuardianJobObject { .. } => "job-object",
+            Self::Unsupported => "none",
+        }
+    }
+
+    fn unit(&self) -> Option<&str> {
+        match self {
+            Self::LinuxSystemdUser { unit } => Some(unit),
+            _ => None,
+        }
+    }
+
+    fn guardian(&self) -> Option<u32> {
+        match self {
+            Self::WindowsGuardianJobObject { guardian } => Some(*guardian),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AuthorityRuntime {
+    TestProcessGroup,
+    LinuxSystemdUser,
+    #[cfg(windows)]
+    WindowsGuardianJobObject(windows_job::Job),
+}
+
+fn authority_for(
+    project_dir: &Path,
+    plan: &DevServicePlan,
+    generation: u64,
+) -> Result<ServiceAuthority, String> {
+    #[cfg(test)]
+    {
+        let _ = (project_dir, plan, generation);
+        return Ok(ServiceAuthority::TestProcessGroup);
+    }
+    #[cfg(all(not(test), target_os = "linux"))]
+    {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        project_dir.to_string_lossy().hash(&mut hash);
+        plan.name.hash(&mut hash);
+        generation.hash(&mut hash);
+        let safe_name = plan
+            .name
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' { ch } else { '-' })
+            .collect::<String>();
+        return Ok(ServiceAuthority::LinuxSystemdUser {
+            unit: format!("jetpack-{:016x}-{safe_name}-g{generation}.scope", hash.finish()),
+        });
+    }
+    #[cfg(all(not(test), windows))]
+    {
+        let _ = project_dir;
+        let _ = plan;
+        let _ = generation;
+        return Ok(ServiceAuthority::WindowsGuardianJobObject {
+            guardian: std::process::id(),
+        });
+    }
+    #[cfg(all(not(test), target_os = "macos"))]
+    {
+        return Err(format!(
+            "E1332: Safe service authority is unavailable for {}.",
+            plan.name
+        ));
+    }
+    #[cfg(all(
+        not(test),
+        not(any(target_os = "linux", target_os = "macos", windows))
+    ))]
+    {
+        let _ = (project_dir, plan, generation);
+        return Err("E1332: Safe service authority is unavailable.".to_string());
+    }
+}
+
+fn authority_from_lifecycle(facts: &LifecycleFacts) -> Result<ServiceAuthority, String> {
+    match facts.backend.as_str() {
+        "test-process-group" => Ok(ServiceAuthority::TestProcessGroup),
+        "linux-systemd-user" => facts
+            .unit
+            .clone()
+            .map(|unit| ServiceAuthority::LinuxSystemdUser { unit })
+            .ok_or_else(|| "service lifecycle state is missing its systemd unit".to_string()),
+        "windows-guardian-job-object" => facts
+            .guardian
+            .map(|guardian| ServiceAuthority::WindowsGuardianJobObject { guardian })
+            .ok_or_else(|| "service lifecycle state is missing its guardian".to_string()),
+        other => Err(format!("service lifecycle state has unknown authority `{other}`")),
+    }
+}
+
+fn lifecycle_for(
+    authority: &ServiceAuthority,
+    generation: u64,
+    phase: &str,
+    recovery: &str,
+    pid: Option<u32>,
+    dependencies: &[String],
+) -> LifecycleFacts {
+    LifecycleFacts {
+        backend: authority.backend().to_string(),
+        generation,
+        phase: phase.to_string(),
+        containment: authority.containment().to_string(),
+        recovery: recovery.to_string(),
+        pid,
+        unit: authority.unit().map(str::to_string),
+        guardian: authority.guardian(),
+        dependencies: dependencies.to_vec(),
+    }
+}
+
+fn attach_authority(
+    authority: &ServiceAuthority,
+    child: &mut Child,
+) -> Result<AuthorityRuntime, String> {
+    match authority {
+        ServiceAuthority::TestProcessGroup => Ok(AuthorityRuntime::TestProcessGroup),
+        ServiceAuthority::LinuxSystemdUser { .. } => Ok(AuthorityRuntime::LinuxSystemdUser),
+        ServiceAuthority::WindowsGuardianJobObject { .. } => {
+            #[cfg(windows)]
+            {
+                let job = windows_job::Job::new()
+                    .map_err(|error| format!("couldn't create service guardian job object: {error}"))?;
+                job.assign(child).map_err(|error| {
+                    let _ = child.kill();
+                    format!("couldn't assign service to its guardian job object: {error}")
+                })?;
+                return Ok(AuthorityRuntime::WindowsGuardianJobObject(job));
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = child;
+                Err("windows service authority is unavailable on this platform".to_string())
+            }
+        }
+        ServiceAuthority::Unsupported => Err("service authority is unavailable".to_string()),
+    }
+}
+
+fn lifecycle_path(dir: &Path) -> PathBuf {
+    dir.join("lifecycle")
+}
+
+fn write_lifecycle(dir: &Path, facts: &LifecycleFacts) -> std::io::Result<()> {
+    let mut encoded = format!(
+        "version=1\nbackend={}\ngeneration={}\nphase={}\ncontainment={}\nrecovery={}\n",
+        facts.backend, facts.generation, facts.phase, facts.containment, facts.recovery
+    );
+    if let Some(pid) = facts.pid {
+        encoded.push_str(&format!("pid={pid}\n"));
+    }
+    if let Some(unit) = &facts.unit {
+        encoded.push_str(&format!("unit={unit}\n"));
+    }
+    if let Some(guardian) = facts.guardian {
+        encoded.push_str(&format!("guardian={guardian}\n"));
+    }
+    for dependency in &facts.dependencies {
+        encoded.push_str(&format!("dependency={dependency}\n"));
+    }
+    write_atomic(&lifecycle_path(dir), encoded.as_bytes())
+}
+
+fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
+    let path = lifecycle_path(dir);
+    let text = match read_text_bounded(&path, 16 * 1024) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "couldn't read service lifecycle state `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    let mut version = None;
+    let mut backend = None;
+    let mut generation = None;
+    let mut phase = None;
+    let mut containment = None;
+    let mut recovery = None;
+    let mut pid = None;
+    let mut unit = None;
+    let mut guardian = None;
+    let mut dependencies = Vec::new();
+    let mut seen = BTreeSet::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+        };
+        if value.contains('\n') || (!matches!(key, "dependency") && !seen.insert(key)) {
+            return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+        }
+        match key {
+            "version" if value == "1" => version = Some(()),
+            "backend" if !value.is_empty() => backend = Some(value.to_string()),
+            "generation" => generation = value.parse::<u64>().ok(),
+            "phase" if !value.is_empty() => phase = Some(value.to_string()),
+            "containment" if !value.is_empty() => containment = Some(value.to_string()),
+            "recovery" if !value.is_empty() => recovery = Some(value.to_string()),
+            "pid" => pid = value.parse::<u32>().ok().filter(|pid| *pid != 0),
+            "unit" if !value.is_empty() => unit = Some(value.to_string()),
+            "guardian" => guardian = value.parse::<u32>().ok().filter(|pid| *pid != 0),
+            "dependency" if !value.is_empty() => dependencies.push(value.to_string()),
+            _ => return Err(format!("service lifecycle state `{}` is invalid", path.display())),
+        }
+    }
+    let (Some(()), Some(backend), Some(generation), Some(phase), Some(containment), Some(recovery)) =
+        (version, backend, generation, phase, containment, recovery)
+    else {
+        return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+    };
+    Ok(Some(LifecycleFacts {
+        backend,
+        generation,
+        phase,
+        containment,
+        recovery,
+        pid,
+        unit,
+        guardian,
+        dependencies,
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -814,6 +1085,16 @@ fn process_alive(pid: u32) -> Result<bool, String> {
     }
     #[cfg(not(windows))]
     {
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = read_text_bounded(&PathBuf::from(format!("/proc/{pid}/stat")), 4096) {
+            if stat
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                == Some("Z")
+            {
+                return Ok(false);
+            }
+        }
         let status = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .stdout(Stdio::null())
@@ -1068,6 +1349,144 @@ mod windows_process {
     }
 }
 
+#[cfg(windows)]
+mod windows_job {
+    use std::ffi::c_void;
+    use std::io;
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+
+    type Handle = *mut c_void;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+    #[repr(C)]
+    struct BasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct IoCounters {
+        read_operations: u64,
+        write_operations: u64,
+        other_operations: u64,
+        read_bytes: u64,
+        write_bytes: u64,
+        other_bytes: u64,
+    }
+
+    #[repr(C)]
+    struct ExtendedLimitInformation {
+        basic: BasicLimitInformation,
+        io: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
+        fn SetInformationJobObject(
+            job: Handle,
+            class: u32,
+            information: *mut c_void,
+            length: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+        fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+
+    #[derive(Debug)]
+    pub(super) struct Job(Handle);
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // SAFETY: this handle is owned by Job and closed exactly once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    impl Job {
+        pub(super) fn new() -> io::Result<Self> {
+            // SAFETY: null attributes/name requests one unnamed job object.
+            let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            let mut limits = ExtendedLimitInformation {
+                basic: BasicLimitInformation {
+                    per_process_user_time_limit: 0,
+                    per_job_user_time_limit: 0,
+                    limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                    minimum_working_set_size: 0,
+                    maximum_working_set_size: 0,
+                    active_process_limit: 0,
+                    affinity: 0,
+                    priority_class: 0,
+                    scheduling_class: 0,
+                },
+                io: IoCounters {
+                    read_operations: 0,
+                    write_operations: 0,
+                    other_operations: 0,
+                    read_bytes: 0,
+                    write_bytes: 0,
+                    other_bytes: 0,
+                },
+                process_memory_limit: 0,
+                job_memory_limit: 0,
+                peak_process_memory_used: 0,
+                peak_job_memory_used: 0,
+            };
+            // SAFETY: limits points to the exact documented structure and
+            // remains alive for the duration of this call.
+            let set = unsafe {
+                SetInformationJobObject(
+                    handle,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    (&mut limits as *mut ExtendedLimitInformation).cast(),
+                    std::mem::size_of::<ExtendedLimitInformation>() as u32,
+                )
+            };
+            if set == 0 {
+                let error = io::Error::last_os_error();
+                // SAFETY: handle was returned by CreateJobObjectW and is not
+                // exposed after this failure.
+                unsafe { CloseHandle(handle) };
+                return Err(error);
+            }
+            Ok(Self(handle))
+        }
+
+        pub(super) fn assign(&self, child: &Child) -> io::Result<()> {
+            // SAFETY: Child owns this live process handle for this call.
+            if unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle().cast()) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        pub(super) fn terminate(&self) -> io::Result<()> {
+            // SAFETY: self.0 is the live owned job handle.
+            if unsafe { TerminateJobObject(self.0, 1) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+}
+
 fn process_matches_start_with(
     expected: &str,
     mut identity: impl FnMut() -> Result<Option<String>, String>,
@@ -1089,11 +1508,66 @@ fn process_matches_start(state: &ProcessState) -> Result<bool, String> {
 }
 
 fn cleanup_child(child: &mut Child) -> String {
-    let kill_error = child.kill().err();
+    let kill_error = kill_child_tree(child);
     let wait_error = child.wait().err();
     match (kill_error, wait_error) {
         (None, None) => String::new(),
         (kill, wait) => format!("; child cleanup failed (kill: {kill:?}, wait: {wait:?})"),
+    }
+}
+
+fn kill_child_tree(child: &mut Child) -> Option<std::io::Error> {
+    #[cfg(windows)]
+    let tree_result = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .and_then(|status| {
+            status
+                .success()
+                .then_some(())
+                .ok_or_else(|| std::io::Error::other("taskkill failed"))
+        });
+    #[cfg(unix)]
+    let tree_result = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .and_then(|status| {
+            status
+                .success()
+                .then_some(())
+                .ok_or_else(|| std::io::Error::other("process-group kill failed"))
+        });
+    let child_result = child.kill();
+    tree_result.err().or(child_result.err())
+}
+
+fn run_bounded_probe(mut command: Command, timeout: Duration) -> bool {
+    let timeout = timeout.min(MAX_READY_PROBE_TIME);
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let Ok(mut child) = command.spawn() else { return false };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                let _ = kill_child_tree(&mut child);
+                let _ = child.wait();
+                return false;
+            }
+            Err(_) => {
+                let _ = kill_child_tree(&mut child);
+                let _ = child.wait();
+                return false;
+            }
+        }
     }
 }
 
@@ -1133,6 +1607,8 @@ fn publish_process_state(child: &mut Child, path: &Path) -> Result<ProcessState,
 struct StartedService {
     child: Child,
     state: ProcessState,
+    authority: ServiceAuthority,
+    runtime: AuthorityRuntime,
 }
 
 const SERVICE_SUPERVISOR_ENV: &str = "JETPACK_SERVICE_SUPERVISOR";
@@ -1145,18 +1621,15 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
         let Some(started) = start_one(project_dir, env, plan)? else {
             return Ok(());
         };
-        if plan.restart.is_some() || !plan.watch.is_empty() {
-            monitor_service(
-                started,
-                project_dir.to_path_buf(),
-                restart_env(env),
-                plan.clone(),
-            );
-        } else {
-            reap_child(started.child);
-        }
+        monitor_service(started, project_dir.to_path_buf(), restart_env(env), plan.clone());
         return Ok(());
     }
+    #[cfg(not(test))]
+    {
+        return spawn_service_supervisor(project_dir, env, plan);
+    }
+    #[cfg(test)]
+    {
     if plan.restart.is_some() || !plan.watch.is_empty() {
         return spawn_service_supervisor(project_dir, env, plan);
     }
@@ -1174,6 +1647,7 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
         std::thread::spawn(move || reap_child(started.child));
     }
     Ok(())
+    }
 }
 
 fn spawn_service_supervisor(
@@ -1229,6 +1703,7 @@ fn restart_env(env: &ShellEnv) -> ShellEnv {
     }
 }
 
+#[cfg(test)]
 fn reap_child(mut child: Child) {
     let _ = child.wait();
 }
@@ -1237,6 +1712,15 @@ fn start_one(
     project_dir: &Path,
     env: &ShellEnv,
     plan: &DevServicePlan,
+) -> Result<Option<StartedService>, String> {
+    start_one_with_recovery(project_dir, env, plan, "none")
+}
+
+fn start_one_with_recovery(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plan: &DevServicePlan,
+    recovery: &str,
 ) -> Result<Option<StartedService>, String> {
     let _guard = super::RuntimePolicy::acquire_lock(
         &super::Store::managed_dir(project_dir),
@@ -1263,6 +1747,35 @@ fn start_one(
             }
         }
     }
+    let generation = read_lifecycle(&resolved.dir)?
+        .map(|facts| facts.generation.saturating_add(1))
+        .unwrap_or(1);
+    let authority = match authority_for(project_dir, plan, generation) {
+        Ok(authority) => authority,
+        Err(error) => {
+            let facts = lifecycle_for(
+                &ServiceAuthority::Unsupported,
+                generation,
+                "failed",
+                "authority-unavailable",
+                None,
+                &dependency_names(plan),
+            );
+            let _ = write_lifecycle(&resolved.dir, &facts);
+            let _ = write_atomic(&supervisor_error_path(&resolved.dir), error.as_bytes());
+            return Err(error);
+        }
+    };
+    let mut lifecycle = lifecycle_for(
+        &authority,
+        generation,
+        "starting",
+        recovery,
+        None,
+        &dependency_names(plan),
+    );
+    write_lifecycle(&resolved.dir, &lifecycle)
+        .map_err(|error| format!("couldn't publish service lifecycle state: {error}"))?;
     let allocated_ports = allocate_ports(&resolved.ports)?;
     let prepared_sockets = prepare_sockets(project_dir, &plan.sockets)?;
     if allocated_ports.ports != resolved.ports.iter().map(|port| *port as u16).collect::<Vec<_>>() {
@@ -1289,16 +1802,16 @@ fn start_one(
     if resolved.run.is_empty() {
         return Err(format!("service `{}` has an empty `run:` command", plan.name));
     }
-    let mut cmd = Command::new(&resolved.run[0]);
-    cmd.args(&resolved.run[1..]);
-    cmd.current_dir(&resolved.data_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    env.apply_to(&mut cmd);
-    cmd.env_remove(SERVICE_SUPERVISOR_ENV);
     let base_path = std::env::var("PATH").unwrap_or_default();
-    cmd.env("PATH", env.composed_path(&base_path));
+    let mut service_env = env.vars.clone();
+    for name in &env.unset_vars {
+        service_env.remove(name);
+    }
+    service_env.insert("PATH".to_string(), env.composed_path(&base_path));
+    service_env.insert(Syntax::JETPACK_ENV_MARKER.to_string(), "1".to_string());
+    service_env.insert(Syntax::JETPACK_REF_VAR.to_string(), env.refs.join(" "));
+    service_env.remove(SERVICE_SUPERVISOR_ENV);
+
     if !resolved.ports.is_empty() {
         let ports = resolved
             .ports
@@ -1306,9 +1819,9 @@ fn start_one(
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        cmd.env("JETPACK_SERVICE_PORTS", &ports);
+        service_env.insert("JETPACK_SERVICE_PORTS".to_string(), ports);
         if let Some(port) = resolved.ports.first() {
-            cmd.env("JETPACK_SERVICE_PORT", port.to_string());
+            service_env.insert("JETPACK_SERVICE_PORT".to_string(), port.to_string());
         }
     }
     if !prepared_sockets.paths.is_empty() {
@@ -1318,13 +1831,53 @@ fn start_one(
             .map(|path| path.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join("\n");
-        cmd.env("JETPACK_SERVICE_SOCKETS", sockets);
+        service_env.insert("JETPACK_SERVICE_SOCKETS".to_string(), sockets);
         for (index, path) in prepared_sockets.paths.iter().enumerate() {
-            cmd.env(
+            service_env.insert(
                 format!("JETPACK_SERVICE_SOCKET_{index}"),
-                path.to_string_lossy().as_ref(),
+                path.to_string_lossy().into_owned(),
             );
         }
+    }
+    let mut cmd = match &authority {
+        ServiceAuthority::LinuxSystemdUser { unit } => {
+            let mut command = Command::new("systemd-run");
+            command.args([
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                "--property=Delegate=yes",
+                "--property=KillMode=control-group",
+            ]);
+            command.arg(format!("--unit={unit}"));
+            command.arg(format!("--working-directory={}", resolved.data_dir.display()));
+            for (name, value) in &service_env {
+                command.arg(format!("--setenv={name}={value}"));
+            }
+            for name in &env.unset_vars {
+                command.arg(format!("--unsetenv={name}"));
+            }
+            command.arg(format!("--unsetenv={SERVICE_SUPERVISOR_ENV}"));
+            command.arg("--");
+            command.arg(&resolved.run[0]);
+            command.args(&resolved.run[1..]);
+            command
+        }
+        _ => {
+            let mut command = Command::new(&resolved.run[0]);
+            command.args(&resolved.run[1..]);
+            command
+        }
+    };
+    cmd.current_dir(&resolved.data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    env.apply_to(&mut cmd);
+    cmd.env_remove(SERVICE_SUPERVISOR_ENV);
+    if !matches!(authority, ServiceAuthority::LinuxSystemdUser { .. }) {
+        cmd.envs(&service_env);
     }
     prepared_sockets.release()?;
     // Release the parent-side port listeners immediately before spawn so the
@@ -1338,7 +1891,21 @@ fn start_one(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("couldn't start `{}`: {e}", plan.name))?;
+    let runtime = match attach_authority(&authority, &mut child) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let cleanup = cleanup_child(&mut child);
+            return Err(format!("{error}{cleanup}"));
+        }
+    };
     let state = publish_process_state(&mut child, &pid_path(&resolved.dir))?;
+    lifecycle.pid = Some(state.pid);
+    lifecycle.phase = "running".to_string();
+    if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
+        let cleanup = cleanup_child(&mut child);
+        let _ = fs::remove_file(pid_path(&resolved.dir));
+        return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
+    }
     if !resolved.ports.is_empty() {
         let encoded = resolved
             .ports
@@ -1353,7 +1920,12 @@ fn start_one(
             return Err(format!("couldn't publish service ports: {error}{cleanup}"));
         }
     }
-    Ok(Some(StartedService { child, state }))
+    Ok(Some(StartedService {
+        child,
+        state,
+        authority,
+        runtime,
+    }))
 }
 
 fn monitor_service(
@@ -1371,19 +1943,28 @@ fn monitor_service(
     let mut stamps = match watch_stamps(&project_dir, &watched) {
         Ok(stamps) => stamps,
         Err(error) => {
-            finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
+            finish_supervisor(&project_dir, &plan, &started, Some(&error));
             return;
         }
     };
     let mut pending_watch: Option<(Vec<String>, Instant)> = None;
     let mut restarts = 0_u32;
     loop {
+        if stopping_requested(&project_dir, &plan) {
+            if let Err(error) = stop_started_process(&started, Some(&ShutdownPolicy::Kill)) {
+                finish_supervisor(&project_dir, &plan, &started, Some(&error));
+                return;
+            }
+            let _ = started.child.wait();
+            finish_supervisor(&project_dir, &plan, &started, None);
+            return;
+        }
         match started.child.try_wait() {
             Err(error) => {
                 finish_supervisor(
                     &project_dir,
                     &plan,
-                    &started.state,
+                    &started,
                     Some(&format!("supervisor could not inspect service: {error}")),
                 );
                 return;
@@ -1398,14 +1979,25 @@ fn monitor_service(
                 };
                 let stopping = stopping_requested(&project_dir, &plan);
                 if !restart || restarts >= max_restarts || stopping {
-                    let error = (restart && !stopping && restarts >= max_restarts)
-                        .then_some("service restart limit exhausted");
-                    finish_supervisor(&project_dir, &plan, &started.state, error);
+                    let error = if stopping {
+                        None
+                    } else if restart && restarts >= max_restarts {
+                        Some("service restart limit exhausted")
+                    } else {
+                        Some("service exited unexpectedly")
+                    };
+                    finish_supervisor(&project_dir, &plan, &started, error);
                     return;
                 }
                 restarts += 1;
                 std::thread::sleep(restart_delay(backoff_ms, exponential, restarts));
-                match start_one(&project_dir, &env, &plan) {
+                let recovery = read_lifecycle(&service_dir(&project_dir, &plan.name))
+                    .ok()
+                    .flatten()
+                    .filter(|facts| facts.phase == "ready")
+                    .map(|_| "post-ready-crash")
+                    .unwrap_or("restart");
+                match start_one_with_recovery(&project_dir, &env, &plan, recovery) {
                     Ok(Some(next)) => {
                         started = next;
                         stamps = match watch_stamps(&project_dir, &watched) {
@@ -1414,7 +2006,7 @@ fn monitor_service(
                                 finish_supervisor(
                                     &project_dir,
                                     &plan,
-                                    &started.state,
+                                    &started,
                                     Some(&error),
                                 );
                                 return;
@@ -1425,13 +2017,13 @@ fn monitor_service(
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            &started.state,
+                            &started,
                             Some("service restart did not produce a running process"),
                         );
                         return;
                     }
                     Err(error) => {
-                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started, Some(&error));
                         return;
                     }
                 }
@@ -1443,7 +2035,7 @@ fn monitor_service(
         }) {
             Some(Ok(changed)) => changed,
             Some(Err(error)) => {
-                finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
+                finish_supervisor(&project_dir, &plan, &started, Some(&error));
                 return;
             }
             None => false,
@@ -1453,21 +2045,21 @@ fn monitor_service(
             if restarts >= max_restarts || stopping {
                 let error = (!stopping && restarts >= max_restarts)
                     .then_some("service watch restart limit exhausted");
-                finish_supervisor(&project_dir, &plan, &started.state, error);
+                finish_supervisor(&project_dir, &plan, &started, error);
                 return;
             }
-            if let Err(error) = stop_process(&started.state, plan.shutdown.as_ref()) {
+            if let Err(error) = stop_started_process(&started, plan.shutdown.as_ref()) {
                 match started.child.try_wait() {
                     Ok(Some(_)) => {}
                     Ok(None) => {
-                        finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started, Some(&error));
                         return;
                     }
                     Err(wait_error) => {
                         finish_supervisor(
                             &project_dir,
                             &plan,
-                            &started.state,
+                            &started,
                             Some(&format!("{error}; couldn't reap service: {wait_error}")),
                         );
                         return;
@@ -1477,7 +2069,7 @@ fn monitor_service(
             let _ = started.child.wait();
             restarts += 1;
             std::thread::sleep(restart_delay(backoff_ms, exponential, restarts));
-            match start_one(&project_dir, &env, &plan) {
+                match start_one_with_recovery(&project_dir, &env, &plan, "watch-restart") {
                 Ok(Some(next)) => {
                     started = next;
                     stamps = match watch_stamps(&project_dir, &watched) {
@@ -1486,7 +2078,7 @@ fn monitor_service(
                             finish_supervisor(
                                 &project_dir,
                                 &plan,
-                                &started.state,
+                                &started,
                                 Some(&error),
                             );
                             return;
@@ -1497,13 +2089,13 @@ fn monitor_service(
                     finish_supervisor(
                         &project_dir,
                         &plan,
-                        &started.state,
+                        &started,
                         Some("service watch restart did not produce a running process"),
                     );
                     return;
                 }
                 Err(error) => {
-                    finish_supervisor(&project_dir, &plan, &started.state, Some(&error));
+                        finish_supervisor(&project_dir, &plan, &started, Some(&error));
                     return;
                 }
             }
@@ -1552,10 +2144,33 @@ fn stopping_requested(project_dir: &Path, plan: &DevServicePlan) -> bool {
     service_dir(project_dir, &plan.name).join(".stopping").is_file()
 }
 
+fn stop_started_process(
+    started: &StartedService,
+    shutdown: Option<&ShutdownPolicy>,
+) -> Result<(), String> {
+    stop_process_with_authority(
+        &started.state,
+        shutdown,
+        Some(&started.authority),
+        Some(&started.runtime),
+    )
+}
+
+fn mark_lifecycle_ready(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String> {
+    let dir = service_dir(project_dir, &plan.name);
+    let Some(mut facts) = read_lifecycle(&dir)? else {
+        return Ok(());
+    };
+    facts.phase = "ready".to_string();
+    facts.recovery = "none".to_string();
+    write_lifecycle(&dir, &facts)
+        .map_err(|error| format!("couldn't publish ready lifecycle state: {error}"))
+}
+
 fn finish_supervisor(
     project_dir: &Path,
     plan: &DevServicePlan,
-    state: &ProcessState,
+    started: &StartedService,
     error: Option<&str>,
 ) {
     let dir = service_dir(project_dir, &plan.name);
@@ -1568,29 +2183,119 @@ fn finish_supervisor(
         // user-issued shutdown and claiming cleanup that did not happen.
         return;
     };
+    let existing_lifecycle = read_lifecycle(&dir).ok().flatten();
+    let preserve_terminal_state = existing_lifecycle.as_ref().is_some_and(|facts| {
+        (facts.phase == "failed" && facts.recovery == "dependency-failed")
+            || (facts.phase == "stopped" && facts.recovery == "down")
+    });
 
     // The service owns a process group whose leader was state.pid. Recheck
     // the recorded start identity before signaling it. If the process has
     // already exited, there is nothing to kill. If the identity probe or the
     // kill fails, preserve the PID and ports as live evidence instead of
     // claiming cleanup and risking a PID-reuse signal or an orphan.
-    let cleanup_error = stop_process(state, Some(&ShutdownPolicy::Kill)).err();
+    let cleanup_error = stop_started_process(started, Some(&ShutdownPolicy::Kill)).err();
     if let Some(cleanup_error) = cleanup_error {
+        if preserve_terminal_state {
+            return;
+        }
         let message = match error {
             Some(error) => format!("{error}; supervisor cleanup failed: {cleanup_error}"),
             None => format!("supervisor cleanup failed: {cleanup_error}"),
         };
         let _ = write_atomic(&supervisor_error_path(&dir), message.as_bytes());
+        if let Ok(Some(mut facts)) = read_lifecycle(&dir) {
+            facts.phase = "failed".to_string();
+            facts.recovery = "cleanup-failed".to_string();
+            let _ = write_lifecycle(&dir, &facts);
+        }
         return;
     }
-    if let Some(error) = error {
-        let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
-    } else {
-        let _ = fs::remove_file(supervisor_error_path(&dir));
+    if !preserve_terminal_state {
+        if let Some(error) = error {
+            let _ = write_atomic(&supervisor_error_path(&dir), error.as_bytes());
+        } else {
+            let _ = fs::remove_file(supervisor_error_path(&dir));
+        }
+        if let Ok(Some(mut facts)) = read_lifecycle(&dir) {
+            facts.phase = if error.is_some() {
+                "failed".to_string()
+            } else {
+                "stopped".to_string()
+            };
+            facts.recovery = error.unwrap_or("none").to_string();
+            facts.pid = None;
+            let _ = write_lifecycle(&dir, &facts);
+        }
     }
     let _ = fs::remove_file(pid_path(&dir));
     let _ = fs::remove_file(ports_path(&dir));
     let _ = fs::remove_file(stopping_path(&dir));
+    if error.is_some() && !preserve_terminal_state {
+        stop_dependents(project_dir, &plan.name, &mut BTreeSet::new());
+    }
+}
+
+fn stop_dependents(project_dir: &Path, dependency: &str, visited: &mut BTreeSet<String>) {
+    if !visited.insert(dependency.to_string()) {
+        return;
+    }
+    let root = service_dir(project_dir, "");
+    let Ok(entries) = fs::read_dir(&root) else { return };
+    let mut dependents = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(Some(facts)) = read_lifecycle(&path) else { continue };
+        if facts.dependencies.iter().any(|name| name == dependency) {
+            dependents.push((
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                facts,
+            ));
+        }
+    }
+    dependents.sort_by(|left, right| left.0.cmp(&right.0));
+    for (name, facts) in dependents {
+        stop_dependents(project_dir, &name, visited);
+        if !matches!(facts.phase.as_str(), "starting" | "running" | "ready") {
+            continue;
+        }
+        let dir = service_dir(project_dir, &name);
+        let Some(PersistedProcessState::Verified(state)) = read_process_state(&dir).ok().flatten() else {
+            continue;
+        };
+        let Ok(authority) = authority_from_lifecycle(&facts) else { continue };
+        let _ = fs::write(stopping_path(&dir), b"dependency-failed\n");
+        let stopped = if matches!(authority, ServiceAuthority::WindowsGuardianJobObject { .. }) {
+            // The dependent's project-local guardian owns the Job Object and
+            // will observe this marker without another process signaling it.
+            true
+        } else {
+            stop_process_with_authority(
+                &state,
+                Some(&ShutdownPolicy::Kill),
+                Some(&authority),
+                None,
+            )
+            .is_ok()
+        };
+        if stopped {
+            let _ = fs::remove_file(pid_path(&dir));
+            let _ = fs::remove_file(ports_path(&dir));
+            let _ = fs::remove_file(stopping_path(&dir));
+            let _ = write_atomic(
+                &supervisor_error_path(&dir),
+                format!("dependency `{dependency}` failed").as_bytes(),
+            );
+            let mut updated = facts;
+            updated.phase = "failed".to_string();
+            updated.recovery = "dependency-failed".to_string();
+            updated.pid = None;
+            let _ = write_lifecycle(&dir, &updated);
+        }
+    }
 }
 
 fn watch_stamps(project_dir: &Path, paths: &[PathBuf]) -> Result<Vec<String>, String> {
@@ -1739,7 +2444,7 @@ fn watch_changed_debounced(
 /// wait, then `SIGKILL` if it's still alive.
 pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String> {
     validate_service_name(&plan.name)?;
-    let _guard = super::RuntimePolicy::acquire_lock(
+    let guard = super::RuntimePolicy::acquire_lock(
         &super::Store::managed_dir(project_dir),
         "services-state",
     )
@@ -1764,6 +2469,20 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         let _ = fs::remove_file(supervisor_error_path(&dir));
         return result;
     };
+    let lifecycle = read_lifecycle(&dir)?;
+    let authority = match lifecycle.as_ref() {
+        Some(facts) => authority_from_lifecycle(facts)?,
+        None => {
+            #[cfg(test)]
+            {
+                ServiceAuthority::TestProcessGroup
+            }
+            #[cfg(not(test))]
+            {
+                return Err("service lifecycle state is missing its authority facts".to_string());
+            }
+        }
+    };
     if !process_matches_start(&state)? {
         match fs::remove_file(pid_path(&dir)) {
             Ok(()) => {}
@@ -1773,11 +2492,37 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         let _ = fs::remove_file(stopping_path(&dir));
         let _ = fs::remove_file(ports_path(&dir));
         let _ = fs::remove_file(supervisor_error_path(&dir));
+        if let Some(mut facts) = lifecycle {
+            facts.phase = "stale".to_string();
+            facts.recovery = "stale-process-state".to_string();
+            facts.pid = None;
+            let _ = write_lifecycle(&dir, &facts);
+        }
         return Ok(());
     }
     fs::write(stopping_path(&dir), b"down\n")
         .map_err(|error| format!("couldn't mark service `{}` for shutdown: {error}", plan.name))?;
-    stop_process(&state, plan.shutdown.as_ref())?;
+    if matches!(authority, ServiceAuthority::WindowsGuardianJobObject { .. }) {
+        drop(guard);
+        stop_process_with_authority(&state, plan.shutdown.as_ref(), Some(&authority), None)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while process_matches_start(&state)? {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "service process {} is still alive after guardian shutdown",
+                    state.pid
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _guard = super::RuntimePolicy::acquire_lock(
+            &super::Store::managed_dir(project_dir),
+            "services-state",
+        )
+        .map_err(|e| format!("couldn't relock service state: {e}"))?;
+    } else {
+        stop_process_with_authority(&state, plan.shutdown.as_ref(), Some(&authority), None)?;
+    }
     let result = match fs::remove_file(pid_path(&dir)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1786,6 +2531,12 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
     let _ = fs::remove_file(ports_path(&dir));
     let _ = fs::remove_file(stopping_path(&dir));
     let _ = fs::remove_file(supervisor_error_path(&dir));
+    if let Ok(Some(mut facts)) = read_lifecycle(&dir) {
+        facts.phase = "stopped".to_string();
+        facts.recovery = "down".to_string();
+        facts.pid = None;
+        let _ = write_lifecycle(&dir, &facts);
+    }
     result
 }
 
@@ -1795,13 +2546,18 @@ enum StopAction {
     Kill,
 }
 
-fn stop_process(state: &ProcessState, shutdown: Option<&ShutdownPolicy>) -> Result<(), String> {
+fn stop_process_with_authority(
+    state: &ProcessState,
+    shutdown: Option<&ShutdownPolicy>,
+    authority: Option<&ServiceAuthority>,
+    runtime: Option<&AuthorityRuntime>,
+) -> Result<(), String> {
     let pid = state.pid;
     stop_process_with(
         pid,
         shutdown,
         Duration::from_secs(3),
-        |action| run_verified_stop_action(state, action),
+        |action| run_verified_stop_action_with(state, action, authority, runtime),
         || process_matches_start(state),
     )
 }
@@ -1818,11 +2574,16 @@ fn run_if_start_identity_matches(
     Ok(true)
 }
 
-fn run_verified_stop_action(state: &ProcessState, action: StopAction) -> Result<(), String> {
+fn run_verified_stop_action_with(
+    state: &ProcessState,
+    action: StopAction,
+    authority: Option<&ServiceAuthority>,
+    runtime: Option<&AuthorityRuntime>,
+) -> Result<(), String> {
     let _ran = run_if_start_identity_matches(
         &state.start_identity,
         || process_start_identity(state.pid),
-        || run_stop_action(state.pid, action),
+        || run_authority_stop_action(state.pid, action, authority, runtime),
     )?;
     Ok(())
 }
@@ -1891,6 +2652,72 @@ fn run_stop_action(pid: u32, action: StopAction) -> Result<(), String> {
     Ok(())
 }
 
+fn run_authority_stop_action(
+    pid: u32,
+    action: StopAction,
+    authority: Option<&ServiceAuthority>,
+    runtime: Option<&AuthorityRuntime>,
+) -> Result<(), String> {
+    match authority {
+        Some(ServiceAuthority::LinuxSystemdUser { unit }) => {
+            let signal = match action {
+                StopAction::Term => "TERM",
+                StopAction::Kill => "KILL",
+            };
+            let status = Command::new("systemctl")
+                .args([
+                    "--user",
+                    "kill",
+                    "--kill-who=all",
+                    &format!("--signal={signal}"),
+                    unit,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| format!("couldn't run service authority {signal}: {error}"))?;
+            if !status.success() {
+                return Err(format!("service authority {signal} exited with {status}"));
+            }
+            Ok(())
+        }
+        Some(ServiceAuthority::WindowsGuardianJobObject { guardian }) => {
+            #[cfg(windows)]
+            if let Some(AuthorityRuntime::WindowsGuardianJobObject(job)) = runtime {
+                return job
+                    .terminate()
+                    .map_err(|error| format!("couldn't terminate service guardian job: {error}"));
+            }
+            #[cfg(windows)]
+            {
+                let mut command = Command::new("taskkill");
+                command.args(["/PID", &guardian.to_string(), "/T"]);
+                if matches!(action, StopAction::Kill) {
+                    command.arg("/F");
+                }
+                let status = command
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map_err(|error| format!("couldn't run service guardian shutdown: {error}"))?;
+                if !status.success() {
+                    return Err(format!("service guardian shutdown exited with {status}"));
+                }
+                return Ok(());
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (pid, action, guardian, runtime);
+                Err("windows service authority is unavailable on this platform".to_string())
+            }
+        }
+        Some(ServiceAuthority::TestProcessGroup) | None => run_stop_action(pid, action),
+        Some(ServiceAuthority::Unsupported) => {
+            Err("service authority is unavailable".to_string())
+        }
+    }
+}
+
 /// A `services: health` result for one service.
 pub enum Health {
     Disabled,
@@ -1952,9 +2779,8 @@ fn probe_ready(resolved: &Resolved, env: Option<&ShellEnv>) -> bool {
                 command
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status()
-                    .map(|status| status.success())
-                    .unwrap_or(false)
+                    ;
+                run_bounded_probe(command, MAX_READY_PROBE_TIME)
             }
             ReadyProbe::Http { url, status } => probe_http(url, *status),
             ReadyProbe::Notify { path } => {
@@ -1983,12 +2809,8 @@ fn probe_ready(resolved: &Resolved, env: Option<&ShellEnv>) -> bool {
         if let Some(env) = env {
             env.apply_to(&mut command);
         }
-        return command
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        return run_bounded_probe(command, MAX_READY_PROBE_TIME);
     }
     if let Some(port) = resolved.ports.first() {
         let addr = format!("127.0.0.1:{port}");
@@ -2171,12 +2993,10 @@ fn visit_dependency(
     Ok(())
 }
 
-/// Return the canonical dependency list for a service. `after` is the
-/// ratified spelling; `depends_on` remains readable for projects written
-/// against the pre-ratification dev surface.
+/// Return the canonical dependency list for a service.
 pub fn dependency_names(plan: &DevServicePlan) -> Vec<String> {
     let mut names = Vec::new();
-    for name in plan.after.iter().chain(plan.depends_on.iter()) {
+    for name in &plan.after {
         if !names.iter().any(|existing| existing == name) {
             names.push(name.clone());
         }
@@ -2269,6 +3089,7 @@ where
                 Some(cleanup) => format!("{current_error}; cleanup failed: {cleanup}"),
             });
         }
+        mark_lifecycle_ready(project_dir, plan)?;
         if !was_running {
             started.push(index);
         }
@@ -2278,8 +3099,8 @@ where
 
 /// Stop a dependency-first selection in reverse order. Callers use the same
 /// graph result for startup and teardown, so a dependent is never left alive
-/// while its dependency is being removed. The function attempts every entry
-/// before returning a combined failure.
+/// while its dependency is being removed. If a dependent cannot be stopped,
+/// leave its dependencies untouched and report the boundary failure.
 pub fn down_ordered(
     project_dir: &Path,
     plans: &[DevServicePlan],
@@ -2293,6 +3114,7 @@ pub fn down_ordered(
         };
         if let Err(error) = down_one(project_dir, plan) {
             errors.push(format!("{}: {error}", plan.name));
+            break;
         }
     }
     if errors.is_empty() {
@@ -2556,6 +3378,36 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
     out
 }
 
+/// Structured lifecycle facts for `services health --json`. The file remains
+/// the source of truth; this is only a stable presentation of that record.
+pub fn lifecycle_json(project_dir: &Path, name: &str) -> Option<String> {
+    let facts = read_lifecycle(&service_dir(project_dir, name)).ok().flatten()?;
+    let dependencies = facts
+        .dependencies
+        .iter()
+        .map(|name| crate::JSON::quote(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!(
+        "{{\"backend\":{},\"generation\":{},\"phase\":{},\"containment\":{},\"recovery\":{},\"pid\":{},\"unit\":{},\"guardian\":{},\"after\":[{}]}}",
+        crate::JSON::quote(&facts.backend),
+        facts.generation,
+        crate::JSON::quote(&facts.phase),
+        crate::JSON::quote(&facts.containment),
+        crate::JSON::quote(&facts.recovery),
+        facts.pid.map_or_else(|| "null".to_string(), |pid| pid.to_string()),
+        facts
+            .unit
+            .as_deref()
+            .map(crate::JSON::quote)
+            .unwrap_or_else(|| "null".to_string()),
+        facts
+            .guardian
+            .map_or_else(|| "null".to_string(), |pid| pid.to_string()),
+        dependencies,
+    ))
+}
+
 fn read_text_bounded(path: &Path, limit: usize) -> std::io::Result<String> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit as u64 {
@@ -2674,7 +3526,7 @@ mod tests {
         let mut api = plan("api", "sleep 30");
         let worker = plan("worker", "sleep 30");
         api.after = vec!["database".to_string()];
-        database.depends_on = vec!["worker".to_string()];
+        database.after = vec!["worker".to_string()];
 
         let plans = vec![api.clone(), database.clone(), worker];
         let order = dependency_order(&plans).unwrap();
@@ -2685,7 +3537,8 @@ mod tests {
         assert_eq!(names, ["worker", "database", "api"]);
 
         let mut cycle = api;
-        cycle.depends_on = vec!["database".to_string()];
+        cycle.after = vec!["database".to_string()];
+        database.after = vec!["api".to_string()];
         let cyclic = vec![cycle, database];
         let error = dependency_order(&cyclic).unwrap_err();
         assert!(error.contains("service dependency cycle"), "{error}");
@@ -3167,6 +4020,15 @@ mod tests {
             "GetProcessTimes",
             "GetExitCodeProcess",
             "windows-filetime",
+            "systemd-run",
+            "--user",
+            "--scope",
+            "Delegate=yes",
+            "KillMode=control-group",
+            "CreateJobObjectW",
+            "AssignProcessToJobObject",
+            "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+            "E1332: Safe service authority is unavailable",
         ] {
             assert!(source.contains(required), "missing process identity law: {required}");
         }
@@ -3221,5 +4083,35 @@ mod tests {
         assert_eq!(unknown_field(&p), None);
         p.extra.push(("prot".to_string(), "5432".to_string()));
         assert_eq!(unknown_field(&p), Some("prot"));
+    }
+
+    #[test]
+    fn lifecycle_facts_persist_authority_generation_and_dependencies() {
+        let dir = scratch("lifecycle-facts");
+        let facts = LifecycleFacts {
+            backend: "linux-systemd-user".to_string(),
+            generation: 7,
+            phase: "ready".to_string(),
+            containment: "delegated-cgroup".to_string(),
+            recovery: "post-ready-crash".to_string(),
+            pid: Some(42),
+            unit: Some("jetpack-test.scope".to_string()),
+            guardian: None,
+            dependencies: vec!["database".to_string(), "cache".to_string()],
+        };
+        write_lifecycle(&dir, &facts).unwrap();
+        assert_eq!(read_lifecycle(&dir).unwrap(), Some(facts));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn shell_readiness_probe_is_bounded_and_kills_descendants() {
+        let dir = scratch("bounded-readiness");
+        let mut command = super::super::Platform::shell_command("sleep 30");
+        command.current_dir(&dir);
+        let started = Instant::now();
+        assert!(!run_bounded_probe(command, Duration::from_millis(100)));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        fs::remove_dir_all(dir).ok();
     }
 }
