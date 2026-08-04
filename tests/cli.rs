@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
 
+use jet_foundation::JSON::parse_json;
+
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -60,11 +62,159 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 #[test]
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
-    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
+    let file = dir.join("main.jet");
+    fs::write(&file, "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
+    let human = Command::new(jet()).args(["inspect", "unsafe", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    let human = String::from_utf8(human.stdout).unwrap();
+    assert!(human.contains("main.jet:4:2"), "{human}");
+    assert!(human.contains("main.jet:5:14"), "{human}");
+    assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "inspect unsafe JSON must parse: {stdout}");
+    assert!(stdout.contains("\"location\":{\"start\":{\"line\":4,\"column\":2}"), "{stdout}");
+    let repeat = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(repeat.status.code(), Some(0));
+    assert_eq!(stdout, String::from_utf8(repeat.stdout).unwrap());
+}
+
+#[test]
+fn inspect_unsafe_loader_failures_use_standard_diagnostics() {
+    let dir = isolated_cwd("inspect_unsafe_loader");
+    let file = dir.join("malformed.jet");
+    fs::write(&file, "fn run( {\n").unwrap();
+    let malformed = Command::new(jet()).args(["inspect", "unsafe", "malformed.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(malformed.status.code(), Some(1));
+    let stderr = String::from_utf8(malformed.stderr).unwrap();
+    assert!(stderr.contains("Error [E0003]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("malformed.jet:1:9"), "{stderr}");
+
+    let colored = Command::new(jet()).args(["inspect", "unsafe", "malformed.jet", "--color=always"]).current_dir(&dir).output().unwrap();
+    assert_eq!(colored.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&colored.stderr).contains("\x1b"), "--color=always must preserve diagnostic styling");
+
+    let missing = Command::new(jet()).args(["inspect", "unsafe", "missing.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    let stderr = String::from_utf8(missing.stderr).unwrap();
+    assert!(stderr.contains("Error [E0603]") && stderr.contains("Why:") && stderr.contains("Fix:"), "{stderr}");
+
+    let missing_json = Command::new(jet()).args(["inspect", "unsafe", "missing.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing_json.status.code(), Some(1));
+    let stdout = String::from_utf8(missing_json.stdout).unwrap();
+    let stderr = String::from_utf8(missing_json.stderr).unwrap();
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E0603\""), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "loader diagnostic JSON must parse: {stdout}");
+    assert!(stderr.is_empty(), "JSON loader diagnostics should keep stderr quiet: {stderr}");
+
+    fs::write(dir.join("missing_reason.jet"), "fn run() {\n #Unsafe { print(\"unchecked\") }\n}\n").unwrap();
+    let missing_reason = Command::new(jet()).args(["inspect", "unsafe", "missing_reason.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(missing_reason.status.code(), Some(1));
+    let stderr = String::from_utf8(missing_reason.stderr).unwrap();
+    assert!(stderr.contains("Error [E3112]") && stderr.contains("Why:") && stderr.contains("Fix:") && stderr.contains("missing_reason.jet:2:2"), "{stderr}");
+}
+
+#[test]
+fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
+    let dir = isolated_cwd("inspect_unsafe_diagnostics");
+    let main = dir.join("main.jet");
+    let helper = dir.join("helper.jet");
+    let runner = dir.join("runner");
+    fs::create_dir(&runner).unwrap();
+    fs::write(&main, "use \"helper\"\nfn run() {}\n").unwrap();
+    fs::write(&helper, "use core.mem\n#Unsafe(\"helper\", obligations: .Track) fn unsafe_run() {\n    value :: 7\n    pointer :: *Int.{*value}\n}\n").unwrap();
+
+    let human = Command::new(jet()).args(["inspect", "unsafe", main.to_str().unwrap()]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(human.status.code(), Some(1), "{}", String::from_utf8_lossy(&human.stderr));
+    let stderr = String::from_utf8(human.stderr).unwrap();
+    assert!(stderr.contains("Error [E3107]"), "{stderr}");
+    assert!(stderr.contains("helper.jet:4:16"), "{stderr}");
+
+    let json = Command::new(jet()).args(["inspect", "unsafe", main.to_str().unwrap(), "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(json.status.code(), Some(1), "{}", String::from_utf8_lossy(&json.stderr));
+    let stdout = String::from_utf8(json.stdout).unwrap();
+    let stderr = String::from_utf8(json.stderr).unwrap();
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
+    assert!(parse_json(&stdout).is_ok(), "inspection diagnostic JSON must parse: {stdout}");
+    assert!(stderr.is_empty(), "JSON inspection diagnostics should keep stderr quiet: {stderr}");
+
+    let bad_main = dir.join("bad_main.jet");
+    let bad_helper = dir.join("bad_helper.jet");
+    fs::write(&bad_main, "use \"bad_helper\"\nfn run() {}\n").unwrap();
+    fs::write(&bad_helper, "fn run( {\n").unwrap();
+    let loader_human = Command::new(jet()).args(["inspect", "unsafe", bad_main.to_str().unwrap()]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(loader_human.status.code(), Some(1), "{}", String::from_utf8_lossy(&loader_human.stderr));
+    let loader_stderr = String::from_utf8(loader_human.stderr).unwrap();
+    assert!(loader_stderr.contains("bad_helper.jet:1:9") && !loader_stderr.contains("bad_main.jet:1:9"), "{loader_stderr}");
+
+    let loader_json = Command::new(jet()).args(["inspect", "unsafe", bad_main.to_str().unwrap(), "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(loader_json.status.code(), Some(1), "{}", String::from_utf8_lossy(&loader_json.stderr));
+    let loader_stdout = String::from_utf8(loader_json.stdout).unwrap();
+    assert!(loader_stdout.contains("\"file\":\"bad_helper.jet\"") && loader_stdout.contains("\"line\":1,\"col\":9"), "{loader_stdout}");
+    assert!(parse_json(&loader_stdout).is_ok(), "imported loader diagnostic JSON must parse: {loader_stdout}");
+    assert!(loader_json.stderr.is_empty(), "JSON imported loader diagnostics should keep stderr quiet");
+}
+
+#[test]
+fn epoch3_string_and_set_surface_runs_on_default_tier() {
+    let dir = isolated_cwd("epoch3_string_set_default");
+    fs::write(
+        dir.join("main.jet"),
+        r#"fn run() {
+    print("  jet".trim_start())
+    print("jet  ".trim_end())
+    print("jet".pad_start(5, "."))
+    print("jet".pad_end(5, "."))
+    print("hello jet".index_of("jet"))
+    print("banana".count("an"))
+    print("hELLO jet".to_title())
+    print("Hello".is_alphabetic())
+    print("123".is_numeric())
+    print(" \t".is_whitespace())
+    print("Jet lang".is_ascii())
+    pair :: "left:right".split_once(":") ?? panic("split")
+    print(pair.before)
+    print(pair.after)
+    print(Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len())
+    print(Set.from([1, 2, 3]).is_subset(Set.from([1, 2, 3, 4])))
+    print(Set.from([1, 2, 3]).is_superset(Set.from([1, 2])))
+    print(Set.from([1, 2, 3]).is_disjoint(Set.from([8])))
+    print(SortedSet.from([1, 2, 3]).union(SortedSet.from([3, 4])).len())
+    print(SortedSet.from([1, 2, 3]).difference(SortedSet.from([2, 3, 4])).len())
+    print(Set.from(["left", "right"]).intersection(Set.from(["right", "other"])).len())
+    print(SortedSet.from(["left", "right"]).is_subset(SortedSet.from(["left", "right", "other"])))
+    print(Set.from(["a", "a"]).len())
+    print(SortedSet.from(["z", "z", "a"]).len())
+    print(SortedSet.from(["z", "a"]).first() ?? "none")
+    print(SortedSet.from(["z", "a"]).last() ?? "none")
+    typed_words := SortedSet<String>.{SortedSet.new()}
+    print(typed_words.add("z"))
+    print(typed_words.add("z"))
+    print(typed_words.first() ?? "none")
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n1\n2\na\nz\ntrue\nfalse\nz\n"
+    );
 }
 
 #[test]
@@ -4418,6 +4568,124 @@ fn expand_inline_golden() {
     );
     let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
     check_snapshot("expand_inline.txt", &s);
+}
+
+#[test]
+fn expand_json_is_canonical_and_lens_scoped() {
+    let p = expand_fixture();
+    let run = || {
+        Command::new(jet())
+            .args(["inspect", "expand", "--facts", "inline", "--json"])
+            .arg(&p)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(first.stdout, second.stdout, "expand JSON must be byte-stable");
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.starts_with('{'), "JSON mode must not print human headers: {stdout}");
+    assert!(stdout.contains("\"schema_version\":12"), "must reuse semindex schema: {stdout}");
+    assert!(stdout.contains("\"expand\":{\"selection\":\"inline\""), "missing expand projection: {stdout}");
+    assert!(stdout.contains("\"contract\":\"#Inline"), "inline facts missing: {stdout}");
+    assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");
+}
+
+#[test]
+fn expand_json_bare_projects_every_lens() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(parse_json(&stdout).is_ok(), "bare expand JSON must parse: {stdout}");
+    assert!(stdout.contains("\"selection\":\"all\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"inline\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"memory\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"web\""), "{stdout}");
+    assert!(!stdout.contains("inline —"), "human output leaked into JSON: {stdout}");
+}
+
+#[test]
+fn expand_json_selected_empty_and_positions_are_proved() {
+    let fixture = expand_fixture();
+    let empty = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "memory", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(empty.status.code(), Some(0));
+    let empty_json = String::from_utf8_lossy(&empty.stdout);
+    assert!(parse_json(&empty_json).is_ok(), "selected empty JSON must parse: {empty_json}");
+    assert!(empty_json.contains("\"selection\":\"memory\""));
+    assert!(empty_json.contains("\"facts\":[]"), "selected empty lens must be explicit: {empty_json}");
+
+    let memory = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "memory", "--json"])
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/memory/no_alloc_policy.jet"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(memory.status.code(), Some(0));
+    let memory_json = String::from_utf8_lossy(&memory.stdout);
+    assert!(parse_json(&memory_json).is_ok());
+    assert!(memory_json.contains("\"fact\":\"no_alloc\""));
+    assert!(memory_json.contains("\"line\":5"), "memory fact location missing: {memory_json}");
+
+    let web = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "web", "--json"])
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/web/web_app.jet"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(web.status.code(), Some(0));
+    let web_json = String::from_utf8_lossy(&web.stdout);
+    assert!(parse_json(&web_json).is_ok());
+    assert!(web_json.contains("\"kind\":\"web_graph\""));
+    assert!(web_json.contains("\"span\":{"), "web fact positions missing: {web_json}");
+}
+
+#[test]
+fn expand_json_compile_error_uses_machine_diagnostics() {
+    let p = bad_file(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.starts_with("{\"schema_version\":1,\"diagnostics\":["), "JSON diagnostics must be one document on stdout: {stdout}");
+    assert!(stdout.contains("\"code\":\"E0102\""), "missing registered diagnostic: {stdout}");
+    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON must parse as one document: {stdout}");
+    assert!(!stdout.contains("Error ["), "human diagnostic leaked into JSON: {stdout}");
+    assert!(stderr.is_empty(), "JSON mode should keep stderr quiet: {stderr}");
+}
+
+#[test]
+fn expand_json_unknown_lens_is_versioned_usage_error() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "bogus", "--json"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("{\"schema_version\":1,\"error\""), "{stdout}");
+    assert!(stdout.contains("\"kind\":\"usage\""), "{stdout}");
+    assert!(!stdout.contains("E2101"), "usage error must not borrow unknown-command code: {stdout}");
+    assert!(out.stderr.is_empty());
 }
 
 #[test]

@@ -15,8 +15,8 @@ pub use Build::{
 };
 pub use Types::{
     CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, EffectProvenance,
-    InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
-    OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
+    ExpandLens, ExpandProjection, ExpandValue, InstanceApplicationFact, InstanceFact, MemberFact,
+    MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
     StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
     SCHEMA_VERSION,

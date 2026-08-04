@@ -290,6 +290,40 @@ fn jet_text_lower(s: &String) -> String {
 fn jet_text_upper(s: &String) -> String {
     jet_unicode_upper(s)
 }
+fn jet_text_title_mapping(cp: u32) -> Option<&'static [u32]> {
+    let at = UNICODE_TITLE_INDEX
+        .binary_search_by_key(&cp, |&(source, _, _)| source)
+        .ok()?;
+    let (_, start, len) = UNICODE_TITLE_INDEX[at];
+    Some(&UNICODE_TITLE_POOL[start as usize..(start + len) as usize])
+}
+fn jet_text_append_title_mapping(out: &mut String, cp: u32) {
+    if let Some(mapped) = jet_text_title_mapping(cp) {
+        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
+    } else if let Some(ch) = char::from_u32(cp) {
+        out.push(ch);
+    }
+}
+fn jet_text_title(s: &String) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut word_start = true;
+    for ch in s.chars() {
+        let cp = ch as u32;
+        if jet_text_alphabetic(cp) || jet_text_numeric(cp) {
+            if word_start {
+                jet_text_append_title_mapping(&mut out, cp);
+            } else {
+                let one = ch.to_string();
+                out.push_str(&jet_text_lower(&one));
+            }
+            word_start = false;
+        } else {
+            out.push(ch);
+            word_start = true;
+        }
+    }
+    out
+}
 // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
 fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
     jet_text_nfd(&jet_text_casefold(&jet_text_nfd(a)))

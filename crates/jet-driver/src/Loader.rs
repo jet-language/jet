@@ -15,6 +15,76 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A loader diagnostic with the source file and source text that produced it.
+/// The ordinary loader API still returns bare diagnostics for existing callers;
+/// inspection tools use this form to preserve imported-module provenance.
+#[derive(Debug, Clone)]
+pub struct LoaderDiagnostic {
+    pub file: String,
+    pub source: String,
+    pub diagnostic: Diagnostic,
+}
+
+#[derive(Debug)]
+struct LoaderError {
+    diagnostics: Vec<LoaderDiagnostic>,
+}
+
+impl LoaderError {
+    fn at(file: &str, source: &str, diagnostics: Vec<Diagnostic>) -> Self {
+        Self {
+            diagnostics: diagnostics
+                .into_iter()
+                .map(|diagnostic| LoaderDiagnostic {
+                    file: file.to_string(),
+                    source: source.to_string(),
+                    diagnostic,
+                })
+                .collect(),
+        }
+    }
+
+    fn into_plain(self) -> Vec<Diagnostic> {
+        self.diagnostics
+            .into_iter()
+            .map(|entry| entry.diagnostic)
+            .collect()
+    }
+}
+
+fn record_loader_error(
+    sink: &mut Option<&mut Vec<LoaderDiagnostic>>,
+    error: LoaderError,
+) -> Vec<Diagnostic> {
+    if let Some(sink) = sink.as_deref_mut() {
+        sink.extend(error.diagnostics.iter().cloned());
+    }
+    error.into_plain()
+}
+
+fn project_parts_loader_error(
+    project_root: &Path,
+    conflicts: &[crate::ProjectParts::ProjectPartConflict],
+) -> LoaderError {
+    let diagnostics = conflicts
+        .iter()
+        .map(|conflict| {
+            let path = conflict.paths.first().cloned();
+            let (file, source) = path
+                .as_ref()
+                .and_then(|path| fs::read_to_string(path).ok().map(|source| (path, source)))
+                .map(|(path, source)| (relative_display(project_root, path), source))
+                .unwrap_or_else(|| (project_root.display().to_string(), String::new()));
+            LoaderDiagnostic {
+                file,
+                source,
+                diagnostic: conflict.diagnostic(project_root, None),
+            }
+        })
+        .collect();
+    LoaderError { diagnostics }
+}
+
 /// What the project's manifest + the shared hangar tell the module resolver
 /// about consuming packages with `use <pkg>` (U17).
 ///
@@ -99,6 +169,35 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     load_entry_with_overlay(entry_path, None, false)
 }
 
+/// Load an entry file and retain source provenance for every loader failure.
+pub fn load_entry_with_diagnostics(entry_path: &str) -> Result<ProgramBundle, Vec<LoaderDiagnostic>> {
+    crate::boot_tir_eval();
+    let mut dependencies = Vec::new();
+    let mut diagnostics = Vec::new();
+    let result = load_entry_with_overlays_mode_with_sink(
+        entry_path,
+        &[],
+        false,
+        false,
+        &mut dependencies,
+        Some(&mut diagnostics),
+    );
+    match result {
+        Ok(bundle) => Ok(bundle),
+        Err(fallback) => {
+            if diagnostics.is_empty() {
+                let source = fs::read_to_string(entry_path).unwrap_or_default();
+                diagnostics.extend(fallback.into_iter().map(|diagnostic| LoaderDiagnostic {
+                    file: entry_path.to_string(),
+                    source: source.clone(),
+                    diagnostic,
+                }));
+            }
+            Err(diagnostics)
+        }
+    }
+}
+
 /// Load a program, optionally substituting in-memory source for one file
 /// (LSP unsaved buffer for the document being edited).
 pub fn load_entry_with_overlay(
@@ -167,6 +266,24 @@ fn load_entry_with_overlays_mode(
     load_adjacent_unqualified: bool,
     dependencies: &mut Vec<PathBuf>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    load_entry_with_overlays_mode_with_sink(
+        entry_path,
+        overlays,
+        for_check,
+        load_adjacent_unqualified,
+        dependencies,
+        None,
+    )
+}
+
+fn load_entry_with_overlays_mode_with_sink(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+    load_adjacent_unqualified: bool,
+    dependencies: &mut Vec<PathBuf>,
+    mut sink: Option<&mut Vec<LoaderDiagnostic>>,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
     // Check/LSP overlays skip `load_entry`; still need TirBridge before derive/comptime.
     crate::boot_tir_eval();
     let entry = PathBuf::from(entry_path);
@@ -196,7 +313,10 @@ fn load_entry_with_overlays_mode(
     // deps found in the manifest-less branch below, merged into
     // `parse_teaching` once that's declared.
     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
-    let organization_policy = load_organization_unsafe_policy()?;
+    let organization_policy = match load_organization_unsafe_policy() {
+        Ok(policy) => policy,
+        Err(error) => return Err(record_loader_error(&mut sink, error)),
+    };
     let (
         project_root,
         pkg_dep_dirs,
@@ -210,30 +330,56 @@ fn load_entry_with_overlays_mode(
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
         let package_manifest = match crate::PackageManifest::parse(&raw) {
             Ok(manifest) => manifest,
-            Err(crate::PackageManifest::ManifestError::BadMemoryPolicy { detail }) => return Err(vec![Diagnostic::error(
-                "E0355",
-                "invalid package memory policy".to_string(),
-                detail,
-                "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `pkg.jet`".to_string(),
-                None,
-            )]),
-            Err(crate::PackageManifest::ManifestError::BadAutoDerivePolicy { detail }) => return Err(vec![Diagnostic::error(
-                "E0355",
-                "invalid package auto-derive policy".to_string(),
-                detail,
-                "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `pkg.jet`".to_string(),
-                None,
-            )]),
+            Err(crate::PackageManifest::ManifestError::BadMemoryPolicy { detail }) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        &raw,
+                        vec![Diagnostic::error(
+                            "E0355",
+                            "invalid package memory policy".to_string(),
+                            detail,
+                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `pkg.jet`".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
+            Err(crate::PackageManifest::ManifestError::BadAutoDerivePolicy { detail }) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        &raw,
+                        vec![Diagnostic::error(
+                            "E0355",
+                            "invalid package auto-derive policy".to_string(),
+                            detail,
+                            "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `pkg.jet`".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
             Err(_) => crate::PackageManifest::PackManifest::default(),
         };
         match Manifest::parse(&pack_path, &raw) {
-            Err(d) => return Err(vec![d]),
+            Err(d) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
+                ));
+            }
             Ok(mf) => {
                 layer_ceiling = mf.package.layer;
                 package_edition = Manifest::effective_edition(&mf);
                 // Check toolchain constraint (E1208).
                 if let Err(d) = Manifest::check_toolchain(&mf, &pack_path.display().to_string()) {
-                    return Err(vec![d]);
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
+                    ));
                 }
 
                 // Check the `edition:` field (E2001, D-REL3): a manifest may not
@@ -241,7 +387,10 @@ fn load_entry_with_overlays_mode(
                 if let Err(d) =
                     Manifest::check_edition_support(&mf, &pack_path.display().to_string())
                 {
-                    return Err(vec![d]);
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
+                    ));
                 }
 
                 // If there are deps, check lock staleness (E1202) and
@@ -257,15 +406,32 @@ fn load_entry_with_overlays_mode(
                                 &mf,
                                 &lock_path.display().to_string(),
                             ) {
-                                return Err(vec![d]);
+                                return Err(record_loader_error(
+                                    &mut sink,
+                                    LoaderError::at(
+                                        &lock_path.display().to_string(),
+                                        &lock_raw,
+                                        vec![d],
+                                    ),
+                                ));
                             }
                         } else {
-                            return Err(vec![crate::Lock::e1202(&lock_path.display().to_string())]);
+                            return Err(record_loader_error(
+                                &mut sink,
+                                LoaderError::at(
+                                    &lock_path.display().to_string(),
+                                    &lock_raw,
+                                    vec![crate::Lock::e1202(&lock_path.display().to_string())],
+                                ),
+                            ));
                         }
                     }
                     // E1201: dry-resolve path deps for package name conflicts.
                     if let Err(d) = dry_resolve_path_deps(&mf, &manifest_dir) {
-                        return Err(vec![d]);
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
+                        ));
                     }
                 }
 
@@ -281,20 +447,34 @@ fn load_entry_with_overlays_mode(
                             Err(crate::PackageManifest::DiscoveryError::NotFound {
                                 name,
                             }) => {
-                                return Err(vec![Manifest::e1212(
-                                    &pack_path.display().to_string(),
-                                    &name,
-                                )]);
+                                return Err(record_loader_error(
+                                    &mut sink,
+                                    LoaderError::at(
+                                        &pack_path.display().to_string(),
+                                        &raw,
+                                        vec![Manifest::e1212(
+                                            &pack_path.display().to_string(),
+                                            &name,
+                                        )],
+                                    ),
+                                ));
                             }
                             Err(crate::PackageManifest::DiscoveryError::Ambiguous {
                                 name,
                                 paths,
                             }) => {
-                                return Err(vec![Manifest::e1213(
-                                    &pack_path.display().to_string(),
-                                    &name,
-                                    &paths,
-                                )]);
+                                return Err(record_loader_error(
+                                    &mut sink,
+                                    LoaderError::at(
+                                        &pack_path.display().to_string(),
+                                        &raw,
+                                        vec![Manifest::e1213(
+                                            &pack_path.display().to_string(),
+                                            &name,
+                                            &paths,
+                                        )],
+                                    ),
+                                ));
                             }
                         }
                     }
@@ -365,7 +545,7 @@ fn load_entry_with_overlays_mode(
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&project_root, &project_part_overlays);
 
-    load_file(
+    if let Err(error) = load_file(
         &entry_abs,
         entry_path,
         &project_root,
@@ -382,17 +562,18 @@ fn load_entry_with_overlays_mode(
         &project_parts,
         &project_part_failures,
         dependencies,
-    )?;
+    ) {
+        return Err(record_loader_error(&mut sink, error));
+    }
 
     // Explicit project imports report the same conflict at their source span
     // while loading. Any conflict left here still invalidates discovery,
     // including duplicate declarations whose internal names stay skipped.
     if validates_project_parts && !project_parts.conflicts.is_empty() {
-        return Err(project_parts
-            .conflicts
-            .iter()
-            .map(|conflict| conflict.diagnostic(&project_root, None))
-            .collect());
+        return Err(record_loader_error(
+            &mut sink,
+            project_parts_loader_error(&project_root, &project_parts.conflicts),
+        ));
     }
 
     if load_adjacent_unqualified {
@@ -419,7 +600,7 @@ fn load_entry_with_overlays_mode(
             let staged = overlays.iter().any(|(path, _)| normalize_path(path) == norm);
             if target.is_file() || staged {
                 let display = relative_display(&project_root, &target);
-                load_file(
+                if let Err(error) = load_file(
                     &target,
                     &display,
                     &project_root,
@@ -436,7 +617,9 @@ fn load_entry_with_overlays_mode(
                     &project_parts,
                     &project_part_failures,
                     dependencies,
-                )?;
+                ) {
+                    return Err(record_loader_error(&mut sink, error));
+                }
                 // Supply the real adjacent module edge to sema. The user's
                 // source remains untouched; this is the structural workspace
                 // context corresponding to `use alias.Item`.
@@ -544,41 +727,94 @@ fn load_entry_with_overlays_mode(
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
-    crate::Foreign::assemble_active_namespaces(&mut bundle)?;
-    bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
+    if let Err(diagnostics) = crate::Foreign::assemble_active_namespaces_with_provenance(&mut bundle) {
+        return Err(record_loader_error(
+            &mut sink,
+            LoaderError {
+                diagnostics: diagnostics
+                    .into_iter()
+                    .map(|entry| LoaderDiagnostic {
+                        file: entry.file,
+                        source: entry.source,
+                        diagnostic: entry.diagnostic,
+                    })
+                    .collect(),
+            },
+        ));
+    }
+    match crate::CFFI::assemble_with_provenance(&mut bundle) {
+        Ok(cffi) => bundle.cffi = cffi,
+        Err(diagnostics) => {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError {
+                    diagnostics: diagnostics
+                        .into_iter()
+                        .map(|entry| LoaderDiagnostic {
+                            file: entry.file,
+                            source: entry.source,
+                            diagnostic: entry.diagnostic,
+                        })
+                        .collect(),
+                },
+            ));
+        }
+    }
     Ok(bundle)
 }
 
 /// D-UNSAFE-OBLIG1=A: optional admin/CI organization floor. The configured
 /// path is an explicit build input; unreadable or malformed input fails closed.
-fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, Vec<Diagnostic>> {
+fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, LoaderError> {
     let Ok(configured) = std::env::var(Syntax::ENV_ORG_UNSAFE_POLICY) else { return Ok(Vec::new()) };
     let path = PathBuf::from(&configured);
-    let source = fs::read_to_string(&path).map_err(|error| vec![Diagnostic::error(
-        "E3109",
-        "cannot read the configured organization unsafe policy".to_string(),
-        format!("{} names `{}`, but it could not be read: {error}", Syntax::ENV_ORG_UNSAFE_POLICY, path.display()),
-        "fix the policy path or remove the environment variable".to_string(),
-        None,
-    )])?;
-    let mut declarations = crate::PackageManifest::parse_policy_document(&source).map_err(|error| vec![Diagnostic::error(
-        "E3109",
-        "the configured organization unsafe policy is malformed".to_string(),
-        format!("`{}` must contain a manifest-shaped `policy: .{{ unsafe: .Obligations }}` block: {error:?}", path.display()),
-        "fix the organization policy; configured policy never fails open".to_string(),
-        None,
-    )])?;
+    let source = match fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) => {
+            return Err(LoaderError::at(
+                &path.display().to_string(),
+                "",
+                vec![Diagnostic::error(
+                    "E3109",
+                    "cannot read the configured organization unsafe policy".to_string(),
+                    format!("{} names `{}`, but it could not be read: {error}", Syntax::ENV_ORG_UNSAFE_POLICY, path.display()),
+                    "fix the policy path or remove the environment variable".to_string(),
+                    None,
+                )],
+            ));
+        }
+    };
+    let mut declarations = match crate::PackageManifest::parse_policy_document(&source) {
+        Ok(declarations) => declarations,
+        Err(error) => {
+            return Err(LoaderError::at(
+                &path.display().to_string(),
+                &source,
+                vec![Diagnostic::error(
+                    "E3109",
+                    "the configured organization unsafe policy is malformed".to_string(),
+                    format!("`{}` must contain a manifest-shaped `policy: .{{ unsafe: .Obligations }}` block: {error:?}", path.display()),
+                    "fix the organization policy; configured policy never fails open".to_string(),
+                    None,
+                )],
+            ));
+        }
+    };
     if declarations.len() != 1
         || declarations[0].key != crate::Policy::PolicyKey::Unsafe
         || declarations[0].value != crate::Policy::PolicyValue::UnsafeObligations
     {
-        return Err(vec![Diagnostic::error(
-            "E3109",
-            "the organization unsafe policy has the wrong shape".to_string(),
-            "this admin input is exactly one mandatory unsafe-obligations floor".to_string(),
-            "use exactly `policy: .{ unsafe: .Obligations }`".to_string(),
-            None,
-        )]);
+        return Err(LoaderError::at(
+            &path.display().to_string(),
+            &source,
+            vec![Diagnostic::error(
+                "E3109",
+                "the organization unsafe policy has the wrong shape".to_string(),
+                "this admin input is exactly one mandatory unsafe-obligations floor".to_string(),
+                "use exactly `policy: .{ unsafe: .Obligations }`".to_string(),
+                None,
+            )],
+        ));
     }
     for declaration in &mut declarations {
         declaration.scope = crate::Policy::PolicyScope::Organization;
@@ -817,7 +1053,7 @@ fn load_file(
     project_parts: &crate::ProjectParts::ProjectPartsReport,
     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
     dependencies: &mut Vec<PathBuf>,
-) -> Result<(), Vec<Diagnostic>> {
+) -> Result<(), LoaderError> {
     let norm = normalize_path(path);
     if !dependencies.contains(&norm) {
         dependencies.push(norm.clone());
@@ -828,13 +1064,13 @@ fn load_file(
             .chain(std::iter::once(&norm))
             .map(|p| relative_display(project_root, p))
             .collect();
-        return Err(vec![Diagnostic::error(
+        return Err(LoaderError::at(display, "", vec![Diagnostic::error(
             "E0604",
             "these files import each other in a circle".to_string(),
             "Jet loads every imported file before compiling, so imports can't loop".to_string(),
             format!("break the cycle: {}", cycle.join(" → ")),
             None,
-        )]);
+        )]));
     }
     if path_to_idx.contains_key(&norm) {
         return Ok(());
@@ -850,27 +1086,27 @@ fn load_file(
         match fs::read_to_string(path) {
             Ok(s) => s,
             Err(_) => {
-                return Err(vec![Diagnostic::error(
+                return Err(LoaderError::at(display, "", vec![Diagnostic::error(
                     "E0603",
                     format!("can't find the file `{}`", display),
                     "an import path must point at an existing `.jet` file".to_string(),
                     "check the spelling, or create the missing file".to_string(),
                     None,
-                )]);
+                )]));
             }
         }
     };
 
     let (toks, lex_diags) = Lexer::lex(&source);
     if !lex_diags.is_empty() {
-        return Err(lex_diags);
+        return Err(LoaderError::at(display, &source, lex_diags));
     }
     let mut prog = match Parser::parse_for_check(&toks) {
         Ok((p, teaching)) => {
             parse_teaching.extend(teaching);
             p
         }
-        Err(diags) => return Err(diags),
+        Err(diags) => return Err(LoaderError::at(display, &source, diags)),
     };
     let auto_derive_default = auto_derive_default_for_file(
         &norm,
@@ -891,17 +1127,17 @@ fn load_file(
     effective_declarations.extend(prog.policy_declarations.clone());
     for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
         let module_chain = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Organization | crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module)).cloned().collect::<Vec<_>>();
-        if let Err(error) = crate::Policy::resolve(key, module_chain) { return Err(vec![policy_ladder_diagnostic(key, error)]); }
+        if let Err(error) = crate::Policy::resolve(key, module_chain) { return Err(LoaderError::at(display, &source, vec![policy_ladder_diagnostic(key, error)])); }
         let targets = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block) && d.key == key).filter_map(|d| d.target).collect::<Vec<_>>();
         for target in targets {
             let chain = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Organization | crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module) || (matches!(d.scope, crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block) && d.target == Some(target))).cloned().collect::<Vec<_>>();
-            if let Err(error) = crate::Policy::resolve(key, chain) { return Err(vec![policy_ladder_diagnostic(key, error)]); }
+            if let Err(error) = crate::Policy::resolve(key, chain) { return Err(LoaderError::at(display, &source, vec![policy_ladder_diagnostic(key, error)])); }
         }
     }
     modules.push(LoadedModule {
         path: path.to_path_buf(),
         display: display.to_string(),
-        source,
+        source: source.clone(),
         alias,
         imports: imports.clone(),
         items: prog.items,
@@ -927,7 +1163,7 @@ fn load_file(
         }
         if let Err(d) = check_reserved_import(imp) {
             stack.pop();
-            return Err(vec![d]);
+            return Err(LoaderError::at(display, &source, vec![d]));
         }
         if core_module_path(imp).is_some() {
             continue;
@@ -949,7 +1185,7 @@ fn load_file(
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
-                return Err(vec![d]);
+                return Err(LoaderError::at(display, &source, vec![d]));
             }
         };
         let child_display = relative_display(project_root, &target);
@@ -1007,7 +1243,7 @@ fn load_file(
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
-                return Err(vec![d]);
+                return Err(LoaderError::at(display, &source, vec![d]));
             }
         };
         let child_display = relative_display(project_root, &target);

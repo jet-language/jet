@@ -8,6 +8,10 @@ use super::Builtins::{as_int, cmp};
 use super::Diagnostics::unsupported;
 use super::Value::CtValue;
 
+mod set_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
+}
+
 fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
     fields
         .iter()
@@ -464,14 +468,62 @@ fn set_method(
                     span,
                 ));
             }
-            let mut merged = items;
-            merged.extend(list_field(other_fields, "items"));
+            let other_items = list_field(other_fields, "items");
+            let merged = set_semantics::jet_set_union_by(&items, &other_items, |left, right| left == right);
             let merged = if sorted {
                 sorted_unique(merged, span)?
             } else {
-                unique_values(merged)
+                merged
             };
             Ok(set_struct(type_name, merged))
+        }
+        "intersection" | "difference" | "symmetric_difference" | "is_subset"
+        | "is_superset" | "is_disjoint" => {
+            let other = args.first().ok_or_else(|| {
+                unsupported(&format!("{type_name}.{method} missing argument"), span)
+            })?;
+            let CtValue::Struct {
+                type_name: other_type,
+                fields: other_fields,
+            } = other
+            else {
+                return Err(unsupported(
+                    &format!("{type_name}.{method} with a non-set"),
+                    span,
+                ));
+            };
+            if other_type != type_name {
+                return Err(unsupported(
+                    &format!("{type_name}.{method} with a non-set"),
+                    span,
+                ));
+            }
+            let other_items = list_field(other_fields, "items");
+            let equal = |left: &CtValue, right: &CtValue| left == right;
+            match method {
+                "is_subset" => Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
+                    &items, &other_items, equal,
+                ))),
+                "is_superset" => Ok(CtValue::Bool(set_semantics::jet_set_is_superset_by(
+                    &items, &other_items, equal,
+                ))),
+                "is_disjoint" => Ok(CtValue::Bool(set_semantics::jet_set_is_disjoint_by(
+                    &items, &other_items, equal,
+                ))),
+                "intersection" => {
+                    let values = set_semantics::jet_set_intersection_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                }
+                "difference" => {
+                    let values = set_semantics::jet_set_difference_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                }
+                "symmetric_difference" => {
+                    let values = set_semantics::jet_set_symmetric_difference_by(&items, &other_items, equal);
+                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                }
+                _ => unreachable!(),
+            }
         }
         _ => Err(unsupported(
             &format!("{type_name}.{} at compile time", method),

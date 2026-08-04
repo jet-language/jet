@@ -75,6 +75,7 @@ const canonDecomp = new Map(); // cp -> [u32...] (no <tag>)
 const compatDecomp = new Map(); // cp -> [u32...] (any decomposition, tag or not)
 const simpleLower = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const simpleUpper = new Map(); // cp -> [u32...], overridden by SpecialCasing
+const simpleTitle = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const generalCategory = []; // [start,end,gcTagIndex]
 const letterRanges = []; // General_Category L*
 const numericRanges = []; // General_Category Nd/Nl/No
@@ -113,6 +114,7 @@ for (const raw of unicodeData.split("\n")) {
   if (["Nd", "Nl", "No"].includes(gc)) numericRanges.push([cp, cp]);
   if (f[12]) simpleUpper.set(cp, [parseInt(f[12], 16)]);
   if (f[13]) simpleLower.set(cp, [parseInt(f[13], 16)]);
+  if (f[14]) simpleTitle.set(cp, [parseInt(f[14], 16)]);
   if (decomp) {
     const tagged = decomp.startsWith("<");
     let rest = decomp;
@@ -135,6 +137,7 @@ for (const raw of specialCasing.split("\n")) {
   if (f.length < 5 || f[4] !== "") continue;
   const cp = parseInt(f[0], 16);
   simpleLower.set(cp, f[1].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
+  simpleTitle.set(cp, f[2].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
   simpleUpper.set(cp, f[3].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
 }
 
@@ -404,6 +407,7 @@ function mappingPool(map) {
 }
 const lower = mappingPool(simpleLower);
 const upper = mappingPool(simpleUpper);
+const title = mappingPool(simpleTitle);
 
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
@@ -428,6 +432,10 @@ pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
   .join(",")}];
 pub static UNICODE_UPPER_POOL: &[u32] = &[${upper.pool.join(",")}];
 pub static UNICODE_UPPER_INDEX: &[(u32,u32,u32)] = &[${upper.index
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+pub static UNICODE_TITLE_POOL: &[u32] = &[${title.pool.join(",")}];
+pub static UNICODE_TITLE_INDEX: &[(u32,u32,u32)] = &[${title.index
   .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
   .join(",")}];
 pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
@@ -522,6 +530,31 @@ pub fn jet_unicode_trim_end(s: &str) -> String {
 
 pub fn jet_unicode_trim(s: &str) -> String {
     jet_unicode_trim_view(s).to_string()
+}
+
+pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
+    s.find(needle)
+        .map(|byte| s[..byte].chars().count() as i64)
+}
+
+pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut rest = s.as_str();
+    let mut count = 0i64;
+    while let Some(at) = rest.find(needle) {
+        count += 1;
+        rest = &rest[at + needle.len()..];
+    }
+    count
+}
+
+pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, String)> {
+    s.find(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
 }
 `;
 

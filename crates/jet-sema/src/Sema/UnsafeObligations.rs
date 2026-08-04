@@ -10,7 +10,13 @@ use crate::Syntax;
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone)]
-pub struct UnsafeInspection { pub gates: Vec<UnsafeGateInspection>, pub diagnostics: Vec<Diagnostic> }
+pub struct UnsafeInspection { pub gates: Vec<UnsafeGateInspection>, pub diagnostics: Vec<UnsafeDiagnostic> }
+
+#[derive(Debug, Clone)]
+pub struct UnsafeDiagnostic {
+    pub source: String,
+    pub diagnostic: Diagnostic,
+}
 
 #[derive(Debug, Clone)]
 pub struct UnsafeGateInspection {
@@ -53,7 +59,11 @@ pub(crate) fn check_and_strip(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     for module in &mut bundle.modules {
         for item in &mut module.items { strip_item(item); }
     }
-    result.diagnostics
+    result.diagnostics.into_iter().map(|entry| entry.diagnostic).collect()
+}
+
+fn push_diagnostic(result: &mut UnsafeInspection, source: &str, diagnostic: Diagnostic) {
+    result.diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic });
 }
 
 fn visit_item(
@@ -120,7 +130,7 @@ fn visit_function(
 
 fn visit_plain_body(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], result: &mut UnsafeInspection) {
     visit_nested_gates(body, source, declarations, result);
-    reject_assertions_outside_gate(body, result);
+    reject_assertions_outside_gate(body, source, result);
 }
 
 fn visit_nested_gates(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], result: &mut UnsafeInspection) {
@@ -168,30 +178,30 @@ fn visit_gate(
     let effective = match Policy::resolve(PolicyKey::Unsafe, chain) {
         Ok(policy) => policy,
         Err(error) => {
-            result.diagnostics.push(Diagnostic::error("E0355", "invalid effective `unsafe` policy".to_string(), format!("the organization, package, and gate declarations do not form a valid tightening chain: {error:?}"), "remove the weaker declaration or track the required obligations".to_string(), Some(gate_span)));
+            push_diagnostic(result, source, Diagnostic::error("E0355", "invalid effective `unsafe` policy".to_string(), format!("the organization, package, and gate declarations do not form a valid tightening chain: {error:?}"), "remove the weaker declaration or track the required obligations".to_string(), Some(gate_span)));
             None
         }
     };
     let mut value = effective.as_ref().map(|policy| policy.value).unwrap_or(PolicyValue::UnsafeDefault);
     if matches!(value, PolicyValue::UnsafePerSite) {
-        result.diagnostics.push(Diagnostic::error("E3106", "this unsafe gate must choose an obligation mode".to_string(), "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`".to_string(), "add `obligations: .Track` (or `.Skip` when organization policy permits it)".to_string(), Some(gate_span)));
+        push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate must choose an obligation mode".to_string(), "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`".to_string(), "add `obligations: .Track` (or `.Skip` when organization policy permits it)".to_string(), Some(gate_span)));
         value = PolicyValue::UnsafeTrack;
     }
     if site.iter().any(|declaration| declaration.value == PolicyValue::UnsafeSkip)
         && !matches!(outer_policy.as_ref().map(|policy| policy.value), Some(PolicyValue::UnsafePerSite))
     {
-        result.diagnostics.push(Diagnostic::error("E3106", "this unsafe gate cannot skip obligations".to_string(), "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization".to_string(), "set package policy to `.PerSite`, or remove `.Skip`".to_string(), Some(gate_span)));
+        push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate cannot skip obligations".to_string(), "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization".to_string(), "set package policy to `.PerSite`, or remove `.Skip`".to_string(), Some(gate_span)));
         value = PolicyValue::UnsafeTrack;
     }
     if value == PolicyValue::UnsafeForbid {
-        result.diagnostics.push(Diagnostic::error("E3105", "organization or package policy forbids unsafe code".to_string(), "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(), "remove the low-level operation or change the outer policy through its owner".to_string(), Some(gate_span)));
+        push_diagnostic(result, source, Diagnostic::error("E3105", "organization or package policy forbids unsafe code".to_string(), "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(), "remove the low-level operation or change the outer policy through its owner".to_string(), Some(gate_span)));
     } else if reason.is_none() && !source_has_reason && value != PolicyValue::UnsafeRelaxed {
         let (what, why, fix) = if is_function {
             ("this `#Unsafe` function has no reason", "every gated function records why callers can rely on its unsafe contract", "add the reason: `#Unsafe(\"why this is safe\") fn ...`")
         } else {
             ("this `#Unsafe` block has no reason", "every gated region records why it can't break memory safety", "add the reason: `#Unsafe(\"why this is safe\") { … }`")
         };
-        result.diagnostics.push(Diagnostic::error("E3112", what.to_string(), why.to_string(), fix.to_string(), Some(gate_span)));
+        push_diagnostic(result, source, Diagnostic::error("E3112", what.to_string(), why.to_string(), fix.to_string(), Some(gate_span)));
     }
 
     let mut gate = UnsafeGateInspection {
@@ -200,7 +210,7 @@ fn visit_gate(
         provenance: effective.as_ref().map(|policy| policy.provenance.iter().map(|declaration| format!("{}:{}:{}..{}={}", declaration.scope.name(), declaration.source, declaration.span.start, declaration.span.end, declaration.value.display())).collect()).unwrap_or_default(),
         operations: Vec::new(),
     };
-    scan_sequence(body, requires_obligations(value), &mut gate, &mut result.diagnostics);
+    scan_sequence(body, requires_obligations(value), &mut gate, source, &mut result.diagnostics);
     result.gates.push(gate);
     visit_nested_gates(body, source, declarations, result);
 }
@@ -218,12 +228,12 @@ fn mode_name(value: PolicyValue) -> &'static str {
 
 fn requires_obligations(value: PolicyValue) -> bool { matches!(value, PolicyValue::UnsafeObligations | PolicyValue::UnsafeTrack) }
 
-fn scan_sequence(body: &[Stmt], track: bool, gate: &mut UnsafeGateInspection, diagnostics: &mut Vec<Diagnostic>) {
+fn scan_sequence(body: &[Stmt], track: bool, gate: &mut UnsafeGateInspection, source: &str, diagnostics: &mut Vec<UnsafeDiagnostic>) {
     let mut pending_operations = Vec::new();
     for statement in body {
         if let Some((names, span)) = assertion(statement) {
             if pending_operations.is_empty() {
-                diagnostics.push(Diagnostic::error("E3108", "this unsafe assertion has no preceding operation".to_string(), "typed obligations attach only to the immediately preceding low-level operation statement".to_string(), "move the assertion directly after the operation it proves".to_string(), Some(span)));
+                diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3108", "this unsafe assertion has no preceding operation".to_string(), "typed obligations attach only to the immediately preceding low-level operation statement".to_string(), "move the assertion directly after the operation it proves".to_string(), Some(span)) });
                 continue;
             }
             let mut asserted = BTreeSet::new();
@@ -231,30 +241,30 @@ fn scan_sequence(body: &[Stmt], track: bool, gate: &mut UnsafeGateInspection, di
                 if matches!(name.as_str(), Syntax::UNSAFE_OBLIGATION_VALID_PTR | Syntax::UNSAFE_OBLIGATION_ALIGNED | Syntax::UNSAFE_OBLIGATION_NO_ALIAS) {
                     asserted.insert(name);
                 } else {
-                    diagnostics.push(Diagnostic::error("E3108", format!("`{name}` is not an unsafe obligation"), "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`".to_string(), "fix the obligation name".to_string(), Some(span)));
+                    diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3108", format!("`{name}` is not an unsafe obligation"), "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`".to_string(), "fix the obligation name".to_string(), Some(span)) });
                 }
             }
-            discharge_operations(&pending_operations, &asserted, track, gate, diagnostics);
+            discharge_operations(&pending_operations, &asserted, track, gate, source, diagnostics);
             pending_operations.clear();
             continue;
         }
-        discharge_operations(&pending_operations, &BTreeSet::new(), track, gate, diagnostics);
+        discharge_operations(&pending_operations, &BTreeSet::new(), track, gate, source, diagnostics);
         pending_operations.clear();
         if matches!(statement, Stmt::Unsafe { .. }) { continue; }
         let mut operations = Vec::new();
         collect_shallow_operations(statement, &mut operations);
         pending_operations.extend(operations);
-        for nested in nested_bodies(statement) { scan_sequence(nested, track, gate, diagnostics); }
+        for nested in nested_bodies(statement) { scan_sequence(nested, track, gate, source, diagnostics); }
     }
-    discharge_operations(&pending_operations, &BTreeSet::new(), track, gate, diagnostics);
+    discharge_operations(&pending_operations, &BTreeSet::new(), track, gate, source, diagnostics);
 }
 
-fn discharge_operations(operations: &[(&'static str, Span, Vec<&'static str>)], asserted: &BTreeSet<String>, track: bool, gate: &mut UnsafeGateInspection, diagnostics: &mut Vec<Diagnostic>) {
+fn discharge_operations(operations: &[(&'static str, Span, Vec<&'static str>)], asserted: &BTreeSet<String>, track: bool, gate: &mut UnsafeGateInspection, source: &str, diagnostics: &mut Vec<UnsafeDiagnostic>) {
     for (kind, span, required) in operations {
         let missing = required.iter().filter(|name| !asserted.contains(**name)).copied().collect::<Vec<_>>();
         let discharged = !track || missing.is_empty();
         if track && !missing.is_empty() {
-            diagnostics.push(Diagnostic::error("E3107", format!("`{kind}` is missing unsafe obligations: {}", missing.join(", ")), "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation".to_string(), format!("add `assert {}` immediately after this operation", required.join(", ")), Some(*span)));
+            diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3107", format!("`{kind}` is missing unsafe obligations: {}", missing.join(", ")), "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation".to_string(), format!("add `assert {}` immediately after this operation", required.join(", ")), Some(*span)) });
         }
         gate.operations.push(UnsafeOperationInspection { kind: (*kind).to_string(), span: *span, required: required.iter().map(|name| (*name).to_string()).collect(), asserted: asserted.iter().cloned().collect(), discharged });
     }
@@ -371,12 +381,12 @@ pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
     }
 }
 
-fn reject_assertions_outside_gate(body: &[Stmt], result: &mut UnsafeInspection) {
+fn reject_assertions_outside_gate(body: &[Stmt], source: &str, result: &mut UnsafeInspection) {
     for statement in body {
         if let Some((_, span)) = assertion(statement) {
-            result.diagnostics.push(Diagnostic::error("E3108", "unsafe obligations can only be asserted inside `#Unsafe`".to_string(), "the assertion discharges one tracked low-level operation and has no ambient meaning".to_string(), "move it immediately after an operation inside the audited gate".to_string(), Some(span)));
+            push_diagnostic(result, source, Diagnostic::error("E3108", "unsafe obligations can only be asserted inside `#Unsafe`".to_string(), "the assertion discharges one tracked low-level operation and has no ambient meaning".to_string(), "move it immediately after an operation inside the audited gate".to_string(), Some(span)));
         }
-        if !matches!(statement, Stmt::Unsafe { .. }) { for nested in nested_bodies(statement) { reject_assertions_outside_gate(nested, result); } }
+        if !matches!(statement, Stmt::Unsafe { .. }) { for nested in nested_bodies(statement) { reject_assertions_outside_gate(nested, source, result); } }
     }
 }
 

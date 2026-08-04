@@ -837,6 +837,40 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::Clone(Box::new(recv)),
         };
     }
+    // D-COLLBREADTH1=A: lower type-owned set constructors into the same
+    // receiver-first builtin used by instance algebra, preserving the
+    // concrete set type for chained dispatch.
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            if !env.locals.contains_key(type_name)
+                && matches!(type_name.as_str(), Syntax::TYPE_SET | Syntax::TYPE_SORTED_SET)
+                && method == "from"
+                && args.len() == 1
+            {
+                let lowered_list = lower_expr(&args[0].expr, cx, env);
+                let elem = match &lowered_list.ty {
+                    Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+                    _ => Type::Int,
+                };
+                let set_ty = Type::Apply {
+                    name: type_name.clone(),
+                    args: vec![elem],
+                };
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or(set_ty),
+                    kind: TExprKind::BuiltinMethod {
+                        recv: Box::new(lowered_list),
+                        op: if type_name == Syntax::TYPE_SORTED_SET {
+                            TBuiltinOp::SortedSetFrom
+                        } else {
+                            TBuiltinOp::SetFrom
+                        },
+                        args: Vec::new(),
+                    },
+                };
+            }
+        }
+    }
     // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
     if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
         && method == Syntax::TASKGROUP_SPAWN_METHOD
@@ -1723,7 +1757,9 @@ pub(crate) fn lower_method_call(
     // receiver's type (reproducing `expr_jet_ty`, incl. its `None` partiality), so
     // emit makes no type decision (I3). The result type comes from the builtin's
     // sema return (`Collections::builtin_method_return`) for totality.
-    if recv_type.is_none() {
+    if recv_type.is_none()
+        || matches!(recv_type.as_deref(), Some("Set") | Some("SortedSet"))
+    {
         if let Some(op) =
             resolve_builtin_op(receiver, method, method_span, args, resolved_ret, env, cx)
         {

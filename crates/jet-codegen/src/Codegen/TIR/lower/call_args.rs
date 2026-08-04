@@ -361,6 +361,28 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         }
     }
 
+    fn literal_ty(expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Int(..) => Some(Type::Int),
+            Expr::Float(_, _, _) => Some(Type::Float),
+            Expr::Bool(_, _) => Some(Type::Bool),
+            Expr::Char(_, _) => Some(Type::Char),
+            Expr::Str(_, _) => Some(Type::String),
+            _ => None,
+        }
+    }
+
+    fn set_constructor_elem(expr: &Expr, env: &LowerEnv) -> Option<Type> {
+        match expr {
+            Expr::ListLit(items, _) => items.first().and_then(literal_ty),
+            Expr::Ident(name, _) => match env.ty_of(name) {
+                Some(Type::List(elem)) | Some(Type::FixedList { elem, .. }) => Some(*elem),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     match e {
         Expr::Ident(name, _) => env.ty_of(name).map(dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
@@ -377,6 +399,22 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             // than the generic method table (or another required exact shape).
             if let Some(ty) = resolved_ret {
                 return Some(dispatch_ty(ty.clone()));
+            }
+            if let Expr::Ident(name, _) = receiver.as_ref() {
+                if !env.locals.contains_key(name)
+                    && method == "from"
+                    && matches!(
+                        name.as_str(),
+                        crate::Syntax::TYPE_SET | crate::Syntax::TYPE_SORTED_SET
+                    )
+                    && args.len() == 1
+                {
+                    let elem = set_constructor_elem(&args[0].expr, env).unwrap_or(Type::Int);
+                    return Some(Type::Apply {
+                        name: name.clone(),
+                        args: vec![elem],
+                    });
+                }
             }
             // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must
             // resolve as `Iter`, not fall through to the list receiver — otherwise

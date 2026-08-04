@@ -822,6 +822,15 @@ where
         .map(|n| n.get())
         .unwrap_or(1)
         .min(chunk_count);
+    // A single chunk is the safe serial fast path. Keep the indexed chunk
+    // boundaries when a host exposes only one CPU; para_fold's seed/merge
+    // semantics depend on those boundaries even without parallel workers.
+    if chunk_count == 1 {
+        return match f(0..len) {
+            Ok(result) => vec![result],
+            Err(failure) => jet_para_raise_failure(failure),
+        };
+    }
     let mut indexed = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(worker_count);
         let f = &f;

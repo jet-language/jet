@@ -184,8 +184,8 @@ lazy. An expected type never changes the collector or evaluation time.
 | --- | --- | --- |
 | `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `indexed`, `indexes`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
 | `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `has_key`, `get`, `add`, `add_new`, `remove`, `merge`, `len`, `is_empty`, `clear` |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `to_list`, `len`, `is_empty`, `clear` |
-| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `to_list`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
+| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.from(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `to_list`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
 | `Cache<K,V>` | `Cache.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
@@ -1553,10 +1553,38 @@ Epoch 3 (D-ADAPT-PROVIDER1=A). Automatic adaptive scheduling is declined
 
 ---
 
+### `String` convenience surface (Epoch 3, #1409)
+
+These methods are ambient `String` operations. Unicode classification, title
+casing, trimming, and padding call the same pinned `core.text` algorithms as
+the qualified module; there is one semantic implementation across AOT,
+comptime, and default `jet run`.
+
+| Method | Returns | Meaning |
+|--------|---------|---------|
+| `.trim_start()` / `.trim_end()` | `String` | Remove Unicode `White_Space` at one edge |
+| `.pad_start(width, fill)` / `.pad_end(width, fill)` | `String` | Pad to terminal display width using the first grapheme in `fill` |
+| `.index_of(needle)` | `Int?` | Unicode-scalar index of the first substring |
+| `.count(needle)` | `Int` | Non-overlapping substring count; empty needles count as zero |
+| `.is_alphabetic()` / `.is_numeric()` / `.is_whitespace()` | `Bool` | True only when non-empty and every scalar has the pinned property |
+| `.is_ascii()` | `Bool` | True when every byte is ASCII |
+| `.to_title()` | `String` | Word-start Unicode titlecase mapping; remaining letters are lowercase |
+| `.split_once(separator)` | `(before: String, after: String)?` | Split at the first separator |
+
+Competitor accounting is explicit: Python `partition`/`count`, Rust
+`find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
+Kotlin `indexOf`/`count`, and JavaScript `indexOf`/`split` map to the rows
+above or the existing `before`/`after`/`split` methods. Locale collation and
+locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
+replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
+are not silently added to the ambient String surface.
+
+---
+
 ### `core.text` — Unicode text algorithms
 
-`String` stays small. `core.text` owns Unicode-heavy operations and tooling may
-insert these calls from String contexts. Results are pinned to Unicode 16.0.0;
+`core.text` owns the Unicode algorithms used by both its qualified calls and the
+ambient String convenience methods above. Results are pinned to Unicode 16.0.0;
 they do not inherit the host Rust, OS, locale, or terminal Unicode version.
 
 | Function | Returns | What it does |

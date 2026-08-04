@@ -1596,8 +1596,11 @@ floor rejects `.Skip`. CI/admins provide that floor explicitly through
 `policy: .{ unsafe: .Obligations }`, its path is retained as provenance, and a
 configured unreadable or malformed file fails closed. `jet inspect unsafe FILE`
 reports every gate, operation, discharge state, and effective-policy provenance
-in stable human or `--json` form. Assertions erase in sema before the shared
-AOT/dev TIR boundary.
+in stable human or `--json` form. Human rows use the source file's
+`file:line:column` location; JSON keeps the byte span and adds matching 1-based
+start/end line and column objects. Loader failures use the ordinary diagnostic
+renderer, including the source frame, Why, Fix, and `NO_COLOR` behavior.
+Assertions erase in sema before the shared AOT/dev TIR boundary.
 
 ## Web browser API (D-FLAGSHIP-WEBAPI1, implemented)
 
@@ -2125,6 +2128,19 @@ calls the seed factory once. The seed must be an identity for `merge`
 otherwise the deterministic tree is still stable, but it does not define a
 portable parallel reduction.
 
+When the plan has one chunk, the engine runs that chunk on the caller thread.
+This keeps small inputs serial and avoids paying for worker setup; the crossover
+to a useful `para_map` speedup depends on item count, callback cost, and the host.
+Run `jet bench examples/features/tooling/para_map_crossover_bench.jet` on the
+same machine as the workload before choosing between `map` and `para_map`.
+`jet bench` owns the optimized benchmark profile; do not compare its numbers
+with debug or release builds.
+
+The checked-in reference run (Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
+three invocations) first favored `para_map` at 256 items with callback cost 256;
+costs 1 and 32 did not cross within the matrix. This is a teaching example, not
+a portable threshold.
+
 If callbacks fail at more than one item, each chunk stops at its first failure,
 all started chunks are joined, and the operation reports the original Jet
 failure belonging to the lowest source index, independent of worker completion
@@ -2205,7 +2221,7 @@ caller's group and is cancelled and joined at that outer scope's exit.
 #### Borrowed captures in a group child (D-TASKBORROW1=A)
 
 A lexical group joins every child before its block returns, so a child may
-borrow places the owner still holds — the loan opens before the child launches
+borrow places the owner still gives access to — the loan opens before the child launches
 and closes at the join. Reads are borrowed freely. A write borrow is admitted
 only where the compiler proves the places never overlap; distinct fields and
 distinct constant indexes are disjoint, and anything dynamic is treated as
@@ -3317,6 +3333,7 @@ CLI flag per feature.
 ```
 jet inspect expand --facts <lens> <file.jet>   # one lens's facts
 jet inspect expand <file.jet>                  # every lens, grouped, empty ones skipped
+jet inspect expand --facts inline --json <file.jet>  # canonical semindex + inline projection
 ```
 
 Facts are read straight off the ordinary check pass — never a second
@@ -3343,6 +3360,17 @@ file that fails to compile prints the ordinary front-end diagnostics and
 exits nonzero: facts require a clean check, same as `jet inspect semindex`/
 `jet inspect impact`. A clean program with no facts for a lens (or for every lens,
 bare form) exits 0 — absence of facts is not a failure.
+
+`--json` keeps the canonical semantic-index document and adds one additive
+`expand` projection. The projection records the requested selection (`all` for
+the bare form), the registered lens name and summary, and structured facts with
+source paths, byte spans, and line/column positions where a lens has a source
+location. The checked bundle and sema facts are shared with human output; JSON
+does not create a second schema or analysis path.
+Usage errors such as an unknown lens stay outside the diagnostic-code table and
+use a small versioned `error.kind = "usage"` object; a source that fails the
+ordinary check uses one versioned document whose `diagnostics` entries are
+serialized by the shared machine-diagnostic renderer.
 
 **Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`
 (name, one-line summary, renderer) — adding a lens for a future ratified

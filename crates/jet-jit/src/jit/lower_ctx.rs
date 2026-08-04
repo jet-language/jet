@@ -12932,7 +12932,18 @@ impl LowerCtx<'_, '_> {
                     };
                     if let Some(host_id) = host_id {
                         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[]);
+                        let call = if matches!(prelude_path, Some(path) if path.ends_with("BTreeSet")) {
+                            let string_kind = matches!(
+                                &expr.ty,
+                                Type::Apply { name, args }
+                                    if name == jet_foundation::Syntax::TYPE_SORTED_SET
+                                        && args.first().is_some_and(|ty| matches!(ty, Type::String))
+                            );
+                            let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                            self.b.ins().call(host_ref, &[kind])
+                        } else {
+                            self.b.ins().call(host_ref, &[])
+                        };
                         return Ok(self.b.inst_results(call)[0]);
                     }
                 }
@@ -15044,6 +15055,78 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::TrimStart => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.trim_start, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::TrimEnd => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.trim_end, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::PadStart | TBuiltinOp::PadEnd => {
+                let width = self.lower_expr(&args[0])?;
+                let fill = self.lower_expr(&args[1])?;
+                let host_id = if matches!(op, TBuiltinOp::PadStart) {
+                    self.host.text.pad_start
+                } else {
+                    self.host.text.pad_end
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, width, fill]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::StringIndexOf => {
+                let needle = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.index_of, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, needle]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::StringCount => {
+                let needle = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.count, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, needle]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::StringIsAlphabetic
+            | TBuiltinOp::StringIsNumeric
+            | TBuiltinOp::StringIsWhitespace
+            | TBuiltinOp::StringIsAscii => {
+                let host_id = match op {
+                    TBuiltinOp::StringIsAlphabetic => self.host.text.is_alphabetic,
+                    TBuiltinOp::StringIsNumeric => self.host.text.is_numeric,
+                    TBuiltinOp::StringIsWhitespace => self.host.text.is_whitespace,
+                    TBuiltinOp::StringIsAscii => self.host.text.is_ascii,
+                    _ => unreachable!(),
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::StringToTitle => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.title, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::StringSplitOnce { .. } => {
+                let separator = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.split_once, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, separator]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Sum { float: false } => {
                 if !matches!(
@@ -15321,7 +15404,13 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.set_from_list, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
+                let string_kind = matches!(
+                    &recv.ty,
+                    Type::List(elem) | Type::FixedList { elem, .. }
+                        if matches!(elem.as_ref(), Type::String)
+                );
+                let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                let call = self.b.ins().call(host_ref, &[recv_val, kind]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::SetInsert => {
@@ -15355,11 +15444,37 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, other]);
                 Ok(self.b.inst_results(call)[0])
             }
+            TBuiltinOp::SetIntersection
+            | TBuiltinOp::SetDifference
+            | TBuiltinOp::SetSymmetricDifference
+            | TBuiltinOp::SetIsSubset
+            | TBuiltinOp::SetIsSuperset
+            | TBuiltinOp::SetIsDisjoint => {
+                let other = self.lower_expr(&args[0])?;
+                let host_id = match op {
+                    TBuiltinOp::SetIntersection => self.host.coll.set_intersection,
+                    TBuiltinOp::SetDifference => self.host.coll.set_difference,
+                    TBuiltinOp::SetSymmetricDifference => self.host.coll.set_symmetric_difference,
+                    TBuiltinOp::SetIsSubset => self.host.coll.set_is_subset,
+                    TBuiltinOp::SetIsSuperset => self.host.coll.set_is_superset,
+                    TBuiltinOp::SetIsDisjoint => self.host.coll.set_is_disjoint,
+                    _ => unreachable!(),
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::SortedSetFrom => {
                 let host = self
                     .module
                     .declare_func_in_func(self.host.coll.sorted_set_from, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
+                let string_kind = matches!(
+                    &recv.ty,
+                    Type::List(elem) | Type::FixedList { elem, .. }
+                        if matches!(elem.as_ref(), Type::String)
+                );
+                let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                let call = self.b.ins().call(host, &[recv_val, kind]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::SortedSetInsert => {
@@ -15385,7 +15500,30 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TBuiltinOp::SortedSetUnion => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetUnion
+            | TBuiltinOp::SortedSetIntersection
+            | TBuiltinOp::SortedSetDifference
+            | TBuiltinOp::SortedSetSymmetricDifference
+            | TBuiltinOp::SortedSetIsSubset
+            | TBuiltinOp::SortedSetIsSuperset
+            | TBuiltinOp::SortedSetIsDisjoint => {
+                let other = self.lower_expr(&args[0])?;
+                let host_id = match op {
+                    TBuiltinOp::SortedSetUnion => self.host.coll.sorted_set_union,
+                    TBuiltinOp::SortedSetIntersection => self.host.coll.sorted_set_intersection,
+                    TBuiltinOp::SortedSetDifference => self.host.coll.sorted_set_difference,
+                    TBuiltinOp::SortedSetSymmetricDifference => {
+                        self.host.coll.sorted_set_symmetric_difference
+                    }
+                    TBuiltinOp::SortedSetIsSubset => self.host.coll.sorted_set_is_subset,
+                    TBuiltinOp::SortedSetIsSuperset => self.host.coll.sorted_set_is_superset,
+                    TBuiltinOp::SortedSetIsDisjoint => self.host.coll.sorted_set_is_disjoint,
+                    _ => unreachable!(),
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::PriorityQueueFrom => {
                 let host = self
                     .module
@@ -19261,11 +19399,16 @@ impl LowerCtx<'_, '_> {
             if matches!(
                 op,
                 TBuiltinOp::Trim
+                    | TBuiltinOp::TrimStart
+                    | TBuiltinOp::TrimEnd
+                    | TBuiltinOp::PadStart
+                    | TBuiltinOp::PadEnd
                     | TBuiltinOp::TrimView
                     | TBuiltinOp::AfterView
                     | TBuiltinOp::BeforeView
                     | TBuiltinOp::ToUpper
                     | TBuiltinOp::ToLower
+                    | TBuiltinOp::StringToTitle
             ) {
                 return Type::String;
             }

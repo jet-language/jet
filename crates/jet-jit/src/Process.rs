@@ -563,6 +563,7 @@ extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, _policy: i64)
 extern "C" fn jet_jit_process_spec_capabilities(_spec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.sets.push(std::collections::HashSet::new());
+        rt.set_string_kinds.push(false);
         rt.sets.len() as i64
     })
 }

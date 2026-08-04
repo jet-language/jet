@@ -32,6 +32,12 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
         | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
+        | ("trim_start", 0) | ("trim_end", 0)
+        | ("pad_start", 2) | ("pad_end", 2)
+        | ("is_alphabetic", 0) | ("is_numeric", 0)
+        | ("is_whitespace", 0) | ("is_ascii", 0)
+        | ("to_title", 0) | ("split_once", 1)
+        | ("count", 1)
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
@@ -49,13 +55,16 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("lazy", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
         | ("add", 1) | ("union", 1) | ("to_list", 0)
+        | ("intersection", 1) | ("difference", 1)
+        | ("symmetric_difference", 1)
+        | ("is_subset", 1) | ("is_superset", 1) | ("is_disjoint", 1)
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
         | ("write_u8", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
         | ("write_u32_le", 1) | ("write_u32_be", 1)
         | ("write_u64_le", 1) | ("write_u64_be", 1) | ("write_bytes", 1)
         // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
-        | ("has", 1) | ("count", 1)
+        | ("has", 1)
         // D-COLLBREADTH1=A: Deque<T> instance methods.
         | ("push_front", 1) | ("push_back", 1)
         | ("pop_front", 0) | ("pop_back", 0)

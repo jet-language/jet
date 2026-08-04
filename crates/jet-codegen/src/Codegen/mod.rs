@@ -53,6 +53,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
+    include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
@@ -1888,11 +1889,19 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/Disjoint.rs")).unwrap();
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
+        let set_algebra =
+            std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let typed_text =
+            std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
+        let shared_protocol =
+            std::fs::read_to_string(root.join("src/Prelude/SharedProtocol.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
+        let numeric_widen =
+            std::fs::read_to_string(root.join("src/Prelude/NumericWiden.rs")).unwrap();
         let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
         let exact_units =
             std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
@@ -1908,12 +1917,16 @@ mod tests {
                 "src/Prelude/Core/ExpiringSecret.rs",
                 expiring_secret.as_str(),
             ),
+            ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
+            ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
             ),
+            ("src/Prelude/NumericWiden.rs", numeric_widen.as_str()),
             ("src/Prelude/Observe.rs", observe.as_str()),
             (
                 "../jet-foundation/src/ExactUnitConversion.rs",
@@ -1951,6 +1964,9 @@ mod tests {
         let expiring_secret_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
             .unwrap();
+        let set_algebra_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/SetAlgebra.rs\")")
+            .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
@@ -1974,7 +1990,8 @@ mod tests {
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
-                && expiring_secret_pos < core_pos
+                && expiring_secret_pos < set_algebra_pos
+                && set_algebra_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
@@ -1992,9 +2009,13 @@ mod tests {
                 range_bounds.as_str(),
                 disjoint.as_str(),
                 expiring_secret.as_str(),
+                set_algebra.as_str(),
                 core.as_str(),
+                typed_text.as_str(),
                 collections.as_str(),
+                shared_protocol.as_str(),
                 runtime_control.as_str(),
+                numeric_widen.as_str(),
                 observe.as_str(),
                 exact_units.as_str(),
                 structural_debug.as_str(),
@@ -2010,9 +2031,13 @@ mod tests {
             range_bounds.as_str(),
             disjoint.as_str(),
             expiring_secret.as_str(),
+            set_algebra.as_str(),
             core.as_str(),
+            typed_text.as_str(),
             collections.as_str(),
+            shared_protocol.as_str(),
             runtime_control.as_str(),
+            numeric_widen.as_str(),
             observe.as_str(),
             exact_units.as_str(),
             structural_debug.as_str(),
@@ -2022,10 +2047,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 227_757, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 289_259, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "69343721d4715c9dca3a4d27b93dee8bd4ef73640c7500bbe3d3fabfc71150b2",
+            "d54e62a062214e87698001cc65071e7fb699d80328ee0b05b01851dd6f5aef92",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
@@ -3244,7 +3269,8 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 /// which wraps each body in an auto-scaled timed loop instead of a pass/fail
 /// check. Each body is emitted exactly like a `#Test` body (a bare statement
 /// list in a `Result<(), String>` fn), so `return Err(…)` from `require` stays
-/// valid; the timing wrapper ignores that result.
+/// valid; the timing wrapper aborts the benchmark command on such an error
+/// instead of printing false timings.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
@@ -3271,6 +3297,10 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+    out.push_str(&format!(
+        "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
+    ));
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
@@ -3362,6 +3392,15 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, false);
 
+    out.push_str(
+        "fn jet_bench_check(result: Result<(), String>) {\n\
+    if let Err(error) = result {\n\
+        eprintln!(\"bench region failed: {}\", error);\n\
+        std::process::exit(70);\n\
+    }\n\
+}\n\n",
+    );
+
     // One body fn + one timing wrapper per bench. The body fn is shaped exactly
     // like a test fn (so `require`'s `return Err(…)` compiles); the wrapper
     // auto-scales the iteration count until a batch lasts >= 1ms, then collects
@@ -3382,7 +3421,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    while iters < (1u64 << 30) {\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
-            "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
+            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
             i
         ));
         out.push_str("        if t0.elapsed().as_millis() >= 1 { break; }\n");
@@ -3394,7 +3433,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("        jet_allocation_probe_reset();\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
-            "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
+            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
             i
         ));
         out.push_str("        samples.push(t0.elapsed().as_nanos());\n");

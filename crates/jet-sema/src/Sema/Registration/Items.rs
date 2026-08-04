@@ -460,7 +460,7 @@ pub(crate) fn register_const(
         None => {
             diags.push(Diagnostic::error(
                 "E0109",
-                "a const holds a plain number or `true`/`false` for now".to_string(),
+                "a const must be a plain number or `true`/`false` for now".to_string(),
                 "richer const values arrive with later milestones".to_string(),
                 "give the const a number, like `const limit = 10;`".to_string(),
                 Some(c.value.span()),

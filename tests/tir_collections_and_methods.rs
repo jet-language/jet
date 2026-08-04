@@ -616,6 +616,84 @@ fn run() {
     );
 }
 
+/// E3 breadth: String owns the common search, trim, padding, classification,
+/// title, and single-split operations. The test runs through the TIR lowering
+/// path and proves the tuple-shaped `split_once` result is usable by name.
+#[test]
+fn string_surface_breadth() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    s := \"  hello jet world  \"
+    print(s.trim_start())
+    print(s.trim_end())
+    print(s.pad_start(22, \".\"))
+    print(s.pad_end(22, \".\"))
+    print(s.index_of(\"jet\"))
+    print(s.count(\"l\"))
+    print(\"Hello\".is_alphabetic())
+    print(\"123\".is_numeric())
+    print(\" \\t\".is_whitespace())
+    print(\"Jet lang\".is_ascii())
+    print(\"hELLO jet\".to_title())
+    pair :: \"left:right\".split_once(\":\") ?? panic(\"split\")
+    print(pair.before)
+    print(pair.after)
+}
+";
+    let (code, stdout) = build_and_run("tir_string_surface_breadth", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "hello jet world  \n  hello jet world\n...  hello jet world  \n  hello jet world  ...\n8\n3\ntrue\ntrue\ntrue\ntrue\nHello Jet\nleft\nright\n"
+    );
+}
+
+/// E3 breadth: Set and SortedSet expose the complete algebra surface with one
+/// semantic operation family on every execution tier.
+#[test]
+fn set_algebra_methods() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn sorted(xs: [Int]) => [Int] {
+    ys := ~xs
+    ys.sort()
+    return ys
+}
+fn run() {
+    a := Set.from([1, 2, 3])
+    b := Set.from([3, 4])
+    i := a.intersection(b).to_list()
+    d := a.difference(b).to_list()
+    x := a.symmetric_difference(b).to_list()
+    print(sorted(i))
+    print(sorted(d))
+    print(sorted(x))
+    print(a.is_subset(Set.from([1, 2, 3, 4])))
+    print(a.is_superset(Set.from([1, 2])))
+    print(a.is_disjoint(Set.from([8])))
+    s := SortedSet.from([1, 2, 3])
+    t := SortedSet.from([3, 4])
+    print(s.intersection(t).to_list())
+    print(s.difference(t).to_list())
+    print(s.symmetric_difference(t).to_list())
+    print(s.is_subset(SortedSet.from([1, 2, 3, 4])))
+    print(s.is_superset(SortedSet.from([1, 2])))
+    print(s.is_disjoint(SortedSet.from([8])))
+}
+";
+    let (code, stdout) = build_and_run("tir_set_algebra", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n"
+    );
+}
+
 /// D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring
 /// split. `sep` absent -> the whole original string on both sides (mirrors
 /// `.replace`'s no-match-is-identity convention; no `Option` to unwrap).
