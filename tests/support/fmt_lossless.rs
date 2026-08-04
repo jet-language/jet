@@ -785,7 +785,7 @@ fn assert_fmt_preserves_token_stream(path: &std::path::Path, src: &str, formatte
     if let Err(diff) = ordered_token_diff(path, &original_tokens, &formatted_tokens) {
         panic!("{diff}");
     }
-    let twice = jet::format_source(&formatted).unwrap_or_else(|diagnostics| {
+    let twice = format_supported_source(path, formatted).unwrap_or_else(|diagnostics| {
         panic!(
             "second fmt failed on {}:\n{}",
             path.display(),
@@ -798,6 +798,17 @@ fn assert_fmt_preserves_token_stream(path: &std::path::Path, src: &str, formatte
         "fmt is not byte-stable on {}",
         path.display()
     );
+}
+
+fn format_supported_source(
+    path: &std::path::Path,
+    src: &str,
+) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
+    match jet::format_source(src) {
+        Ok(formatted) => Ok(formatted),
+        Err(diagnostics) => jet::Package::format_source(src, path.display().to_string())
+            .or(Err(diagnostics)),
+    }
 }
 
 fn ordered_token_diff(
@@ -1248,28 +1259,35 @@ fn run_supported_source_corpus() {
     let mut example_programs = 0usize;
     let mut example_configs = 0usize;
     for path in &example_files {
-        match path.file_name().and_then(|name| name.to_str()) {
-            Some(name)
-                if name == jet::Syntax::PAYLOAD_FILE
-                    || name == jet::Syntax::WORKSPACE_FILE =>
-            {
-                example_configs += 1;
-            }
-            _ => {
-                let src = fs::read_to_string(path).unwrap();
-                let formatted = jet::format_source(&src).unwrap_or_else(|diagnostics| {
-                    panic!(
-                        "example program failed to parse for fmt on {}:\n{}",
-                        path.display(),
-                        jet::render_diagnostics(
-                            &path.display().to_string(),
-                            &src,
-                            &diagnostics
-                        )
-                    )
-                });
+        let name = path.file_name().and_then(|name| name.to_str());
+        if matches!(
+            name,
+            Some(jet::Syntax::PAYLOAD_FILE) | Some(jet::Syntax::WORKSPACE_FILE)
+        ) {
+            example_configs += 1;
+            continue;
+        }
+        let src = fs::read_to_string(path).unwrap();
+        match jet::format_source(&src) {
+            Ok(formatted) => {
                 assert_fmt_preserves_token_stream(path, &src, &formatted);
                 example_programs += 1;
+            }
+            Err(diagnostics) => {
+                let formatted = jet::Package::format_source(&src, path.display().to_string())
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "example program failed to parse for fmt on {}:\n{}",
+                            path.display(),
+                            jet::render_diagnostics(
+                                &path.display().to_string(),
+                                &src,
+                                &diagnostics
+                            )
+                        )
+                    });
+                assert_fmt_preserves_token_stream(path, &src, &formatted);
+                example_configs += 1;
             }
         }
     }

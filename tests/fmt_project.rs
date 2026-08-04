@@ -32,8 +32,8 @@ fn tmpdir(tag: &str) -> PathBuf {
 const UNFORMATTED: &str = "fn run()  {\n  print( \"hi\" );\n}\n";
 
 /// A well-formed, already-canonical .jet file. Formatting it again must be a no-op.
-/// Use a truly simple declaration that the formatter does not alter.
-const CANONICAL: &str = "fn run() {\n    print(\"hi\")\n}\n";
+/// D-FMTCOLLAPSE1 keeps a fitting simple body on one line.
+const CANONICAL: &str = "fn run() { print(\"hi\") }\n";
 
 /// A source file with a deliberate parse error.
 const INVALID: &str = "fn run( {\n";
@@ -149,6 +149,60 @@ fn explicit_dir_ignores_payload_manifest() {
         explicit.status.code(),
         Some(2),
         "an explicit pkg.jet path must still reach the formatter"
+    );
+}
+
+#[test]
+fn epoch5_package_and_config_files_use_typed_formatter() {
+    let dir = tmpdir(&line!().to_string());
+    let package = write(
+        &dir,
+        jet::Syntax::PACKAGE_FILE,
+        "name: \"demo\"\noutputs: .{app: .Executable.{entry: run}}\n",
+    );
+    let config = write(
+        &dir,
+        "config/dev.jet",
+        "pub dev :: Config.{deps: {ripgrep: \"ripgrep@nixpkgs\"} environments: {dev: Environment.{tools: [\"ripgrep@nixpkgs\"]}}}\n",
+    );
+    let before_package = read(&package);
+    let before_config = read(&config);
+
+    let formatted = Command::new(jet())
+        .arg("fmt")
+        .arg(&dir)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        formatted.status.code(),
+        Some(0),
+        "Epoch 5 package/config formatting failed\nstderr: {}",
+        String::from_utf8_lossy(&formatted.stderr)
+    );
+    assert_ne!(read(&package), before_package);
+    assert_ne!(read(&config), before_config);
+
+    let clean = Command::new(jet())
+        .args(["fmt", "--check"])
+        .arg(&dir)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        clean.status.code(),
+        Some(0),
+        "typed package/config formatter must be idempotent\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&clean.stdout),
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    assert!(
+        jet::Package::PackageFacts::parse(&read(&package), "package.jet").is_ok(),
+        "formatted package must remain typed"
+    );
+    assert!(
+        jet::Package::ConfigFacts::parse(&read(&config), "config/dev.jet").is_ok(),
+        "formatted Config must remain typed"
     );
 }
 

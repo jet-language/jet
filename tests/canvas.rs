@@ -609,10 +609,52 @@ fn canvas_rejects_ambiguous_package_facts_before_projection() {
 
     let diagnostics = jet::Canvas::graph_json_for_file(&entry)
         .expect_err("Canvas must reject ambiguous package facts");
+    assert!(diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1206")
+        .is_some(), "{diagnostics:?}");
+}
+
+#[test]
+fn canvas_project_uses_shared_package_diagnostic() {
+    let dir = temp_dir("project_ambiguous_package");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"canonical\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"legacy\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let diagnostics = jet::Canvas::graph_json_for_file(&entry)
+        .expect_err("Canvas must reject ambiguous package facts");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1206")
+        .expect("ambiguous package facts must use the shared E1206 diagnostic");
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    assert!(project.contains("\"code\":\"E1206\""), "{project}");
+    assert!(!project.contains("\"code\":\"package\""), "{project}");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1206"),
-        "{diagnostics:?}"
+        project.contains("one typed Package fact graph must own this projection"),
+        "{project}"
     );
+    for field in [
+        diagnostic.code.as_str(),
+        diagnostic.what.as_str(),
+        diagnostic.why.as_str(),
+        diagnostic.fix.as_str(),
+    ] {
+        assert!(
+            project.contains(field),
+            "project omitted diagnostic field: {field}\n{project}"
+        );
+    }
 }
 
 #[test]

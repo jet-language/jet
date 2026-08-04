@@ -29,6 +29,9 @@ fn project_file_with_runtime_on_compiler_stack(
 ) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
     let src = fs::read_to_string(path).unwrap_or_default();
+    let package_facts = jet_semindex::package_facts_for_entry(path).map_err(|error| {
+        vec![jet_semindex::package_facts_diagnostic(path, &error)]
+    })?;
     let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(&path_str, None, true);
     let errors: Vec<Diagnostic> = diags
         .iter()
@@ -41,9 +44,6 @@ fn project_file_with_runtime_on_compiler_stack(
     let Some(bundle) = bundle else {
         return Err(diags);
     };
-    let package_facts = jet_semindex::package_facts_for_entry(path).map_err(|error| {
-        vec![jet_semindex::package_facts_diagnostic(path, &error)]
-    })?;
     let workspace_overlay_policy = jet_semindex::workspace_overlay_policy_for_entry(path)
         .map_err(|diagnostic| vec![diagnostic])?;
     Ok(project_checked(
@@ -361,13 +361,14 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
 
 pub(super) fn packages_project_json(
     project_root: &Path,
+    entry_path: &Path,
     manifest_root: Option<&Path>,
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
     package_dirs(manifest_root, ecosystem_root, workspace_root)
         .iter()
-        .filter_map(|dir| package_project_json(project_root, dir))
+        .filter_map(|dir| package_project_json(project_root, entry_path, dir))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -440,9 +441,9 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
     )
 }
 
-fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
+fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> Option<String> {
     if dir.join("package.jet").is_file() {
-        return canonical_package_project_json(project_root, dir);
+        return canonical_package_project_json(project_root, entry_path, dir);
     }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
@@ -508,13 +509,19 @@ fn canonical_package_facts(
         .map_err(|error| error.to_string())
 }
 
-fn canonical_package_error(project_root: &Path, dir: &Path, error: &str) -> String {
+fn canonical_package_error(
+    project_root: &Path,
+    entry_path: &Path,
+    dir: &Path,
+    error: &str,
+) -> String {
+    let diagnostic = jet_semindex::package_facts_diagnostic(entry_path, error);
     format!(
-        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{{\"code\":\"package\",\"what\":{},\"why\":\"package.jet did not produce one valid typed Package fact graph\",\"fix\":\"fix package.jet or its declared Config files before Canvas uses package facts\"}}]}}",
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{}]}}",
         json_str(&rel_path(project_root, dir)),
         json_str(&rel_path(project_root, &dir.join("package.jet"))),
         json_str(dir.file_name().and_then(|name| name.to_str()).unwrap_or("package")),
-        json_str(error),
+        diagnostic_json(&diagnostic),
     )
 }
 
@@ -663,10 +670,14 @@ fn canonical_package_targets_project_json(project_root: &Path, dir: &Path) -> Op
     )
 }
 
-fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
+fn canonical_package_project_json(
+    project_root: &Path,
+    entry_path: &Path,
+    dir: &Path,
+) -> Option<String> {
     let facts = match canonical_package_facts(dir) {
         Ok(facts) => facts,
-        Err(error) => return Some(canonical_package_error(project_root, dir, &error)),
+        Err(error) => return Some(canonical_package_error(project_root, entry_path, dir, &error)),
     };
     let (workspace_overlays, diagnostics) = match
         jet_semindex::workspace_overlay_policy_for_entry(&dir.join("package.jet"))

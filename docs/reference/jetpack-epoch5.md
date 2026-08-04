@@ -30,6 +30,10 @@ Scalar conflicts name both contributing source files and their values. Successfu
 fields retain ordered contributor provenance for lock and explain projections;
 failed composition never mutates the Package facts.
 
+`jet fmt` formats both `package.jet` and declared Config files through this
+typed model. Ordinary source files continue through the compiler formatter.
+Running the command twice is a no-op after the first pass.
+
 ## Registry delivery and provider facts
 
 `jet registry publish` commits the immutable sparse index line and the matching
