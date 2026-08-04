@@ -586,12 +586,13 @@ pub(super) struct RunPlan {
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
 pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
-    load_project_plan_with_profile(theme, None)
+    load_project_plan_with_selections(theme, None, None)
 }
 
-pub(super) fn load_project_plan_with_profile(
+pub(super) fn load_project_plan_with_selections(
     theme: &Theme,
     requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let dir = project_env_root(&cwd);
@@ -619,7 +620,24 @@ pub(super) fn load_project_plan_with_profile(
     // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
     // surface stays the fallback until the typed example fully replaces it.
     if ModuleEval::is_module_surface(&src) {
-        return typed_plan_with_defaults(theme, &src, &dir, toml_table, requested_profile);
+        return typed_plan_with_defaults(
+            theme,
+            &src,
+            &dir,
+            toml_table,
+            requested_profile,
+            requested_environment_profile,
+        );
+    }
+
+    if let Some(name) = requested_environment_profile {
+        theme.error_coded(
+            "E1337",
+            &format!("environment profile `{name}` is not declared"),
+            "the explicit environment-profile selector applies to typed `env.<name>` profiles",
+            "use a typed env.jet module or omit `--env-profile`",
+        );
+        return Err(2);
     }
 
     let ef = EnvFile::parse(&src);
@@ -651,8 +669,15 @@ fn typed_plan_with_defaults(
     dir: &Path,
     toml_defaults: RefSpec::SourceTable,
     requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let plan = ModuleEval::evaluate_env_with_profile(src, dir, requested_profile).map_err(|d| {
+    let plan = ModuleEval::evaluate_env_with_profiles(
+        src,
+        dir,
+        requested_profile,
+        requested_environment_profile,
+    )
+    .map_err(|d| {
         eprint!(
             "{}",
             crate::Diagnostics::render_all(Syntax::ENV_FILE, src, std::slice::from_ref(&d))
@@ -686,7 +711,7 @@ fn typed_plan_with_defaults(
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
     let selected_profile = plan.selected_profile;
-    // `evaluate_env_with_profile` already expanded the typed selections. Keep
+    // `evaluate_env_with_profiles` already expanded the typed selections. Keep
     // that exact graph fact through realization; re-expanding here could make
     // planning, trust, and activation disagree if the catalog changes.
     let language_expansion = plan.language_expansion;

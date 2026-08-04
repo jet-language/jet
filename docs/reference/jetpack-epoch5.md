@@ -69,10 +69,12 @@ directories, duplicate Package names, and nested member roots.
 
 ## Environment profiles and language packs
 
-Profiles resolve parents before children. `--profile` selects one profile for
-the command. Without a flag, all hostname matches merge first, then all user
-matches merge in deterministic name order. Conflicting facts fail closed.
-`default` is used only when no hostname or user profile matches.
+Workflow profiles resolve parents before children. `--profile` selects one
+named workflow profile for the command. The `env.<name>` modules are separate
+environment profiles: `--env-profile full` selects one module when an
+environment declares more than one. Without that flag, `dev`, then `default`,
+then lexical order chooses the environment profile. Conflicting facts fail
+closed. JetOS/tool profiles keep their own commands and state.
 
 Language selections are typed records. Enabled records expand through the
 closed catalog into ordinary package references. Disabled records remain in

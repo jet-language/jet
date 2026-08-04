@@ -67,25 +67,25 @@ pub fn evaluate_env_with_profile(
     base_dir: &Path,
     requested_profile: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
-    evaluate_env_with_profile_and_facet(src, base_dir, requested_profile, None)
+    evaluate_env_with_profiles(src, base_dir, requested_profile, None)
 }
 
-/// Evaluate an environment while explicitly selecting one `env.<name>` facet.
-/// This is an API-level selector for hosts and tools; the ordinary CLI uses
-/// the deterministic default (`dev`, then `default`, then lexical order).
-pub fn evaluate_env_with_facet(
+/// Evaluate an environment while explicitly selecting one `env.<name>`
+/// environment profile. The ordinary CLI uses the deterministic default
+/// (`dev`, then `default`, then lexical order) when it has no selector.
+pub fn evaluate_env_with_environment_profile(
     src: &str,
     base_dir: &Path,
-    requested_facet: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
-    evaluate_env_with_profile_and_facet(src, base_dir, None, requested_facet)
+    evaluate_env_with_profiles(src, base_dir, None, requested_environment_profile)
 }
 
-pub fn evaluate_env_with_profile_and_facet(
+pub fn evaluate_env_with_profiles(
     src: &str,
     base_dir: &Path,
     requested_profile: Option<&str>,
-    requested_facet: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
@@ -407,10 +407,11 @@ pub fn evaluate_env_with_profile_and_facet(
         ));
     }
 
-    // Select exactly one env facet. The selected name is explicit when a host
+    // Select exactly one environment profile. The selected name is explicit when a host
     // asks for it; otherwise `dev`, then `default`, then lexical order gives
-    // one stable beginner path instead of silently merging sibling facets.
-    let active_environment = select_active_environment(&environment_names, requested_facet)?;
+    // one stable beginner path instead of silently merging sibling profiles.
+    let active_environment =
+        select_active_environment(&environment_names, requested_environment_profile)?;
     let active_key = active_environment
         .as_ref()
         .map(|name| (Namespace::Env, name.clone()));
@@ -521,17 +522,17 @@ pub fn evaluate_env_with_profile_and_facet(
 
 fn select_active_environment(
     names: &std::collections::BTreeSet<String>,
-    requested: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<Option<String>, Diagnostic> {
-    if let Some(name) = requested {
+    if let Some(name) = requested_environment_profile {
         if names.contains(name) {
             return Ok(Some(name.to_string()));
         }
         return Err(Diagnostic::error(
             "E1337",
-            format!("environment facet `{name}` is not declared"),
-            "one environment plan activates one declared `env.<name>` facet; sibling facets stay available for explicit selection".to_string(),
-            "choose one of the declared environment facet names".to_string(),
+            format!("environment profile `{name}` is not declared"),
+            "one environment plan activates one declared `env.<name>` profile; sibling profiles stay available for explicit selection".to_string(),
+            "choose one of the declared environment profile names".to_string(),
             None,
         ));
     }

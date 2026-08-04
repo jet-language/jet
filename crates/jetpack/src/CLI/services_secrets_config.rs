@@ -1,5 +1,5 @@
 use super::parse::Parsed;
-use super::realize::load_project_plan_with_profile;
+use super::realize::load_project_plan_with_selections;
 use super::trust_env_build::compose_env;
 use jet_env_model::ModuleEval;
 use crate::Output::Theme;
@@ -415,7 +415,11 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let name = parsed.positional.get(1).cloned();
 
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -766,7 +770,11 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };

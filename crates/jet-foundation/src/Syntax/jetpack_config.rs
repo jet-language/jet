@@ -533,6 +533,8 @@ pub const ENV_FIELD_LANGUAGES: &str = "languages";
 pub const ENV_FIELD_VARIABLES: &str = "variables";
 /// D-ENV-FILES1: managed project-relative file declarations.
 pub const ENV_FIELD_FILES: &str = "files";
+/// D-ENV-FACET1: select one declared environment profile (`env.<name>`).
+pub const ENV_FLAG_ENV_PROFILE: &str = "--env-profile";
 pub const ENV_FLAG_PROFILE: &str = "--profile";
 /// D-FE-PROMPT-STRIP1: `Prompt.{ label: "...", path: .Short, strip: .On }`.
 pub const PROMPT_FIELD_LABEL: &str = "label";

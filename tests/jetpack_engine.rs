@@ -1852,7 +1852,7 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
 }
 
 #[test]
-fn env_info_json_discloses_one_profile_facet_and_language_projection() {
+fn env_info_json_discloses_selected_environment_profile_and_language_projection() {
     let project = Scratch::new("env-info-composition");
     fs::write(
         project.join("env.jet"),
@@ -1898,6 +1898,45 @@ module env.full {
     assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
+
+    let full = jetpack()
+        .args(["enter", "info", "--json", "--no-color", "--env-profile", "full"])
+        .current_dir(&project.path)
+        .env("HOSTNAME", "epoch5-host")
+        .env("USER", "epoch5-user")
+        .output()
+        .unwrap();
+    assert!(
+        full.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&full.stderr)
+    );
+    let full_stdout = String::from_utf8_lossy(&full.stdout);
+    assert!(
+        full_stdout.contains("\"active_environment\":\"full\""),
+        "stdout: {full_stdout}"
+    );
+    assert!(
+        full_stdout.contains("\"active_environment_provenance\":[\"env.full\"]"),
+        "stdout: {full_stdout}"
+    );
+    assert!(full_stdout.contains("\"fd@nixpkgs\""), "stdout: {full_stdout}");
+    assert!(!full_stdout.contains("\"ripgrep@nixpkgs\""), "stdout: {full_stdout}");
+
+    let missing = jetpack()
+        .args(["enter", "info", "--no-color", "--env-profile", "missing"])
+        .current_dir(&project.path)
+        .env("HOSTNAME", "epoch5-host")
+        .env("USER", "epoch5-user")
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    let missing_stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(missing_stderr.contains("E1337"), "stderr: {missing_stderr}");
+    assert!(
+        missing_stderr.contains("environment profile `missing` is not declared"),
+        "stderr: {missing_stderr}"
+    );
 }
 
 

@@ -1110,6 +1110,15 @@ name — `module env.dev { packages: […] }`, `module image.server { … }`.
 (`name: target@provider` or bare-path entries, merged by key) and `imports:` are fields
 inside `module name { … }`, never file top-level.
 
+**D-ENV-FACET1=A — environment profiles use the profile noun** *(ratified by
+owner 2026-08-03, card #1104)*: a typed environment may declare multiple
+`env.<name>` contributions, but one contribution is active at a time. The
+beginner default is `dev`, then `default`, then lexical order. Experts select
+one explicitly with `jet env info --env-profile <name>` (the flag applies to
+all Jetpack commands that load an environment plan). `--profile` remains the
+selector for a named workflow profile inside that environment; JetOS profile
+commands keep their own namespace and state.
+
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
 `.jet` files and merges typed contributions; no manual lists.
 

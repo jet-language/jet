@@ -63,6 +63,10 @@ pub(super) struct Flags {
     pub(super) studio_host: Option<String>,
     /// D-ENV-PROFILE1: explicit named environment profile.
     pub(super) profile: Option<String>,
+    /// D-ENV-FACET1: explicit profile selecting one `env.<name>` contribution.
+    /// This is separate from `--profile`, which selects a named workflow
+    /// profile declared inside the environment.
+    pub(super) environment_profile: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
     pub(super) adapt: bool,
@@ -158,6 +162,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         studio_serve: None,
         studio_host: None,
         profile: None,
+        environment_profile: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -185,6 +190,12 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                 i += 1;
                 if let Some(name) = args.get(i) {
                     flags.profile = Some(name.clone());
+                }
+            }
+            a if a == Syntax::ENV_FLAG_ENV_PROFILE => {
+                i += 1;
+                if let Some(name) = args.get(i) {
+                    flags.environment_profile = Some(name.clone());
                 }
             }
             "--adapt" => flags.adapt = true,

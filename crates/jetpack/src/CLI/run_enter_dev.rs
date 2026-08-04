@@ -1,7 +1,7 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
 use super::realize::{
-    apply_locked_channels, classify_or_report, load_project_plan_with_profile, project_env_root,
+    apply_locked_channels, classify_or_report, load_project_plan_with_selections, project_env_root,
     RunPlan,
 };
 use super::services_secrets_config::{
@@ -66,9 +66,10 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                         }
                         match &parsed.command {
                             Some(cmd) if !cmd.is_empty() => {
-                                let mut plan = match load_project_plan_with_profile(
+                                let mut plan = match load_project_plan_with_selections(
                                     theme,
                                     parsed.flags.profile.as_deref(),
+                                    parsed.flags.environment_profile.as_deref(),
                                 ) {
                                     Ok(plan) => plan,
                                     Err(code) => return code,
@@ -143,7 +144,11 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
         },
-        None => match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        None => match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         },
@@ -234,7 +239,11 @@ pub(super) fn run_project_task_with_mode(
     // metadata, in which case it is composed through the same RunPlan path as
     // `jet env` rather than by mutating PATH in this dispatcher.
     let mut plan = if has_env {
-        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         }
@@ -673,7 +682,11 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // present.
     let has_env_file = EnvFile::path_in(&project_dir).is_file();
     let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
-        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         }
@@ -766,7 +779,11 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
     let roots = Store::resolve();
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -828,7 +845,11 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
 fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -904,7 +925,11 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
 /// `jet env info`: disclose the selected profile and the typed environment
 /// facts without realizing packages or executing lifecycle commands.
 fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -1295,7 +1320,13 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         .filter(|s| !s.is_empty());
     let target_hash = target
         .as_ref()
-        .and_then(|root| EnvHook::definition_fingerprint(root, parsed.flags.profile.as_deref()));
+        .and_then(|root| {
+            EnvHook::definition_fingerprint_with_selections(
+                root,
+                parsed.flags.profile.as_deref(),
+                parsed.flags.environment_profile.as_deref(),
+            )
+        });
 
     // Nothing changed since the last prompt — stay silent so the hook is a
     // no-op on the vast majority of prompts (and never re-realizes).
@@ -1309,7 +1340,10 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut watched_reload_ready = false;
     if target_s == active_s && target_hash != active_hash {
         if let (Some(root), Some(hash)) = (target.as_ref(), target_hash.as_deref()) {
-            match EnvHook::reload_policy(root) {
+            match EnvHook::reload_policy_with_environment_profile(
+                root,
+                parsed.flags.environment_profile.as_deref(),
+            ) {
                 ModuleEval::ReloadPolicy::Never => return 0,
                 ModuleEval::ReloadPolicy::Prompt => {}
                 ModuleEval::ReloadPolicy::Watch { debounce_ms, .. } => {
@@ -1350,7 +1384,11 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // changing its own cwd affects nothing else.
         let _ = std::env::set_current_dir(&root);
         let roots = Store::resolve();
-        let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        let mut plan = match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(_) => {
                 // Malformed / foreign-only env: keep the previous activation.
@@ -1417,8 +1455,12 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // Reconcile the source graph after realization. If a prompt races an
         // edit, retain the prior activation and let the next prompt retry the
         // new hash instead of emitting a plan assembled from mixed revisions.
-        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
-            .as_deref()
+        if EnvHook::definition_fingerprint_with_selections(
+            &root,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        )
+        .as_deref()
             != target_hash.as_deref()
         {
             return 0;
@@ -1439,8 +1481,12 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             return 0;
         }
-        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
-            .as_deref()
+        if EnvHook::definition_fingerprint_with_selections(
+            &root,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        )
+        .as_deref()
             != target_hash.as_deref()
         {
             return 0;
@@ -1629,7 +1675,11 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
