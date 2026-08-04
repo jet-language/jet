@@ -1507,12 +1507,60 @@ fn process_matches_start(state: &ProcessState) -> Result<bool, String> {
     )
 }
 
-fn cleanup_child(child: &mut Child) -> String {
-    let kill_error = kill_child_tree(child);
+fn cleanup_child_with_authority(child: &mut Child, authority: &ServiceAuthority) -> String {
+    let uses_platform_authority = matches!(
+        authority,
+        ServiceAuthority::LinuxSystemdUser { .. }
+            | ServiceAuthority::WindowsGuardianJobObject { .. }
+    );
+    let authority_error = if uses_platform_authority {
+        match run_authority_stop_action(child.id(), StopAction::Kill, Some(authority), None) {
+            Ok(()) => None,
+            Err(first) => match stop_platform_authority(authority) {
+                Ok(()) => None,
+                Err(second) => Some(format!("{first}; authority stop fallback failed: {second}")),
+            },
+        }
+    } else {
+        None
+    };
+    let kill_error = if uses_platform_authority && authority_error.is_none() {
+        match child.try_wait() {
+            Ok(Some(_)) => None,
+            Ok(None) => child.kill().err(),
+            Err(error) => Some(error),
+        }
+    } else {
+        kill_child_tree(child)
+    };
     let wait_error = child.wait().err();
-    match (kill_error, wait_error) {
-        (None, None) => String::new(),
-        (kill, wait) => format!("; child cleanup failed (kill: {kill:?}, wait: {wait:?})"),
+    match (authority_error, kill_error, wait_error) {
+        (None, None, None) => String::new(),
+        (authority, kill, wait) => format!(
+            "; child cleanup failed (authority: {authority:?}, kill: {kill:?}, wait: {wait:?})"
+        ),
+    }
+}
+
+fn stop_platform_authority(authority: &ServiceAuthority) -> Result<(), String> {
+    match authority {
+        ServiceAuthority::LinuxSystemdUser { unit } => {
+            let status = Command::new("systemctl")
+                .args(["--user", "stop", unit])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| format!("couldn't run service authority stop: {error}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("service authority stop exited with {status}"))
+            }
+        }
+        ServiceAuthority::WindowsGuardianJobObject { .. } => {
+            Err("service guardian stop fallback is unavailable".to_string())
+        }
+        ServiceAuthority::TestProcessGroup | ServiceAuthority::Unsupported => Ok(()),
     }
 }
 
@@ -1571,18 +1619,22 @@ fn run_bounded_probe(mut command: Command, timeout: Duration) -> bool {
     }
 }
 
-fn publish_process_state(child: &mut Child, path: &Path) -> Result<ProcessState, String> {
+fn publish_process_state(
+    child: &mut Child,
+    path: &Path,
+    authority: &ServiceAuthority,
+) -> Result<ProcessState, String> {
     let start_identity = match process_start_identity(child.id()) {
         Ok(Some(identity)) => identity,
         Ok(None) => {
-            let cleanup = cleanup_child(child);
+            let cleanup = cleanup_child_with_authority(child, authority);
             return Err(format!(
                 "couldn't capture service process identity for {}{cleanup}",
                 child.id()
             ));
         }
         Err(error) => {
-            let cleanup = cleanup_child(child);
+            let cleanup = cleanup_child_with_authority(child, authority);
             return Err(format!("{error}{cleanup}"));
         }
     };
@@ -1595,7 +1647,7 @@ fn publish_process_state(child: &mut Child, path: &Path) -> Result<ProcessState,
         state.pid, state.start_identity
     );
     if let Err(error) = write_atomic(path, encoded.as_bytes()) {
-        let cleanup = cleanup_child(child);
+        let cleanup = cleanup_child_with_authority(child, authority);
         return Err(format!(
             "couldn't publish service process state to `{}`: {error}{cleanup}",
             path.display()
@@ -1894,15 +1946,15 @@ fn start_one_with_recovery(
     let runtime = match attach_authority(&authority, &mut child) {
         Ok(runtime) => runtime,
         Err(error) => {
-            let cleanup = cleanup_child(&mut child);
+            let cleanup = cleanup_child_with_authority(&mut child, &authority);
             return Err(format!("{error}{cleanup}"));
         }
     };
-    let state = publish_process_state(&mut child, &pid_path(&resolved.dir))?;
+    let state = publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)?;
     lifecycle.pid = Some(state.pid);
     lifecycle.phase = "running".to_string();
     if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
-        let cleanup = cleanup_child(&mut child);
+        let cleanup = cleanup_child_with_authority(&mut child, &authority);
         let _ = fs::remove_file(pid_path(&resolved.dir));
         return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
     }
@@ -1914,7 +1966,7 @@ fn start_one_with_recovery(
             .collect::<Vec<_>>()
             .join("\n");
         if let Err(error) = write_atomic(&ports_path(&resolved.dir), encoded.as_bytes()) {
-            let cleanup = cleanup_child(&mut child);
+            let cleanup = cleanup_child_with_authority(&mut child, &authority);
             let _ = fs::remove_file(pid_path(&resolved.dir));
             let _ = fs::remove_file(ports_path(&resolved.dir));
             return Err(format!("couldn't publish service ports: {error}{cleanup}"));
@@ -4042,7 +4094,12 @@ mod tests {
         let mut child = super::super::Platform::shell_command("sleep 30")
             .spawn()
             .unwrap();
-        let error = publish_process_state(&mut child, &bad_path).unwrap_err();
+        let error = publish_process_state(
+            &mut child,
+            &bad_path,
+            &ServiceAuthority::TestProcessGroup,
+        )
+        .unwrap_err();
         assert!(
             error.contains("couldn't publish service process state"),
             "{error}"
