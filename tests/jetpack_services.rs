@@ -87,8 +87,20 @@ set -eu
 state=${JETPACK_FAKE_SYSTEMD_STATE:?}
 unit=
 workdir=
+saw_user=0
+saw_scope=0
+saw_collect=0
+saw_quiet=0
+saw_delegate=0
+saw_kill_mode=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --user) saw_user=1 ;;
+        --scope) saw_scope=1 ;;
+        --collect) saw_collect=1 ;;
+        --quiet) saw_quiet=1 ;;
+        --property=Delegate=yes) saw_delegate=1 ;;
+        --property=KillMode=control-group) saw_kill_mode=1 ;;
         --unit=*) unit=${1#--unit=} ;;
         --working-directory=*) workdir=${1#--working-directory=} ;;
         --setenv=*) export "${1#--setenv=}" ;;
@@ -98,6 +110,12 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 [ -n "$unit" ]
+[ "$saw_user" -eq 1 ]
+[ "$saw_scope" -eq 1 ]
+[ "$saw_collect" -eq 1 ]
+[ "$saw_quiet" -eq 1 ]
+[ "$saw_delegate" -eq 1 ]
+[ "$saw_kill_mode" -eq 1 ]
 mkdir -p "$state"
 printf '%s\n' "$$" > "$state/$unit.pid"
 [ -z "$workdir" ] || cd "$workdir"

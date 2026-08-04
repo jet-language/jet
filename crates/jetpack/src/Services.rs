@@ -35,6 +35,8 @@ const MAX_SERVICE_BACKOFF_MS: u64 = 60_000;
 const MAX_SERVICE_RESTART_DELAY_MS: u64 = 60_000;
 const MAX_WATCH_DEPTH: usize = 64;
 const MAX_READY_PROBE_TIME: Duration = Duration::from_millis(750);
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 /// A well-known dev dependency's default package, port, start command, and
 /// readiness probe — used only when the author's `services:` entry doesn't
@@ -318,7 +320,7 @@ struct LifecycleFacts {
     recovery: String,
     pid: Option<u32>,
     unit: Option<String>,
-    guardian: Option<u32>,
+    guardian: Option<String>,
     dependencies: Vec<String>,
 }
 
@@ -326,7 +328,7 @@ struct LifecycleFacts {
 enum ServiceAuthority {
     TestProcessGroup,
     LinuxSystemdUser { unit: String },
-    WindowsGuardianJobObject { guardian: u32 },
+    WindowsGuardianJobObject { guardian: String },
     Unsupported,
 }
 
@@ -356,9 +358,9 @@ impl ServiceAuthority {
         }
     }
 
-    fn guardian(&self) -> Option<u32> {
+    fn guardian(&self) -> Option<String> {
         match self {
-            Self::WindowsGuardianJobObject { guardian } => Some(*guardian),
+            Self::WindowsGuardianJobObject { guardian } => Some(guardian.clone()),
             _ => None,
         }
     }
@@ -402,8 +404,10 @@ fn authority_for(
         let _ = project_dir;
         let _ = plan;
         let _ = generation;
+        let guardian = windows_job::new_endpoint()
+            .map_err(|error| format!("couldn't create service guardian endpoint: {error}"))?;
         return Ok(ServiceAuthority::WindowsGuardianJobObject {
-            guardian: std::process::id(),
+            guardian,
         });
     }
     #[cfg(all(not(test), target_os = "macos"))]
@@ -433,8 +437,12 @@ fn authority_from_lifecycle(facts: &LifecycleFacts) -> Result<ServiceAuthority, 
             .ok_or_else(|| "service lifecycle state is missing its systemd unit".to_string()),
         "windows-guardian-job-object" => facts
             .guardian
-            .map(|guardian| ServiceAuthority::WindowsGuardianJobObject { guardian })
+            .as_ref()
+            .map(|guardian| ServiceAuthority::WindowsGuardianJobObject {
+                guardian: guardian.clone(),
+            })
             .ok_or_else(|| "service lifecycle state is missing its guardian".to_string()),
+        "unsupported" => Ok(ServiceAuthority::Unsupported),
         other => Err(format!("service lifecycle state has unknown authority `{other}`")),
     }
 }
@@ -467,10 +475,10 @@ fn attach_authority(
     match authority {
         ServiceAuthority::TestProcessGroup => Ok(AuthorityRuntime::TestProcessGroup),
         ServiceAuthority::LinuxSystemdUser { .. } => Ok(AuthorityRuntime::LinuxSystemdUser),
-        ServiceAuthority::WindowsGuardianJobObject { .. } => {
+        ServiceAuthority::WindowsGuardianJobObject { guardian } => {
             #[cfg(windows)]
             {
-                let job = windows_job::Job::new()
+                let job = windows_job::Job::new(guardian)
                     .map_err(|error| format!("couldn't create service guardian job object: {error}"))?;
                 job.assign(child).map_err(|error| {
                     let _ = child.kill();
@@ -480,7 +488,7 @@ fn attach_authority(
             }
             #[cfg(not(windows))]
             {
-                let _ = child;
+                let _ = (child, guardian);
                 Err("windows service authority is unavailable on this platform".to_string())
             }
         }
@@ -503,7 +511,7 @@ fn write_lifecycle(dir: &Path, facts: &LifecycleFacts) -> std::io::Result<()> {
     if let Some(unit) = &facts.unit {
         encoded.push_str(&format!("unit={unit}\n"));
     }
-    if let Some(guardian) = facts.guardian {
+    if let Some(guardian) = &facts.guardian {
         encoded.push_str(&format!("guardian={guardian}\n"));
     }
     for dependency in &facts.dependencies {
@@ -551,7 +559,7 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
             "recovery" if !value.is_empty() => recovery = Some(value.to_string()),
             "pid" => pid = value.parse::<u32>().ok().filter(|pid| *pid != 0),
             "unit" if !value.is_empty() => unit = Some(value.to_string()),
-            "guardian" => guardian = value.parse::<u32>().ok().filter(|pid| *pid != 0),
+            "guardian" if !value.is_empty() => guardian = Some(value.to_string()),
             "dependency" if !value.is_empty() => dependencies.push(value.to_string()),
             _ => return Err(format!("service lifecycle state `{}` is invalid", path.display())),
         }
@@ -561,7 +569,7 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
     else {
         return Err(format!("service lifecycle state `{}` is invalid", path.display()));
     };
-    Ok(Some(LifecycleFacts {
+    let facts = LifecycleFacts {
         backend,
         generation,
         phase,
@@ -571,7 +579,28 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
         unit,
         guardian,
         dependencies,
-    }))
+    };
+    validate_lifecycle_authority(&facts, &path)?;
+    Ok(Some(facts))
+}
+
+fn validate_lifecycle_authority(
+    facts: &LifecycleFacts,
+    path: &Path,
+) -> Result<(), String> {
+    let authority = authority_from_lifecycle(facts)
+        .map_err(|error| format!("service lifecycle state `{}` is invalid: {error}", path.display()))?;
+    if facts.backend != authority.backend()
+        || facts.containment != authority.containment()
+        || facts.unit != authority.unit().map(str::to_string)
+        || facts.guardian != authority.guardian()
+    {
+        return Err(format!(
+            "service lifecycle state `{}` has inconsistent authority facts",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1359,6 +1388,9 @@ mod windows_job {
     type Handle = *mut c_void;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const JOB_OBJECT_TERMINATE: u32 = 0x0008;
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    const CTRL_BREAK_EVENT: u32 = 1;
 
     #[repr(C)]
     struct BasicLimitInformation {
@@ -1396,6 +1428,11 @@ mod windows_job {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
+        fn OpenJobObjectW(
+            desired_access: u32,
+            inherit_handle: i32,
+            name: *const u16,
+        ) -> Handle;
         fn SetInformationJobObject(
             job: Handle,
             class: u32,
@@ -1405,6 +1442,43 @@ mod windows_job {
         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
         fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
         fn CloseHandle(handle: Handle) -> i32;
+        fn GenerateConsoleCtrlEvent(event: u32, process_group_id: u32) -> i32;
+    }
+
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(
+            algorithm: Handle,
+            buffer: *mut u8,
+            length: u32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub(super) fn new_endpoint() -> io::Result<String> {
+        let mut bytes = [0_u8; 16];
+        // SAFETY: BCryptGenRandom writes exactly the bounded buffer supplied;
+        // the null algorithm selects Windows' system-preferred CSPRNG.
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                bytes.as_mut_ptr(),
+                bytes.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status));
+        }
+        let suffix = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Ok(format!("Local\\Jetpack-{suffix}"))
     }
 
     #[derive(Debug)]
@@ -1418,9 +1492,11 @@ mod windows_job {
     }
 
     impl Job {
-        pub(super) fn new() -> io::Result<Self> {
-            // SAFETY: null attributes/name requests one unnamed job object.
-            let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+        pub(super) fn new(name: &str) -> io::Result<Self> {
+            let name = wide(name);
+            // SAFETY: null attributes and the bounded NUL-terminated name
+            // request one named job object in the caller's session namespace.
+            let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), name.as_ptr()) };
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
@@ -1469,6 +1545,17 @@ mod windows_job {
             Ok(Self(handle))
         }
 
+        pub(super) fn open(name: &str) -> io::Result<Self> {
+            let name = wide(name);
+            // SAFETY: the name is a bounded, NUL-terminated UTF-16 string;
+            // the returned handle is owned by this Job value.
+            let handle = unsafe { OpenJobObjectW(JOB_OBJECT_TERMINATE, 0, name.as_ptr()) };
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(handle))
+        }
+
         pub(super) fn assign(&self, child: &Child) -> io::Result<()> {
             // SAFETY: Child owns this live process handle for this call.
             if unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle().cast()) } == 0 {
@@ -1480,6 +1567,16 @@ mod windows_job {
         pub(super) fn terminate(&self) -> io::Result<()> {
             // SAFETY: self.0 is the live owned job handle.
             if unsafe { TerminateJobObject(self.0, 1) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        pub(super) fn request_graceful_stop(&self, process_group_id: u32) -> io::Result<()> {
+            // SAFETY: the process group was created by Jetpack for this
+            // service generation; the Job Object remains the authority and
+            // supplies the forced fallback when no console accepts the event.
+            if unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, process_group_id) } == 0 {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
@@ -1931,6 +2028,10 @@ fn start_one_with_recovery(
     if !matches!(authority, ServiceAuthority::LinuxSystemdUser { .. }) {
         cmd.envs(&service_env);
     }
+    #[cfg(windows)]
+    // CREATE_NEW_PROCESS_GROUP lets the Job Object authority request a
+    // graceful Ctrl+Break before falling back to forced termination.
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NEW_PROCESS_GROUP);
     prepared_sockets.release()?;
     // Release the parent-side port listeners immediately before spawn so the
     // service can bind the reserved ports without an EADDRINUSE race.
@@ -2654,13 +2755,23 @@ fn stop_process_with(
         }
         None => (StopAction::Term, grace),
     };
-    run(action)?;
+    let is_term = matches!(action, StopAction::Term);
+    let request_error = match run(action) {
+        Ok(()) => None,
+        Err(error) if is_term => Some(error),
+        Err(error) => return Err(error),
+    };
     let deadline = Instant::now() + wait;
     while Instant::now() < deadline && alive()? {
         std::thread::sleep(Duration::from_millis(100));
     }
     if alive()? {
-        run(StopAction::Kill)?;
+        if let Err(kill_error) = run(StopAction::Kill) {
+            return Err(match request_error {
+                Some(request_error) => format!("{request_error}; {kill_error}"),
+                None => kill_error,
+            });
+        }
         let deadline = Instant::now() + grace.min(Duration::from_secs(1));
         while Instant::now() < deadline && alive()? {
             std::thread::sleep(Duration::from_millis(25));
@@ -2736,26 +2847,28 @@ fn run_authority_stop_action(
         Some(ServiceAuthority::WindowsGuardianJobObject { guardian }) => {
             #[cfg(windows)]
             if let Some(AuthorityRuntime::WindowsGuardianJobObject(job)) = runtime {
-                return job
-                    .terminate()
-                    .map_err(|error| format!("couldn't terminate service guardian job: {error}"));
+                let result = match action {
+                    // `stop_process_with` waits the configured grace period
+                    // after this request and calls the Kill branch if the
+                    // request fails or the service remains alive.
+                    StopAction::Term => job.request_graceful_stop(pid),
+                    StopAction::Kill => job.terminate(),
+                };
+                return result
+                    .map_err(|error| format!("couldn't stop service guardian job: {error}"));
             }
             #[cfg(windows)]
             {
-                let mut command = Command::new("taskkill");
-                command.args(["/PID", &guardian.to_string(), "/T"]);
-                if matches!(action, StopAction::Kill) {
-                    command.arg("/F");
-                }
-                let status = command
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map_err(|error| format!("couldn't run service guardian shutdown: {error}"))?;
-                if !status.success() {
-                    return Err(format!("service guardian shutdown exited with {status}"));
-                }
-                return Ok(());
+                let job = windows_job::Job::open(guardian)
+                    .map_err(|error| format!("couldn't open service guardian job: {error}"))?;
+                let result = match action {
+                    // `stop_process_with` owns the bounded wait and forced
+                    // escalation when this graceful request is ignored.
+                    StopAction::Term => job.request_graceful_stop(pid),
+                    StopAction::Kill => job.terminate(),
+                };
+                return result
+                    .map_err(|error| format!("couldn't stop service guardian job: {error}"));
             }
             #[cfg(not(windows))]
             {
@@ -3434,6 +3547,7 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
 /// the source of truth; this is only a stable presentation of that record.
 pub fn lifecycle_json(project_dir: &Path, name: &str) -> Option<String> {
     let facts = read_lifecycle(&service_dir(project_dir, name)).ok().flatten()?;
+    let authority = authority_from_lifecycle(&facts).ok()?;
     let dependencies = facts
         .dependencies
         .iter()
@@ -3442,20 +3556,21 @@ pub fn lifecycle_json(project_dir: &Path, name: &str) -> Option<String> {
         .join(",");
     Some(format!(
         "{{\"backend\":{},\"generation\":{},\"phase\":{},\"containment\":{},\"recovery\":{},\"pid\":{},\"unit\":{},\"guardian\":{},\"after\":[{}]}}",
-        crate::JSON::quote(&facts.backend),
+        crate::JSON::quote(authority.backend()),
         facts.generation,
         crate::JSON::quote(&facts.phase),
-        crate::JSON::quote(&facts.containment),
+        crate::JSON::quote(authority.containment()),
         crate::JSON::quote(&facts.recovery),
         facts.pid.map_or_else(|| "null".to_string(), |pid| pid.to_string()),
-        facts
-            .unit
+        authority
+            .unit()
+            .map(crate::JSON::quote)
+            .unwrap_or_else(|| "null".to_string()),
+        authority
+            .guardian()
             .as_deref()
             .map(crate::JSON::quote)
             .unwrap_or_else(|| "null".to_string()),
-        facts
-            .guardian
-            .map_or_else(|| "null".to_string(), |pid| pid.to_string()),
         dependencies,
     ))
 }
@@ -3878,12 +3993,12 @@ mod tests {
             Duration::ZERO,
             |action| match action {
                 StopAction::Term => Err("TERM failed".to_string()),
-                _ => Ok(()),
+                StopAction::Kill => Err("KILL failed".to_string()),
             },
             || Ok(true),
         )
         .unwrap_err();
-        assert_eq!(term, "TERM failed");
+        assert_eq!(term, "TERM failed; KILL failed");
 
         let kill = stop_process_with(
             42,
@@ -3907,6 +4022,30 @@ mod tests {
         )
         .unwrap_err();
         assert!(alive.contains("still alive"), "{alive}");
+    }
+
+    #[test]
+    fn term_shutdown_escalates_when_graceful_request_is_ignored() {
+        let killed = std::cell::Cell::new(false);
+        let actions = std::cell::RefCell::new(Vec::new());
+        stop_process_with(
+            42,
+            Some(&ShutdownPolicy::Term { grace_ms: 0 }),
+            Duration::ZERO,
+            |action| {
+                actions.borrow_mut().push(action.clone());
+                if matches!(action, StopAction::Kill) {
+                    killed.set(true);
+                }
+                Ok(())
+            },
+            || Ok(!killed.get()),
+        )
+        .unwrap();
+        assert_eq!(
+            actions.into_inner(),
+            vec![StopAction::Term, StopAction::Kill]
+        );
     }
 
     #[test]
@@ -4078,8 +4217,13 @@ mod tests {
             "Delegate=yes",
             "KillMode=control-group",
             "CreateJobObjectW",
+            "OpenJobObjectW",
             "AssignProcessToJobObject",
             "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+            "JOB_OBJECT_TERMINATE",
+            "BCryptGenRandom",
+            "GenerateConsoleCtrlEvent",
+            "CREATE_NEW_PROCESS_GROUP",
             "E1332: Safe service authority is unavailable",
         ] {
             assert!(source.contains(required), "missing process identity law: {required}");
@@ -4158,6 +4302,26 @@ mod tests {
         };
         write_lifecycle(&dir, &facts).unwrap();
         assert_eq!(read_lifecycle(&dir).unwrap(), Some(facts));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn lifecycle_facts_reject_inconsistent_authority_claims() {
+        let dir = scratch("lifecycle-authority-mismatch");
+        let facts = LifecycleFacts {
+            backend: "linux-systemd-user".to_string(),
+            generation: 7,
+            phase: "ready".to_string(),
+            containment: "job-object".to_string(),
+            recovery: "none".to_string(),
+            pid: Some(42),
+            unit: Some("jetpack-test.scope".to_string()),
+            guardian: None,
+            dependencies: Vec::new(),
+        };
+        write_lifecycle(&dir, &facts).unwrap();
+        let error = read_lifecycle(&dir).unwrap_err();
+        assert!(error.contains("inconsistent authority facts"), "{error}");
         fs::remove_dir_all(dir).ok();
     }
 
