@@ -1,10 +1,10 @@
 //! D-UNSAFE-OBLIG1=A: deterministic `jet inspect unsafe` audit report.
 
-use std::fs;
 use std::process::exit;
 
 use jet::AST::ProgramBundle;
 use jet::Diagnostics::Span;
+use jet_foundation::JSON::json_escape;
 
 pub(crate) fn run(args: &[String], json: bool, color: bool) {
     let Some(file) = args.iter().find(|argument| !argument.starts_with('-')) else {
@@ -12,17 +12,19 @@ pub(crate) fn run(args: &[String], json: bool, color: bool) {
         eprintln!(" fix: jet inspect unsafe Source/main.jet");
         exit(jet::ExitCodes::USAGE);
     };
-    let bundle = jet::Loader::load_entry(file).unwrap_or_else(|diagnostics| {
-        let source = fs::read_to_string(file).unwrap_or_default();
+    let bundle = jet::Loader::load_entry_with_diagnostics(file).unwrap_or_else(|diagnostics| {
         if json {
             print!("{{\"schema_version\":1,\"diagnostics\":[");
-            for (index, diagnostic) in diagnostics.iter().enumerate() {
+            for (index, entry) in diagnostics.iter().enumerate() {
                 if index > 0 { print!(","); }
-                print!("{}", diagnostic.to_json(file, &source));
+                print!("{}", entry.diagnostic.to_json(&entry.file, &entry.source));
             }
             println!("]}}");
         } else {
-            eprint!("{}", jet::render_all_colored(file, &source, &diagnostics, color));
+            for (index, entry) in diagnostics.iter().enumerate() {
+                if index > 0 { eprint!("\n"); }
+                eprint!("{}", jet::render_all_colored(&entry.file, &entry.source, std::slice::from_ref(&entry.diagnostic), color));
+            }
         }
         exit(jet::ExitCodes::USER_ERROR);
     });
@@ -48,7 +50,8 @@ fn render_report_diagnostics(
         }
         println!("]}}");
     } else {
-        for entry in &report.diagnostics {
+        for (index, entry) in report.diagnostics.iter().enumerate() {
+            if index > 0 { eprint!("\n"); }
             let source = module_source(bundle, &entry.source);
             eprint!("{}", jet::render_all_colored(&entry.source, &source, std::slice::from_ref(&entry.diagnostic), color));
         }
@@ -73,12 +76,12 @@ fn render_json(report: &jet::Sema::UnsafeObligations::UnsafeInspection, bundle: 
     for (gate_index, gate) in report.gates.iter().enumerate() {
         if gate_index > 0 { print!(","); }
         let source = module_source(bundle, &gate.source);
-        print!("{{\"source\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"mode\":\"{}\",\"reason\":{},\"provenance\":[", escape(&gate.source), gate.span.start, gate.span.end, json_location(&source, gate.span), escape(&gate.mode), gate.reason.as_ref().map(|reason| format!("\"{}\"", escape(reason))).unwrap_or_else(|| "null".to_string()));
+        print!("{{\"source\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"mode\":\"{}\",\"reason\":{},\"provenance\":[", json_escape(&gate.source), gate.span.start, gate.span.end, json_location(&source, gate.span), json_escape(&gate.mode), gate.reason.as_ref().map(|reason| format!("\"{}\"", json_escape(reason))).unwrap_or_else(|| "null".to_string()));
         strings(&gate.provenance);
         print!("],\"operations\":[");
         for (operation_index, operation) in gate.operations.iter().enumerate() {
             if operation_index > 0 { print!(","); }
-            print!("{{\"kind\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"required\":[", escape(&operation.kind), operation.span.start, operation.span.end, json_location(&source, operation.span));
+            print!("{{\"kind\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"required\":[", json_escape(&operation.kind), operation.span.start, operation.span.end, json_location(&source, operation.span));
             strings(&operation.required);
             print!("],\"asserted\":[");
             strings(&operation.asserted);
@@ -92,7 +95,7 @@ fn render_json(report: &jet::Sema::UnsafeObligations::UnsafeInspection, bundle: 
 fn strings(values: &[String]) {
     for (index, value) in values.iter().enumerate() {
         if index > 0 { print!(","); }
-        print!("\"{}\"", escape(value));
+        print!("\"{}\"", json_escape(value));
     }
 }
 
@@ -115,5 +118,3 @@ fn json_location(source: &str, span: Span) -> String {
         "{{\"start\":{{\"line\":{start_line},\"column\":{start_column}}},\"end\":{{\"line\":{end_line},\"column\":{end_column}}}}}"
     )
 }
-
-fn escape(value: &str) -> String { value.chars().flat_map(|character| match character { '"' => "\\\"".chars().collect::<Vec<_>>(), '\\' => "\\\\".chars().collect(), '\n' => "\\n".chars().collect(), '\r' => "\\r".chars().collect(), '\t' => "\\t".chars().collect(), other => vec![other] }).collect() }

@@ -472,6 +472,310 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
     Ok(cffi)
 }
 
+/// C-FFI assembly with source provenance for front-end inspection commands.
+/// The ordinary API above remains a bare-diagnostic compatibility seam for
+/// compiler callers; this form snapshots user spans before assembly drains
+/// `CModule` items and carries generated-cache parser errors by cache path.
+#[derive(Debug, Clone)]
+pub struct CffiDiagnostic {
+    pub file: String,
+    pub source: String,
+    pub diagnostic: Diagnostic,
+}
+
+struct AssemblyOrigins {
+    spans: HashMap<Span, Vec<(String, String)>>,
+    headers: Vec<(String, String)>,
+    duplicate_uses: Vec<(String, String)>,
+    invalid_bindgen: Vec<(String, String)>,
+    incompatible_overrides: Vec<(String, String)>,
+}
+
+struct OriginSurface {
+    bindgen: Vec<(ExternFn, (String, String))>,
+    overlay: Vec<(ExternFn, (String, String))>,
+}
+
+pub fn assemble_with_provenance(
+    bundle: &mut ProgramBundle,
+) -> Result<CFfi, Vec<CffiDiagnostic>> {
+    // `assemble` rejects duplicate C imports before it discovers generated
+    // caches. Preserve that order in the provenance path as well.
+    let duplicate_diagnostics = duplicate_use_form_diagnostics(bundle);
+    if !duplicate_diagnostics.is_empty() {
+        return Err(map_diagnostics(
+            bundle,
+            assembly_origins(bundle),
+            duplicate_diagnostics,
+        ));
+    }
+
+    // Cache modules are appended by `load_binding_caches`. Preload them before
+    // taking the symbol snapshot so cache-vs-overlay conflicts retain the
+    // generated cache item's identity. The ordinary `assemble` call below
+    // sees those modules and skips loading them a second time.
+    let mut cache_diagnostics = Vec::new();
+    load_binding_caches(bundle, &mut cache_diagnostics);
+    let origins = assembly_origins(bundle);
+    if !cache_diagnostics.is_empty() {
+        return Err(map_diagnostics(bundle, origins, cache_diagnostics));
+    }
+
+    match assemble(bundle) {
+        Ok(cffi) => Ok(cffi),
+        Err(diagnostics) => Err(map_diagnostics(bundle, origins, diagnostics)),
+    }
+}
+
+fn map_diagnostics(
+    bundle: &ProgramBundle,
+    mut origins: AssemblyOrigins,
+    diagnostics: Vec<Diagnostic>,
+) -> Vec<CffiDiagnostic> {
+    let cache_origins = cache_diagnostic_origins(bundle);
+    let mut used_cache_origins = vec![false; cache_origins.len()];
+    let mut next_duplicate_use = 0;
+    let mut next_invalid_bindgen = 0;
+    let mut next_incompatible_override = 0;
+    let mut next_header_origin = 0;
+    let fallback_file = bundle.project_root.display().to_string();
+    diagnostics
+        .into_iter()
+        .map(|diagnostic| {
+            let origin = cache_origins
+                .iter()
+                .enumerate()
+                .find(|(index, candidate)| {
+                    !used_cache_origins[*index]
+                        && same_diagnostic(&diagnostic, &candidate.diagnostic)
+                })
+                .map(|(index, candidate)| {
+                    used_cache_origins[index] = true;
+                    (candidate.file.clone(), candidate.source.clone())
+                })
+                .or_else(|| match diagnostic.code.as_str() {
+                    "E3204" => take_origin(&origins.duplicate_uses, &mut next_duplicate_use),
+                    "E3205" => take_origin(
+                        &origins.incompatible_overrides,
+                        &mut next_incompatible_override,
+                    ),
+                    "E3207" => take_origin(&origins.invalid_bindgen, &mut next_invalid_bindgen),
+                    _ => None,
+                })
+                .or_else(|| {
+                    diagnostic.span.and_then(|span| {
+                        let candidates = origins.spans.get_mut(&span)?;
+                        (!candidates.is_empty()).then(|| candidates.remove(0))
+                    })
+                })
+                .or_else(|| {
+                    if diagnostic.code == "E3208" {
+                        take_origin(&origins.headers, &mut next_header_origin)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| (fallback_file.clone(), String::new()));
+            CffiDiagnostic {
+                file: origin.0,
+                source: origin.1,
+                diagnostic,
+            }
+        })
+        .collect()
+}
+
+fn take_origin(
+    origins: &[(String, String)],
+    next: &mut usize,
+) -> Option<(String, String)> {
+    let origin = origins.get(*next).cloned();
+    if origin.is_some() {
+        *next += 1;
+    }
+    origin
+}
+
+fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
+    let mut origins = AssemblyOrigins {
+        spans: HashMap::new(),
+        headers: Vec::new(),
+        duplicate_uses: Vec::new(),
+        invalid_bindgen: Vec::new(),
+        incompatible_overrides: Vec::new(),
+    };
+    let mut surfaces: HashMap<String, OriginSurface> = HashMap::new();
+    let mut order = Vec::new();
+    let mut library_order = Vec::new();
+    let mut header_origins_by_lib: HashMap<String, (String, String)> = HashMap::new();
+    for module in &bundle.modules {
+        let origin = (module.display.clone(), module.source.clone());
+        let generated_language = generated_cache_language(&module.path.to_string_lossy());
+        let generated = generated_language.is_some();
+        let mut seen: HashMap<String, (bool, String)> = HashMap::new();
+        for import in &module.imports {
+            origins
+                .spans
+                .entry(import.span)
+                .or_insert_with(Vec::new)
+                .push(origin.clone());
+            origins
+                .spans
+                .entry(import.alias_span)
+                .or_insert_with(Vec::new)
+                .push(origin.clone());
+            let (lib, is_header, header) = if let Some(lib) = c_module_lib(import) {
+                (Some(lib), false, String::new())
+            } else if let Some((header, lib)) = c_header_lib(import) {
+                (Some(lib), true, header)
+            } else {
+                (None, false, String::new())
+            };
+            if let Some(lib) = lib {
+                if !library_order.contains(&lib) {
+                    library_order.push(lib.clone());
+                }
+                if let Some((previous_is_header, previous_header)) = seen.get(&lib) {
+                    if *previous_is_header != is_header {
+                        let _header = if is_header { &header } else { previous_header };
+                        origins.duplicate_uses.push(origin.clone());
+                    }
+                } else {
+                    seen.insert(lib, (is_header, header));
+                }
+            }
+            if let Some((_, lib)) = c_header_lib(import) {
+                header_origins_by_lib.entry(lib).or_insert_with(|| origin.clone());
+            }
+        }
+        for item in &module.items {
+            let Item::CModule(c_module) = item else {
+                continue;
+            };
+            if c_module.kind == CModuleKind::Bindgen && !generated {
+                origins.invalid_bindgen.push(origin.clone());
+                continue;
+            }
+            let surface = match surfaces.entry(c_module.lib.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    order.push(c_module.lib.clone());
+                    entry.insert(OriginSurface {
+                        bindgen: Vec::new(),
+                        overlay: Vec::new(),
+                    })
+                }
+            };
+            let functions = match c_module.kind {
+                CModuleKind::Bindgen => &mut surface.bindgen,
+                CModuleKind::Extern => &mut surface.overlay,
+            };
+            functions.extend(
+                c_module
+                    .functions
+                    .iter()
+                    .cloned()
+                    .map(|function| (function, origin.clone())),
+            );
+            for span in std::iter::once(c_module.span)
+                .chain(std::iter::once(c_module.path_span))
+                .chain(c_module.functions.iter().flat_map(|function| {
+                    std::iter::once(function.span)
+                        .chain(std::iter::once(function.name_span))
+                        .chain(std::iter::once(function.rust_path_span))
+                        .chain(function.abi.iter().map(|(_, span)| *span))
+                }))
+            {
+                origins
+                    .spans
+                    .entry(span)
+                    .or_insert_with(Vec::new)
+                    .push(origin.clone());
+            }
+        }
+    }
+
+    // `load_binding_caches` first orders all C libraries, then selects the
+    // first header import for each library. A later header can therefore be
+    // the provenance for a library whose `use c.<lib>` appeared earlier.
+    for lib in library_order {
+        if let Some(origin) = header_origins_by_lib.remove(&lib) {
+            origins.headers.push(origin);
+        }
+    }
+
+    // `assemble` groups surfaces by library before it emits E3205. A plain
+    // span queue loses that identity when imported files reuse offsets, so
+    // derive the same per-library conflict order from the pre-drain snapshot.
+    for lib in order {
+        let Some(surface) = surfaces.get(&lib) else {
+            continue;
+        };
+        let mut merged = HashMap::new();
+        for (function, _) in &surface.bindgen {
+            merged.insert(function.name.clone(), function.clone());
+        }
+        for (function, origin) in &surface.overlay {
+            if let Some(previous) = merged.get_mut(&function.name) {
+                if !same_signature(previous, function) {
+                    origins.incompatible_overrides.push(origin.clone());
+                    continue;
+                }
+                *previous = function.clone();
+            } else {
+                merged.insert(function.name.clone(), function.clone());
+            }
+        }
+    }
+    origins
+}
+
+fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
+    let mut libs = Vec::new();
+    for module in &bundle.modules {
+        for import in &module.imports {
+            let lib = c_module_lib(import)
+                .or_else(|| c_header_lib(import).map(|(_, lib)| lib));
+            let Some(lib) = lib else {
+                continue;
+            };
+            if !libs.contains(&lib) {
+                libs.push(lib);
+            }
+        }
+    }
+
+    libs.into_iter()
+        .flat_map(|lib| {
+            let path = binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
+            let source = std::fs::read_to_string(&path).ok()?;
+            let (tokens, lex_diags) = crate::Lexer::lex_generated(&source);
+            let diagnostics = if !lex_diags.is_empty() {
+                lex_diags
+            } else {
+                match crate::Parser::parse(&tokens) {
+                    Ok(_) => Vec::new(),
+                    Err(parse_diags) => parse_diags,
+                }
+            };
+            Some(diagnostics.into_iter().map(move |diagnostic| CffiDiagnostic {
+                file: path.display().to_string(),
+                source: source.clone(),
+                diagnostic,
+            }))
+        })
+        .flatten()
+        .collect()
+}
+
+fn same_diagnostic(left: &Diagnostic, right: &Diagnostic) -> bool {
+    left.code == right.code
+        && left.what == right.what
+        && left.why == right.why
+        && left.fix == right.fix
+        && left.span == right.span
+}
+
 fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for module in &bundle.modules {

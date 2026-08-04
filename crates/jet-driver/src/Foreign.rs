@@ -382,7 +382,25 @@ pub fn is_active_namespace_import(imp: &ImportDecl) -> bool {
 /// active binders whose cache is already plain Jet source. Missing caches still
 /// get an empty synthetic module so unused imports type-check and real symbol
 /// use fails as a normal missing member until `jet inspect bind <lang>` materializes it.
+#[derive(Debug, Clone)]
+pub struct ForeignDiagnostic {
+    pub file: String,
+    pub source: String,
+    pub diagnostic: Diagnostic,
+}
+
 pub fn assemble_active_namespaces(bundle: &mut ProgramBundle) -> Result<(), Vec<Diagnostic>> {
+    assemble_active_namespaces_with_provenance(bundle).map_err(|diagnostics| {
+        diagnostics
+            .into_iter()
+            .map(|entry| entry.diagnostic)
+            .collect()
+    })
+}
+
+pub fn assemble_active_namespaces_with_provenance(
+    bundle: &mut ProgramBundle,
+) -> Result<(), Vec<ForeignDiagnostic>> {
     let mut surfaces: HashMap<(ForeignLanguage, String), usize> = HashMap::new();
     let user_module_count = bundle.modules.len();
 
@@ -404,22 +422,40 @@ pub fn assemble_active_namespaces(bundle: &mut ProgramBundle) -> Result<(), Vec<
                 continue;
             }
             if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
-                return Err(vec![Diagnostic::error(
-                    "E3260",
-                    "`com.*` needs a Windows host".to_string(),
-                    "COM automation depends on Windows apartments, the registry, and IDispatch"
-                        .to_string(),
-                    "build and run this module on a Windows host; use a non-COM boundary for other targets"
-                        .to_string(),
-                    Some(imp.span),
-                )]);
+                return Err(vec![ForeignDiagnostic {
+                    file: bundle.modules[idx].display.clone(),
+                    source: bundle.modules[idx].source.clone(),
+                    diagnostic: Diagnostic::error(
+                        "E3260",
+                        "`com.*` needs a Windows host".to_string(),
+                        "COM automation depends on Windows apartments, the registry, and IDispatch"
+                            .to_string(),
+                        "build and run this module on a Windows host; use a non-COM boundary for other targets"
+                            .to_string(),
+                        Some(imp.span),
+                    ),
+                }]);
             }
 
             let key = (ns.language, ns.lib.clone());
             let target_idx = if let Some(idx) = surfaces.get(&key).copied() {
                 idx
             } else {
-                let idx = materialize_namespace(bundle, ns.language, &ns.lib)?;
+                let idx = match materialize_namespace(bundle, ns.language, &ns.lib) {
+                    Ok(idx) => idx,
+                    Err(diagnostics) => {
+                        let path = binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
+                        let source = std::fs::read_to_string(&path).unwrap_or_default();
+                        return Err(diagnostics
+                            .into_iter()
+                            .map(|diagnostic| ForeignDiagnostic {
+                                file: path.display().to_string(),
+                                source: source.clone(),
+                                diagnostic,
+                            })
+                            .collect());
+                    }
+                };
                 surfaces.insert(key, idx);
                 idx
             };
