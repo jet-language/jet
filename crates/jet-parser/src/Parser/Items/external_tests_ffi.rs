@@ -259,7 +259,7 @@ impl<'a> Parser<'a> {
             metadata.cwd = Self::task_optional_string(arguments.parameter(1), marker.span, "cwd")?;
             metadata.inputs = Self::task_string_list(arguments.parameter(2), marker.span)?;
             metadata.outputs = Self::task_string_list(arguments.parameter(3), marker.span)?;
-            metadata.skip = Self::task_optional_string(arguments.parameter(4), marker.span, "skip")?;
+            metadata.skip = Self::task_skip(arguments.parameter(4), marker.span)?;
             if let Some(cache) = arguments.parameter(5) {
                 metadata.cache = match Self::task_word(cache) {
                     Some("Local") => crate::AST::TaskCachePolicy::Local,
@@ -321,6 +321,76 @@ impl<'a> Parser<'a> {
                 Some(_) => Ok(None),
                 None => Err(Self::task_metadata_error(field, "a string or name", marker_span)),
             }
+        }
+
+        fn task_skip(
+            expr: Option<&crate::AST::Expr>,
+            marker_span: Span,
+        ) -> Result<Option<crate::AST::TaskSkip>, Diagnostic> {
+            let Some(expr) = expr else { return Ok(None) };
+            if let Some(value) = Self::task_word(expr) {
+                return Ok((value != "none" && value != "None")
+                    .then(|| crate::AST::TaskSkip::Always(value.to_string())));
+            }
+            let crate::AST::Expr::EnumLit { variant, args, .. } = expr else {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    "a reason string or .Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            };
+            let [crate::AST::EnumLitArg::Positional(platform)] = args.as_slice() else {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            };
+            if variant != "Unless" {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            }
+            let crate::AST::Expr::EnumLit {
+                variant: platform_constructor,
+                args: platform_args,
+                ..
+            } = platform
+            else {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            };
+            let [crate::AST::EnumLitArg::Positional(platform)] = platform_args.as_slice() else {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            };
+            let Some(platform) = Self::task_word(platform) else {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            };
+            if platform_constructor != "Platform"
+                || !matches!(platform, "Linux" | "MacOS" | "Windows" | "FreeBSD")
+            {
+                return Err(Self::task_metadata_error(
+                    "skip",
+                    ".Unless(.Platform(.Linux))",
+                    marker_span,
+                ));
+            }
+            Ok(Some(crate::AST::TaskSkip::UnlessPlatform {
+                platform: platform.to_string(),
+            }))
         }
 
         fn task_limits(

@@ -25,6 +25,7 @@ use crate::Shell::{self, Env, ShellKind};
 use crate::Store;
 use crate::Syntax;
 use crate::Trust;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// `jetpack run [<ref>|<task>] [-- cmd…]`
@@ -229,7 +230,7 @@ pub(super) fn run_project_task_with_mode(
         return 2;
     }
     let metadata = project_task_metadata(entry, task).unwrap_or_default();
-    if let Some(reason) = metadata.skip.as_deref() {
+    if let Some(reason) = task_skip_reason(metadata.skip.as_ref()) {
         theme.status(&format!("skipping task {}: {}", theme.bold(task), reason));
         return 0;
     }
@@ -298,6 +299,14 @@ pub(super) fn run_project_task_with_mode(
         env.vars.insert(key, value.clone());
     }
 
+    let task_args: Vec<String> = parsed
+        .positional
+        .iter()
+        .skip(1)
+        .cloned()
+        .chain(parsed.command.iter().flatten().cloned())
+        .collect();
+
     let task_cwd = match task_path(project_dir, metadata.cwd.as_deref(), "cwd", false) {
         Ok(path) => path,
         Err(message) => {
@@ -319,40 +328,67 @@ pub(super) fn run_project_task_with_mode(
         );
         return 2;
     }
-    let cache_key = match task_cache_key(
-        project_dir,
-        entry,
-        task,
-        &metadata,
-        &plan.refs,
-        &plan.table,
-    ) {
-        Ok(key) => key,
-        Err(message) => {
+    let mut jet_binary = find_jet_binary();
+    let cache_key = if metadata.cache == crate::AST::TaskCachePolicy::Uncached {
+        None
+    } else {
+        if metadata.outputs.is_empty() {
             theme.error_coded(
                 "E1330",
-                &format!("task `{task}` has invalid cache inputs or outputs"),
-                &message,
-                "use existing project-relative input and output paths.",
+                &format!("task `{task}` enables caching without outputs"),
+                "a cached task needs at least one declared output so a later run can prove that the result still exists.",
+                "add `outputs: [\"path\"]`, or use `cache: .Uncached`.",
             );
             return 2;
         }
+        if let Err(message) = validate_cached_task_metadata(project_dir, &metadata) {
+            theme.error_coded(
+                "E1330",
+                &format!("task `{task}` has unsafe cache declarations"),
+                &message,
+                "declare every project input and keep cached outputs separate from inputs, or use `cache: .Uncached`.",
+            );
+            return 2;
+        }
+        jet_binary = match resolve_task_jet_binary(&env) {
+            Ok(path) => path,
+            Err(message) => {
+                theme.error_coded(
+                    "E1330",
+                    &format!("task `{task}` cannot resolve its compiler"),
+                    &message,
+                    "make the compiler named by the task environment available, or use `cache: .Uncached`.",
+                );
+                return 2;
+            }
+        };
+        let key = match task_cache_key(
+            project_dir,
+            entry,
+            task,
+            Path::new(&jet_binary),
+            &metadata,
+            &task_args,
+            &plan.refs,
+            &plan.table,
+        ) {
+            Ok(key) => key,
+            Err(message) => {
+                theme.error_coded(
+                    "E1330",
+                    &format!("task `{task}` has invalid cache inputs or outputs"),
+                    &message,
+                    "use existing project-relative input and output paths.",
+                );
+                return 2;
+            }
+        };
+        if task_cache_hit(project_dir, roots, &metadata, &key) {
+            theme.status(&format!("task {} is up to date", theme.bold(task)));
+            return 0;
+        }
+        Some(key)
     };
-    if metadata.cache != crate::AST::TaskCachePolicy::Uncached
-        && metadata.outputs.is_empty()
-    {
-        theme.error_coded(
-            "E1330",
-            &format!("task `{task}` enables caching without outputs"),
-            "a cached task needs at least one declared output so a later run can prove that the result still exists.",
-            "add `outputs: [\"path\"]`, or use `cache: .Uncached`.",
-        );
-        return 2;
-    }
-    if task_cache_hit(project_dir, roots, &metadata, &cache_key) {
-        theme.status(&format!("task {} is up to date", theme.bold(task)));
-        return 0;
-    }
 
     theme.status(&format!(
         "running task {} ({})",
@@ -360,13 +396,8 @@ pub(super) fn run_project_task_with_mode(
         theme.gray(&entry.display().to_string())
     ));
 
-    let mut task_args: Vec<String> = parsed.positional.iter().skip(1).cloned().collect();
-    if let Some(cmd) = &parsed.command {
-        task_args.extend(cmd.iter().cloned());
-    }
-
     let mut argv = vec![
-        find_jet_binary(),
+        jet_binary,
         "run".to_string(),
         format!("--task={task}"),
         entry.to_string_lossy().into_owned(),
@@ -375,7 +406,30 @@ pub(super) fn run_project_task_with_mode(
         argv.push("--".to_string());
         argv.extend(task_args);
     }
-    let code = if clean && silent {
+    let access_trace = cache_key
+        .as_deref()
+        .map(task_access_trace_path);
+    let code = if let Some(trace_path) = access_trace.as_deref() {
+        match run_task_with_access_trace(
+            &env,
+            &argv,
+            &task_cwd,
+            clean,
+            silent,
+            trace_path,
+        ) {
+            Ok(code) => code,
+            Err(message) => {
+                theme.error_coded(
+                    "E1330",
+                    &format!("task `{task}` cannot prove strict cache access"),
+                    &message,
+                    "run the cached task on a host with file-access tracing, or use `cache: .Uncached`.",
+                );
+                return 2;
+            }
+        }
+    } else if clean && silent {
         Shell::run_clean_command_in_silent(&env, &argv, Some(&task_cwd))
     } else if clean {
         Shell::run_clean_command_in(&env, &argv, Some(&task_cwd))
@@ -384,8 +438,43 @@ pub(super) fn run_project_task_with_mode(
     } else {
         Shell::run_command_in(&env, &argv, Some(&task_cwd))
     };
+    if code != 0 {
+        if let Some(path) = access_trace.as_deref() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
     if code == 0 {
-        if metadata.cache != crate::AST::TaskCachePolicy::Uncached {
+        if let Some(cache_key) = cache_key {
+            let undeclared = access_trace
+                .as_deref()
+                .map(|path| {
+                    let result = task_undeclared_accesses(project_dir, &task_cwd, entry, &metadata, path);
+                    let _ = std::fs::remove_file(path);
+                    result
+                })
+                .transpose();
+            let undeclared = match undeclared {
+                Ok(Some(paths)) => paths,
+                Ok(None) => Vec::new(),
+                Err(message) => {
+                    theme.error_coded(
+                        "E1330",
+                        &format!("task `{task}` access proof failed"),
+                        &message,
+                        "fix the trace file or use `cache: .Uncached` for tasks that cannot be proven.",
+                    );
+                    return 1;
+                }
+            };
+            if !undeclared.is_empty() {
+                theme.error_coded(
+                    "E1330",
+                    &format!("task `{task}` read undeclared project files"),
+                    &undeclared.join(", "),
+                    "declare every read path in `inputs`, or use `cache: .Uncached`.",
+                );
+                return 1;
+            }
             if !task_outputs_exist(project_dir, &metadata) {
                 theme.error_coded(
                     "E1330",
@@ -407,6 +496,127 @@ pub(super) fn run_project_task_with_mode(
         auto_clean_after_success(theme, roots);
     }
     code
+}
+
+fn task_access_trace_path(cache_key: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "jet-task-access-{}-{}.log",
+        std::process::id(),
+        &cache_key[..cache_key.len().min(24)]
+    ))
+}
+
+fn resolve_task_jet_binary(env: &Env) -> Result<String, String> {
+    let requested = find_jet_binary();
+    if let Some(stable) = env
+        .cache_leases
+        .iter()
+        .find_map(|lease| lease.executable(&requested))
+    {
+        return Ok(stable.to_string_lossy().into_owned());
+    }
+    Ok(resolve_executable_path(&requested)?.to_string_lossy().into_owned())
+}
+
+fn run_task_with_access_trace(
+    env: &Env,
+    argv: &[String],
+    cwd: &Path,
+    clean: bool,
+    silent: bool,
+    trace_path: &Path,
+) -> Result<i32, String> {
+    if !cfg!(target_os = "linux") {
+        return Err("strict cached task access tracing is currently supported only on Linux".to_string());
+    }
+    let tracer = resolve_executable_path("strace")?;
+    let _ = std::fs::remove_file(trace_path);
+    let mut traced = vec![
+        tracer.to_string_lossy().into_owned(),
+        "-f".to_string(),
+        "-qq".to_string(),
+        "-e".to_string(),
+        "trace=%file".to_string(),
+        "-o".to_string(),
+        trace_path.to_string_lossy().into_owned(),
+    ];
+    traced.extend_from_slice(argv);
+    let code = if clean && silent {
+        Shell::run_clean_command_in_silent(env, &traced, Some(cwd))
+    } else if clean {
+        Shell::run_clean_command_in(env, &traced, Some(cwd))
+    } else if silent {
+        Shell::run_command_in_silent(env, &traced, Some(cwd))
+    } else {
+        Shell::run_command_in(env, &traced, Some(cwd))
+    };
+    if !trace_path.is_file() {
+        return Err("file-access tracer completed without producing an access log".to_string());
+    }
+    Ok(code)
+}
+
+fn task_undeclared_accesses(
+    project_dir: &Path,
+    task_cwd: &Path,
+    entry: &Path,
+    metadata: &crate::AST::TaskMetadata,
+    trace_path: &Path,
+) -> Result<Vec<String>, String> {
+    let trace = std::fs::read_to_string(trace_path)
+        .map_err(|error| format!("couldn't read file-access trace: {error}"))?;
+    let project_root = project_dir
+        .canonicalize()
+        .map_err(|error| format!("couldn't resolve project root for access proof: {error}"))?;
+    let entry = entry
+        .canonicalize()
+        .map_err(|error| format!("couldn't resolve task entry for access proof: {error}"))?;
+    let declared = metadata
+        .inputs
+        .iter()
+        .map(|input| task_path(project_dir, Some(input), "input", true))
+        .collect::<Result<Vec<_>, _>>()?;
+    let outputs = metadata
+        .outputs
+        .iter()
+        .map(|output| task_path(project_dir, Some(output), "output", true))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut unexpected = BTreeSet::new();
+    for raw in trace.lines().filter_map(strace_path) {
+        let path = Path::new(raw);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            task_cwd.join(path)
+        };
+        let path = if path.exists() {
+            path.canonicalize().unwrap_or(path)
+        } else {
+            path
+        };
+        if !path.starts_with(&project_root)
+            || path.starts_with(project_root.join(".git"))
+            || path.starts_with(project_root.join("target"))
+            || path == entry
+            || declared.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
+            || outputs.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
+        {
+            continue;
+        }
+        unexpected.insert(path.to_string_lossy().replace('\\', "/"));
+    }
+    Ok(unexpected.into_iter().collect())
+}
+
+fn strace_path(line: &str) -> Option<&str> {
+    let start = line.find('"')? + 1;
+    let end = start + line[start..].find('"')?;
+    let path = &line[start..end];
+    if path.is_empty() || path == "?" || path.contains('\\') {
+        None
+    } else {
+        Some(path)
+    }
 }
 
 fn empty_task_plan() -> RunPlan {
@@ -443,6 +653,10 @@ fn task_limit_env_name(name: &str) -> String {
         out.push(if ch.is_ascii_alphanumeric() { ch.to_ascii_uppercase() } else { '_' });
     }
     out
+}
+
+fn task_skip_reason(skip: Option<&crate::AST::TaskSkip>) -> Option<String> {
+    skip.and_then(|rule| rule.reason_for_host(&crate::Envelope::host_platform()))
 }
 
 fn task_path(
@@ -492,18 +706,28 @@ fn task_cache_key(
     project_dir: &Path,
     entry: &Path,
     task: &str,
+    compiler_path: &Path,
     metadata: &crate::AST::TaskMetadata,
+    task_args: &[String],
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
 ) -> Result<String, String> {
     let mut identity = String::from("jet-task-cache-v2\n");
     identity.push_str(task);
     identity.push('\n');
+    identity.push_str(&format!("compiler={}\n", env!("CARGO_PKG_VERSION")));
+    identity.push_str(&format!(
+        "compiler-build={}\n",
+        crate::SHA256::sha256_file_hex(&compiler_path)
+            .map_err(|error| format!("couldn't hash compiler `{}`: {error}", compiler_path.display()))?
+    ));
+    identity.push_str(&format!("platform={}\n", crate::Envelope::host_platform()));
     identity.push_str(
         &crate::SHA256::sha256_file_hex(entry)
             .map_err(|error| format!("couldn't hash task entry: {error}"))?,
     );
     identity.push('\n');
+    identity.push_str(&format!("args={task_args:?}\n"));
     identity.push_str(&format!("packages={:?}\n", metadata.packages));
     identity.push_str(&format!("inputs={:?}\n", metadata.inputs));
     identity.push_str(&format!("outputs={:?}\n", metadata.outputs));
@@ -546,7 +770,139 @@ fn task_cache_key(
         let path = task_path(project_dir, Some(output), "output", true)?;
         identity.push_str(&format!("output={output}:{}\n", path.display()));
     }
+    if metadata.cache != crate::AST::TaskCachePolicy::Uncached {
+        identity.push_str(&format!(
+            "project-scope={}\n",
+            task_project_scope_fingerprint(project_dir, metadata)?
+        ));
+    }
     Ok(crate::SHA256::sha256_hex(identity.as_bytes()))
+}
+
+fn resolve_executable_path(program: &str) -> Result<PathBuf, String> {
+    let path = Path::new(program);
+    if path.is_absolute() || path.components().count() > 1 {
+        return path
+            .canonicalize()
+            .map_err(|error| format!("couldn't resolve compiler `{program}`: {error}"));
+    }
+    let search = std::env::var_os("PATH")
+        .ok_or_else(|| format!("couldn't resolve compiler `{program}`: PATH is unavailable"))?;
+    for directory in std::env::split_paths(&search) {
+        let candidate = directory.join(program);
+        if candidate.is_file() {
+            return candidate
+                .canonicalize()
+                .map_err(|error| format!("couldn't resolve compiler `{program}`: {error}"));
+        }
+    }
+    Err(format!("couldn't resolve compiler `{program}` through PATH"))
+}
+
+fn validate_cached_task_metadata(
+    project_dir: &Path,
+    metadata: &crate::AST::TaskMetadata,
+) -> Result<(), String> {
+    if metadata.cache == crate::AST::TaskCachePolicy::Uncached {
+        return Ok(());
+    }
+    if metadata.inputs.is_empty() {
+        return Err(
+            "strict cached tasks must declare at least one project input; undeclared reads cannot be proven safe".to_string(),
+        );
+    }
+    let outputs = metadata
+        .outputs
+        .iter()
+        .map(|output| task_path(project_dir, Some(output), "output", true).map(|path| (output, path)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let inputs = metadata
+        .inputs
+        .iter()
+        .map(|input| task_path(project_dir, Some(input), "input", true).map(|path| (input, path)))
+        .collect::<Result<Vec<_>, _>>()?;
+    for (output, output_path) in outputs {
+        if inputs.iter().any(|(_, input)| {
+            input == &output_path || input.starts_with(&output_path) || output_path.starts_with(input)
+        }) {
+            return Err(format!(
+                "cached task input `{}` overlaps output `{output}`",
+                inputs
+                    .iter()
+                    .find(|(_, input)| {
+                        input == &output_path
+                            || input.starts_with(&output_path)
+                            || output_path.starts_with(input)
+                    })
+                    .map(|(name, _)| name.as_str())
+                    .unwrap_or("<unknown>")
+            ));
+        }
+    }
+    for (input_name, input_path) in &inputs {
+        if !input_path.exists() {
+            return Err(format!("task input `{input_name}` does not exist"));
+        }
+    }
+    Ok(())
+}
+
+fn task_project_scope_fingerprint(
+    project_dir: &Path,
+    metadata: &crate::AST::TaskMetadata,
+) -> Result<String, String> {
+    let mut files = Vec::new();
+    collect_task_scope_files(project_dir, project_dir, metadata, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut identity = String::from("jet-task-project-scope-v1\n");
+    for (path, digest) in files {
+        identity.push_str(&path);
+        identity.push('=');
+        identity.push_str(&digest);
+        identity.push('\n');
+    }
+    Ok(crate::SHA256::sha256_hex(identity.as_bytes()))
+}
+
+fn collect_task_scope_files(
+    root: &Path,
+    directory: &Path,
+    metadata: &crate::AST::TaskMetadata,
+    files: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("couldn't read task cache scope `{}`: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?;
+        if relative.components().next().is_some_and(|component| {
+            matches!(component, std::path::Component::Normal(name) if name == ".jet" || name == ".git" || name == "target")
+        }) || metadata.outputs.iter().any(|output| {
+            let output = Path::new(output);
+            relative == output || relative.starts_with(output)
+        }) {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() {
+            collect_task_scope_files(root, &path, metadata, files)?;
+        } else if file_type.is_file() {
+            files.push((
+                relative.to_string_lossy().replace('\\', "/"),
+                crate::SHA256::sha256_file_hex(&path)
+                    .map_err(|error| format!("couldn't hash task scope `{}`: {error}", relative.display()))?,
+            ));
+        } else if file_type.is_symlink() {
+            return Err(format!(
+                "strict cached task scope contains unsupported symlink `{}`",
+                relative.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn task_cache_path(
@@ -1747,4 +2103,149 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     // of its own, so everything here is pass-through.
     cmd.extend(parsed.positional.iter().cloned());
     Shell::run_command(&env, &cmd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_cache_key_changes_when_task_arguments_change() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-task-cache-key-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
+        let metadata = crate::AST::TaskMetadata::default();
+        let table = RefSpec::SourceTable::empty();
+        let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
+
+        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["one".to_string()], &[], &table)
+            .unwrap();
+        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["two".to_string()], &[], &table)
+            .unwrap();
+        assert_ne!(first, second);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_platform_skip_only_skips_outside_its_declared_host() {
+        let linux = crate::AST::TaskSkip::UnlessPlatform {
+            platform: "Linux".to_string(),
+        };
+        let macos = crate::AST::TaskSkip::UnlessPlatform {
+            platform: "MacOS".to_string(),
+        };
+        assert!(linux.reason_for_host("aarch64-macos").is_some());
+        assert!(linux.reason_for_host("x86_64-linux").is_none());
+        assert!(macos.reason_for_host("x86_64-linux").is_some());
+        assert!(macos.reason_for_host("aarch64-macos").is_none());
+        assert_eq!(
+            task_skip_reason(Some(&crate::AST::TaskSkip::Always("manual".to_string())))
+                .as_deref(),
+            Some("manual")
+        );
+    }
+
+    #[test]
+    fn strict_cached_tasks_need_declared_inputs_and_reject_overlap() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-task-cache-declarations-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("input.txt"), "input\n").unwrap();
+        let mut metadata = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        assert!(validate_cached_task_metadata(&root, &metadata)
+            .unwrap_err()
+            .contains("must declare at least one project input"));
+        metadata.inputs = vec!["input.txt".to_string()];
+        assert!(validate_cached_task_metadata(&root, &metadata).is_ok());
+        metadata.inputs = vec!["out.txt".to_string()];
+        assert!(validate_cached_task_metadata(&root, &metadata)
+            .unwrap_err()
+            .contains("overlaps output"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn strict_cached_tasks_reject_undeclared_project_access() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-task-access-proof-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        let input = root.join("input.txt");
+        let hidden = root.join("hidden.jet");
+        let secret = root.join("secret.txt");
+        let state_dir = root.join(".jet");
+        let state_secret = state_dir.join("credentials");
+        let trace = root.join("access.log");
+        std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
+        std::fs::write(&input, "input\n").unwrap();
+        std::fs::write(&hidden, "hidden\n").unwrap();
+        std::fs::write(&secret, "secret\n").unwrap();
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(&state_secret, "secret\n").unwrap();
+        std::fs::write(
+            &trace,
+            format!(
+                "123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 3\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 4\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 5\n123 openat(AT_FDCWD, \"{}\", O_RDONLY) = 6\n",
+                input.display(),
+                hidden.display(),
+                secret.display(),
+                state_secret.display()
+            ),
+        )
+        .unwrap();
+        let metadata = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            inputs: vec!["input.txt".to_string()],
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        let accesses = task_undeclared_accesses(&root, &root, &entry, &metadata, &trace).unwrap();
+        assert_eq!(
+            accesses,
+            vec![
+                state_secret.to_string_lossy().replace('\\', "/"),
+                hidden.to_string_lossy().replace('\\', "/"),
+                secret.to_string_lossy().replace('\\', "/")
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_cache_key_changes_when_an_unlisted_project_file_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-task-cache-scope-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
+        std::fs::write(root.join("undeclared.txt"), "one\n").unwrap();
+        let metadata = crate::AST::TaskMetadata {
+            cache: crate::AST::TaskCachePolicy::Local,
+            inputs: vec!["main.jet".to_string()],
+            outputs: vec!["out.txt".to_string()],
+            ..Default::default()
+        };
+        let table = RefSpec::SourceTable::empty();
+        let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
+        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table).unwrap();
+        std::fs::write(root.join("undeclared.txt"), "two\n").unwrap();
+        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table).unwrap();
+        assert_ne!(first, second);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

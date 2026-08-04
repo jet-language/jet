@@ -206,6 +206,48 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
 }
 
 #[test]
+fn task_metadata_binds_typed_platform_skip_and_formats_stably() {
+    for (platform, spelling) in [("Linux", ".Linux"), ("MacOS", ".MacOS")] {
+        let source = format!(
+            "#Job(skip: .Unless(.Platform({spelling}))) fn build() {{}}\nfn run() {{}}\n"
+        );
+        let (tokens, lexer_diagnostics) = jet::Lexer::lex(&source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = jet::Parser::parse(&tokens).expect("typed task skip should parse");
+        let function = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                jet::AST::Item::Func(function) if function.name == "build" => Some(function),
+                _ => None,
+            })
+            .expect("build task");
+        assert!(matches!(
+            function
+                .task_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.skip.as_ref()),
+            Some(jet::AST::TaskSkip::UnlessPlatform { platform: actual })
+                if actual == platform
+        ));
+        let skip = function
+            .task_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.skip.as_ref())
+            .expect("typed task skip");
+        assert_eq!(skip.reason_for_host("aarch64-macos").is_none(), platform == "MacOS");
+        assert_eq!(skip.reason_for_host("x86_64-linux").is_none(), platform == "Linux");
+
+        let formatted = jet::format_source(&source).expect("typed task skip should format");
+        assert!(
+            formatted.contains(&format!("skip: .Unless(.Platform({spelling}))")),
+            "{formatted}"
+        );
+        assert_eq!(formatted, jet::format_source(&formatted).unwrap());
+    }
+}
+
+#[test]
 fn adjacent_method_markers_keep_the_shared_e0999_rewrite() {
     let source =
         "state Door { Ready }\nstruct Door { #Inline #State(Ready) fn open(self) {} }\nfn run() {}";

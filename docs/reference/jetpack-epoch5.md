@@ -133,6 +133,19 @@ inside the project, including after symlink resolution. A changed hook or
 lifecycle policy changes the environment trust identity, so the next entry
 needs a new trust decision.
 
+Task metadata stays on the `#Job` marker. Bare tasks use the current project
+directory and remain uncached. Typed fields can add task-local packages, a
+project-relative `cwd`, declared `inputs` and `outputs`, a typed skip reason,
+cache policy, authority, and limits. Platform skips use `Linux`, `MacOS`,
+`Windows`, or `FreeBSD` and report why the task did not run. Direct task runs
+and scheduled `jet dev` runs apply the same skip rule.
+
+Cached tasks require declared inputs and outputs. Their identity includes task
+arguments, locked package facts, policy, platform, compiler bytes, and project
+inputs. Strict cached runs trace project file access and refuse to record a
+cache result when the task reads an undeclared project path; use
+`cache: .Uncached` when the task is intentionally dynamic.
+
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
 
@@ -294,8 +307,10 @@ reported as unsupported evaluator input; they are not empty or guessed values.
 The typed Package model owns one reversible transition journal. `jet init
 --check` previews migration from retired `pkg.jet`, `env.jet`, `workspace.jet`,
 or `config.jet` files; `jet init` applies only closed facts and refuses unknown
-or open fields before writing. `jet init --restore-role-files` reverses the
-last migration and restores the original bytes.
+or open fields before writing. An `env.<name>` module becomes a typed
+`environments.<name>` Config contribution; it is not copied as an unrelated
+top-level field. `jet init --restore-role-files` reverses the last migration
+and restores the original bytes.
 
 Growth uses the same journal: `jet split env`, `jet split package <name>`, and
 `jet split hosts <name>` preview by default when `--check` is present. A split

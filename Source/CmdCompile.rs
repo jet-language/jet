@@ -847,6 +847,22 @@ pub(crate) fn run_task_entry(
         report_problems(mode, file, &src, &[diag]);
         exit(ExitCodes::USER_ERROR);
     }
+    if let Ok(tasks) = &declared {
+        if let Some(reason) = tasks
+            .iter()
+            .find(|item| item.name == task)
+            .and_then(|item| item.metadata.as_ref())
+            .and_then(|metadata| {
+                metadata
+                    .skip
+                    .as_ref()
+                    .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
+            })
+        {
+            println!("skipping task `{task}`: {reason}");
+            return;
+        }
+    }
     let out = match jet::compile_with_entry(file, task) {
         Ok(out) => out,
         Err(diags) => {
@@ -893,6 +909,7 @@ struct TaskListing {
     name: String,
     doc: Option<String>,
     schedule: Option<String>,
+    metadata: Option<jet::AST::TaskMetadata>,
 }
 
 fn marker_string(marker: &jet::AST::Marker) -> Option<String> {
@@ -948,6 +965,7 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
                     name: f.name.clone(),
                     doc,
                     schedule: f.every.as_ref().and_then(schedule_text),
+                    metadata: f.task_metadata.clone(),
                 })
             }
             _ => None,
