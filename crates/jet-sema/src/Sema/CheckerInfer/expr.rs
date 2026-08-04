@@ -2514,6 +2514,25 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         self.borrow_ctx = true;
         let base_ty = self.infer(base)?;
+        if let Expr::Ident(name, selector_span) = index.as_ref() {
+            if let Some(field) = crate::Syntax::layout_selector_name(name) {
+                if base_ty != Type::Named(crate::Syntax::TYPE_LAYOUT_INFO.to_string()) {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!(
+                            "layout field selector `.{field}` needs a `{}` value",
+                            crate::Syntax::TYPE_LAYOUT_INFO
+                        ),
+                        "typed `[.field]` selection is only defined on `T.$layout`"
+                            .to_string(),
+                        "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                        Some(*selector_span),
+                    ));
+                }
+                *kind = IndexKind::LayoutField(field.to_string());
+                return Some(Type::Named(crate::Syntax::TYPE_LAYOUT_FIELD.to_string()));
+            }
+        }
         let idx_ty = self.infer(index)?;
         match &base_ty {
             Type::List(inner) => {

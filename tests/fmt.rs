@@ -1719,6 +1719,40 @@ fn fmt_comptime_splice_stability() {
 }
 
 #[test]
+fn fmt_layout_compiler_fact_and_field_selector_stability() {
+    let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+    let once = jet::format_source(src).expect("layout compiler fact should parse");
+    assert!(once.contains("T.$layout"), "fact spelling was lost:\n{once}");
+    assert!(once.contains("info[.count]"), "typed selector spelling was lost:\n{once}");
+    assert!(once.contains("T.reflect().layout"), "reflection projection was lost:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted layout fact should parse");
+    assert_eq!(once, twice, "layout fact formatting must be idempotent");
+}
+
+#[test]
+fn layout_compiler_fact_rejects_unknown_and_user_owned_dollar_members() {
+    let unknown = jet::Compiler::parse_source(
+        "derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n",
+    );
+    let unknown = unknown
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0302")
+        .expect("unknown compiler fact should have a registered diagnostic");
+    assert!(unknown.message.contains("$unknown"), "{unknown:?}");
+    assert!(unknown.fix.contains("$layout"), "{unknown:?}");
+
+    let user_member = jet::Compiler::parse_source(
+        "struct Bad { $layout: Int }\nfn run() {}\n",
+    );
+    assert!(
+        user_member.diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+        "user declarations must not claim the compiler-owned dollar member: {:?}",
+        user_member.diagnostics
+    );
+}
+
+#[test]
 fn fmt_impl_dot_trait_stability() {
     // D-IMPLDOT1=A: `impl Type.Trait { … }` round-trips unchanged.
     let src = "\

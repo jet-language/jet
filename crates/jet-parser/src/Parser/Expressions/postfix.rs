@@ -340,7 +340,28 @@ impl<'a> Parser<'a> {
                     }
                     TokKind::LBracket => {
                         let open = self.bump().span;
-                        let start = self.expr()?;
+                        // D-LAYOUT-FACTS1=B: `[.field]` is a typed selector,
+                        // not a leading-dot enum literal. Store it in the
+                        // existing identifier node with an internal sentinel;
+                        // formatter and TIR unwrap it at their boundaries.
+                        let start = if matches!(self.peek().kind, TokKind::Dot)
+                            && matches!(&self.peek2().kind, TokKind::Ident(_))
+                            && matches!(
+                                self.peek3().kind,
+                                TokKind::RBracket | TokKind::DotDot
+                            )
+                        {
+                            let dot = self.bump().span;
+                            let (name, name_span) = self.expect_ident(
+                                "after `.` in a layout field selector",
+                            )?;
+                            Expr::Ident(
+                                Syntax::layout_selector(&name),
+                                Span::new(dot.start, name_span.end),
+                            )
+                        } else {
+                            self.expr()?
+                        };
                         if matches!(self.peek().kind, TokKind::DotDot) {
                             self.bump();
                             let end = self.expr()?;

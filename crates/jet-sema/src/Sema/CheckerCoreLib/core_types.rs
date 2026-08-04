@@ -315,7 +315,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DecodeResult" | "MigrationStatus"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
         | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
         | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"
@@ -676,6 +676,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {
             "name" | "module" | "identity" | "kind" => Some(Type::String),
+            "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
             "type_params" => Some(Type::List(Box::new(Type::Named("TypeParamInfo".to_string())))),
@@ -685,6 +686,23 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "transitions" => Some(Type::List(Box::new(Type::Named("TransitionInfo".to_string())))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_LAYOUT_INFO {
+        return match field {
+            "kind" | "target" | "guarantee" | "source" => Some(Type::String),
+            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
+            "fields" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_LAYOUT_FIELD.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_LAYOUT_FIELD {
+        return match field {
+            "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
+            "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
     }

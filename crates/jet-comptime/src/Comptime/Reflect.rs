@@ -3,7 +3,7 @@
 //! `T.reflect()` in a derive body receives a `TypeInfo` value whose `.fields`,
 //! `.methods`, `.type_params`, and `.markers` expose the target type's shape.
 
-use crate::AST::{EnumDef, Field, Func, Marker, StructDef, TypeParam, VariantPayload};
+use crate::AST::{EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
 
 use super::Value::CtValue;
 
@@ -28,6 +28,114 @@ fn ct_bool(b: bool) -> CtValue {
 
 fn ct_list(xs: Vec<CtValue>) -> CtValue {
     CtValue::List(xs)
+}
+
+fn unknown_layout_bytes() -> CtValue {
+    // D-LAYOUT-FACTS1=B: byte facts stay absent until a canonical target
+    // layout engine exists. `None(Int)` is the typed optional value used by
+    // the public `LayoutInfo`/`LayoutField` model.
+    CtValue::None(crate::AST::Type::Int)
+}
+
+fn layout_field_info(
+    name: impl Into<String>,
+    ty: impl Into<String>,
+    guarantee: &str,
+    source: &str,
+) -> CtValue {
+    ct_struct(
+        crate::Syntax::TYPE_LAYOUT_FIELD,
+        &[
+            ("name", ct_str(name)),
+            ("ty", ct_str(ty)),
+            ("offset", unknown_layout_bytes()),
+            ("size", unknown_layout_bytes()),
+            ("target", ct_str("unknown")),
+            ("guarantee", ct_str(guarantee)),
+            ("source", ct_str(source)),
+        ],
+    )
+}
+
+fn layout_info(
+    kind: &str,
+    guarantee: &str,
+    source: &str,
+    fields: impl IntoIterator<Item = (String, String)>,
+) -> CtValue {
+    ct_struct(
+        crate::Syntax::TYPE_LAYOUT_INFO,
+        &[
+            ("kind", ct_str(kind)),
+            ("size", unknown_layout_bytes()),
+            ("alignment", unknown_layout_bytes()),
+            ("stride", unknown_layout_bytes()),
+            ("target", ct_str("unknown")),
+            ("guarantee", ct_str(guarantee)),
+            ("source", ct_str(source)),
+            (
+                "fields",
+                ct_list(
+                    fields
+                        .into_iter()
+                        .map(|(name, ty)| layout_field_info(name, ty, guarantee, source))
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+fn layout_info_for_struct(s: &StructDef) -> CtValue {
+    let (kind, guarantee) = match s.layout.as_ref() {
+        Some(StructLayout::C) => ("c", "repr(C) declaration"),
+        Some(StructLayout::Columnar) => ("columnar", "columnar storage declaration"),
+        None => ("default", "physical layout unspecified"),
+    };
+    layout_info(
+        kind,
+        guarantee,
+        "struct declaration",
+        s.fields
+            .iter()
+            .map(|field| (field.name.clone(), field.ty.name())),
+    )
+}
+
+/// Build the focused layout projection for a struct without exposing the
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+pub fn build_struct_layout_info(s: &StructDef) -> CtValue {
+    layout_info_for_struct(s)
+}
+
+fn layout_info_for_enum(def: &EnumDef) -> CtValue {
+    let fields = def.variants.iter().map(|variant| {
+        let ty = match &variant.payload {
+            VariantPayload::Unit => "Unit".to_string(),
+            VariantPayload::Single(ty, _) => ty.name(),
+            VariantPayload::Named(fields) => format!(
+                "{{{}}}",
+                fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, field.ty.name()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        (variant.name.clone(), ty)
+    });
+    layout_info(
+        "default",
+        "enum physical layout unspecified",
+        "enum declaration",
+        fields,
+    )
+}
+
+/// Build the focused layout projection for an enum without exposing the
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+pub fn build_enum_layout_info(def: &EnumDef) -> CtValue {
+    layout_info_for_enum(def)
 }
 
 fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
@@ -324,6 +432,7 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
 
 pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> CtValue {
     let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
+    let layout = build_struct_layout_info(s);
     let methods_info: Vec<CtValue> = s.methods.iter().map(build_method_info).collect();
     let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
     let state_info = states
@@ -366,6 +475,7 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
         "TypeInfo",
         &[
             ("name", ct_str(s.name.clone())),
+            ("layout", layout),
             (
                 "span",
                 ct_struct(
@@ -419,6 +529,7 @@ fn qualified_method_info(method: &Func, module: &str, owner: &str) -> CtValue {
 }
 
 fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
+    let layout = build_enum_layout_info(def);
     let variants = def.variants.iter().map(|variant| {
         let ty = match &variant.payload {
             VariantPayload::Unit => "Unit".to_string(),
@@ -463,6 +574,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         .collect();
     qualify_info(ct_struct("TypeInfo", &[
         ("name", ct_str(def.name.clone())),
+        ("layout", layout),
         ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[("start", CtValue::Int(def.name_span.start as i64)), ("end", CtValue::Int(def.name_span.end as i64))])),
         ("fields", ct_list(variants)),
         ("methods", ct_list(methods)),

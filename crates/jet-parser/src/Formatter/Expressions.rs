@@ -720,7 +720,16 @@ impl<'a> Fmt<'a> {
             Expr::Index { base, index, .. } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
-                self.fmt_expr(index, Prec::OrFallback);
+                if let Expr::Ident(name, _) = index.as_ref() {
+                    if let Some(field) = Syntax::layout_selector_name(name) {
+                        self.write(".");
+                        self.write(field);
+                    } else {
+                        self.fmt_expr(index, Prec::OrFallback);
+                    }
+                } else {
+                    self.fmt_expr(index, Prec::OrFallback);
+                }
                 self.write("]");
             }
             Expr::Slice {

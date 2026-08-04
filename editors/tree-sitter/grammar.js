@@ -1021,9 +1021,13 @@ module.exports = grammar({
         seq(
           field("object", $._expr),
           choice(".", "?."),
-          field("field", choice($.identifier, $.type_identifier)),
+          field("field", choice($.identifier, $.type_identifier, $.compiler_fact)),
         ),
       ),
+
+    // D-LAYOUT-FACTS1=B: `$layout` is a compiler-owned member after a type
+    // expression. `$name` remains a comptime splice in expression position.
+    compiler_fact: ($) => seq("$", field("name", $.identifier)),
 
     // Postfix deref `p.*` (D-CAP7).
     deref_expr: ($) => prec.left(4, seq($._expr, ".", "*")),

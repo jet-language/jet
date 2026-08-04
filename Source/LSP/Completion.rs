@@ -124,6 +124,40 @@ fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
     None
 }
 
+/// D-LAYOUT-FACTS1=B: completion context for the compiler-owned dollar
+/// member. It is kept separate from ordinary member completion because dollar
+/// is not part of an identifier prefix.
+fn context_is_compiler_fact_access(src: &str, offset: usize) -> Option<(String, String)> {
+    let before = &src[..offset.min(src.len())];
+    let dollar = before.rfind('$')?;
+    let dot = dollar.checked_sub(1)?;
+    if before.as_bytes().get(dot) != Some(&b'.') {
+        return None;
+    }
+    let receiver_end = dot;
+    let mut receiver_start = receiver_end;
+    while receiver_start > 0
+        && (before.as_bytes()[receiver_start - 1].is_ascii_alphanumeric()
+            || before.as_bytes()[receiver_start - 1] == b'_')
+    {
+        receiver_start -= 1;
+    }
+    if receiver_start == receiver_end {
+        return None;
+    }
+    let suffix = &before[dollar..];
+    if !suffix[1..]
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return None;
+    }
+    Some((
+        before[receiver_start..receiver_end].to_string(),
+        suffix.to_string(),
+    ))
+}
+
 /// Is the cursor inside a switch body for an enum type?
 fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Option<&'a str> {
     // Look backward for `when <ident> {` pattern
@@ -264,6 +298,31 @@ pub(crate) fn compute_completions(
     }
 
     // Member completion: `expr.`
+    if let Some((receiver_name, prefix)) = context_is_compiler_fact_access(src, offset) {
+        let is_type = db.defs.iter().any(|def| {
+            def.name == receiver_name
+                && matches!(&def.kind, SymKind::Struct { .. } | SymKind::Type)
+        }) || receiver_name
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase());
+        if is_type && Syntax::COMPILER_FACT_LAYOUT.starts_with(&prefix) {
+            items.push(CompletionItem {
+                label: Syntax::COMPILER_FACT_LAYOUT.to_string(),
+                kind: ck::PROPERTY,
+                detail: Some(format!("compiler fact: {}", Syntax::TYPE_LAYOUT_INFO)),
+                documentation: Some(
+                    "Focused layout facts; byte values remain unknown when the target layout is not guaranteed."
+                        .to_string(),
+                ),
+                insert_text: None,
+                insert_text_format: 1,
+                auto_import: None,
+            });
+        }
+        return items;
+    }
+
     if let Some(receiver_name) = context_is_member_access(src, offset) {
         let owner = if receiver_name == crate::Syntax::DURATION_TYPE
             || crate::AST::numeric_type_from_name(&receiver_name).is_some()

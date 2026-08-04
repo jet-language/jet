@@ -100,8 +100,8 @@ pub fn data_status_rows() -> Vec<(
 pub use Methods::apply_dollar_splices;
 pub use Purity::{check_build_time_io, walk_calls, walk_identifiers};
 pub use Reflect::{
-    build_program_info, build_struct_type_info, build_struct_type_info_with_states,
-    ProgramSemanticFacts,
+    build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
+    build_struct_type_info_with_states, ProgramSemanticFacts,
 };
 pub use Value::CtValue;
 

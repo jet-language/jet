@@ -10300,6 +10300,72 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-LAYOUT-FACTS1=B: the focused fact and full reflection projection share
+/// one typed layout model, including typed field selection and explicit
+/// provenance for the default, C, and columnar declarations.
+#[test]
+fn user_derive_layout_fact_matches_reflection_projection() {
+    let dir = std::env::temp_dir().join(format!("jet_layout_facts_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+derive T.LayoutFacts {
+    info :: T.$layout
+    reflected :: T.reflect().layout
+    selected :: info[.count]
+    kind :: info.kind
+    target :: info.target
+    guarantee :: info.guarantee
+    source :: info.source
+    reflected_kind :: reflected.kind
+    field_name :: selected.name
+    name :: T.reflect().name
+    emit("impl $name {{ fn layout_facts(self) => String {{ return \"$kind:$target:$guarantee:$source:$reflected_kind:$field_name\" }} }}")
+}
+
+#LayoutFacts
+struct Packet {
+    count: Int
+    label: String
+}
+
+#Layout(c)
+struct CPacket {
+    count: U32
+    flag: U8
+
+    derive LayoutFacts
+}
+
+#Layout(columnar)
+struct ColumnPacket {
+    count: Int
+    label: String
+
+    derive LayoutFacts
+}
+
+fn run() {
+    packet := Packet.{ count: 2, label: "ok" }
+    c_packet := CPacket.{ count: 2, flag: 1 }
+    column_packet := ColumnPacket.{ count: 2, label: "ok" }
+    print(packet.layout_facts())
+    print(c_packet.layout_facts())
+    print(column_packet.layout_facts())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "layout_facts", src, &[], None);
+    assert_eq!(code, 0, "layout facts derive failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "default:unknown:physical layout unspecified:struct declaration:default:count\n"
+            .to_string()
+            + "c:unknown:repr(C) declaration:struct declaration:c:count\n"
+            + "columnar:unknown:columnar storage declaration:struct declaration:columnar:count\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Card #129 / R11: generated declarations are ordinary Jet items. They must
 /// be registered before later generated code (here `#[Codable]`) is checked,
 /// and `#[Default(expr)]` must retain its exact compile-time value.

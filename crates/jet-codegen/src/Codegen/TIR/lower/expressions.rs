@@ -1784,6 +1784,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // covered function never reaches here with a non-struct receiver (sema
         // guarantees field reads target struct values).
         Expr::Field(receiver, member, _) => {
+            // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
+            // comptime `TypeInfo` value, but fragment lowering has no ordinary
+            // local type fact for that binding. Keep `$layout` on the field
+            // path so `T.$layout` is not mistaken for an enum literal.
+            let compiler_fact_receiver = match receiver.as_ref() {
+                // A qualified type path lowers as a field chain. The final
+                // segment is still the type name (`module.Packet`), while a
+                // value path such as `info.layout` remains lowercase.
+                Expr::Ident(name, _) | Expr::Field(_, name, _) => {
+                    name.chars().next().is_some_and(char::is_uppercase)
+                }
+                _ => false,
+            };
+            if member == Syntax::COMPILER_FACT_LAYOUT && compiler_fact_receiver {
+                let recv = lower_expr(receiver, cx, env);
+                return TExpr {
+                    ty: Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+                    kind: TExprKind::Field {
+                        recv: Box::new(recv),
+                        field: member.clone(),
+                        boxed: false,
+                    },
+                };
+            }
             // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
             // a `Field` whose receiver is the enum-name ident (sema re-types but does
             // not rewrite the node). The gate proved this is a covered enum + unit
@@ -2329,6 +2353,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
+            // D-LAYOUT-FACTS1=B: the parser stores `[.field]` as an internal
+            // selector identifier. Project it through the same `Field` TIR
+            // node used by every other comptime struct read; the evaluator
+            // resolves the selected `LayoutField` from `LayoutInfo.fields`.
+            if let Expr::Ident(name, _) = index.as_ref() {
+                if let Some(field_name) = Syntax::layout_selector_name(name) {
+                    let base_t = lower_expr(base, cx, env);
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string()),
+                        kind: TExprKind::Field {
+                            recv: Box::new(base_t),
+                            field: format!(
+                                "{}{}",
+                                Syntax::LAYOUT_FIELD_PROJECTION_PREFIX,
+                                field_name
+                            ),
+                            boxed: false,
+                        },
+                    };
+                }
+            }
             // Sema's IndexKind::Unknown must not abort the interpreter path;
             // treat it as a list index and let runtime miss if wrong.
             let kind = if matches!(kind, IndexKind::Unknown) {

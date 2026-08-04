@@ -207,6 +207,16 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
         "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
         "Auth" => matches!(member, "users_table"),
+        n if n == Syntax::TYPE_TYPE_INFO => {
+            matches!(member, "layout")
+        }
+        n if n == Syntax::TYPE_LAYOUT_INFO => matches!(
+            member,
+            "kind" | "size" | "alignment" | "stride" | "target" | "guarantee" | "source" | "fields"
+        ),
+        n if n == Syntax::TYPE_LAYOUT_FIELD => {
+            matches!(member, "name" | "ty" | "offset" | "size" | "target" | "guarantee" | "source")
+        }
         _ => false,
     };
     if known {
@@ -469,6 +479,31 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
                 Some(Type::Float)
             }
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_TYPE_INFO {
+        return match field {
+            "layout" => {
+                Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()))
+            }
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_LAYOUT_INFO {
+        return match field {
+            "kind" | "target" | "guarantee" | "source" => Some(Type::String),
+            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
+            "fields" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_LAYOUT_FIELD.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_LAYOUT_FIELD {
+        return match field {
+            "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
+            "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
     }
