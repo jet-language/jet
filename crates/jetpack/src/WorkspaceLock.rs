@@ -25,7 +25,16 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
     };
     super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
         std::fs::create_dir_all(&lock_dir)?;
-        let mut lock = Lock::load(workspace_root).unwrap_or_else(empty_lock);
+        let mut lock = match std::fs::read_to_string(&lock_path) {
+            Ok(raw) => jet_pkg_model::Lock::parse(&raw).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("existing lock is malformed: {error}"),
+                )
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => empty_lock(),
+            Err(error) => return Err(error),
+        };
         lock.version = Lock::LOCK_VERSION;
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
@@ -410,6 +419,28 @@ mod tests {
         assert!(raw.contains("[[package]]"), "{raw}");
         assert!(raw.contains("name = \"dep\""), "{raw}");
         assert!(raw.contains("[[workspace_member]]"), "{raw}");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn write_rejects_malformed_existing_lock_without_overwriting_it() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-malformed-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join(".jet")).unwrap();
+        let lock_path = tmp.join(Syntax::UNIFIED_LOCK_FILE);
+        let raw = "version = 1\n[[package]]\nname = \"broken\"\n";
+        std::fs::write(&lock_path, raw).unwrap();
+        let plan = WorkspacePlan::default();
+
+        let error = write(&tmp, &plan).unwrap_err();
+
+        assert!(error.contains("existing lock is malformed"), "{error}");
+        assert_eq!(std::fs::read_to_string(&lock_path).unwrap(), raw);
         std::fs::remove_dir_all(&tmp).ok();
     }
 }
