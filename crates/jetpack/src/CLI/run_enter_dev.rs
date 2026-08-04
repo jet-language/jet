@@ -1,11 +1,13 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
 use super::realize::{
-    apply_locked_channels, classify_or_report, load_project_plan_with_profile, RunPlan,
+    apply_locked_channels, classify_or_report, load_project_plan_with_selections, project_env_root,
+    RunPlan,
 };
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
-    project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    project_task_declared, project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    run_lifecycle_hooks_silent,
     validate_declared_secrets,
     wait_for_services_ready,
 };
@@ -39,7 +41,8 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let select_req = SelectRequest {
         packages: parsed.flags.workspace_members.clone(),
         affected: parsed.flags.affected,
@@ -63,9 +66,10 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                         }
                         match &parsed.command {
                             Some(cmd) if !cmd.is_empty() => {
-                                let mut plan = match load_project_plan_with_profile(
+                                let mut plan = match load_project_plan_with_selections(
                                     theme,
                                     parsed.flags.profile.as_deref(),
+                                    parsed.flags.environment_profile.as_deref(),
                                 ) {
                                     Ok(plan) => plan,
                                     Err(code) => return code,
@@ -112,6 +116,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             Ok(spec) => {
                 explicit_package = Some(spec.short_name().to_string());
                 RunPlan {
+                    project_root: project_dir.clone(),
                     refs: vec![spec],
                     adapters: Vec::new(),
                     table: cwd_table(),
@@ -139,7 +144,11 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
         },
-        None => match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        None => match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         },
@@ -152,9 +161,13 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -189,6 +202,32 @@ pub(super) fn run_project_task(
     entry: &Path,
     task: &str,
 ) -> i32 {
+    run_project_task_with_mode(theme, parsed, roots, project_dir, entry, task, false, false)
+}
+
+pub(super) fn run_project_task_with_mode(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    task: &str,
+    clean: bool,
+    silent: bool,
+) -> i32 {
+    if project_task_declared(entry, task) == Some(false) {
+        let declared_tasks = list_project_tasks(entry);
+        theme.error_coded(
+            "E1294",
+            &format!("no task named `{task}`"),
+            "lifecycle task names must refer to a declared top-level #Job function.",
+            "declare the task with #Job, or remove it from the environment lifecycle.",
+        );
+        if !declared_tasks.is_empty() {
+            theme.detail(&format!("declared tasks: {}", declared_tasks.join(", ")));
+        }
+        return 2;
+    }
     let metadata = project_task_metadata(entry, task).unwrap_or_default();
     if let Some(reason) = metadata.skip.as_deref() {
         theme.status(&format!("skipping task {}: {}", theme.bold(task), reason));
@@ -200,7 +239,11 @@ pub(super) fn run_project_task(
     // metadata, in which case it is composed through the same RunPlan path as
     // `jet env` rather than by mutating PATH in this dispatcher.
     let mut plan = if has_env {
-        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         }
@@ -332,7 +375,15 @@ pub(super) fn run_project_task(
         argv.push("--".to_string());
         argv.extend(task_args);
     }
-    let code = Shell::run_command_in(&env, &argv, Some(&task_cwd));
+    let code = if clean && silent {
+        Shell::run_clean_command_in_silent(&env, &argv, Some(&task_cwd))
+    } else if clean {
+        Shell::run_clean_command_in(&env, &argv, Some(&task_cwd))
+    } else if silent {
+        Shell::run_command_in_silent(&env, &argv, Some(&task_cwd))
+    } else {
+        Shell::run_command_in(&env, &argv, Some(&task_cwd))
+    };
     if code == 0 {
         if metadata.cache != crate::AST::TaskCachePolicy::Uncached {
             if !task_outputs_exist(project_dir, &metadata) {
@@ -360,6 +411,7 @@ pub(super) fn run_project_task(
 
 fn empty_task_plan() -> RunPlan {
     RunPlan {
+        project_root: std::env::current_dir().unwrap_or_default(),
         refs: Vec::new(),
         adapters: Vec::new(),
         table: RefSpec::SourceTable::empty(),
@@ -587,7 +639,8 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         _ => {}
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
 
     // U16: a project's own `env.*` always wins; the foreign-flake fallback
     // only kicks in when it declares none, or when `--flake` forces it. An
@@ -629,12 +682,17 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // present.
     let has_env_file = EnvFile::path_in(&project_dir).is_file();
     let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
-        match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(code) => return code,
         }
     } else {
         RunPlan {
+            project_root: project_dir.clone(),
             refs: Vec::new(),
             adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
@@ -690,9 +748,13 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -714,9 +776,14 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
 /// child environment. A command is optional; without one the declared checks
 /// are the complete operation.
 fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let roots = Store::resolve();
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -742,9 +809,13 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks_clean(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",
@@ -753,7 +824,10 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     if let Err(code) = run_lifecycle_hooks_clean(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.checks,
         "check",
@@ -769,8 +843,13 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
 
 /// `jet env sync`: show and optionally apply the complete managed-file plan.
 fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
-    let project_dir = std::env::current_dir().unwrap_or_default();
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -846,7 +925,11 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
 /// `jet env info`: disclose the selected profile and the typed environment
 /// facts without realizing packages or executing lifecycle commands.
 fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -875,6 +958,13 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .collect::<Vec<_>>();
     if parsed.flags.json {
         let quote_list = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| crate::JSON::quote(value))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let quote_strings = |values: &[String]| {
             values
                 .iter()
                 .map(|value| crate::JSON::quote(value))
@@ -939,6 +1029,74 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 )
             })
             .collect::<Vec<_>>();
+        let catalog = ModuleEval::LanguagePackCatalog::builtin();
+        let language_catalog = catalog
+            .names()
+            .into_iter()
+            .filter_map(|name| {
+                let pack = catalog.get(&name)?.clone();
+                Some(format!(
+                    "{{\"name\":{},\"fingerprint\":{}}}",
+                    crate::JSON::quote(&pack.name),
+                    crate::JSON::quote(&pack.fingerprint()),
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let language_packs = plan
+            .environment
+            .language_packs
+            .iter()
+            .map(|pack| {
+                format!(
+                    "{{\"name\":{},\"fingerprint\":{},\"packages\":[{}],\"venv_packages\":[{}],\"host\":{},\"platforms\":[{}],\"license\":{},\"required_tools\":[{}]}}",
+                    crate::JSON::quote(&pack.name),
+                    crate::JSON::quote(&pack.fingerprint()),
+                    quote_strings(&pack.packages),
+                    quote_strings(&pack.venv_packages),
+                    crate::JSON::quote(&pack.host),
+                    quote_strings(&pack.platforms),
+                    crate::JSON::quote(&pack.license),
+                    quote_strings(&pack.required_tools),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let language_projections = plan
+            .environment
+            .language_projections
+            .iter()
+            .map(|projection| {
+                let selection = &projection.selection;
+                let version = selection
+                    .version
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                let channel = selection
+                    .channel
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                format!(
+                    "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"pack_fingerprint\":{},\"host\":{},\"platform\":{},\"license\":{},\"missing_tools\":[{}],\"included\":[{}],\"omitted\":[{}],\"changed\":[{}]}}",
+                    crate::JSON::quote(&selection.name),
+                    selection.enable,
+                    version,
+                    channel,
+                    selection.venv,
+                    crate::JSON::quote(&projection.pack.fingerprint()),
+                    crate::JSON::quote(&projection.host),
+                    crate::JSON::quote(&projection.platform),
+                    crate::JSON::quote(&projection.license),
+                    quote_strings(&projection.missing_tools),
+                    quote_strings(&projection.included),
+                    quote_strings(&projection.omitted),
+                    quote_strings(&projection.changed),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         let integrations = plan
             .environment
             .integrations
@@ -987,14 +1145,31 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             })
             .collect::<Vec<_>>();
         println!(
-            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"sources\":[{}],\"languages\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(profile),
             quote_list(&selected_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
+            plan.environment
+                .active_environment
+                .as_deref()
+                .map(crate::JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
+            quote_list(
+                &plan
+                    .environment
+                    .active_environment_provenance
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ),
             quote_list(&plan.environment.source_files.iter().map(String::as_str).collect::<Vec<_>>()),
+            crate::JSON::quote(&catalog.fingerprint()),
+            language_catalog,
             languages.join(","),
+            language_packs,
+            language_projections,
             quote_list(&packages),
             quote_list(&files),
             dotenv.join(","),
@@ -1016,6 +1191,18 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     theme.detail(&format!("selected profiles: {selected}"));
     theme.detail(&format!("profiles: {applied}"));
+    theme.detail(&format!(
+        "active environment: {} (from {})",
+        plan.environment
+            .active_environment
+            .as_deref()
+            .unwrap_or("<none>"),
+        if plan.environment.active_environment_provenance.is_empty() {
+            "<none>".to_string()
+        } else {
+            plan.environment.active_environment_provenance.join(", ")
+        }
+    ));
     let languages = plan
         .environment
         .languages
@@ -1037,7 +1224,27 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             label
         })
         .collect::<Vec<_>>();
+    let catalog = ModuleEval::LanguagePackCatalog::builtin();
+    theme.detail(&format!(
+        "language catalog: {} ({})",
+        catalog.names().join(", "),
+        catalog.fingerprint()
+    ));
     theme.detail(&format!("languages: {}", if languages.is_empty() { "<none>".to_string() } else { languages.join(", ") }));
+    let expanded = plan
+        .environment
+        .language_projections
+        .iter()
+        .map(|projection| {
+            format!(
+                "{}: +{} -{}",
+                projection.selection.name,
+                if projection.included.is_empty() { "<none>".to_string() } else { projection.included.join(",") },
+                if projection.omitted.is_empty() { "<none>".to_string() } else { projection.omitted.join(",") },
+            )
+        })
+        .collect::<Vec<_>>();
+    theme.detail(&format!("language projections: {}", if expanded.is_empty() { "<none>".to_string() } else { expanded.join("; ") }));
     theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
     theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
     let integrations = plan
@@ -1113,7 +1320,13 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         .filter(|s| !s.is_empty());
     let target_hash = target
         .as_ref()
-        .and_then(|root| EnvHook::definition_fingerprint(root, parsed.flags.profile.as_deref()));
+        .and_then(|root| {
+            EnvHook::definition_fingerprint_with_selections(
+                root,
+                parsed.flags.profile.as_deref(),
+                parsed.flags.environment_profile.as_deref(),
+            )
+        });
 
     // Nothing changed since the last prompt — stay silent so the hook is a
     // no-op on the vast majority of prompts (and never re-realizes).
@@ -1127,7 +1340,10 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut watched_reload_ready = false;
     if target_s == active_s && target_hash != active_hash {
         if let (Some(root), Some(hash)) = (target.as_ref(), target_hash.as_deref()) {
-            match EnvHook::reload_policy(root) {
+            match EnvHook::reload_policy_with_environment_profile(
+                root,
+                parsed.flags.environment_profile.as_deref(),
+            ) {
                 ModuleEval::ReloadPolicy::Never => return 0,
                 ModuleEval::ReloadPolicy::Prompt => {}
                 ModuleEval::ReloadPolicy::Watch { debounce_ms, .. } => {
@@ -1168,7 +1384,11 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // changing its own cwd affects nothing else.
         let _ = std::env::set_current_dir(&root);
         let roots = Store::resolve();
-        let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+        let mut plan = match load_project_plan_with_selections(
+            theme,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        ) {
             Ok(plan) => plan,
             Err(_) => {
                 // Malformed / foreign-only env: keep the previous activation.
@@ -1189,7 +1409,9 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             &plan.secrets,
             &plan.environment,
         );
-        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
+        let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty())
+            || !plan.environment.lifecycle.on_enter.is_empty()
+            || !plan.environment.lifecycle.checks.is_empty();
         let trusted = !sensitive
             || Trust::is_environment_trusted(
                 &store,
@@ -1233,16 +1455,24 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // Reconcile the source graph after realization. If a prompt races an
         // edit, retain the prior activation and let the next prompt retry the
         // new hash instead of emitting a plan assembled from mixed revisions.
-        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
-            .as_deref()
+        if EnvHook::definition_fingerprint_with_selections(
+            &root,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        )
+        .as_deref()
             != target_hash.as_deref()
         {
             return 0;
         }
         let plan_hash = target_hash.clone().unwrap_or_default();
-        if run_lifecycle_hooks(
+        let entry = find_project_entry(&root);
+        if run_lifecycle_hooks_silent(
             theme,
+            parsed,
+            &roots,
             &root,
+            &entry,
             &env,
             &plan.environment.lifecycle.on_enter,
             "on_enter",
@@ -1251,8 +1481,12 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             return 0;
         }
-        if EnvHook::definition_fingerprint(&root, parsed.flags.profile.as_deref())
-            .as_deref()
+        if EnvHook::definition_fingerprint_with_selections(
+            &root,
+            parsed.flags.profile.as_deref(),
+            parsed.flags.environment_profile.as_deref(),
+        )
+        .as_deref()
             != target_hash.as_deref()
         {
             return 0;
@@ -1424,7 +1658,8 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = project_env_root(&cwd);
     let entry = find_project_entry(&project_dir);
     if !has_dev_or_run_entry(&entry) {
         theme.error_coded(
@@ -1440,7 +1675,11 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    let mut plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let mut plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -1471,7 +1710,10 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if let Err(code) = run_lifecycle_hooks(
         theme,
+        parsed,
+        &roots,
         &project_dir,
+        &entry,
         &env,
         &plan.environment.lifecycle.on_enter,
         "on_enter",

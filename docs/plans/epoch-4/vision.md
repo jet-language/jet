@@ -220,11 +220,11 @@ module env.dev {
             name: "weirdctl",
             source: "acme/weirdctl#8a31c9d@github",
             deps: [default.cmake, default.ninja],
-            recipe: Recipe.build(fn(b: BuildContext) {
-                b.exec(cmake, ["-S", ".", "-B", "build"])
-                b.exec(ninja, ["-C", "build"])
-                b.install_bin("build/weirdctl", as: "weirdctl")
-            }),
+            recipe: Recipe.build(steps: [
+                .exec(tool: "cmake", args: ["-S", ".", "-B", "build"]),
+                .exec(tool: "ninja", args: ["-C", "build"]),
+                .install(src: "build/weirdctl", dest: "bin/weirdctl"),
+            ]),
         ),
     ]
 }

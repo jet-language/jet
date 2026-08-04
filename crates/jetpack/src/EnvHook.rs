@@ -23,10 +23,26 @@ use std::path::{Path, PathBuf};
 /// imported modules, dotenv files, managed-file sources, locks, and profile
 /// inputs cannot leave a stale environment active.
 pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> Option<String> {
+    definition_fingerprint_with_selections(root, requested_profile, None)
+}
+
+/// Hash the activation plan for both kinds of explicit selection: a named
+/// workflow profile inside `env.jet`, and one declared `env.<name>`
+/// environment profile.
+pub fn definition_fingerprint_with_selections(
+    root: &Path,
+    requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
+) -> Option<String> {
     let env_path = root.join(Syntax::ENV_FILE);
     let source = std::fs::read_to_string(&env_path).ok()?;
     let mut entries = Vec::<(String, Vec<u8>)>::new();
-    if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env(&source, root) {
+    if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env_with_profiles(
+        &source,
+        root,
+        requested_profile,
+        requested_environment_profile,
+    ) {
         for relative in &plan.source_files {
             add_input(root, relative, "source", &mut entries);
         }
@@ -88,8 +104,9 @@ pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> O
     entries.push((
         "selection".to_string(),
         format!(
-            "profile={};host={};user={}",
+            "profile={};environment_profile={};host={};user={}",
             requested_profile.unwrap_or_default(),
+            requested_environment_profile.unwrap_or_default(),
             std::env::var("HOSTNAME").unwrap_or_default(),
             std::env::var("USER")
                 .or_else(|_| std::env::var("USERNAME"))
@@ -111,10 +128,23 @@ pub fn definition_fingerprint(root: &Path, requested_profile: Option<&str>) -> O
 /// Read the typed lifecycle policy without realizing packages or executing
 /// project code. Legacy `pkg.*` env files have the normal prompt policy.
 pub fn reload_policy(root: &Path) -> jet_env_model::ModuleEval::ReloadPolicy {
+    reload_policy_with_environment_profile(root, None)
+}
+
+/// Read reload policy for the selected `env.<name>` environment profile.
+pub fn reload_policy_with_environment_profile(
+    root: &Path,
+    requested_environment_profile: Option<&str>,
+) -> jet_env_model::ModuleEval::ReloadPolicy {
     let Ok(source) = std::fs::read_to_string(root.join(Syntax::ENV_FILE)) else {
         return jet_env_model::ModuleEval::ReloadPolicy::default();
     };
-    jet_env_model::ModuleEval::evaluate_env(&source, root)
+    jet_env_model::ModuleEval::evaluate_env_with_profiles(
+        &source,
+        root,
+        None,
+        requested_environment_profile,
+    )
         .map(|plan| plan.lifecycle.reload)
         .unwrap_or_default()
 }
@@ -626,6 +656,28 @@ mod tests {
         assert_eq!(definition_fingerprint(&root, None), Some(first.clone()));
         std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
         assert_ne!(definition_fingerprint(&root, None), Some(first));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn definition_fingerprint_tracks_environment_profile_selection() {
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(Syntax::ENV_FILE),
+            "module env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
+        )
+        .unwrap();
+        let dev = definition_fingerprint_with_selections(&root, None, Some("dev")).unwrap();
+        let full = definition_fingerprint_with_selections(&root, None, Some("full")).unwrap();
+        assert_ne!(dev, full);
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -41,7 +41,20 @@ fn project_file_with_runtime_on_compiler_stack(
     let Some(bundle) = bundle else {
         return Err(diags);
     };
-    Ok(project_checked(path, &src, &bundle, &facts, runtime_events))
+    let package_facts = jet_semindex::package_facts_for_entry(path).map_err(|error| {
+        vec![jet_semindex::package_facts_diagnostic(path, &error)]
+    })?;
+    let workspace_overlay_policy = jet_semindex::workspace_overlay_policy_for_entry(path)
+        .map_err(|diagnostic| vec![diagnostic])?;
+    Ok(project_checked(
+        path,
+        &src,
+        &bundle,
+        &facts,
+        package_facts,
+        workspace_overlay_policy,
+        runtime_events,
+    ))
 }
 
 #[derive(Clone)]
@@ -655,6 +668,19 @@ fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<Str
         Ok(facts) => facts,
         Err(error) => return Some(canonical_package_error(project_root, dir, &error)),
     };
+    let (workspace_overlays, diagnostics) = match
+        jet_semindex::workspace_overlay_policy_for_entry(&dir.join("package.jet"))
+    {
+        Ok(Some(policy)) => (
+            jet_semindex::workspace_overlay_policy_json(&policy),
+            "[]".to_string(),
+        ),
+        Ok(None) => ("null".to_string(), "[]".to_string()),
+        Err(diagnostic) => (
+            "null".to_string(),
+            format!("[{}]", diagnostic_json(&diagnostic)),
+        ),
+    };
     let deps = facts
         .deps
         .iter()
@@ -668,7 +694,7 @@ fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<Str
         .collect::<Vec<_>>()
         .join(",");
     Some(format!(
-        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"effects_enabled\":false,\"diagnostics\":[]}}",
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
         json_str(&rel_path(project_root, dir)),
         json_str(&rel_path(project_root, &dir.join("package.jet"))),
         json_str(&facts.name),
@@ -695,6 +721,9 @@ fn canonical_package_project_json(project_root: &Path, dir: &Path) -> Option<Str
             })
             .collect::<Vec<_>>()
             .join(","),
+        jet_semindex::package_facts_json(&facts),
+        workspace_overlays,
+        diagnostics,
     ))
 }
 

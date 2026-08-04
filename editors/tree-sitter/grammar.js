@@ -17,9 +17,9 @@ const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reacti
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];
-const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Cache", "Char", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "SharedGuard", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "TaskGroup", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
+const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Cache", "Char", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "TaskGroup", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Authority", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Job", "Known", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Summarize", "Target", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Authority", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Job", "Kernel", "Known", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Summarize", "Target", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$[", "&", "...", "::", ":=", "]$", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -758,6 +758,7 @@ module.exports = grammar({
         $.primitive_type,
         $.call_expr,
         $.turbofish_call,
+        $.build_recipe_expr,
         $.struct_literal,
         $.list_literal,
         $.map_literal,
@@ -928,6 +929,55 @@ module.exports = grammar({
           $.arg_list,
         ),
       ),
+
+    // D-JPK-BUILDRECIPE1: the finite adapter recipe surface. Keep these
+    // lower-case leading-dot values scoped to Recipe.build.
+    build_recipe_expr: ($) =>
+      prec(
+        6,
+        seq(
+          "Recipe",
+          ".",
+          "build",
+          "(",
+          "steps",
+          ":",
+          "[",
+          commaSep($.build_step_value),
+          optional(","),
+          "]",
+          ")",
+        ),
+      ),
+
+    build_step_value: ($) =>
+      seq(
+        ".",
+        choice("fetch", "exec", "install", "install_tree"),
+        optional($.build_step_args),
+      ),
+
+    build_step_args: ($) =>
+      seq(
+        "(",
+        optional(
+          seq(
+            $.build_step_arg,
+            repeat(seq(",", $.build_step_arg)),
+            optional(","),
+          ),
+        ),
+        ")",
+      ),
+
+    build_step_arg: ($) =>
+      choice(
+        seq(choice("url", "sha256", "tool", "src", "dest"), ":", $.string_literal),
+        seq("args", ":", $.build_step_string_list),
+      ),
+
+    build_step_string_list: ($) =>
+      seq("[", commaSep($.string_literal), optional(","), "]"),
 
     // Turbofish: `decode<Order>(raw)`, `make_pair<Int>(…)`. The `<` is adjacent
     // (no space) so a spaced comparison `c < 3` stays a `binary_expr`.

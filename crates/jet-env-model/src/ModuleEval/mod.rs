@@ -29,7 +29,10 @@ mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
-pub use Source::{evaluate_env, evaluate_env_with_profile, is_module_surface};
+pub use Source::{
+    evaluate_env, evaluate_env_with_environment_profile, evaluate_env_with_profile,
+    evaluate_env_with_profiles, is_module_surface,
+};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
@@ -37,7 +40,7 @@ pub use Types::{
     ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 pub use Environment::{
-    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookSpec, LanguageExpansion, LanguagePack,
+    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookAction, HookSpec, LanguageExpansion, LanguagePack,
     LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
     EnvironmentIntegration, IntegrationKind, ProfileError, ProfileSet, ProfileSpec, ReloadPolicy,
     ResolvedProfile, valid_env_name,
@@ -133,6 +136,34 @@ module dev {
             entry.settings.get("prompt"),
             Some(&vec![Scalar::normal("wordstats")])
         );
+    }
+
+    #[test]
+    fn selects_one_environment_profile_and_discloses_its_provenance() {
+        let source = r#"
+module dev {
+    env.dev: Env.{ packages: [default.ripgrep], prompt: "dev" }
+}
+module full {
+    env.full: Env.{ packages: [default.fd], prompt: "full" }
+}
+"#;
+        let default_plan = evaluate_env(source, &base_dir()).unwrap();
+        assert_eq!(default_plan.active_environment.as_deref(), Some("dev"));
+        assert_eq!(default_plan.package_refs, vec!["ripgrep@default"]);
+        assert_eq!(default_plan.prompt.as_deref(), Some("dev"));
+        assert_eq!(default_plan.active_environment_provenance, vec!["dev"]);
+
+        let full_plan =
+            evaluate_env_with_environment_profile(source, &base_dir(), Some("full")).unwrap();
+        assert_eq!(full_plan.active_environment.as_deref(), Some("full"));
+        assert_eq!(full_plan.package_refs, vec!["fd@default"]);
+        assert_eq!(full_plan.prompt.as_deref(), Some("full"));
+        assert_eq!(full_plan.active_environment_provenance, vec!["full"]);
+
+        let error = evaluate_env_with_environment_profile(source, &base_dir(), Some("missing"))
+            .expect_err("unknown environment profile must not fall through to another profile");
+        assert_eq!(error.code, "E1337");
     }
 
     #[test]
@@ -463,6 +494,76 @@ module dev {
     }
 
     #[test]
+    fn evaluate_env_rejects_empty_prebuilt_recipe() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [Pkg.adapt(
+            name: "tool",
+            source: "./vendor/tool",
+            recipe: Recipe.prebuilt()
+        )],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
+    }
+
+    #[test]
+    fn evaluate_env_captures_finite_build_recipe() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "wiretool",
+                source: "./vendor/wiretool",
+                recipe: Recipe.build(steps: [
+                    .fetch(url: "https://example.test/wiretool.tar", sha256: "sha{{}}\n\t"),
+                    .exec(tool: "cc", args: ["-O2", "main.c", "-o", "wiretool",]),
+                    .install(src: "wiretool", dest: "bin/wiretool"),
+                    .install_tree(src: "share", dest: "share"),
+                ])
+            )
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        let AdapterRecipe::Build(recipe) = &plan.adapters[0].recipe else {
+            panic!("expected a finite build recipe");
+        };
+        assert_eq!(recipe.steps.len(), 4);
+        let super::super::Recipe::BuildStep::Fetch { sha256, .. } = &recipe.steps[0] else {
+            panic!("expected a fetch step");
+        };
+        assert_eq!(sha256, "sha{}\n\t");
+        assert!(matches!(recipe.steps[1], super::super::Recipe::BuildStep::Exec { .. }));
+        assert!(matches!(recipe.steps[2], super::super::Recipe::BuildStep::Install { .. }));
+        assert!(matches!(recipe.steps[3], super::super::Recipe::BuildStep::InstallTree { .. }));
+    }
+
+    #[test]
+    fn evaluate_env_rejects_unknown_build_step_fields() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [Pkg.adapt(
+            name: "tool",
+            source: "./vendor/tool",
+            recipe: Recipe.build(steps: [
+                .exec(tool: "cc", args: [], shell: "sh"),
+            ])
+        )],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
+    }
+
+    #[test]
     fn evaluate_env_bad_adapter_is_e1270() {
         let src = r#"
 module dev {
@@ -479,6 +580,8 @@ module dev {
 "#;
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E1270");
+        let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
+        check_diagnostic_snapshot("E1270", &rendered);
     }
 
     #[test]

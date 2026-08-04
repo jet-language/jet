@@ -296,6 +296,17 @@ mod tests {
         assert!(p.flags.pure);
     }
 
+    #[test]
+    fn parses_workflow_and_environment_profiles_separately() {
+        let args: Vec<String> = ["--profile", "work", "--env-profile", "full"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert_eq!(p.flags.profile.as_deref(), Some("work"));
+        assert_eq!(p.flags.environment_profile.as_deref(), Some("full"));
+    }
+
     // ── D-JPK-SELECTOR1: -p / --affected on build/test/run ──
 
     #[test]

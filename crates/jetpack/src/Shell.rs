@@ -10,7 +10,7 @@ use crate::Syntax;
 use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use jet_foundation::Terminal::Theme as SharedTheme;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// The shells Jetpack can decorate. Anything else falls back to `bash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,7 +124,8 @@ impl Env {
     /// Apply only the declared environment and realized PATH. Callers use
     /// this after `env_clear` for clean-shell checks and task probes.
     pub(crate) fn apply_clean_to(&self, cmd: &mut Command) {
-        self.apply_to_base(cmd, "");
+        let base = super::Platform::clean_path();
+        self.apply_to_base(cmd, base);
     }
 
     fn apply_to_base(&self, cmd: &mut Command, base_path: &str) {
@@ -159,6 +160,22 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
 /// Run a command with the composed environment and an explicit working
 /// directory. The directory belongs to the child, never to this process.
 pub fn run_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
+    run_command_in_mode(env, cmd_args, cwd, false, false)
+}
+
+/// Run a composed command while keeping its stdout out of a generated shell
+/// script. Stderr remains visible so a failed task still explains itself.
+pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
+    run_command_in_mode(env, cmd_args, cwd, false, true)
+}
+
+fn run_command_in_mode(
+    env: &Env,
+    cmd_args: &[String],
+    cwd: Option<&Path>,
+    clean: bool,
+    silent: bool,
+) -> i32 {
     if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
         return 126;
     }
@@ -176,13 +193,22 @@ pub fn run_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    env.apply_to(&mut cmd);
+    if clean {
+        cmd.env_clear();
+        env.apply_clean_to(&mut cmd);
+    } else {
+        env.apply_to(&mut cmd);
+    }
+    if silent {
+        cmd.stdout(Stdio::null());
+    }
     let code = match cmd.status() {
         Ok(status) => status
             .code()
             .unwrap_or(if status.success() { 0 } else { 1 }),
         Err(e) => {
-            eprintln!("jetpack: could not run `{program}`: {e}");
+            let suffix = if clean { " in a clean env" } else { "" };
+            eprintln!("jetpack: could not run `{program}`{suffix}: {e}");
             127
         }
     };
@@ -195,35 +221,23 @@ pub fn run_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32
 /// Run a command with no inherited host variables. Only the composed PATH,
 /// declared variables, Jet markers, and declared unsets enter the child.
 pub fn run_clean_command(env: &Env, cmd_args: &[String]) -> i32 {
-    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
-        return 126;
-    }
-    let Some((program, rest)) = cmd_args.split_first() else {
-        return 0;
-    };
-    let stable_program = env
-        .cache_leases
-        .iter()
-        .find_map(|lease| lease.executable(program));
-    let mut cmd = stable_program
-        .as_ref()
-        .map_or_else(|| Command::new(program), Command::new);
-    cmd.args(rest);
-    cmd.env_clear();
-    env.apply_clean_to(&mut cmd);
-    let code = match cmd.status() {
-        Ok(status) => status
-            .code()
-            .unwrap_or(if status.success() { 0 } else { 1 }),
-        Err(e) => {
-            eprintln!("jetpack: could not run `{program}` in a clean env: {e}");
-            127
-        }
-    };
-    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
-        return 126;
-    }
-    code
+    run_clean_command_in(env, cmd_args, None)
+}
+
+/// Run a command with no inherited host variables and an explicit working
+/// directory. This is the clean-shell counterpart to `run_command_in`.
+pub fn run_clean_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
+    run_command_in_mode(env, cmd_args, cwd, true, false)
+}
+
+/// Run a clean-shell command without letting task stdout corrupt a generated
+/// activation script.
+pub fn run_clean_command_in_silent(
+    env: &Env,
+    cmd_args: &[String],
+    cwd: Option<&Path>,
+) -> i32 {
+    run_command_in_mode(env, cmd_args, cwd, true, true)
 }
 
 /// Enter an interactive temporary shell. Returns the child's exit code.

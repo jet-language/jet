@@ -14,6 +14,46 @@ pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
 }
 
+/// Find the nearest Package, environment, or workspace root for commands run
+/// below a project directory. Explicit refs and project plans must use the
+/// same source facts from that root.
+pub(super) fn project_root(start: &Path) -> PathBuf {
+    nearest_root_with_file(
+        start,
+        &[
+            Syntax::PACKAGE_FILE,
+            Syntax::ENV_FILE,
+            Syntax::WORKSPACE_FILE,
+        ],
+    )
+    .unwrap_or_else(|| start.to_path_buf())
+}
+
+/// Workspace member lookup has a wider boundary than a member Package. Keep
+/// it on the nearest workspace declaration so a package inside a monorepo
+/// still sees the monorepo's member index.
+fn workspace_root(start: &Path) -> PathBuf {
+    nearest_root_with_file(start, &[Syntax::WORKSPACE_FILE])
+        .unwrap_or_else(|| start.to_path_buf())
+}
+
+fn nearest_root_with_file(start: &Path, files: &[&str]) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if files.iter().any(|file| dir.join(file).is_file()) {
+            return Some(dir);
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    None
+}
+
 /// Load and evaluate `workspace.jet` from `dir`, emit workspace entries into
 /// `.jet/lock`, and return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
 /// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
@@ -22,9 +62,25 @@ pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan,
     let result = WorkspaceFile::load(dir)?;
     match result {
         Ok(plan) => {
-            // Best-effort: write the generated lock for external tools.
-            WorkspaceLock::write(dir, &plan);
-            Some(Ok(plan))
+            match WorkspaceLock::write(dir, &plan) {
+                Ok(()) => Some(Ok(plan)),
+                Err(error) => {
+                    let lock_path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+                    let diagnostic = crate::Lock::e1202_workspace_write(
+                        &lock_path.display().to_string(),
+                        &error,
+                    );
+                    eprint!(
+                        "{}",
+                        crate::Diagnostics::render_all(
+                            Syntax::WORKSPACE_FILE,
+                            "",
+                            std::slice::from_ref(&diagnostic),
+                        )
+                    );
+                    Some(Err(2))
+                }
+            }
         }
         Err(d) => {
             eprint!(
@@ -78,7 +134,7 @@ pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (Ref
 /// Also merges any `[sources]` declared in `jetpack.toml` (additive — env.jet
 /// inline declarations win on conflict).
 pub(super) fn cwd_table() -> RefSpec::SourceTable {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let dir = project_root(&std::env::current_dir().unwrap_or_default());
     let mut table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
         .unwrap_or_else(RefSpec::SourceTable::empty);
@@ -97,18 +153,101 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let dir = workspace_root(&std::env::current_dir().unwrap_or_default());
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),
         // A malformed `workspace.jet` is source failure, never permission to
         // reuse a stale lock mirror.
-        Some(Err(_)) => None,
-        None => WorkspaceLock::load(&dir),
+        Some(Err(diagnostic)) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    Syntax::WORKSPACE_FILE,
+                    "",
+                    std::slice::from_ref(&diagnostic)
+                )
+            );
+            std::process::exit(2);
+        }
+        None => {
+            let lock = WorkspaceLock::load(&dir);
+            if lock.is_none() {
+                let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+                let looks_like_workspace_lock = std::fs::read_to_string(&path)
+                    .map(|source| crate::Lock::looks_like_workspace_lock(&source))
+                    .unwrap_or(false);
+                if looks_like_workspace_lock {
+                    let diagnostic = crate::Lock::e1202_workspace(&path.display().to_string());
+                    eprint!(
+                        "{}",
+                        crate::Diagnostics::render_all(
+                            Syntax::WORKSPACE_FILE,
+                            "",
+                            std::slice::from_ref(&diagnostic),
+                        )
+                    );
+                    std::process::exit(2);
+                }
+            }
+            lock
+        }
     };
     match plan {
         Some(plan) => RefSpec::WorkspaceIndex::from_members(
             plan.members.into_iter().map(|m| (m.name, m.path)),
         ),
         None => RefSpec::WorkspaceIndex::empty(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{project_root, workspace_root};
+    use crate::Syntax;
+    use std::fs;
+
+    #[test]
+    fn project_root_walks_from_nested_command_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-project-root-{}",
+            std::process::id()
+        ));
+        let nested = root.join("packages/app/src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join("env.jet"), "module env.dev {}\n").unwrap();
+        assert_eq!(project_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_root_walks_to_the_nearest_package_file() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-package-root-{}",
+            std::process::id()
+        ));
+        let nested = root.join("packages/app/src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
+        assert_eq!(project_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_root_survives_a_nested_package_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-workspace-root-{}",
+            std::process::id()
+        ));
+        let package = root.join("packages/app");
+        let nested = package.join("src");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join(Syntax::WORKSPACE_FILE), "module workspace {}\n").unwrap();
+        fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();
+        assert_eq!(project_root(&nested), package);
+        assert_eq!(workspace_root(&nested), root);
+        let _ = fs::remove_dir_all(root);
     }
 }

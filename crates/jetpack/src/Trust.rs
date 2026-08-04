@@ -793,7 +793,17 @@ pub fn gate(
     bypass: bool,
 ) -> Result<(), i32> {
     let hash = env_definition_hash(refs, table, secrets);
-    gate_with_hash(theme, store, project_dir, refs, secrets, bypass, hash, false)
+    gate_with_hash(
+        theme,
+        store,
+        project_dir,
+        refs,
+        secrets,
+        bypass,
+        hash,
+        false,
+        false,
+    )
 }
 
 /// Trust gate variant for a plan whose typed lifecycle facts are part of its
@@ -818,6 +828,8 @@ pub fn gate_with_environment(
         return Err(2);
     }
     let hash = environment_definition_hash(refs, table, secrets, facts);
+    let typed = is_typed_environment(facts);
+    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty() || !facts.lifecycle.checks.is_empty();
     gate_with_hash(
         theme,
         store,
@@ -826,7 +838,8 @@ pub fn gate_with_environment(
         secrets,
         bypass,
         hash,
-        is_typed_environment(facts),
+        typed,
+        lifecycle_hooks,
     )
 }
 
@@ -857,6 +870,8 @@ pub fn gate_with_environment_and_snapshot(
         facts,
         source_snapshot,
     );
+    let typed = is_typed_environment(facts);
+    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty() || !facts.lifecycle.checks.is_empty();
     gate_with_hash(
         theme,
         store,
@@ -865,7 +880,8 @@ pub fn gate_with_environment_and_snapshot(
         secrets,
         bypass,
         hash,
-        is_typed_environment(facts),
+        typed,
+        lifecycle_hooks,
     )
 }
 
@@ -963,8 +979,9 @@ fn gate_with_hash(
     bypass: bool,
     hash: String,
     typed: bool,
+    lifecycle_hooks: bool,
 ) -> Result<(), i32> {
-    if !is_trust_sensitive_ext(refs, !secrets.is_empty()) {
+    if !is_trust_sensitive_ext(refs, !secrets.is_empty()) && !lifecycle_hooks {
         return Ok(());
     }
     let trusted = if typed {

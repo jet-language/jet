@@ -8,6 +8,7 @@ mod JSON;
 mod Symbols;
 mod Types;
 
+pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
     build_index, build_symbol_db, structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef,
@@ -25,6 +26,7 @@ pub use Symbols::{
     build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SemanticVisibilityAnchor,
 };
+pub use jet_pkg_model::Package::PackageFacts;
 
 use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::AST::ProgramBundle;
@@ -52,6 +54,96 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
     build_index(bundle, facts)
 }
 
+/// Load the canonical Package facts that own an entry. Standalone source has
+/// no package projection. A package root is one typed authority: malformed or
+/// ambiguous package sources are returned as errors instead of becoming an
+/// empty projection.
+pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, String> {
+    let mut dir = entry
+        .canonicalize()
+        .unwrap_or_else(|_| entry.to_path_buf());
+    if !dir.is_dir() {
+        let Some(parent) = dir.parent() else {
+            return Ok(None);
+        };
+        dir = parent.to_path_buf();
+    }
+    loop {
+        if dir.join("package.jet").is_file() || dir.join("pkg.jet").is_file() {
+            return match PackageFacts::load(&dir) {
+                Some(Ok(facts)) => Ok(Some(facts)),
+                Some(Err(error)) => Err(error.to_string()),
+                None => Err(format!("Package facts are missing at `{}`", dir.display())),
+            };
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    Ok(None)
+}
+
+/// Render the registered package-shape diagnostic shared by semantic-index
+/// and Canvas when a package projection cannot be loaded.
+pub fn package_facts_diagnostic(entry: &Path, error: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("package facts for `{}` have a shape error", entry.display()),
+        format!(
+            "one typed Package fact graph must own this projection; {error}"
+        ),
+        "fix package.jet or its declared Config files before tooling uses package facts".to_string(),
+        None,
+    )
+}
+
+/// Find the nearest validated workspace lock for a source entry. Overlay
+/// policy is deliberately read from the persisted lock so Canvas, the
+/// semantic index, and Jetpack do not each reparse workspace policy.
+pub fn workspace_overlay_policy_for_entry(
+    entry: &Path,
+) -> Result<Option<jet_pkg_model::Overlay::OverlayPolicy>, Diagnostic> {
+    let Some(parent) = entry.parent() else {
+        return Ok(None);
+    };
+    let mut dir = parent.to_path_buf();
+    loop {
+        if let Some(plan) = jet_pkg_model::WorkspaceLock::load(&dir) {
+            return Ok((!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy));
+        }
+        let lock_path = dir.join(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE);
+        if let Ok(raw) = std::fs::read_to_string(&lock_path) {
+            if jet_pkg_model::Lock::looks_like_workspace_lock(&raw) {
+                return Err(jet_pkg_model::Lock::e1202_workspace(
+                    &lock_path.display().to_string(),
+                ));
+            }
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    Ok(None)
+}
+
+fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemIndexError> {
+    if let Some(facts) = package_facts_for_entry(entry)
+        .map_err(|error| SemIndexError::Load(vec![package_facts_diagnostic(entry, &error)]))?
+    {
+        index.attach_package_facts(facts);
+    }
+    if let Some(policy) = workspace_overlay_policy_for_entry(entry)
+        .map_err(|diagnostic| SemIndexError::Load(vec![diagnostic]))?
+    {
+        index.attach_workspace_overlay_policy(policy);
+    }
+    Ok(())
+}
+
 /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
 pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
@@ -62,7 +154,9 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry)?;
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -97,7 +191,9 @@ pub fn open_with_overlays(
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry)?;
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -117,7 +213,9 @@ pub fn open_structural_with_overlays(
         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
     {
         if let Some(bundle) = bundle {
-            return Ok(build_index(&bundle, &facts));
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry)?;
+            return Ok(index);
         }
     }
     Err(SemIndexError::Load(diags))
@@ -151,7 +249,9 @@ pub fn open_with_overlays_diagnostics_and_inputs(
                 .iter()
                 .map(|module| module.path.clone())
                 .collect();
-            Ok((build_index(&bundle, &facts), diags, inputs))
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry)?;
+            Ok((index, diags, inputs))
         }
         None => Err(SemIndexError::Load(diags)),
     }
@@ -203,7 +303,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":11"));
+        assert!(json.contains("\"schema_version\":12"));
         assert!(json.contains("\"outputs\""));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
@@ -213,6 +313,131 @@ mod tests {
         assert!(json.contains("\"members\""));
         assert!(json.contains("\"instances\""));
         assert!(json.contains("\"run\""));
+    }
+
+    #[test]
+    fn package_config_facts_are_shared_with_the_index_json() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_package_facts_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.jet"),
+            "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("release.jet"),
+            "Config.{ outputs: .{ app: .Executable.{ entry: run } } }\n",
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let index = open(&entry).expect("package entry should index");
+        let facts = index.package_facts().expect("package facts attached");
+        assert_eq!(facts.name, "demo");
+        assert!(facts.outputs.contains_key("app"));
+        assert_eq!(facts.configs, vec!["release.jet"]);
+        assert!(facts
+            .field_provenance("outputs.app")
+            .iter()
+            .any(|origin| origin.ends_with("release.jet")));
+        let json = index.to_json();
+        assert!(json.contains("\"package_facts\""));
+        assert!(json.contains("\"semantic_digest\":\""));
+        assert!(json.contains("release.jet"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_package_facts_are_not_dropped_from_projection() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_ambiguous_package_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.jet"),
+            "name: \"canonical\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pkg.jet"),
+            "payload: { name: \"legacy\", version: \"0.1.0\" }\n",
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let error = package_facts_for_entry(&entry)
+            .expect_err("ambiguous package roots must remain an error");
+        assert!(error.contains("both `package.jet` and migration-era `pkg.jet`"), "{error}");
+        let diagnostic = package_facts_diagnostic(&entry, &error);
+        assert_eq!(diagnostic.code, "E1206");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn semantic_index_consumes_persisted_workspace_overlay_facts() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_workspace_overlay_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        let workspace_digest = jet_pkg_model::SHA256::sha256_hex(
+            std::fs::read(root.join("workspace.jet")).unwrap().as_slice(),
+        );
+        std::fs::write(
+            root.join(".jet/lock"),
+            format!(
+                "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\nfield_priorities = [\"version=7\"]\n"
+            ),
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let index = open(&entry).expect("workspace source should index");
+        let policy = index
+            .workspace_overlay_policy()
+            .expect("overlay facts must come from the lock");
+        assert_eq!(policy.allow_unfree, vec!["discord"]);
+        assert_eq!(policy.overlays[0].name, "beta");
+        let json = index.to_json();
+        assert!(json.contains("\"workspace_overlays\""));
+        assert!(json.contains("plasma-beta"));
+        assert!(json.contains("discord"));
+        assert!(json.contains("\"field_priorities\":{\"version\":7}"), "{json}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_workspace_lock_returns_e1202_instead_of_empty_policy() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_stale_workspace_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            root.join(".jet/lock"),
+            "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
+        )
+        .unwrap();
+        let entry = root.join("main.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+        let diagnostic = workspace_overlay_policy_for_entry(&entry)
+            .expect_err("stale workspace authority must remain visible");
+        assert_eq!(diagnostic.code, "E1202");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -1110,6 +1110,15 @@ name — `module env.dev { packages: […] }`, `module image.server { … }`.
 (`name: target@provider` or bare-path entries, merged by key) and `imports:` are fields
 inside `module name { … }`, never file top-level.
 
+**D-ENV-FACET1=A — environment profiles use the profile noun** *(ratified by
+owner 2026-08-03, card #1104)*: a typed environment may declare multiple
+`env.<name>` contributions, but one contribution is active at a time. The
+beginner default is `dev`, then `default`, then lexical order. Experts select
+one explicitly with `jet env info --env-profile <name>` (the flag applies to
+all Jetpack commands that load an environment plan). `--profile` remains the
+selector for a named workflow profile inside that environment; JetOS profile
+commands keep their own namespace and state.
+
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
 `.jet` files and merges typed contributions; no manual lists.
 
@@ -3798,14 +3807,15 @@ never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
 stored-ref-field mechanism it reported on (`--facts refs` is an
 unknown-lens usage error today).
 
-**Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
+**Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-BUILDRECIPE1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
 D-JPK-OFFLINE1, U5, D-MONOREF1)*: `jetpack` is its own binary
 (`run/build/list/clean/add/remove` + `enter`); Jetpack owns the user model,
 refs, lock, shells — Nix is one provider behind the `core`-first resolver
 trait (tvix shim scoped I6 waiver for the no-installed-nix goal). Ad-hoc
 adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
-(`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`). Hangar GC by age
+(`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`) and finite executable
+`Recipe.build(steps: […])` actions. Hangar GC by age
 (default 30 days), `jet clean` (one verb: garbage-collect + optimize the
 hangar via hardlink/dedup, `nix store optimise` equivalent; owner amendment
 2026-07-03 — there is no `jet store gc`), `jet hangar du`; no daemon, no root
@@ -4000,10 +4010,17 @@ implementation.
   Jet package can replace a foreign surface without call-site rewrites.
 
 **D-JPK-ADAPTNAME1 (=A, ratified 2026-07-03, c9jetpackgates)**: adapter
-spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the `Recipe.*`
-family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
-`Recipe.build(fn(b: BuildContext))`) — the vision-doc spelling is now law;
+spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the curated
+`Recipe.*` family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`).
 `jet add <ref> --adapt` drafts one.
+
+**D-JPK-BUILDRECIPE1 (=A, ratified 2026-08-03)**: an executable adapter uses
+the finite public form `Recipe.build(steps: […])`. Its steps are `.fetch(url:,
+sha256:)`, `.exec(tool:, args:)`, `.install(src:, dest:)`, and
+`.install_tree(src:, dest:)`. The parser lowers these values into the existing
+`BuildStep` action graph. Unknown fields, missing fields, unlocked fetches,
+invalid paths, cycles, and partial outputs remain errors; the recipe does not
+add ambient authority or a second build mechanism.
 
 **U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
 
@@ -4367,7 +4384,8 @@ supported hosts. Terminal and editor debugging remain projections of one
 breakpoint, task, evaluator, exception, mapping, diagnostic, and process model.
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/
-call-graph/effects/member facts; `jet inspect semindex --json`, schema v3) —
+call-graph/effects/member facts plus typed Package and workspace-overlay facts;
+`jet inspect semindex --json`, schema v12) —
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
 (D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
 is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON

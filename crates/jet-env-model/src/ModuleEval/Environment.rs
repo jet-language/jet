@@ -548,9 +548,8 @@ pub struct ProfileSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResolvedProfile {
     pub name: String,
-    /// Ambient selection order before inheritance expansion. Explicit CLI
-    /// selection contains one name; hostname and user matching can contain
-    /// both names in deterministic order.
+    /// Ambient selection before inheritance expansion. Explicit CLI selection
+    /// chooses one profile; ambient hostname and user matches may merge.
     pub selected_profiles: Vec<String>,
     pub applied: Vec<String>,
     pub packages: Vec<String>,
@@ -626,9 +625,8 @@ impl ProfileSet {
         self.auto_select_many(hostname, user).into_iter().next()
     }
 
-    /// Select all matching ambient profiles. Hostname matches are applied
-    /// before user matches; the BTreeMap keeps each group deterministic. The
-    /// default profile is a fallback only when neither ambient selector matches.
+    /// Select ambient profiles in deterministic priority order. All hostname
+    /// matches merge before all user matches; `default` is the last resort.
     pub fn auto_select_many(&self, hostname: &str, user: &str) -> Vec<String> {
         let mut selected = self
             .profiles
@@ -656,10 +654,14 @@ impl ProfileSet {
                 selected.push(name);
             }
         }
-        if selected.is_empty() && self.profiles.contains_key("default") {
-            selected.push("default".to_string());
+        if !selected.is_empty() {
+            return selected;
         }
-        selected
+
+        if self.profiles.contains_key("default") {
+            return vec!["default".to_string()];
+        }
+        Vec::new()
     }
 
     fn resolve_into(
@@ -713,6 +715,15 @@ pub struct LanguagePack {
     pub venv_packages: Vec<String>,
     pub variables: BTreeMap<String, String>,
     pub commands: BTreeMap<String, String>,
+    /// Execution authority for the pack. `native` means the pack is selected
+    /// for the host platform recorded in `platforms`.
+    pub host: String,
+    pub platforms: Vec<String>,
+    /// Union of the licenses declared by the catalog entries in this pack.
+    pub license: String,
+    /// Command names the pack promises to expose. A missing mapping is a
+    /// catalog error, never an empty PATH entry.
+    pub required_tools: Vec<String>,
 }
 
 impl LanguagePack {
@@ -746,6 +757,22 @@ impl LanguagePack {
             text.push_str(name);
             text.push('=');
             text.push_str(command);
+            text.push('\n');
+        }
+        text.push_str("host=");
+        text.push_str(&self.host);
+        text.push('\n');
+        for platform in &self.platforms {
+            text.push_str("platform=");
+            text.push_str(platform);
+            text.push('\n');
+        }
+        text.push_str("license=");
+        text.push_str(&self.license);
+        text.push('\n');
+        for tool in &self.required_tools {
+            text.push_str("required-tool=");
+            text.push_str(tool);
             text.push('\n');
         }
         text
@@ -802,6 +829,10 @@ pub struct LanguageProjection {
     pub included: Vec<String>,
     pub omitted: Vec<String>,
     pub changed: Vec<String>,
+    pub host: String,
+    pub platform: String,
+    pub license: String,
+    pub missing_tools: Vec<String>,
 }
 
 impl LanguageProjection {
@@ -820,6 +851,18 @@ impl LanguageProjection {
         text.push('\n');
         text.push_str("changed=");
         text.push_str(&self.changed.join(","));
+        text.push('\n');
+        text.push_str("host=");
+        text.push_str(&self.host);
+        text.push('\n');
+        text.push_str("platform=");
+        text.push_str(&self.platform);
+        text.push('\n');
+        text.push_str("license=");
+        text.push_str(&self.license);
+        text.push('\n');
+        text.push_str("missing-tools=");
+        text.push_str(&self.missing_tools.join(","));
         text.push('\n');
         text
     }
@@ -883,7 +926,29 @@ impl LanguagePackCatalog {
         self.packs.keys().cloned().collect()
     }
 
+    /// Stable catalog identity disclosed by `jet env info`; changing a pack's
+    /// packages or host variables changes this fingerprint.
+    pub fn fingerprint(&self) -> String {
+        let mut text = String::from("jet-language-catalog-v1\n");
+        for pack in self.packs.values() {
+            text.push_str(&pack.fingerprint());
+            text.push('\n');
+        }
+        jet_pkg_model::SHA256::sha256_hex(text.as_bytes())
+    }
+
     pub fn expand(&self, selections: &[LanguageSpec]) -> Result<LanguageExpansion, String> {
+        self.expand_for_platform(selections, &jet_pkg_model::Platform::host_key())
+    }
+
+    /// Expand selections for one explicit host platform. Keeping the target
+    /// parameter here makes unsupported-host behavior testable without
+    /// pretending the host is something it is not.
+    pub fn expand_for_platform(
+        &self,
+        selections: &[LanguageSpec],
+        platform: &str,
+    ) -> Result<LanguageExpansion, String> {
         let mut expansion = LanguageExpansion::default();
         for selection in selections {
             let name = selection.name.as_str();
@@ -909,8 +974,43 @@ impl LanguagePackCatalog {
             let mut projection = LanguageProjection {
                 selection: normalized,
                 pack: pack.clone(),
+                host: pack.host.clone(),
+                platform: platform.to_string(),
+                license: pack.license.clone(),
                 ..Default::default()
             };
+            if selection.enable && pack.license.trim().is_empty() {
+                return Err(format!(
+                    "language pack `{}` has no license fact",
+                    pack.name
+                ));
+            }
+            if selection.enable
+                && !pack.platforms.is_empty()
+                && !pack.platforms.iter().any(|item| item == platform)
+            {
+                return Err(format!(
+                    "language pack `{}` does not support host platform `{platform}`",
+                    pack.name
+                ));
+            }
+            let missing_tools = pack
+                .required_tools
+                .iter()
+                .filter(|tool| !pack.commands.contains_key(*tool))
+                .cloned()
+                .collect::<Vec<_>>();
+            if selection.enable && !missing_tools.is_empty() {
+                return Err(format!(
+                    "language pack `{}` is missing catalog tools: {}",
+                    pack.name,
+                    missing_tools.join(", ")
+                ));
+            }
+            projection.missing_tools = missing_tools;
+            projection.changed.push(format!("host={}", pack.host));
+            projection.changed.push(format!("platform={platform}"));
+            projection.changed.push(format!("license={}", pack.license));
             if let Some(version) = selection.version.as_deref() {
                 projection.changed.push(format!("version={version}"));
             }
@@ -1064,20 +1164,66 @@ fn versioned_package(package: &str, version: Option<&str>) -> String {
 }
 
 fn pack(name: &str, packages: &[&str]) -> LanguagePack {
+    let (commands, license, required_tools) = match name {
+        "Rust" => (
+            BTreeMap::from([
+                ("rustc".to_string(), "rustc".to_string()),
+                ("cargo".to_string(), "cargo".to_string()),
+                ("rust-analyzer".to_string(), "rust-analyzer".to_string()),
+                ("rustfmt".to_string(), "rustfmt".to_string()),
+                ("clippy".to_string(), "clippy-driver".to_string()),
+            ]),
+            "Apache-2.0 OR MIT".to_string(),
+            vec![
+                "rustc".to_string(),
+                "cargo".to_string(),
+                "rust-analyzer".to_string(),
+                "rustfmt".to_string(),
+                "clippy".to_string(),
+            ],
+        ),
+        "Python" => (
+            BTreeMap::from([
+                ("python".to_string(), "python3".to_string()),
+                ("pip".to_string(), "pip".to_string()),
+            ]),
+            "MIT OR PSF-2.0".to_string(),
+            vec!["python".to_string(), "pip".to_string()],
+        ),
+        _ => (BTreeMap::new(), String::new(), Vec::new()),
+    };
     LanguagePack {
         name: name.to_string(),
         packages: packages.iter().map(|item| (*item).to_string()).collect(),
         venv_packages: (name == "Python")
             .then(|| vec!["pythonPackages.virtualenv@nixpkgs".to_string()])
             .unwrap_or_default(),
+        commands,
+        host: "native".to_string(),
+        platforms: vec![
+            "aarch64-macos".to_string(),
+            "aarch64-linux".to_string(),
+            "x86_64-macos".to_string(),
+            "x86_64-linux".to_string(),
+        ],
+        license,
+        required_tools,
         ..Default::default()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookAction {
+    /// The normal lifecycle spelling names one checked `#Job fn`.
+    Task(String),
+    /// The explicit expert escape remains a trust-gated command record.
+    Command(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookSpec {
     pub name: String,
-    pub command: String,
+    pub action: HookAction,
     pub cwd: Option<String>,
     pub trusted: bool,
 }
@@ -1146,7 +1292,16 @@ impl EnvironmentLifecycle {
             text.push_str("hook\t");
             text.push_str(&hook.name);
             text.push('\t');
-            text.push_str(&hook.command);
+            match &hook.action {
+                HookAction::Task(task) => {
+                    text.push_str("task:");
+                    text.push_str(task);
+                }
+                HookAction::Command(command) => {
+                    text.push_str("command:");
+                    text.push_str(command);
+                }
+            }
             text.push('\t');
             text.push_str(hook.cwd.as_deref().unwrap_or(""));
             text.push('\t');
@@ -1657,14 +1812,16 @@ fn hooks_from_value(prefix: &str, value: &CtValue) -> Result<Vec<HookSpec>, Stri
         .enumerate()
         .map(|(index, value)| {
             if let Some(command) = string_value(value) {
-                if command.trim().is_empty() {
-                    return Err(format!("{prefix}[{index}] command cannot be empty"));
+                if !valid_task_name(&command) {
+                    return Err(format!(
+                        "{prefix}[{index}] must name a declared #Job task; arbitrary commands need a trusted hook record"
+                    ));
                 }
                 return Ok(HookSpec {
                     name: format!("{prefix}.{index}"),
-                    command,
-                    trusted: true,
-                    ..Default::default()
+                    action: HookAction::Task(command),
+                    cwd: None,
+                    trusted: false,
                 });
             }
             let fields = checked_unique_fields_named(value, &format!("{prefix}[{index}]"), &["name", "command", "cwd", "trusted"])?;
@@ -1699,9 +1856,20 @@ fn hooks_from_value(prefix: &str, value: &CtValue) -> Result<Vec<HookSpec>, Stri
                 })
                 .transpose()?
                 .unwrap_or(false);
-            Ok(HookSpec { name, command, cwd, trusted })
+            Ok(HookSpec {
+                name,
+                action: HookAction::Command(command),
+                cwd,
+                trusted,
+            })
         })
         .collect()
+}
+
+fn valid_task_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn reload_from_value(value: &CtValue) -> Result<ReloadPolicy, String> {
@@ -1895,7 +2063,7 @@ mod tests {
     }
 
     #[test]
-    fn ambient_hostname_and_user_profiles_merge_without_overrides() {
+    fn ambient_hostname_profiles_merge_before_user_profiles() {
         let mut set = ProfileSet::default();
         set.insert(ProfileSpec {
             name: "host".to_string(),
@@ -1943,10 +2111,31 @@ mod tests {
         .unwrap();
 
         let selected = set.auto_select_many("build-01", "sam");
+        assert_eq!(selected, vec!["host", "sam"]);
         assert!(matches!(
             set.resolve_many(&selected),
-            Err(ProfileError::Conflict { .. })
+            Err(ProfileError::Conflict { name }) if name == "sam.MODE"
         ));
+    }
+
+    #[test]
+    fn ambient_user_precedes_default_and_default_is_last_resort() {
+        let mut set = ProfileSet::default();
+        set.insert(ProfileSpec {
+            name: "default".to_string(),
+            packages: vec!["default@nixpkgs".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+        set.insert(ProfileSpec {
+            name: "sam".to_string(),
+            user: Some("sam".to_string()),
+            packages: vec!["user@nixpkgs".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(set.auto_select_many("other", "sam"), vec!["sam"]);
+        assert_eq!(set.auto_select_many("other", "other"), vec!["default"]);
     }
 
     #[test]
@@ -1997,6 +2186,7 @@ mod tests {
             .register(LanguagePack {
                 name: "JetExperimental".to_string(),
                 packages: vec!["jet-tool@nixpkgs".to_string()],
+                license: "MIT".to_string(),
                 ..Default::default()
             })
             .unwrap();
@@ -2015,6 +2205,90 @@ mod tests {
             }])
             .unwrap();
         assert_eq!(expansion.packages, vec!["jet-tool@nixpkgs"]);
+    }
+
+    #[test]
+    fn language_pack_rejects_unsupported_platform_and_missing_tool_facts() {
+        let mut catalog = LanguagePackCatalog::default();
+        catalog
+            .register(LanguagePack {
+                name: "Narrow".to_string(),
+                packages: vec!["narrow@nixpkgs".to_string()],
+                platforms: vec!["x86_64-linux".to_string()],
+                host: "native".to_string(),
+                license: "MIT".to_string(),
+                required_tools: vec!["narrow".to_string()],
+                commands: BTreeMap::from([("narrow".to_string(), "narrow".to_string())]),
+                ..Default::default()
+            })
+            .unwrap();
+        let unsupported = catalog
+            .expand_for_platform(
+                &[LanguageSpec {
+                    name: "Narrow".to_string(),
+                    enable: true,
+                    ..Default::default()
+                }],
+                "aarch64-darwin",
+            )
+            .unwrap_err();
+        assert!(unsupported.contains("does not support host platform"), "{unsupported}");
+
+        let mut missing = LanguagePackCatalog::default();
+        missing
+            .register(LanguagePack {
+                name: "Missing".to_string(),
+                license: "MIT".to_string(),
+                required_tools: vec!["missing".to_string()],
+                ..Default::default()
+            })
+            .unwrap();
+        let error = missing
+            .expand_for_platform(
+                &[LanguageSpec {
+                    name: "Missing".to_string(),
+                    enable: true,
+                    ..Default::default()
+                }],
+                "x86_64-linux",
+            )
+            .unwrap_err();
+        assert!(error.contains("missing catalog tools: missing"), "{error}");
+        let disabled = missing
+            .expand_for_platform(
+                &[LanguageSpec {
+                    name: "Missing".to_string(),
+                    enable: false,
+                    ..Default::default()
+                }],
+                "x86_64-linux",
+            )
+            .unwrap();
+        assert!(disabled.packages.is_empty());
+        assert_eq!(
+            disabled.projections[0].missing_tools,
+            vec!["missing".to_string()]
+        );
+
+        let mut unlicensed = LanguagePackCatalog::default();
+        unlicensed
+            .register(LanguagePack {
+                name: "Unlicensed".to_string(),
+                packages: vec!["unlicensed@nixpkgs".to_string()],
+                ..Default::default()
+            })
+            .unwrap();
+        let error = unlicensed
+            .expand_for_platform(
+                &[LanguageSpec {
+                    name: "Unlicensed".to_string(),
+                    enable: true,
+                    ..Default::default()
+                }],
+                "x86_64-linux",
+            )
+            .unwrap_err();
+        assert!(error.contains("has no license fact"), "{error}");
     }
 
     #[test]
@@ -2074,6 +2348,10 @@ mod tests {
             .included
             .contains(&"rustc#version=1.78@nixpkgs".to_string()));
         assert!(rust_projection.changed.contains(&"channel=Stable".to_string()));
+        assert_eq!(rust_projection.host, "native");
+        assert_eq!(rust_projection.platform, jet_pkg_model::Platform::host_key());
+        assert_eq!(rust_projection.license, "Apache-2.0 OR MIT");
+        assert!(rust_projection.missing_tools.is_empty());
         let python_projection = expansion
             .projections
             .iter()
@@ -2093,11 +2371,18 @@ mod tests {
             venv_packages: vec!["pythonPackages.virtualenv@nixpkgs".to_string()],
             variables: BTreeMap::from([("PYTHONUTF8".to_string(), "1".to_string())]),
             commands: BTreeMap::from([("python".to_string(), "python3".to_string())]),
+            host: "native".to_string(),
+            license: "PSF-2.0".to_string(),
+            required_tools: vec!["python".to_string()],
+            ..Default::default()
         };
         let fingerprint = pack.fingerprint();
         assert!(fingerprint.contains("venv-package=pythonPackages.virtualenv@nixpkgs"));
         assert!(fingerprint.contains("var=PYTHONUTF8=1"));
         assert!(fingerprint.contains("command=python=python3"));
+        assert!(fingerprint.contains("host=native"));
+        assert!(fingerprint.contains("license="));
+        assert!(fingerprint.contains("required-tool="));
     }
 
     #[test]

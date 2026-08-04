@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageOutputKind {
@@ -100,6 +101,10 @@ pub struct PackageFacts {
     pub environments: BTreeMap<String, EnvironmentFact>,
     pub defaults: BTreeMap<String, String>,
     pub configs: Vec<String>,
+    /// Resolved file-backed Config paths. These are relative to the Package
+    /// root and keep discovery provenance available to source enumeration.
+    #[doc(hidden)]
+    pub resolved_config_paths: Vec<String>,
     /// Inline `name :: Config.{ ... }` contributions. The merged fields stay
     /// in the parent facts; this map preserves the declaration identity so a
     /// `configs: [...]` list can refer to either inline or file-backed Configs.
@@ -197,6 +202,47 @@ impl std::error::Error for ComposeError {}
 impl std::error::Error for PackageParseError {}
 
 impl PackageFacts {
+    /// Stable, checkout-portable digest of the fully composed typed facts
+    /// used by workspace locks. Source origins and provenance are audit
+    /// metadata, not Package meaning, so absolute checkout paths never enter
+    /// this identity.
+    pub fn semantic_digest(&self) -> String {
+        let mut semantic = String::new();
+        write!(
+            &mut semantic,
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};configs={:?};members={:?};",
+            self.name,
+            self.version,
+            self.jet,
+            self.source,
+            self.deps,
+            self.services,
+            self.outputs,
+            self.environments,
+            self.defaults,
+            self.configs,
+            self.members,
+        )
+        .expect("writing to a String cannot fail");
+        for (name, config) in &self.inline_configs {
+            write!(
+                &mut semantic,
+                "inline_config={:?};name={:?};version={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};",
+                name,
+                config.name,
+                config.version,
+                config.source,
+                config.deps,
+                config.services,
+                config.outputs,
+                config.environments,
+                config.defaults,
+            )
+            .expect("writing to a String cannot fail");
+        }
+        crate::SHA256::sha256_hex(semantic.as_bytes())
+    }
+
     /// Parse the canonical `package.jet` root shape.
     pub fn parse(text: &str, origin: impl Into<String>) -> Result<Self, PackageParseError> {
         let facts = Self::parse_uncomposed(text, origin)?;
@@ -308,6 +354,14 @@ impl PackageFacts {
                     field: "configs".to_string(),
                     value: path.display().to_string(),
                 });
+            }
+            let relative_path = path
+                .strip_prefix(&root)
+                .expect("validated Config path must stay below Package root")
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            if !self.resolved_config_paths.contains(&relative_path) {
+                self.resolved_config_paths.push(relative_path);
             }
             let text = std::fs::read_to_string(&path).map_err(|error| {
                 PackageParseError::Composition(format!(
@@ -441,28 +495,25 @@ impl PackageFacts {
     ) -> Result<Option<std::path::PathBuf>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
-        if let Some(entry) = self.legacy_run_entry(root) {
-            return Ok(Some(entry));
-        }
-        if !self
+        if self
             .outputs
             .values()
             .any(|output| intent_accepts_kind("run", output.kind))
         {
-            return Ok(None);
+            let output = self
+                .select_output("run", None, None)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+            let Some(entry) = self.entry_path(root, output) else {
+                return Err(format!(
+                    "{}: typed output `{}` has no unique source entry for `{}`",
+                    self.origin,
+                    output.name,
+                    output.entry.as_deref().unwrap_or("<missing>")
+                ));
+            };
+            return Ok(Some(entry));
         }
-        let output = self
-            .select_output("run", None, None)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
-        let Some(entry) = self.entry_path(root, output) else {
-            return Err(format!(
-                "{}: typed output `{}` has no unique source entry for `{}`",
-                self.origin,
-                output.name,
-                output.entry.as_deref().unwrap_or("<missing>")
-            ));
-        };
-        Ok(Some(entry))
+        Ok(self.legacy_run_entry(root))
     }
 
     fn legacy_run_entry(&self, root: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -533,12 +584,16 @@ impl PackageFacts {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "package.jet" || name == "pkg.jet");
-            let config = self.configs.iter().any(|name| {
-                let candidate = root.join(name);
-                path == &candidate
-                    || (candidate.extension().is_none()
-                        && path == &candidate.with_extension("jet"))
-            });
+            let config = self
+                .resolved_config_paths
+                .iter()
+                .chain(self.configs.iter())
+                .any(|name| {
+                    let candidate = root.join(name);
+                    path == &candidate
+                        || (candidate.extension().is_none()
+                            && path == &candidate.with_extension("jet"))
+                });
             !reserved && !config
         });
         files.sort();
@@ -736,6 +791,9 @@ impl ConfigFacts {
         let stripped = strip_comments(text);
         let (declared_name, body) = match config_wrapper(&stripped)? {
             Some((name, body)) => (Some(name), body),
+            None if stripped.trim_start().starts_with("Config") => {
+                (None, record_body(stripped.trim(), "Config")?)
+            }
             None => (None, stripped.as_str()),
         };
         let facts = parse_common(body, origin, true)?;
@@ -1894,6 +1952,13 @@ fn discover_config_path(
         if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("jet") {
             continue;
         }
+        if path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.starts_with('_'))
+        {
+            continue;
+        }
         let text = std::fs::read_to_string(&path).map_err(|error| {
             PackageParseError::Composition(format!("couldn't read Config `{}`: {error}", path.display()))
         })?;
@@ -2280,6 +2345,14 @@ defaults: .{ run: app, test: check }
     }
 
     #[test]
+    fn semantic_digest_ignores_checkout_origins() {
+        let source = "name: \"demo\"\nversion: \"1.0.0\"\n";
+        let left = PackageFacts::parse(source, "/checkout/one/package.jet").unwrap();
+        let right = PackageFacts::parse(source, "/checkout/two/package.jet").unwrap();
+        assert_eq!(left.semantic_digest(), right.semantic_digest());
+    }
+
+    #[test]
     fn output_payload_keeps_json_shapes() {
         let facts = PackageFacts::parse(
             r#"
@@ -2323,6 +2396,68 @@ dev :: Config.{
         assert_eq!(facts.version.as_deref(), Some("1"));
         assert_eq!(facts.inline_configs["dev"].name.as_deref(), Some("dev"));
         assert_eq!(facts.defaults["run"], "app");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn named_config_discovery_skips_leading_underscore_files() {
+        let dir = temp_dir("config-discovery");
+        std::fs::write(
+            dir.join("package.jet"),
+            "name: \"demo\"\nconfigs: [dev]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("_dev.jet"),
+            "pub dev :: Config.{ version: \"ignored\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("one.jet"),
+            "pub dev :: Config.{ version: \"selected\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("ordinary.jet"),
+            "pub run() { }\n",
+        )
+        .unwrap();
+
+        let facts = PackageFacts::load(&dir).unwrap().unwrap();
+        assert_eq!(facts.version.as_deref(), Some("selected"));
+        assert!(facts
+            .provenance
+            .get("version")
+            .is_some_and(|origins| origins.contains(&dir.join("one.jet").display().to_string())));
+        assert!(facts
+            .source_files(&dir)
+            .iter()
+            .all(|path| path.file_name().and_then(|name| name.to_str()) != Some("one.jet")));
+        assert!(facts
+            .source_files(&dir)
+            .iter()
+            .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("ordinary.jet")));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn ambiguous_named_config_discovery_fails_before_composition() {
+        let dir = temp_dir("config-ambiguous");
+        std::fs::write(
+            dir.join("package.jet"),
+            "name: \"demo\"\nconfigs: [dev]\n",
+        )
+        .unwrap();
+        for file in ["one.jet", "two.jet"] {
+            std::fs::write(
+                dir.join(file),
+                "pub dev :: Config.{ version: \"same\" }\n",
+            )
+            .unwrap();
+        }
+
+        let error = PackageFacts::load(&dir).unwrap().unwrap_err().to_string();
+        assert!(error.contains("Config `dev` is ambiguous"), "{error}");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -2402,7 +2537,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
     }
 
     #[test]
-    fn legacy_run_precedes_a_sole_typed_output() {
+    fn typed_output_precedes_a_legacy_run_entry() {
         let dir = temp_dir("legacy-run");
         std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
         std::fs::write(dir.join("serve.jet"), "fn serve() { print(2) }\n").unwrap();
@@ -2414,7 +2549,7 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         .unwrap();
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
-            Some(dir.join("main.jet"))
+            Some(dir.join("serve.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
     }

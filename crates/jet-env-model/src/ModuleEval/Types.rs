@@ -100,8 +100,7 @@ pub enum AdapterRecipe {
     /// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
     /// `bin/<as>`.
     Prebuilt { bin: String, as_name: String },
-    /// Curated future recipes parse as a concrete `BuildRecipe` once their
-    /// tool deps can be represented. The current U20 slice uses copy/prebuilt.
+    /// `Recipe.build(steps: […])`: a finite, digestable executable action graph.
     Build(BuildRecipe),
 }
 
@@ -408,11 +407,18 @@ pub struct EnvPlan {
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
     pub environment_names: Vec<String>,
+    /// The one environment profile whose packages/settings are active for this
+    /// plan. `dev` is the deterministic beginner default when present.
+    pub active_environment: Option<String>,
+    /// Module names that contributed the selected environment profile, in source order.
+    pub active_environment_provenance: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnvironmentFacts {
     pub environment_names: Vec<String>,
+    pub active_environment: Option<String>,
+    pub active_environment_provenance: Vec<String>,
     pub source_files: Vec<String>,
     pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,

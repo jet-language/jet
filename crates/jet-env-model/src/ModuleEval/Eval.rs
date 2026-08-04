@@ -673,7 +673,9 @@ fn evaluate_env_fields(
     // comptime value.
     let field_map = fields
         .iter()
-        .filter(|(name, _, _)| name != &Syntax::SYSTEM_FIELD_PACKAGES)
+        .filter(|(name, _, _)| {
+            name != &Syntax::SYSTEM_FIELD_PACKAGES && !is_lifecycle_field(name)
+        })
         .map(|(name, span, value)| (name.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
     for (name, _, value) in fields {
@@ -761,25 +763,17 @@ fn evaluate_env_fields(
                     )
                 })?);
             }
-        } else if matches!(
-            name.as_str(),
-            Syntax::ENV_FIELD_DOTENV
-                | Syntax::ENV_FIELD_UNSET
-                | Syntax::ENV_FIELD_ON_ENTER
-                | Syntax::ENV_FIELD_CHECKS
-                | Syntax::ENV_FIELD_RELOAD
-        ) {
-            if let Some(value) = resolved.get(name) {
-                lifecycle_from_field(&mut lifecycle, name, value).map_err(|error| {
-                    Diagnostic::error(
-                        "E1333",
-                        format!("environment lifecycle declaration is invalid: {error}"),
-                        "lifecycle fields use typed dotenv, unset, hook, and reload records".to_string(),
-                        "fix the field shape, for example `dotenv: [\".env\"]` or `reload: .Prompt`".to_string(),
-                        Some(*span),
-                    )
-                })?;
-            }
+        } else if is_lifecycle_field(name) {
+            let value = evaluate_lifecycle_value(value, base_dir, funcs, globals)?;
+            lifecycle_from_field(&mut lifecycle, name, &value).map_err(|error| {
+                Diagnostic::error(
+                    "E1333",
+                    format!("environment lifecycle declaration is invalid: {error}"),
+                    "lifecycle fields use typed dotenv, unset, task names, and hook records".to_string(),
+                    "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, or `reload: .Prompt`".to_string(),
+                    Some(*span),
+                )
+            })?;
         } else {
             let v = resolved
                 .get(name)
@@ -801,6 +795,76 @@ fn evaluate_env_fields(
         languages,
         files,
     })
+}
+
+fn is_lifecycle_field(name: &str) -> bool {
+    matches!(
+        name,
+        Syntax::ENV_FIELD_DOTENV
+            | Syntax::ENV_FIELD_UNSET
+            | Syntax::ENV_FIELD_ON_ENTER
+            | Syntax::ENV_FIELD_CHECKS
+            | Syntax::ENV_FIELD_RELOAD
+    )
+}
+
+/// Lifecycle names are references, not comptime variable reads. Keep bare
+/// identifiers as strings while still evaluating ordinary literals and the
+/// explicit expert record's scalar fields.
+fn evaluate_lifecycle_value(
+    expr: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Result<crate::Comptime::CtValue, Diagnostic> {
+    match expr {
+        Expr::Ident(name, _) => Ok(crate::Comptime::CtValue::Str(name.clone())),
+        Expr::Field(..) => Ok(crate::Comptime::CtValue::Str(expression_name(expr))),
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| evaluate_lifecycle_value(value, base_dir, funcs, globals))
+            .collect::<Result<Vec<_>, _>>()
+            .map(crate::Comptime::CtValue::List),
+        Expr::StructLit {
+            type_name, fields, ..
+        } => fields
+            .iter()
+            .map(|(name, _, value)| {
+                Ok((
+                    name.clone(),
+                    evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()
+            .map(|fields| crate::Comptime::CtValue::Struct {
+                type_name: type_name.clone(),
+                fields,
+            }),
+        Expr::MapLit(entries, _) => entries
+            .iter()
+            .map(|(key, value)| {
+                let key = evaluate_lifecycle_value(key, base_dir, funcs, globals)?;
+                let key = integration_ct_key(&key).ok_or_else(|| {
+                    Diagnostic::error(
+                        "E1333",
+                        "lifecycle map keys must be deterministic scalar values".to_string(),
+                        "lifecycle records are captured as stable plan facts".to_string(),
+                        "use a string, integer, boolean, or character key".to_string(),
+                        Some(expr.span()),
+                    )
+                })?;
+                Ok((
+                    key,
+                    evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()
+            .map(|entries| crate::Comptime::CtValue::Map(entries.into_iter().collect())),
+        _ => {
+            check_build_io(expr)?;
+            Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)
+        }
+    }
 }
 
 fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
@@ -964,7 +1028,7 @@ pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<ExtractedPacka
         if item.is_empty() {
             continue;
         }
-        if item.starts_with("Pkg.adapt") {
+        if item.starts_with(Syntax::PKG_ADAPT) {
             out.adapters.push(parse_adapter(item)?);
         } else {
             plain.push(item);
@@ -1008,12 +1072,23 @@ fn split_top_level(body: &str) -> Vec<&str> {
 }
 
 fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
-    let args = call_args(item, "Pkg.adapt").ok_or_else(|| adapter_shape(item))?;
-    let name = named_string(args, "name").ok_or_else(|| adapter_shape(item))?;
-    let source = named_raw(args, "source").ok_or_else(|| adapter_shape(item))?;
+    let args = call_args(item, Syntax::PKG_ADAPT).ok_or_else(|| adapter_shape(item))?;
+    validate_fields(
+        args,
+        &[
+            Syntax::ADAPTER_FIELD_NAME,
+            Syntax::ADAPTER_FIELD_SOURCE,
+            Syntax::ADAPTER_FIELD_DEPS,
+            Syntax::ADAPTER_FIELD_RECIPE,
+        ],
+    )?;
+    let name = named_string(args, Syntax::ADAPTER_FIELD_NAME)
+        .ok_or_else(|| adapter_shape(item))?;
+    let source = named_raw(args, Syntax::ADAPTER_FIELD_SOURCE)
+        .ok_or_else(|| adapter_shape(item))?;
     let source = unquote(source.trim()).unwrap_or(source);
     super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
-    let deps = named_raw(args, "deps")
+    let deps = named_raw(args, Syntax::ADAPTER_FIELD_DEPS)
         .map(|raw| {
             let body = raw
                 .trim()
@@ -1023,7 +1098,10 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
             Merge::parse_package_list(body)
         })
         .unwrap_or_default();
-    let recipe = parse_recipe(&named_raw(args, "recipe").ok_or_else(|| adapter_shape(item))?)?;
+    let recipe = parse_recipe(
+        &named_raw(args, Syntax::ADAPTER_FIELD_RECIPE)
+            .ok_or_else(|| adapter_shape(item))?,
+    )?;
     Ok(AdapterPlan {
         name,
         source,
@@ -1034,13 +1112,33 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
 
 fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     let raw = raw.trim();
-    if raw.starts_with("Recipe.copy") {
-        return Ok(AdapterRecipe::Copy);
+    if let Some(args) = call_args(raw, Syntax::RECIPE_BUILD) {
+        validate_fields(args, &[Syntax::RECIPE_FIELD_STEPS])?;
+        let steps = parse_build_steps(args)?;
+        return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe { steps }));
     }
-    if let Some(args) = call_args(raw, "Recipe.prebuilt") {
-        let bin = named_string(args, "bin").ok_or_else(|| adapter_shape(raw))?;
-        let as_name = named_string(args, "as")
-            .or_else(|| named_string(args, "as_name"))
+    if let Some(args) = call_args(raw, Syntax::RECIPE_COPY) {
+        if args.trim().is_empty() {
+            return Ok(AdapterRecipe::Copy);
+        }
+        return Err(adapter_shape(raw));
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_PREBUILT) {
+        if args.trim().is_empty() {
+            return Err(adapter_shape(raw));
+        }
+        validate_fields(
+            args,
+            &[
+                Syntax::RECIPE_FIELD_BIN,
+                Syntax::RECIPE_FIELD_AS,
+                Syntax::RECIPE_FIELD_AS_NAME,
+            ],
+        )?;
+        let bin = named_string(args, Syntax::RECIPE_FIELD_BIN)
+            .ok_or_else(|| adapter_shape(raw))?;
+        let as_name = named_string(args, Syntax::RECIPE_FIELD_AS)
+            .or_else(|| named_string(args, Syntax::RECIPE_FIELD_AS_NAME))
             .unwrap_or_else(|| {
                 std::path::Path::new(&bin)
                     .file_name()
@@ -1053,11 +1151,134 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     Err(adapter_shape(raw))
 }
 
+fn parse_build_steps(args: &str) -> Result<Vec<super::super::Recipe::BuildStep>, Diagnostic> {
+    let raw = named_field(args, Syntax::RECIPE_FIELD_STEPS)
+        .ok_or_else(|| adapter_shape(args))?;
+    let body = raw
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| adapter_shape(args))?;
+    let mut steps = Vec::new();
+    for item in split_top_level(body) {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        steps.push(parse_build_step(item)?);
+    }
+    if steps.is_empty() {
+        return Err(adapter_shape(args));
+    }
+    Ok(steps)
+}
+
+fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagnostic> {
+    use super::super::Recipe::BuildStep;
+
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_FETCH) {
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_URL, Syntax::RECIPE_STEP_FIELD_SHA256],
+        )?;
+        return Ok(BuildStep::Fetch {
+            url: required_field_string(args, Syntax::RECIPE_STEP_FIELD_URL)?,
+            sha256: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SHA256)?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_EXEC) {
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_TOOL, Syntax::RECIPE_STEP_FIELD_ARGS],
+        )?;
+        return Ok(BuildStep::Exec {
+            tool: required_field_string(args, Syntax::RECIPE_STEP_FIELD_TOOL)?,
+            args: required_field_strings(args, Syntax::RECIPE_STEP_FIELD_ARGS)?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL) {
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+        )?;
+        return Ok(BuildStep::Install {
+            src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+            dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
+        });
+    }
+    if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL_TREE) {
+        validate_fields(
+            args,
+            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+        )?;
+        return Ok(BuildStep::InstallTree {
+            src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+            dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
+        });
+    }
+    Err(adapter_shape(raw))
+}
+
+fn named_field<'a>(args: &'a str, key: &str) -> Option<&'a str> {
+    let fields = named_fields(args)?;
+    let mut found = None;
+    for (name, value) in fields {
+        if name == key {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(value);
+        }
+    }
+    found
+}
+
+fn named_fields<'a>(args: &'a str) -> Option<Vec<(&'a str, &'a str)>> {
+    split_top_level(args)
+        .into_iter()
+        .filter(|item| !item.trim().is_empty())
+        .map(|item| {
+            let (name, value) = item.trim().split_once(':')?;
+            let name = name.trim();
+            let value = value.trim();
+            (!name.is_empty() && !value.is_empty()).then_some((name, value))
+        })
+        .collect()
+}
+
+fn validate_fields(args: &str, allowed: &[&str]) -> Result<(), Diagnostic> {
+    let fields = named_fields(args).ok_or_else(|| adapter_shape(args))?;
+    let mut seen = HashSet::new();
+    if fields.iter().any(|(name, _)| {
+        !allowed.contains(name) || !seen.insert(*name)
+    }) {
+        return Err(adapter_shape(args));
+    }
+    Ok(())
+}
+
+fn required_field_string(args: &str, key: &str) -> Result<String, Diagnostic> {
+    let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+    unquote(value.trim()).ok_or_else(|| adapter_shape(args))
+}
+
+fn required_field_strings(args: &str, key: &str) -> Result<Vec<String>, Diagnostic> {
+    let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+    let body = value
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| adapter_shape(args))?;
+    split_top_level(body)
+        .into_iter()
+        .map(|item| unquote(item.trim()).ok_or_else(|| adapter_shape(args)))
+        .collect()
+}
+
 fn call_args<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = raw.trim().strip_prefix(prefix)?.trim_start();
     let rest = rest.strip_prefix('(')?;
-    let end = rest.rfind(')')?;
-    Some(&rest[..end])
+    rest.strip_suffix(')')
 }
 
 fn named_raw(args: &str, key: &str) -> Option<String> {
@@ -1078,14 +1299,36 @@ fn named_string(args: &str, key: &str) -> Option<String> {
 
 fn unquote(raw: &str) -> Option<String> {
     let s = raw.strip_prefix('"')?.strip_suffix('"')?;
-    Some(s.replace("\\\"", "\"").replace("\\\\", "\\"))
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                let escaped = chars.next()?;
+                let (_, decoded) = Syntax::ESCAPES
+                    .iter()
+                    .find(|&&(marker, _)| marker == escaped)?;
+                out.push(*decoded);
+            }
+            '{' if chars.clone().next() == Some('{') => {
+                chars.next();
+                out.push('{');
+            }
+            '}' if chars.clone().next() == Some('}') => {
+                chars.next();
+                out.push('}');
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out)
 }
 
 fn adapter_shape(_raw: &str) -> Diagnostic {
     Diagnostic::error(
         "E1270",
         "adapter package declaration is not complete".to_string(),
-        "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; this U20 slice supports `Recipe.copy()` and `Recipe.prebuilt(bin:, as:)`.".to_string(),
+        "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; recipes are `Recipe.copy()`, `Recipe.prebuilt(bin:, as:)`, or a finite `Recipe.build(steps: […])`.".to_string(),
         "write `Pkg.adapt(name: \"tool\", source: \"./vendor/tool\", recipe: Recipe.copy())`.".to_string(),
         None,
     )

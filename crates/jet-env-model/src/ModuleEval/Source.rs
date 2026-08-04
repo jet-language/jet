@@ -67,6 +67,26 @@ pub fn evaluate_env_with_profile(
     base_dir: &Path,
     requested_profile: Option<&str>,
 ) -> Result<EnvPlan, Diagnostic> {
+    evaluate_env_with_profiles(src, base_dir, requested_profile, None)
+}
+
+/// Evaluate an environment while explicitly selecting one `env.<name>`
+/// environment profile. The ordinary CLI uses the deterministic default
+/// (`dev`, then `default`, then lexical order) when it has no selector.
+pub fn evaluate_env_with_environment_profile(
+    src: &str,
+    base_dir: &Path,
+    requested_environment_profile: Option<&str>,
+) -> Result<EnvPlan, Diagnostic> {
+    evaluate_env_with_profiles(src, base_dir, None, requested_environment_profile)
+}
+
+pub fn evaluate_env_with_profiles(
+    src: &str,
+    base_dir: &Path,
+    requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
+) -> Result<EnvPlan, Diagnostic> {
     let program = parse_program(src)?;
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
         Diagnostic::error(
@@ -387,21 +407,31 @@ pub fn evaluate_env_with_profile(
         ));
     }
 
-    // Collect the `env`-namespace contributions in a deterministic order so the
-    // realized package list is stable across runs (merge_all returns a HashMap).
-    let mut env_keys: Vec<(Namespace, String)> = merged
-        .keys()
-        .filter(|(ns, _)| *ns == Namespace::Env)
-        .cloned()
-        .collect();
-    env_keys.sort_by(|a, b| a.1.cmp(&b.1));
+    // Select exactly one environment profile. The selected name is explicit when a host
+    // asks for it; otherwise `dev`, then `default`, then lexical order gives
+    // one stable beginner path instead of silently merging sibling profiles.
+    let active_environment =
+        select_active_environment(&environment_names, requested_environment_profile)?;
+    let active_key = active_environment
+        .as_ref()
+        .map(|name| (Namespace::Env, name.clone()));
+    let active_environment_provenance = active_key
+        .as_ref()
+        .map(|key| {
+            modules
+                .iter()
+                .filter(|module| module.entries.iter().any(|(entry_key, _)| entry_key == key))
+                .map(|module| module.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     let mut package_refs = Vec::new();
     package_refs.extend(integration_packages);
     let mut prompt = None;
     let mut prompt_path = PromptPathMode::default();
     let mut prompt_strip = PromptStripMode::default();
-    for key in &env_keys {
+    if let Some(key) = &active_key {
         let entry = &merged[key];
         for pkg in &entry.packages {
             push_unique(&mut package_refs, pkg_ref(pkg));
@@ -485,7 +515,34 @@ pub fn evaluate_env_with_profile(
         integrations,
         integration_facts,
         environment_names: environment_names.into_iter().collect(),
+        active_environment,
+        active_environment_provenance,
     })
+}
+
+fn select_active_environment(
+    names: &std::collections::BTreeSet<String>,
+    requested_environment_profile: Option<&str>,
+) -> Result<Option<String>, Diagnostic> {
+    if let Some(name) = requested_environment_profile {
+        if names.contains(name) {
+            return Ok(Some(name.to_string()));
+        }
+        return Err(Diagnostic::error(
+            "E1337",
+            format!("environment profile `{name}` is not declared"),
+            "one environment plan activates one declared `env.<name>` profile; sibling profiles stay available for explicit selection".to_string(),
+            "choose one of the declared environment profile names".to_string(),
+            None,
+        ));
+    }
+    if names.contains("dev") {
+        return Ok(Some("dev".to_string()));
+    }
+    if names.contains("default") {
+        return Ok(Some("default".to_string()));
+    }
+    Ok(names.iter().next().cloned())
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {

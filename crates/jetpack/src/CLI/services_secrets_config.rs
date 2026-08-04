@@ -1,5 +1,5 @@
 use super::parse::Parsed;
-use super::realize::load_project_plan_with_profile;
+use super::realize::load_project_plan_with_selections;
 use super::trust_env_build::compose_env;
 use jet_env_model::ModuleEval;
 use crate::Output::Theme;
@@ -154,18 +154,39 @@ fn run_before_start_tasks(
     Ok(())
 }
 
-/// Run typed lifecycle hooks through the same composed environment used by
-/// commands and services. A hook with an inline command is already covered by
-/// the environment trust grant; structured hooks additionally require the
-/// explicit trusted bit before they may execute.
+/// Run typed lifecycle actions through the same composed environment used by
+/// commands and services. The normal short form names a checked `#Job fn`;
+/// only an explicit record command uses the expert trust-gated hook escape.
 pub(super) fn run_lifecycle_hooks(
     theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
     project_dir: &Path,
+    entry: &Path,
     env: &Env,
     hooks: &[ModuleEval::HookSpec],
     phase: &str,
 ) -> Result<(), i32> {
-    run_lifecycle_hooks_with_mode(theme, project_dir, env, hooks, phase, false, false)
+    run_lifecycle_hooks_with_mode(
+        theme, parsed, roots, project_dir, entry, env, hooks, phase, false, false, false,
+    )
+}
+
+/// Run lifecycle tasks for shell activation without allowing task stdout to
+/// corrupt the generated export script.
+pub(super) fn run_lifecycle_hooks_silent(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    env: &Env,
+    hooks: &[ModuleEval::HookSpec],
+    phase: &str,
+) -> Result<(), i32> {
+    run_lifecycle_hooks_with_mode(
+        theme, parsed, roots, project_dir, entry, env, hooks, phase, false, false, true,
+    )
 }
 
 /// Run lifecycle hooks with only the declared environment visible. This is
@@ -173,24 +194,59 @@ pub(super) fn run_lifecycle_hooks(
 /// variable or host-installed executable leaked into the process.
 pub(super) fn run_lifecycle_hooks_clean(
     theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
     project_dir: &Path,
+    entry: &Path,
     env: &Env,
     hooks: &[ModuleEval::HookSpec],
     phase: &str,
 ) -> Result<(), i32> {
-    run_lifecycle_hooks_with_mode(theme, project_dir, env, hooks, phase, true, true)
+    run_lifecycle_hooks_with_mode(
+        theme, parsed, roots, project_dir, entry, env, hooks, phase, true, true, true,
+    )
 }
 
 fn run_lifecycle_hooks_with_mode(
     theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
     project_dir: &Path,
+    entry: &Path,
     env: &Env,
     hooks: &[ModuleEval::HookSpec],
     phase: &str,
     clean: bool,
     strict: bool,
+    silent: bool,
 ) -> Result<(), i32> {
     for hook in hooks {
+        if let ModuleEval::HookAction::Task(task) = &hook.action {
+            let task_parsed = Parsed {
+                flags: parsed.flags.clone(),
+                positional: vec![task.clone()],
+                command: None,
+            };
+            let code = super::run_enter_dev::run_project_task_with_mode(
+                theme,
+                &task_parsed,
+                roots,
+                project_dir,
+                entry,
+                task,
+                clean,
+                silent,
+            );
+            if code != 0 {
+                theme.error(
+                    &format!("lifecycle {phase} task `{task}` failed"),
+                    &format!("the task returned exit code {code}"),
+                    "fix the task or remove it from the environment lifecycle.",
+                );
+                return Err(code);
+            }
+            continue;
+        }
         if !hook.trusted {
             if !strict {
                 theme.detail(&format!(
@@ -236,7 +292,40 @@ fn run_lifecycle_hooks_with_mode(
             );
             return Err(2);
         };
-        let mut command = crate::Platform::shell_command(&hook.command);
+        let project_root = match project_dir.canonicalize() {
+            Ok(root) => root,
+            Err(error) => {
+                theme.error(
+                    &format!("couldn't resolve lifecycle {phase} hook '{}' project root", hook.name),
+                    &error.to_string(),
+                    "run the hook from an existing project directory.",
+                );
+                return Err(2);
+            }
+        };
+        let cwd = match cwd.canonicalize() {
+            Ok(cwd) if cwd.starts_with(&project_root) && cwd.is_dir() => cwd,
+            Ok(cwd) => {
+                theme.error(
+                    &format!("lifecycle {phase} hook '{}' has an unsafe cwd", hook.name),
+                    &format!("`{}` resolves outside the project", cwd.display()),
+                    "use a project-relative directory that does not escape through a symlink.",
+                );
+                return Err(2);
+            }
+            Err(error) => {
+                theme.error(
+                    &format!("lifecycle {phase} hook '{}' has an unusable cwd", hook.name),
+                    &error.to_string(),
+                    "use an existing project-relative directory.",
+                );
+                return Err(2);
+            }
+        };
+        let ModuleEval::HookAction::Command(command) = &hook.action else {
+            unreachable!("task lifecycle actions return above");
+        };
+        let mut command = crate::Platform::shell_command(command);
         command
             .current_dir(&cwd)
             .stdin(Stdio::null())
@@ -326,7 +415,11 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let name = parsed.positional.get(1).cloned();
 
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -677,7 +770,11 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let plan = match load_project_plan_with_profile(theme, parsed.flags.profile.as_deref()) {
+    let plan = match load_project_plan_with_selections(
+        theme,
+        parsed.flags.profile.as_deref(),
+        parsed.flags.environment_profile.as_deref(),
+    ) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
@@ -1004,15 +1101,21 @@ pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
 /// D-JPK-TASKRUN1: top-level `#Job fn` names in the project entry (sorted).
 /// Parse failure → empty list (real diagnostics surface when jet compiles).
 pub(super) fn list_project_tasks(file: &Path) -> Vec<String> {
+    project_task_names(file).unwrap_or_default()
+}
+
+/// Return task names when the entry can be parsed. `None` preserves the
+/// compiler's own diagnostic path for unreadable or malformed entries.
+fn project_task_names(file: &Path) -> Option<Vec<String>> {
     let Ok(src) = std::fs::read_to_string(file) else {
-        return Vec::new();
+        return None;
     };
     let (toks, diags) = crate::Lexer::lex(&src);
     if !diags.is_empty() {
-        return Vec::new();
+        return None;
     }
     let Ok(prog) = crate::Parser::parse(&toks) else {
-        return Vec::new();
+        return None;
     };
     let mut names: Vec<String> = prog
         .items
@@ -1024,7 +1127,13 @@ pub(super) fn list_project_tasks(file: &Path) -> Vec<String> {
         .collect();
     names.sort();
     names.dedup();
-    names
+    Some(names)
+}
+
+/// Distinguish a parsed entry with no matching task from an entry whose
+/// syntax must be diagnosed by the compiler handoff.
+pub(super) fn project_task_declared(file: &Path, task: &str) -> Option<bool> {
+    project_task_names(file).map(|names| names.iter().any(|name| name == task))
 }
 
 /// D-TASK-META1: return the checked static metadata for one task. A parse

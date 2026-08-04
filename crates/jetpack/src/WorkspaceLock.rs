@@ -15,18 +15,26 @@ use std::path::Path;
 
 /// Write workspace members into `.jet/lock` from a freshly evaluated
 /// `WorkspacePlan`.
-/// Creates `.jet/` if it doesn't exist. Silently ignores write failures
-/// (the lock is best-effort; the source of truth is `workspace.jet`).
-pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
+/// Creates `.jet/` if it doesn't exist. A failed write is returned to the
+/// caller because a stale or partial workspace lock must never masquerade as
+/// a valid index.
+pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> {
     let lock_path = workspace_root.join(WORKSPACE_LOCK);
     let Some(lock_dir) = lock_path.parent().map(Path::to_path_buf) else {
-        return;
+        return Err("workspace lock has no parent directory".to_string());
     };
-    let _ = super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
-        if std::fs::create_dir_all(lock_dir).is_err() {
-            return Ok(());
-        }
-        let mut lock = Lock::load(workspace_root).unwrap_or_else(empty_lock);
+    super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
+        std::fs::create_dir_all(&lock_dir)?;
+        let mut lock = match std::fs::read_to_string(&lock_path) {
+            Ok(raw) => jet_pkg_model::Lock::parse(&raw).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("existing lock is malformed: {error}"),
+                )
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => empty_lock(),
+            Err(error) => return Err(error),
+        };
         lock.version = Lock::LOCK_VERSION;
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
@@ -38,21 +46,75 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
         lock.workspace_members = plan
             .members
             .iter()
-            .map(|m| LockedWorkspaceMember {
-                name: m.name.clone(),
-                path: m.path.clone(),
-                source_digest: source_digest.clone(),
-                canonical_path: if !m.canonical_path.is_empty() {
-                    m.canonical_path.clone()
+            .map(|m| {
+                let relative = std::path::Path::new(&m.path);
+                if relative.is_absolute()
+                    || relative
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} has an unsafe relative path", m.name),
+                    ));
+                }
+                let canonical_path = workspace_root.join(relative).canonicalize().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} cannot be canonicalized: {error}", m.name),
+                    )
+                })?;
+                let root = workspace_root.canonicalize().map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace root cannot be canonicalized: {error}"),
+                    )
+                })?;
+                if !canonical_path.starts_with(&root) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("workspace member {} escapes the workspace root", m.name),
+                    ));
+                }
+                let canonical_relative = canonical_path
+                    .strip_prefix(&root)
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member {} has no relative identity: {error}", m.name),
+                        )
+                    })?
+                    .to_string_lossy()
+                    .into_owned();
+                let canonical_relative = if canonical_relative.is_empty() {
+                    ".".to_string()
                 } else {
-                    workspace_root
-                        .join(&m.path)
-                        .canonicalize()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                },
+                    canonical_relative
+                };
+                let package = jet_pkg_model::Package::PackageFacts::load(&canonical_path)
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member `{}` has no valid Package facts", m.name),
+                        )
+                    })?
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("workspace member `{}` Package facts are invalid: {error}", m.name),
+                        )
+                    })?;
+                Ok(LockedWorkspaceMember {
+                    name: m.name.clone(),
+                    path: m.path.clone(),
+                    source_digest: source_digest.clone(),
+                    canonical_path: canonical_relative,
+                    package_digest: package.semantic_digest(),
+                })
             })
-            .collect();
+            .collect::<std::io::Result<Vec<_>>>()?;
+        lock.workspace_source_digest = Some(source_digest);
+        lock.workspace_overlay_policy = plan.overlay_policy.clone();
         // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
         // into the lock, keeping any inputs already recorded by other call sites.
         // Dedup by path so re-writing the lock is idempotent.
@@ -62,7 +124,8 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
             }
         }
         std::fs::write(lock_path, Lock::write(&lock))
-    });
+    })
+    .map_err(|error| format!("could not write workspace lock: {error}"))
 }
 
 fn empty_lock() -> LockFile {
@@ -71,6 +134,8 @@ fn empty_lock() -> LockFile {
         packages: Vec::new(),
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
         browsers: Vec::new(),
@@ -118,7 +183,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let lock_path = tmp.join(Syntax::UNIFIED_LOCK_FILE);
         assert!(
             lock_path.exists(),
@@ -149,7 +214,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         write_member_manifest(&tmp, "packages/hello", "hello");
         write_member_manifest(&tmp, "packages/ranker", "ranker");
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let loaded = load(&tmp).unwrap();
         assert_eq!(loaded.members.len(), 2);
         assert_eq!(loaded.members[0].name, "hello");
@@ -174,7 +239,7 @@ mod tests {
             members: vec![member("root", ".")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let loaded = load(&tmp).expect("lock reload must preserve a root member");
         assert_eq!(loaded.members.len(), 1);
         assert_eq!(loaded.members[0].name, "root");
@@ -194,17 +259,45 @@ mod tests {
         std::fs::create_dir_all(tmp.join(".jet")).unwrap();
         write_member_manifest(&tmp, "packages/hello", "hello");
         let canonical = tmp.join("packages/hello").canonicalize().unwrap();
+        let package_digest = jet_pkg_model::Package::PackageFacts::load(&canonical)
+            .unwrap()
+            .unwrap()
+            .semantic_digest();
         std::fs::write(
             tmp.join(Syntax::UNIFIED_LOCK_FILE),
             format!(
-                "version = 1\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"{}\"\n",
-                canonical.display()
+                "version = 1\nworkspace_source_digest = \"no-workspace-source\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{}\"\n",
+                package_digest,
             ),
         )
         .unwrap();
         let plan = load(&tmp).unwrap();
         assert_eq!(plan.members.len(), 1);
         assert_eq!(plan.members[0].name, "hello");
+        let moved = std::env::temp_dir().join(format!(
+            "wlock-moved-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(moved.join(".jet")).unwrap();
+        std::fs::create_dir_all(moved.join("packages/hello")).unwrap();
+        std::fs::copy(
+            tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
+            moved.join("packages/hello").join(Syntax::PACKAGE_FILE),
+        )
+        .unwrap();
+        std::fs::copy(
+            tmp.join(Syntax::UNIFIED_LOCK_FILE),
+            moved.join(Syntax::UNIFIED_LOCK_FILE),
+        )
+        .unwrap();
+        assert!(
+            load(&moved).is_some(),
+            "workspace lock must survive checkout relocation"
+        );
+        std::fs::remove_dir_all(moved).ok();
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -229,7 +322,7 @@ mod tests {
             overlay_policy: Default::default(),
             source_digest: String::new(),
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
         assert!(raw.contains("[[comptime_inputs]]"), "{raw}");
         assert!(raw.contains("assets/index.json"), "{raw}");
@@ -237,7 +330,7 @@ mod tests {
         assert_eq!(loaded.comptime_inputs.len(), 1);
         assert_eq!(loaded.comptime_inputs[0].path, "assets/index.json");
         // Idempotent re-write does not duplicate the input.
-        write(&tmp, &loaded);
+        write(&tmp, &loaded).unwrap();
         let reloaded = load(&tmp).unwrap();
         assert_eq!(reloaded.comptime_inputs.len(), 1);
         std::fs::remove_dir_all(&tmp).ok();
@@ -258,7 +351,7 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write(&tmp, &plan).unwrap();
 
         std::fs::write(
             tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
@@ -276,6 +369,25 @@ mod tests {
         std::fs::write(
             tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
             "name: \"hello\"\nmembers: [\"child\"]\n",
+        )
+        .unwrap();
+        assert!(load(&tmp).is_none());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn lock_load_rejects_a_workspace_digest_when_the_source_is_missing() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-missing-source-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join(".jet")).unwrap();
+        std::fs::write(
+            tmp.join(Syntax::UNIFIED_LOCK_FILE),
+            "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
         )
         .unwrap();
         assert!(load(&tmp).is_none());
@@ -301,11 +413,34 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
-        write(&tmp, &plan);
+        write_member_manifest(&tmp, "packages/hello", "hello");
+        write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
         assert!(raw.contains("[[package]]"), "{raw}");
         assert!(raw.contains("name = \"dep\""), "{raw}");
         assert!(raw.contains("[[workspace_member]]"), "{raw}");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn write_rejects_malformed_existing_lock_without_overwriting_it() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-malformed-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join(".jet")).unwrap();
+        let lock_path = tmp.join(Syntax::UNIFIED_LOCK_FILE);
+        let raw = "version = 1\n[[package]]\nname = \"broken\"\n";
+        std::fs::write(&lock_path, raw).unwrap();
+        let plan = WorkspacePlan::default();
+
+        let error = write(&tmp, &plan).unwrap_err();
+
+        assert!(error.contains("existing lock is malformed"), "{error}");
+        assert_eq!(std::fs::read_to_string(&lock_path).unwrap(), raw);
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

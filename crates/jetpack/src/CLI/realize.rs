@@ -1,6 +1,6 @@
 use super::parse::Flags;
 use super::update_search_info::shell_on_failed_build;
-use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources};
+use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources, project_root};
 use crate::EnvFile;
 use crate::Lock;
 use jet_env_model::ModuleEval;
@@ -11,7 +11,7 @@ use crate::Services;
 use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
 /// current project's env file so `jetpack run ripgrep@stable` works there, and
@@ -35,6 +35,16 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     } else {
         None
     }
+}
+
+/// Resolve the nearest directory that owns an `env.jet` or `workspace.jet`.
+///
+/// Environment and workspace commands are allowed from a project
+/// subdirectory. Keep the root explicit so planning, trust, dotenv
+/// composition, managed state, and explicit refs use the same project
+/// identity.
+pub(super) fn project_env_root(start: &Path) -> PathBuf {
+    project_root(start)
 }
 
 /// Realize one ref, recording it in the store and printing progress. `table`
@@ -476,6 +486,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "for now use a `…@nixpkgs` or `…@github` ref while the native builder lands.",
         ),
+        ProviderError::ForeignProjection(reason) => theme.error_coded(
+            "E1256",
+            "couldn't project the foreign environment",
+            reason,
+            "use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`.",
+        ),
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",
             reason,
@@ -543,6 +559,10 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
 /// The refs to realize, the table that resolves their named sources, and the
 /// prompt label for the resulting shell.
 pub(super) struct RunPlan {
+    /// Canonical project root for project-relative lifecycle files. Keeping
+    /// this beside the typed facts prevents nested hook commands from
+    /// resolving `.env` against the caller's subdirectory.
+    pub(super) project_root: std::path::PathBuf,
     pub(super) refs: Vec<RefSpec::RefSpec>,
     pub(super) adapters: Vec<ModuleEval::AdapterPlan>,
     pub(super) table: RefSpec::SourceTable,
@@ -566,14 +586,16 @@ pub(super) struct RunPlan {
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
 pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
-    load_project_plan_with_profile(theme, None)
+    load_project_plan_with_selections(theme, None, None)
 }
 
-pub(super) fn load_project_plan_with_profile(
+pub(super) fn load_project_plan_with_selections(
     theme: &Theme,
     requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let dir = std::env::current_dir().unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let dir = project_env_root(&cwd);
 
     // Load jetpack.toml [sources] first so they are available as defaults.
     // If the file exists but is malformed, surface the diagnostics and bail out.
@@ -598,7 +620,24 @@ pub(super) fn load_project_plan_with_profile(
     // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
     // surface stays the fallback until the typed example fully replaces it.
     if ModuleEval::is_module_surface(&src) {
-        return typed_plan_with_defaults(theme, &src, &dir, toml_table, requested_profile);
+        return typed_plan_with_defaults(
+            theme,
+            &src,
+            &dir,
+            toml_table,
+            requested_profile,
+            requested_environment_profile,
+        );
+    }
+
+    if let Some(name) = requested_environment_profile {
+        theme.error_coded(
+            "E1337",
+            &format!("environment profile `{name}` is not declared"),
+            "the explicit environment-profile selector applies to typed `env.<name>` profiles",
+            "use a typed env.jet module or omit `--env-profile`",
+        );
+        return Err(2);
     }
 
     let ef = EnvFile::parse(&src);
@@ -607,6 +646,7 @@ pub(super) fn load_project_plan_with_profile(
     table.merge_defaults(toml_table);
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
+        project_root: dir.clone(),
         refs,
         adapters: Vec::new(),
         table,
@@ -629,8 +669,15 @@ fn typed_plan_with_defaults(
     dir: &Path,
     toml_defaults: RefSpec::SourceTable,
     requested_profile: Option<&str>,
+    requested_environment_profile: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let plan = ModuleEval::evaluate_env_with_profile(src, dir, requested_profile).map_err(|d| {
+    let plan = ModuleEval::evaluate_env_with_profiles(
+        src,
+        dir,
+        requested_profile,
+        requested_environment_profile,
+    )
+    .map_err(|d| {
         eprint!(
             "{}",
             crate::Diagnostics::render_all(Syntax::ENV_FILE, src, std::slice::from_ref(&d))
@@ -664,7 +711,7 @@ fn typed_plan_with_defaults(
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
     let selected_profile = plan.selected_profile;
-    // `evaluate_env_with_profile` already expanded the typed selections. Keep
+    // `evaluate_env_with_profiles` already expanded the typed selections. Keep
     // that exact graph fact through realization; re-expanding here could make
     // planning, trust, and activation disagree if the catalog changes.
     let language_expansion = plan.language_expansion;
@@ -698,6 +745,7 @@ fn typed_plan_with_defaults(
     }
     let refs = classify_all(theme, package_refs.iter().map(String::as_str), &table)?;
     Ok(RunPlan {
+        project_root: dir.to_path_buf(),
         refs,
         adapters: plan.adapters,
         table,
@@ -710,6 +758,8 @@ fn typed_plan_with_defaults(
         secrets: plan.secrets,
         environment: ModuleEval::EnvironmentFacts {
             environment_names: plan.environment_names,
+            active_environment: plan.active_environment,
+            active_environment_provenance: plan.active_environment_provenance,
             source_files: plan.source_files,
             dev_services: plan.dev_services,
             lifecycle: plan.lifecycle,

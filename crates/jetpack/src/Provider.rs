@@ -672,6 +672,10 @@ pub enum ProviderError {
     FixtureMissing(PathBuf),
     /// The selected provider can't realize this ref yet.
     Unsupported(String),
+    /// E1256: a bounded foreign projection could not translate the source
+    /// into Jet facts. This is distinct from a provider that simply has no
+    /// realization implementation.
+    ForeignProjection(String),
     /// The first-party `core` builder could not realize the package.
     CoreBuild(String),
     /// Native CRAN metadata, integrity, dependency, or R installation failure.
@@ -711,6 +715,7 @@ impl ProviderError {
             ProviderError::MonorepoFetch(_) => Some("E1232"),
             ProviderError::MemberOutsideWorkspace(_) => Some("E1233"),
             ProviderError::Adapter(_) => Some("E1270"),
+            ProviderError::ForeignProjection(_) => Some("E1256"),
             ProviderError::Channel(_) => Some("E1271"),
             ProviderError::BuildDebug(_) => Some("E1273"),
             ProviderError::Offline(_) => Some("E1276"),

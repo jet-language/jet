@@ -222,6 +222,17 @@ fn ui_snapshots() {
         let jetpack_hangar_digest_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
+        // D-ENV-FACET1 / E1337: environment profile selection is an
+        // environment-model diagnostic, so this fixture drives that same
+        // evaluator while retaining the ordinary UI snapshot contract.
+        let env_facet_missing = src
+            .lines()
+            .any(|line| line.trim() == "// @env_facet_missing");
+        // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
+        // use the same registered diagnostic in tooling and CLI paths.
+        let workspace_lock_e1202 = src
+            .lines()
+            .any(|line| line.trim() == "// @workspace_lock_e1202");
         // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
         // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
         let compiler_extension = src.lines().find_map(|line| {
@@ -232,6 +243,21 @@ fn ui_snapshots() {
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
+        } else if env_facet_missing {
+            let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment_profile(
+                &src,
+                path.parent().expect("environment fixture parent"),
+                Some("missing"),
+            )
+            .expect_err("missing environment profile fixture must fail");
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if workspace_lock_e1202 {
+            let lock_path = ".jet/lock";
+            let diagnostics = [
+                jetpack::Lock::e1202_workspace(lock_path),
+                jetpack::Lock::e1202_workspace_write(lock_path, "permission denied"),
+            ];
+            jet::render_diagnostics(&shown_path, &src, &diagnostics)
         } else if programmable_build {
             let result = if build_locked {
                 jet::compile_programmable_build_opts(

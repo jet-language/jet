@@ -263,6 +263,29 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     if failed {
         return Err(1);
     }
+    let missing_language_tools = plan
+        .environment
+        .language_packs
+        .iter()
+        .flat_map(|pack| {
+            pack.required_tools.iter().filter_map(|tool| {
+                let command = pack.commands.get(tool)?;
+                let present = bin_dirs
+                    .iter()
+                    .any(|dir| std::path::Path::new(dir).join(command).is_file());
+                (!present).then(|| format!("{}:{tool}", pack.name))
+            })
+        })
+        .collect::<Vec<_>>();
+    if !missing_language_tools.is_empty() {
+        theme.error_coded(
+            "E1333",
+            "a language pack tool is missing from the realized environment",
+            &format!("missing required language tools: {}", missing_language_tools.join(", ")),
+            "realize the pack's declared packages again, or remove the language selection until its tools are available",
+        );
+        return Err(2);
+    }
     let mut composed_vars: std::collections::BTreeMap<String, String> =
         provider_vars
             .into_iter()
@@ -297,7 +320,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
             );
             return Err(2);
         }
-        let dotenv_path = std::env::current_dir().unwrap_or_default().join(relative);
+        let dotenv_path = plan.project_root.join(relative);
         match read_dotenv(&dotenv_path) {
             Ok(values) => {
                 for (name, value) in values {
@@ -584,6 +607,7 @@ pub(crate) fn compose_refs_for_test(roots: &Roots, refs: Vec<RefSpec::RefSpec>) 
         roots,
         &parsed.flags,
         &RunPlan {
+            project_root: std::env::current_dir().unwrap_or_default(),
             refs,
             adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
@@ -723,6 +747,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
             Ok(s) => RunPlan {
+                project_root: dir.clone(),
                 refs: vec![s],
                 adapters: Vec::new(),
                 table: cwd_table(),

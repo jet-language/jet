@@ -882,6 +882,16 @@ fn report_archive_result(
 }
 
 fn report_archive_error(theme: &Theme, action: &str, error: std::io::Error) -> i32 {
+    if action == "verify" && error.to_string().starts_with("hangar ingest ") {
+        let message = error.to_string();
+        theme.error_coded(
+            "E1315",
+            &message,
+            &message,
+            "Fix the rejected tree (path law, special files, or unsupported xattrs) and ingest again.",
+        );
+        return 2;
+    }
     theme.error(
         &format!("Hangar {action} failed"),
         &error.to_string(),

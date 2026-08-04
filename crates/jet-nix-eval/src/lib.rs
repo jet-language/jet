@@ -70,6 +70,11 @@ use core::fmt;
 use JSON::JSON as JSONValue;
 
 const ORACLE_JSON: &str = include_str!("../../../tests/fixtures/nix-compat/oracle.json");
+/// The committed breadth inventory is kept beside the differential oracle so
+/// its scope and expected counts cannot drift with the implementation.
+#[cfg(test)]
+const PINNED_INVENTORY_MANIFEST: &str =
+    include_str!("../../../tests/fixtures/nix-compat/pinned-inventory.json");
 const NIX_VERSION: &str = "2.34.8";
 const NIX_TAG_OBJECT: &str = "b6769c588f60b3e762f73d3a8cf60294df078ccd";
 const NIX_SOURCE_COMMIT: &str = "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024";
@@ -97,39 +102,106 @@ pub enum InventoryStatus {
 pub struct InventoryEntry {
     pub surface: &'static str,
     pub status: InventoryStatus,
+    pub class: &'static str,
     pub reason: &'static str,
 }
 
 pub const PINNED_INVENTORY: &[InventoryEntry] = &[
     InventoryEntry {
-        surface: "stage-a-values-errors-locks-output-identities",
+        surface: "stage-a-values",
         status: InventoryStatus::Covered,
-        reason: "pinned oracle manifest and stage-A differential fixtures",
+        class: "evaluable",
+        reason: "pinned literal and value fixtures",
     },
     InventoryEntry {
-        surface: "overlays-devshells-multi-output-packages",
+        surface: "stage-a-errors",
         status: InventoryStatus::Covered,
-        reason: "bounded native projection with private materialization",
+        class: "evaluable",
+        reason: "pinned rejection and diagnostic fixtures",
+    },
+    InventoryEntry {
+        surface: "normalized-locks",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "pinned lock normalization fixtures",
+    },
+    InventoryEntry {
+        surface: "lazy-thunks",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "bounded lazy evaluation and cycle fixtures",
+    },
+    InventoryEntry {
+        surface: "functions-and-attrsets",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "bounded pure function and attribute fixtures",
+    },
+    InventoryEntry {
+        surface: "project-imports",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "explicit project-root import authority fixtures",
+    },
+    InventoryEntry {
+        surface: "overlays",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "bounded package overlay fixtures",
+    },
+    InventoryEntry {
+        surface: "output-identities",
+        status: InventoryStatus::Covered,
+        class: "buildable",
+        reason: "pinned drvPath and outPath identity fixtures",
+    },
+    InventoryEntry {
+        surface: "devshells",
+        status: InventoryStatus::Covered,
+        class: "buildable",
+        reason: "native devShell projection fixtures",
+    },
+    InventoryEntry {
+        surface: "multi-output-packages",
+        status: InventoryStatus::Covered,
+        class: "buildable",
+        reason: "typed output projection fixtures",
     },
     InventoryEntry {
         surface: "fixed-output-fetchers",
         status: InventoryStatus::Skipped,
-        reason: "requires explicit fetch authority and verified bytes; no network authority is exposed here",
+        class: "skipped",
+        reason: "requires explicit fetch authority and verified bytes",
     },
     InventoryEntry {
         surface: "cross-system-packages",
         status: InventoryStatus::Skipped,
-        reason: "target package semantics require a declared target and provider facts beyond host projection",
+        class: "skipped",
+        reason: "requires a declared target beyond host projection",
     },
     InventoryEntry {
         surface: "external-flakes",
         status: InventoryStatus::Skipped,
-        reason: "remote source resolution remains an explicit provider boundary; local imports require authority",
+        class: "skipped",
+        reason: "remote resolution remains an explicit provider boundary",
     },
     InventoryEntry {
         surface: "differential-fuzzing",
         status: InventoryStatus::Skipped,
-        reason: "oracle-process fuzzing belongs to the host proof harness, not the no-std evaluator",
+        class: "skipped",
+        reason: "oracle-process fuzzing belongs to the host proof harness",
+    },
+    InventoryEntry {
+        surface: "dynamic-derivations",
+        status: InventoryStatus::Skipped,
+        class: "skipped",
+        reason: "dynamic staging has a separate compatibility boundary",
+    },
+    InventoryEntry {
+        surface: "ifd",
+        status: InventoryStatus::Skipped,
+        class: "skipped",
+        reason: "import-from-derivation requires a separate authority grant",
     },
 ];
 

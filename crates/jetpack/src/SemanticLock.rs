@@ -469,9 +469,12 @@ impl FlakeGraph {
     }
 
     fn attach_composition_sources(&mut self, path: &Path) -> Result<(), FlakeGraphError> {
-        let Some(composition) = self.composition.as_mut() else {
+        let Some(composition) = self.composition.as_ref() else {
             return Ok(());
         };
+        let composition_modules = composition.modules.clone();
+        let composition_systems = composition.systems.clone();
+        let composition_per_system = composition.per_system;
         let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
         let project_root = project_dir.canonicalize().map_err(|error| {
             FlakeGraphError::Io(format!(
@@ -479,14 +482,13 @@ impl FlakeGraph {
                 project_dir.display()
             ))
         })?;
-        let mut pending = composition
-            .modules
-            .iter()
-            .cloned()
+        let mut pending = composition_modules
+            .into_iter()
             .map(|module| (module, project_dir.to_path_buf(), true))
             .collect::<Vec<_>>();
         let mut visited = BTreeSet::new();
         let mut module_sources = Vec::new();
+        let mut imported_outputs = Vec::new();
         while let Some((module, base_dir, root_module)) = pending.pop() {
             let relative = Path::new(&module);
             if relative.is_absolute()
@@ -543,6 +545,53 @@ impl FlakeGraph {
                 source_name,
                 crate::SHA256::sha256_hex(&bytes)
             ));
+            // flake-parts places `packages.default` and
+            // `devShells.default` inside `perSystem`. Those declarations are
+            // still ordinary graph facts: expand an unqualified module
+            // output across the declared systems and retain the module path
+            // as its provenance. This keeps the lock and the bridge on the
+            // same imported-module projection without evaluating arbitrary
+            // Nix functions here.
+            for (kind, declared_system, attribute) in output_assignments(module_text) {
+                let systems = if declared_system.is_empty() && composition_per_system {
+                    if composition_systems.is_empty() {
+                        vec![String::new()]
+                    } else {
+                        composition_systems.clone()
+                    }
+                } else {
+                    vec![declared_system]
+                };
+                for system in systems {
+                    let kind = match kind.as_str() {
+                        "packages" | "legacyPackages" => FlakeOutputKind::Package,
+                        "devShells" | "devShell" => FlakeOutputKind::DevShell,
+                        "apps" => FlakeOutputKind::App,
+                        "checks" => FlakeOutputKind::Check,
+                        "formatter" => FlakeOutputKind::Formatter,
+                        other => FlakeOutputKind::Other(other.to_string()),
+                    };
+                    let name = if system.is_empty() {
+                        attribute.clone()
+                    } else {
+                        format!("{}:{}:{}", kind.as_str(), system.as_str(), attribute.as_str())
+                    };
+                    if !imported_outputs.iter().any(|output: &FlakeOutput| {
+                        output.name == name
+                            && output.kind == kind
+                            && output.system == system
+                            && output.attribute == attribute
+                    }) {
+                        imported_outputs.push(FlakeOutput {
+                            name,
+                            kind,
+                            system,
+                            attribute: attribute.clone(),
+                            provenance: source_name.clone(),
+                        });
+                    }
+                }
+            }
             for import in list_assignment_values(&strip_nix_comments(module_text), "imports") {
                 pending.push((
                     import,
@@ -556,7 +605,11 @@ impl FlakeGraph {
         }
         module_sources.sort();
         module_sources.dedup();
-        composition.module_sources = module_sources;
+        if let Some(composition) = self.composition.as_mut() {
+            composition.module_sources = module_sources;
+        }
+        self.outputs.extend(imported_outputs);
+        self.outputs.sort();
         Ok(())
     }
 
@@ -810,6 +863,12 @@ impl FlakeGraph {
             ));
         }
 
+        if source.composition != locked.composition {
+            return Err(FlakeGraphError::StaleSemanticLock(
+                "flake-parts composition differs from the lock".to_string(),
+            ));
+        }
+
         let output_shape = |graph: &FlakeGraph| {
             graph
                 .outputs
@@ -827,11 +886,6 @@ impl FlakeGraph {
         if output_shape(source) != output_shape(locked) {
             return Err(FlakeGraphError::StaleSemanticLock(
                 "flake output declarations differ from the lock".to_string(),
-            ));
-        }
-        if source.composition != locked.composition {
-            return Err(FlakeGraphError::StaleSemanticLock(
-                "flake-parts composition differs from the lock".to_string(),
             ));
         }
         let source_unsupported = source
@@ -2523,6 +2577,17 @@ fn lock_node_name(
                 if values.is_empty() {
                     return Ok(None);
                 }
+                // Nix uses a one-element array as a direct node reference
+                // when an input follows a node outside the current input
+                // map. Resolve that form before treating the array as an
+                // input path; otherwise `flake-utils.inputs.systems =
+                // ["systems"]` asks for `systems` twice and looks like a
+                // cycle.
+                if values.len() == 1 {
+                    if let Some(node_name) = values[0].as_str().ok().filter(|name| nodes.contains_key(*name)) {
+                        return Ok(Some(node_name.to_string()));
+                    }
+                }
                 let mut current = start_node.to_string();
                 for value in values {
                     let segment = value.as_str().map_err(|error| {
@@ -3081,6 +3146,10 @@ fn conflict_for(left: &SemanticRecord, right: &SemanticRecord) -> Option<LockCon
 pub struct ExplainFact {
     pub semantic_key: String,
     pub owners: Vec<String>,
+    /// Every rationale that competed for this resolved record. The first
+    /// rationale is not a sufficient explanation when overlays merge several
+    /// declarations into one winner.
+    pub contenders: Vec<LockRationale>,
     pub provider: String,
     pub platform: String,
     pub exact_artifact: String,
@@ -3106,6 +3175,7 @@ pub fn explain(lock: &SemanticLockFile, key: &str) -> Option<ExplainFact> {
     Some(ExplainFact {
         semantic_key: key.to_string(),
         owners,
+        contenders: rec.rationales.clone(),
         provider: first.provider,
         platform: rec.identity.platform.clone(),
         exact_artifact: rec.identity.exact.clone(),
@@ -4077,12 +4147,17 @@ mod flake_tests {
         let source = "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567\"; }";
         std::fs::write(&flake, source).unwrap();
         let graph = FlakeGraph::parse(flake.display().to_string(), source).unwrap();
-        std::fs::write(live_path(&root), write(&graph.semantic_lock())).unwrap();
+        let lock_body = write(&graph.semantic_lock());
+        std::fs::write(live_path(&root), &lock_body).unwrap();
 
         assert!(FlakeGraph::load(&flake).is_ok());
         std::fs::write(&flake, format!("{source}\n# changed\n")).unwrap();
         let error = FlakeGraph::load(&flake).unwrap_err();
         assert!(matches!(error, FlakeGraphError::StaleSemanticLock(_)), "{error}");
+        assert_eq!(std::fs::read(live_path(&root)).unwrap(), lock_body.as_bytes());
+        let prior = FlakeGraph::from_semantic_lock("flake.nix", &parse(&lock_body))
+            .expect("the previous semantic plan must remain readable after source drift");
+        assert_eq!(prior.source_fingerprint, graph.source_fingerprint);
 
         let _ = std::fs::remove_dir_all(root);
     }

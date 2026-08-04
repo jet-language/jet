@@ -1,6 +1,6 @@
 use super::super::{
-    BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, Syntax, TokKind, UnOp,
-    pat_span, retired_s14_teaching_enabled,
+    BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, StrTokPart, Syntax, TokKind,
+    UnOp, pat_span, retired_s14_teaching_enabled,
 };
 
 fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
@@ -607,8 +607,116 @@ impl<'a> Parser<'a> {
                         span: Span::new(dot_start, end),
                     })
                 }
+                // D-JPK-BUILDRECIPE1: executable adapter steps are the one
+                // lower-case leading-dot value surface. The parser keeps them
+                // as the ordinary inferred enum-literal node so module
+                // consumers and formatters see one value shape.
+                TokKind::Dot
+                    if self.allow_lowercase_leading_dot
+                        && matches!(&self.peek2().kind, TokKind::Ident(name) if name.chars().next().is_some_and(char::is_lowercase)) =>
+                {
+                    let dot_start = self.bump().span.start;
+                    let (variant, variant_span) =
+                        self.expect_ident("after `.` in a build step")?;
+                    let (args, end) = if matches!(self.peek().kind, TokKind::LParen) {
+                        self.bump();
+                        let mut args = Vec::new();
+                        if !matches!(self.peek().kind, TokKind::RParen) {
+                            loop {
+                                let arg = if matches!(self.peek().kind, TokKind::Ident(_))
+                                    && matches!(self.peek2().kind, TokKind::Colon)
+                                {
+                                    let (label, _) =
+                                        self.expect_ident("for a named build-step argument")?;
+                                    self.bump();
+                                    let expr = if label == Syntax::RECIPE_STEP_FIELD_ARGS {
+                                        self.build_step_string_list()?
+                                    } else {
+                                        self.build_step_string()?
+                                    };
+                                    EnumLitArg::Named {
+                                        label,
+                                        expr,
+                                    }
+                                } else {
+                                    return Err(Diagnostic::error(
+                                        "E0003",
+                                        "build-step arguments need field labels".to_string(),
+                                        "finite build actions name every tool, path, URL, hash, and argument list".to_string(),
+                                        "write `field: value`, for example `tool: \"cc\"`".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                };
+                                args.push(arg);
+                                if matches!(self.peek().kind, TokKind::RParen) {
+                                    break;
+                                }
+                                self.expect(TokKind::Comma, "between build-step arguments")?;
+                            }
+                        }
+                        self.expect(TokKind::RParen, "to close the build step")?;
+                        (args, self.toks[self.pos - 1].span.end)
+                    } else {
+                        (Vec::new(), variant_span.end)
+                    };
+                    Ok(Expr::EnumLit {
+                        type_name: String::new(),
+                        variant,
+                        args,
+                        span: Span::new(dot_start, end),
+                    })
+                }
                 _ => self.expr_postfix(allow_struct_lit),
             }
+        }
+
+        /// D-JPK-BUILDRECIPE1: build-step fields are deliberately finite
+        /// strings or lists of strings. Parse these directly instead of
+        /// recursing through the full expression grammar at an already deep
+        /// nested call site.
+        fn build_step_string(&mut self) -> Result<Expr, Diagnostic> {
+            let token = self.peek().clone();
+            let TokKind::Str(parts) = token.kind else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "a build-step field must be quoted text".to_string(),
+                    "build actions use fixed strings for tools, paths, URLs, and hashes".to_string(),
+                    "write a quoted string such as `\"src/file\"`".to_string(),
+                    Some(token.span),
+                ));
+            };
+            if parts.iter().any(|part| matches!(part, StrTokPart::Interp(_))) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "build-step fields must be literal quoted text".to_string(),
+                    "build action identity includes fixed tool, path, URL, and hash facts".to_string(),
+                    "replace interpolation with a quoted literal".to_string(),
+                    Some(token.span),
+                ));
+            }
+            self.bump();
+            self.str_expr_from_parts(parts, token.span)
+        }
+
+        fn build_step_string_list(&mut self) -> Result<Expr, Diagnostic> {
+            let open = self.peek().span;
+            self.expect(TokKind::LBracket, "before build-step string arguments")?;
+            let mut values = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RBracket) {
+                loop {
+                    values.push(self.build_step_string()?);
+                    if matches!(self.peek().kind, TokKind::RBracket) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between build-step string arguments")?;
+                    if matches!(self.peek().kind, TokKind::RBracket) {
+                        break;
+                    }
+                }
+            }
+            let close = self.peek().span;
+            self.expect(TokKind::RBracket, "after build-step string arguments")?;
+            Ok(Expr::ListLit(values, Span::new(open.start, close.end)))
         }
     
 }

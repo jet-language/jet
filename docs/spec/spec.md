@@ -2331,10 +2331,11 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
   `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
-  `"./vendor/tool"`; this U20 slice realizes `Recipe.copy()` and
-  `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
-  store/lock path as any other package. `jetpack add <ref> --adapt` prints a
-  draft adapter and does not run upstream code.
+  `"./vendor/tool"`; Jetpack realizes `Recipe.copy()`,
+  `Recipe.prebuilt(bin:, as:)`, and finite `Recipe.build(steps: […])` actions
+  (`.fetch`, `.exec`, `.install`, and `.install_tree`) into ordinary hangar
+  packages, with the same store/lock path as any other package. `jetpack add
+  <ref> --adapt` prints a draft adapter and does not run upstream code.
 - **Direct ecosystem providers (D-JPK-PROVIDERS2):** LuaRocks uses the exact
   `<name>#version=<version>@luarocks` root. Jetpack resolves the repository
   manifest and rockspec dependency closure, verifies every source SHA-256,
@@ -3379,8 +3380,8 @@ subcommand or a new flag (I8).
 
 ## Semantic index, dossier, and codemods (D-SEMINDEX1, D-WD2, D-CODEMOD1)
 
-`jet inspect semindex --json <file.jet>` emits schema v3: definitions, references,
-call edges, effects, and member facts. Member facts stitch fields, variants,
+`jet inspect semindex --json <file.jet>` emits schema v12: definitions, references,
+call edges, effects, member facts, and typed Package/workspace-overlay facts. Member facts stitch fields, variants,
 inline methods, external inherent impl methods, trait impl methods, and trait
 requirements into one stable owner-ordered view. Every resolved reference also
 carries its definition identity; unresolved or ambiguous references carry no

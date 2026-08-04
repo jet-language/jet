@@ -94,7 +94,21 @@ pub fn read_devshell_facts(
                 &system,
                 Some(import_authority),
             )
-                .map_err(|error| ProviderError::Unsupported(error.to_string()))?;
+                .map_err(|error| {
+                    let reason = error.to_string();
+                    // Project-root authority failures are boundary violations,
+                    // not unsupported foreign semantics. Keep them on the
+                    // existing safety diagnostic; semantic and budget limits
+                    // are the E1256 projection surface.
+                    if reason.contains("project-root authority")
+                        || reason.contains("project-root")
+                        || reason.contains("symlink")
+                    {
+                        ProviderError::Unsupported(reason)
+                    } else {
+                        ProviderError::ForeignProjection(reason)
+                    }
+                })?;
             Ok(DevShellFacts {
                 packages: evaluation.packages().to_vec(),
                 unmapped: evaluation.unsupported().to_vec(),
@@ -116,14 +130,27 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
     let bad_output = |reason: String| ProviderError::BadOutput(parsed.diagnostic(reason));
     let obj = parsed.value.as_object().map_err(&bad_output)?;
 
-    let mut packages: Vec<String> = obj
-        .get("buildInputs")
-        .ok_or_else(|| bad_output("missing key `buildInputs`".into()))?
-        .as_array()
-        .map_err(&bad_output)?
-        .iter()
-        .map(|value| value.as_str().map(str::to_string).map_err(&bad_output))
-        .collect::<Result<_, _>>()?;
+    let mut packages = Vec::new();
+    let mut package_field_seen = false;
+    for field in ["packages", "buildInputs", "nativeBuildInputs"] {
+        let Some(value) = obj.get(field) else {
+            continue;
+        };
+        package_field_seen = true;
+        packages.extend(
+            value
+                .as_array()
+                .map_err(&bad_output)?
+                .iter()
+                .map(|value| value.as_str().map(str::to_string).map_err(&bad_output))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    if !package_field_seen {
+        return Err(bad_output(
+            "missing one of `packages`, `buildInputs`, or `nativeBuildInputs`".into(),
+        ));
+    }
     packages.sort();
     packages.dedup();
 
@@ -135,6 +162,13 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
         .map_err(&bad_output)?;
     if !shell_hook.trim().is_empty() {
         unmapped.push("shellHook".to_string());
+    }
+    for field in obj.keys() {
+        if !matches!(field.as_str(), "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook")
+            && !unmapped.iter().any(|existing| existing == field)
+        {
+            unmapped.push(field.clone());
+        }
     }
 
     Ok(DevShellFacts { packages, unmapped })
@@ -207,7 +241,7 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     // unsupported fields, but surface every known projection loss instead of
     // silently dropping it.
     match FlakeGraph::load(&flake_path) {
-        Ok(graph) => {
+        Ok(mut graph) => {
             let system = host_system();
             let mut native_derivations = Vec::new();
             let source = match std::fs::read_to_string(&flake_path) {
@@ -301,6 +335,21 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     return 1;
                 }
             };
+            for (output_name, derivation) in &native_derivations {
+                if derivation.outputs().get("out").is_none() {
+                    let loss = format!("derivation output {output_name} has no out path");
+                    if !facts.unmapped.iter().any(|existing| existing == &loss) {
+                        facts.unmapped.push(loss);
+                    }
+                }
+            }
+            for field in &facts.unmapped {
+                if !graph.unsupported.iter().any(|existing| existing == field) {
+                    graph.unsupported.push(field.clone());
+                }
+            }
+            graph.unsupported.sort();
+            graph.unsupported.dedup();
             let mut lock = graph.semantic_lock();
             lock.records.push(super::SemanticLock::SemanticRecord::new(
                 super::SemanticLock::LockIdentity {
@@ -320,9 +369,6 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
             ));
             for (output_name, derivation) in native_derivations {
                 let Some(out) = derivation.outputs().get("out") else {
-                    facts
-                        .unmapped
-                        .push(format!("derivation output {output_name} has no out path"));
                     continue;
                 };
                 let exact = format!("drvPath={};out={out}", derivation.drv_path());
@@ -454,6 +500,16 @@ mod tests {
     }
 
     #[test]
+    fn fixture_package_fields_are_lossless_and_unknown_fields_are_reported() {
+        let facts = parse_facts_json(
+            r#"{"packages":["fd"],"buildInputs":["ripgrep"],"nativeBuildInputs":["gcc"],"shellHook":"","extra":true}"#,
+        )
+        .unwrap();
+        assert_eq!(facts.packages, vec!["fd", "gcc", "ripgrep"]);
+        assert_eq!(facts.unmapped, vec!["extra"]);
+    }
+
+    #[test]
     fn fact_schema_missing_or_wrong_typed_required_fields_fail_closed() {
         for input in [
             r#"{"shellHook":""}"#,
@@ -479,7 +535,7 @@ mod tests {
         let ProviderError::BadOutput(reason) = error else {
             panic!("expected BadOutput, got {error:?}");
         };
-        assert!(reason.contains("missing key `buildInputs`"));
+        assert!(reason.contains("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"));
         assert!(reason.contains(noise));
     }
 
@@ -828,6 +884,17 @@ mod tests {
         .unwrap();
         let facts = read_devshell_facts(&dir, None).expect("native evaluator must not need Nix");
         assert_eq!(facts.packages, vec!["fd"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn native_projection_budget_failure_is_e1256() {
+        let dir = scratch("native_budget");
+        let source = "x".repeat((1 << 20) + 1);
+        std::fs::write(dir.join("flake.nix"), source).unwrap();
+        let error = read_devshell_facts(&dir, None).expect_err("oversized foreign input must fail");
+        assert_eq!(error.code(), Some("E1256"));
+        assert!(matches!(error, ProviderError::ForeignProjection(reason) if reason.contains("evaluator limit")));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

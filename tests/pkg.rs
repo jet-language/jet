@@ -589,6 +589,7 @@ fn lock_explain_names_owner_policy_provider_platform() {
     assert_eq!(fact.provider, "core");
     assert_eq!(fact.platform, "x86_64-linux");
     assert_eq!(fact.policy_fingerprint, "policy-1");
+    assert_eq!(fact.contenders.len(), 1);
 }
 
 #[test]
@@ -1882,8 +1883,11 @@ fn lock_file_content_hash_roundtrip() {
             path: "packages/hello".into(),
             source_digest: "no-workspace-source".into(),
             canonical_path: "/workspace/packages/hello".into(),
+            package_digest: "sha256-package".into(),
         }],
         comptime_inputs: vec![],
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
@@ -3170,6 +3174,8 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
         }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
         browsers: Vec::new(),
@@ -3271,6 +3277,8 @@ fn e1217_missing_locked_revision() {
         packages: vec![],
         root_dependencies: vec![],
         workspace_members: vec![],
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
         browsers: Vec::new(),
