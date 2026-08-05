@@ -35,7 +35,7 @@ labels :: loop user; users -> {
 }
 ```
 
-The yielding body must return a non-Void value. The loop runs immediately and
+The yielding body must return a non-unit value. The loop runs immediately and
 returns `List<T>` in iteration order.
 
 Braces only group a multiline body. They do not select effect or value
@@ -226,7 +226,7 @@ The formatter never rewrites loops into adapters or adapters into loops.
 The implementation must register and snapshot diagnostics for:
 
 - a yield arrow on a non-finite loop;
-- a Void yielding body;
+- a () yielding body;
 - a yielded path with no item;
 - incompatible item types;
 - an invalid break payload in a yielding loop;

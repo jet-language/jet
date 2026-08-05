@@ -670,7 +670,7 @@ fn structural_signature(def: &SymbolDef) -> String {
                 .join(",");
             format!(
                 "fn({params})=>{};view_source={}",
-                ret.as_deref().unwrap_or("Void"),
+                ret.as_deref().unwrap_or("()"),
                 def.view_provenance
                     .iter()
                     .map(ViewProvenanceFact::canonical)

@@ -96,6 +96,28 @@ fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     }
 }
 
+fn compute_alias_return(name: &str, args: &[crate::AST::CallArg]) -> Option<Type> {
+    match name {
+        "vec" => literal_int(&args.first()?.expr)
+            .filter(|value| *value >= 0)
+            .map(|value| {
+                result_ty(
+                    Type::compute_shape_type("Vec", &[value as u64]),
+                    Type::Named("ComputeError".to_string()),
+                )
+            }),
+        "matrix" => {
+            let rows = literal_int(&args.first()?.expr).filter(|value| *value >= 0)?;
+            let cols = literal_int(&args.get(1)?.expr).filter(|value| *value >= 0)?;
+            Some(result_ty(
+                Type::compute_shape_type("Matrix", &[rows as u64, cols as u64]),
+                Type::Named("ComputeError".to_string()),
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn safe_envelope_raw_argument(
     module: &str,
     name: &str,
@@ -1764,6 +1786,55 @@ impl<'a> Checker<'a> {
                         }
                     }
                     return None;
+                }
+                ("core.io", "progress") => {
+                    if args.is_empty() || args.len() > 3 {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            "`io.progress` needs one to three arguments".to_string(),
+                            "the first argument is a String message or a List/Iter source; the optional arguments set the description and format".to_string(),
+                            "write `io.progress(items, description, format)` for an iterable".to_string(),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let source = self.infer(&mut args[0].expr)?;
+                    if matches!(source, Type::String) {
+                        if args.len() != 1 {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                "`io.progress` takes only one argument for a text update".to_string(),
+                                "the one-string form writes one progress message".to_string(),
+                                "use `io.progress(items, description, format)` for an iterable".to_string(),
+                                Some(args[1].expr.span()),
+                            ));
+                        }
+                        return Some(result_ty(unit_ty(), io_error_ty()));
+                    }
+                    let elem = match source {
+                        Type::List(inner) => *inner,
+                        Type::FixedList { elem, .. } => *elem,
+                        Type::Apply { name, mut args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+                            args.pop().expect("Iter has one element type")
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`io.progress` cannot wrap {}", source.show()),
+                                "progress adapters wrap List<T> and Iter<T> values".to_string(),
+                                "pass a list or lazy iterator".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                    };
+                    for arg in args.iter_mut().skip(1) {
+                        self.expect_core_arg("progress", 1, &Type::String, arg);
+                    }
+                    return Some(crate::Collections::iter_ty(elem));
                 }
                 ("core.io", "eprint") => {
                     // D-VERDICT-1321-1: variadic — each argument prints on its own line.
@@ -4234,6 +4305,11 @@ impl<'a> Checker<'a> {
                 return ret;
             }
 
+            let compute_alias_ret = if module == "core.compute" {
+                compute_alias_return(name, args)
+            } else {
+                None
+            };
             let Some((params, ret)) = sig else {
                 self.diags.push(unknown_core_item(module, name, span));
                 for a in args.iter_mut() {
@@ -4328,7 +4404,7 @@ impl<'a> Checker<'a> {
             if module == "core.time" && name == "clock" {
                 ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
             } else {
-                ret
+                compute_alias_ret.or(ret)
             }
         }
     

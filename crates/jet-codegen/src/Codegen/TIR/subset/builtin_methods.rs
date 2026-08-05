@@ -15,6 +15,12 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     if crate::Collections::is_closure_method(method) {
         return false;
     }
+    // D-ZIPPAD1: zip-family arity is variadic. Sema has already validated the
+    // receiver and every input/fill label; lowering carries the resolved row
+    // shape, so this gate must not impose an artificial arity ceiling.
+    if matches!(method, "zip" | "zip_short" | "zip_pad") {
+        return true;
+    }
     matches!(
         (method, nargs),
         // List + map shared.
@@ -23,7 +29,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("push", 1) | ("pop", 0) | ("first", 0) | ("last", 0)
         | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
-        | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1) | ("get", 1)
+        | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1 | 2) | ("get", 1)
         // List + string: contains.
         | ("contains", 1)
         // Map-only.
@@ -37,7 +43,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("is_alphabetic", 0) | ("is_numeric", 0)
         | ("is_whitespace", 0) | ("is_ascii", 0)
         | ("to_title", 0) | ("split_once", 1)
-        | ("count", 1)
+        | ("count", 1) | ("extend", 1) | ("concat", 1)
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.

@@ -536,11 +536,30 @@ pub fn apply_mutating(
             Ok(CtValue::Unit)
         }
         (CtValue::List(xs), "remove") => {
-            let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            if i < 0 || i as usize >= xs.len() {
-                return Err(index_oob(xs.len(), i, span));
+            let by_slot = matches!(
+                args.get(1),
+                Some(CtValue::Enum { variant, .. }) if variant == "Slot"
+            );
+            if by_slot {
+                let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+                if i < 0 || i as usize >= xs.len() {
+                    return Err(index_oob(xs.len(), i, span));
+                }
+                Ok(CtValue::Some(Box::new(xs.remove(i as usize))))
+            } else {
+                let value = args.first().cloned().unwrap_or(CtValue::Unit);
+                Ok(match xs.iter().position(|item| *item == value) {
+                    Some(index) => CtValue::Some(Box::new(xs.remove(index))),
+                    None => CtValue::None(xs.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                })
             }
-            Ok(xs.remove(i as usize))
+        }
+        (CtValue::List(xs), "extend") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("List.extend expects a list", span));
+            };
+            xs.extend(other);
+            Ok(CtValue::Unit)
         }
         (CtValue::Map(m), "add") => {
             let mut it = args.into_iter();
@@ -810,6 +829,18 @@ pub fn apply_method(
             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
             Ok(CtValue::Bool(xs.iter().any(|x| *x == needle)))
         }
+        (CtValue::List(xs), "count") => {
+            let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
+            Ok(CtValue::Int(xs.iter().filter(|item| *item == &needle).count() as i64))
+        }
+        (CtValue::List(xs), "concat") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("List.concat expects a list", span));
+            };
+            let mut out = xs.clone();
+            out.extend(other);
+            Ok(CtValue::List(out))
+        }
         (CtValue::List(xs), "join") => {
             let sep = match args.into_iter().next() {
                 Some(CtValue::Str(s)) => s,
@@ -820,7 +851,7 @@ pub fn apply_method(
         }
         // D-ITERTOOLS1=A: Iter is List-shaped in comptime/TIR eval; materialize is
         // identity. Non-closure adapters mirror SequenceParity so JIT deopt works.
-        (CtValue::List(xs), "to_list" | "collect") => Ok(CtValue::List(xs.clone())),
+        (CtValue::List(xs), "to_list" | "collect" | "lazy") => Ok(CtValue::List(xs.clone())),
         (CtValue::List(xs), "take") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
             Ok(CtValue::List(xs.iter().take(n).cloned().collect()))

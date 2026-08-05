@@ -67,6 +67,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
+            | ("core.io", "progress")
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
             // them from resolved_ret (I3).
@@ -382,6 +383,23 @@ pub fn core_fixed_sig(
             Some(Type::Named("SyncText".into())),
         )),
         ("core.sync", "text_show") => Some((
+            vec![(read, Type::Named("SyncText".into()))],
+            Some(Type::String),
+        )),
+        // D-SYNC1: a positioned edit is what makes
+        // SyncText a text CRDT rather than a whole-document overwrite.
+        ("core.sync", "text_edit") => Some((
+            vec![
+                (read, Type::Named("SyncText".into())),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
+            Some(Type::Named("SyncText".into())),
+        )),
+        // D-SYNC1: the expert view of the merge bookkeeping.
+        ("core.sync", "text_metadata") => Some((
             vec![(read, Type::Named("SyncText".into()))],
             Some(Type::String),
         )),

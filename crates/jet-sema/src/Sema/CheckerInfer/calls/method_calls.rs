@@ -50,7 +50,8 @@ impl<'a> Checker<'a> {
         if *convention != AccessConvention::Read {
             return false;
         }
-        (param_ty == receiver_ty || receiver_ty.numeric_widening_to(param_ty).is_some())
+        param_ty == receiver_ty
+            || receiver_ty.numeric_widening_to(param_ty).is_some()
             || matches!(
                 param_ty,
                 Type::Named(name) if fn_params.iter().any(|param| param.name == *name)
@@ -248,8 +249,8 @@ impl<'a> Checker<'a> {
                 name_span: method_span,
                 type_args: type_args.to_vec(),
                 args: call_args,
-                resolved_ret: None,
                 range_checked: false,
+                resolved_ret: None,
             };
             let result = self.check_call(&mut call, true).flatten();
             call_args = call.args;
@@ -3857,10 +3858,10 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-ZIPPAD1: the list/iter zip family has its own variadic type
-            // pack and fill-policy checker. It must run before the fixed-arity
-            // builtin table, which only has the historical binary placeholder.
-            if matches!(method.as_str(), "zip" | "zip_short" | "zip_pad") {
+            // D-ZIPPAD1: list/iterator zip-family calls use one variadic typed
+            // contract for free and method spellings. Option.zip remains the
+            // separate nullable combinator below.
+            if matches!(method, "zip" | "zip_short" | "zip_pad") {
                 if let Some(ret) = self.check_zip_family_method(
                     receiver,
                     method,
@@ -3872,6 +3873,7 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+
             // D-HOLE1: `.zip` on `T?` pairs two optionals into `(a: T, b: U)?` — present
             // only when both operands are present. `U` is independent of the receiver's
             // `T`, which doesn't fit `Collections::builtin_method_arg_types`'s

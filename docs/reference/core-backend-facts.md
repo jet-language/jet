@@ -2,11 +2,10 @@
 
 Published ownership, effect, failure, blocking, platform, and backend facts for
 compiler-known Core modules (R10 / #1134). Accelerated backends must
-differentially conform to these facts against the CPU/oracle path. This page
-does not claim that current compiler-owned rows use ordinary-Jet behavior
-source. `core.archive` uses an explicit Rust ABI bridge: `archive.jet` declares
-the package boundary, while `src/lib.rs` implements behavior. This does not
-satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
+differentially conform to these facts against the CPU/oracle path. `core.archive`
+is an ordinary Jet source package loaded and checked by the normal frontend.
+Its source calls one audited ABI kernel for byte-format primitives; no compiler
+template or engine-specific public fallback is part of the path.
 
 | Module | Ownership | Effects | Failure | Blocking | Platform | Backend |
 |--------|-----------|---------|---------|----------|----------|---------|
@@ -17,7 +16,7 @@ satisfy D-CORE-SOURCE-AUTHORITY1=A. Card #1133 remains open.
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |
 | `core.compute` | `Tensor` owned | pure (CPU oracle) | `ComputeError` | sync | all | reachable Core runtime + CPU ABI; GPU E6 |
 | `core.services` | tree/endpoint owned | tasks/channels | `ServiceError` | sync mailboxes | all | reachable Core runtime over taskgroup ABI |
-| `core.archive` | bytes owned | pure | empty bytes / JSON `[]` on invalid input | sync | all native + interpreter | one dependency-free audited ABI kernel (`src/lib.rs`) |
+| `core.archive` | bytes owned | pure | empty bytes / JSON `[]` on invalid input | sync | all native + interpreter | reachable ordinary-Jet package plus one dependency-free audited ABI kernel |
 
 The archive facts are also published per operation:
 
@@ -45,9 +44,10 @@ The archive facts are also published per operation:
 ## Offline delivery
 
 Pinned toolchains and content-addressed Core builds remain the delivery path.
-`core.archive` proves one package boundary and one audited ABI source tree
-consumed by CoreProvider. It does not prove ordinary-Jet behavior authority.
-No copied compiler-template fallback is allowed.
+`core.archive` ships a source closure and a dependency-free ABI kernel. The
+source closure is part of the cache identity and is compiled through the
+normal frontend before the package's internal ABI calls are emitted. No copied
+compiler-template fallback is allowed.
 
 Hostile closure checks:
 
@@ -60,9 +60,10 @@ Hostile closure checks:
   is never proof of a valid AOT/JIT bridge.
 - Failure while publishing a new binary or digest → explicit build error; a
   partial cache write is never reported as a successful store.
-- `core.archive` CoreProvider, AOT bridge, JIT host, and interpreter consume the
-  same audited Rust ABI source; no second algorithm or compiler template is
-  allowed.
+- `core.archive` AOT, default JIT/dev, interpreter, and applicable web checks
+  consume the same source-owned TIR. Only the source package's internal ABI
+  calls cross into the audited Rust kernel; no second public algorithm or
+  compiler template is allowed.
 - Offline Cargo-backed Core builds require a regular lockfile and a realized
   pinned Jet toolchain. A missing pin, missing closure artifact, or unreadable
   source tree is a miss/error; host Cargo is not a fallback. Host drift that
@@ -70,6 +71,6 @@ Hostile closure checks:
   manifest also disables cache reuse instead of becoming an empty identity.
 
 AOT and default `jet run` (Cranelift / deopt) preserve the same reachable
-`core.archive` meaning through the canonical ABI source. The remaining
+`core.archive` meaning through the emitted source package and its ABI kernel. The remaining
 compiler-owned rows require the UL3 source-boundary migration and their
 per-tier proof before this page can claim universal Core parity (I9).

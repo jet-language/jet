@@ -4,16 +4,16 @@ fn bare_run_stays_valid() {
 }
 
 #[test]
-fn fallible_void_run_is_the_only_fallible_entrypoint() {
+fn fallible_unit_run_is_the_only_fallible_entrypoint() {
     let src = r#"
-fn run() => Void ? {
+fn run() => () ? {
     return Err("boom")
 }
 "#;
-    let out = jet::compile(src).expect("fallible Void run should compile");
+    let out = jet::compile(src).expect("fallible unit run should compile");
     assert!(
         out.rust.contains("pub fn user_run() -> Result<(), String>"),
-        "Void ? run should lower to Result<(), String>:\n{}",
+        "() ? run should lower to Result<(), String>:\n{}",
         out.rust
     );
     assert!(
@@ -30,11 +30,11 @@ fn run() => Void ? {
 }
 
 #[test]
-fn crypto_fallible_void_run_uses_the_e3001_runtime_boundary() {
+fn crypto_fallible_unit_run_uses_the_e3001_runtime_boundary() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() => Void ? CryptoError {
+fn run() => () ? CryptoError {
     length :: 0
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -67,7 +67,7 @@ fn dynamic_length(value: Int) => Int {
     return value
 }
 
-fn run() => Void ? CryptoError {
+fn run() => () ? CryptoError {
     length :: dynamic_length(8161)
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -106,7 +106,7 @@ enum CryptoError {
     Internal
 }
 
-fn run() => Void ? CryptoError {
+fn run() => () ? CryptoError {
     return Err(.Internal)
 }
 "#;
@@ -122,7 +122,7 @@ fn internal_crypto_error_exits_101_in_the_generated_wrapper() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() => Void ? CryptoError {
+fn run() => () ? CryptoError {
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)?
 }
 "#;
@@ -179,53 +179,59 @@ fn main() {{
 }
 
 #[test]
-fn fallible_void_run_can_finish_normally_after_try() {
+fn fallible_unit_run_can_finish_normally_after_try() {
     let src = r#"
 fn step() => Int ? {
     return Ok(1)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     n :: step()?
     print(n)
 }
 "#;
-    let out = jet::compile(src).expect("fallible Void run should allow normal completion");
+    let out = jet::compile(src).expect("fallible unit run should allow normal completion");
     assert!(
         out.rust.contains("Ok(())"),
-        "fallible Void run should synthesize success at the end:\n{}",
+        "fallible unit run should synthesize success at the end:\n{}",
         out.rust
     );
 }
 
 #[test]
-fn unit_fallible_run_stays_rejected() {
+fn unit_fallible_run_is_accepted() {
     let src = r#"
-fn run() => Unit ? {
+fn run() => () ? {
     return Err("boom")
 }
 "#;
-    let diags = jet::compile(src).expect_err("Unit ? run should not be accepted");
-    assert!(
-        diags.iter().any(|d| d.code == "E0122"),
-        "expected E0122, got: {diags:?}"
-    );
+    jet::compile(src).expect("() ? is the canonical fallible run type");
 }
 
 #[test]
-fn fallible_void_fallthrough_is_entrypoint_only() {
+fn fallible_unit_fallthrough_is_entrypoint_only() {
     let src = r#"
-fn helper() => Void ? {
+fn helper() => () ? {
 }
 
 fn run() {
     print("hi")
 }
 "#;
-    let diags = jet::compile(src).expect_err("non-run Void ? fallthrough needs return");
+    let diags = jet::compile(src).expect_err("non-run () ? fallthrough needs return");
     assert!(
         diags.iter().any(|d| d.code == "E0114"),
         "expected E0114, got: {diags:?}"
+    );
+}
+
+#[test]
+fn retired_void_type_reports_the_migration_diagnostic() {
+    let src = "fn run() => Void ? { return Err(\"boom\") }\n";
+    let diagnostics = jet::compile(src).expect_err("Void must not remain a source type");
+    assert!(
+        diagnostics.iter().any(|d| d.code == "E0431"),
+        "expected E0431, got: {diagnostics:?}"
     );
 }
 

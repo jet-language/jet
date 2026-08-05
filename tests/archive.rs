@@ -67,17 +67,44 @@ fn archive_bridge_embeds_the_canonical_ring_source() {
     let ffi = include_str!("../crates/jet-pkg-model/src/FFI.rs");
     let canonical = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("corelib/core.archive/pkgs/archive/src/lib.rs");
+    let source_package = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("corelib/core.archive/pkgs/archive/archive.jet");
     let retired_copy = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates/jet-pkg-model/src/Prelude/Archive.rs");
 
     assert!(canonical.is_file(), "canonical archive source is missing");
+    let source = fs::read_to_string(&source_package).unwrap();
+    for function in [
+        "pub fn zip_compress",
+        "pub fn zip_decompress",
+        "pub fn tar_add",
+        "pub fn tar_get",
+        "pub fn tar_names_json",
+    ] {
+        assert!(source.contains(function), "source package is missing `{function}`");
+    }
     assert!(
         ffi.contains("../../../corelib/core.archive/pkgs/archive/src/lib.rs"),
-        "the bridge must include the canonical ring-package implementation"
+        "the ABI bridge must include the canonical ring-package kernel"
     );
     assert!(
         !retired_copy.exists(),
         "a second archive runtime source would allow the two build paths to drift"
+    );
+
+    let temp = TempTree::new("jet_archive_source_boundary");
+    let entry = temp.0.join("main.jet");
+    let entry_source = "use core.archive as ar\nfn run() { ar.zip_compress(\"x\", [U8].{}) }\n";
+    fs::write(&entry, entry_source).unwrap();
+    let output = jet::compile_with_path(entry_source, entry.to_str().unwrap())
+        .expect("Core source package must compile through the normal frontend");
+    assert!(
+        output.rust.contains("mod user_core_archive"),
+        "reachable archive source module must be emitted"
+    );
+    assert!(
+        output.rust.contains("user_core_archive::user_zip_compress"),
+        "public archive calls must target the emitted source module"
     );
 }
 

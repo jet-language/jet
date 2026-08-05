@@ -9,6 +9,7 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::ListRemoveMode;
 use crate::Diagnostics::Span;
 
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
@@ -165,6 +166,44 @@ pub(crate) fn resolve_builtin_op(
     let receiver_borrow = rty
         .as_ref()
         .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
+    let list_remove_mode = if method == "remove" {
+        match args.len() {
+            1 => Some(ListRemoveMode::Value),
+            2 => match &args[1].expr {
+                Expr::EnumLit { variant, .. } if variant == "Val" => Some(ListRemoveMode::Value),
+                Expr::EnumLit { variant, .. } if variant == "Slot" => Some(ListRemoveMode::Slot),
+                // A `#Known` selector is an enum value by the time codegen runs.
+                // Recover the same fixed mode from sema's evaluated fact so a
+                // non-Int list does not fall through to an unlowered method call.
+                Expr::Ident(name, _) => match cx.const_values.get(name) {
+                    Some(crate::AST::CtValue::Enum {
+                        type_name,
+                        variant,
+                        ..
+                    }) if type_name == crate::Syntax::TYPE_REMOVE_BY => {
+                        match variant.strip_prefix("user_").unwrap_or(variant) {
+                            "Val" => Some(ListRemoveMode::Value),
+                            "Slot" => Some(ListRemoveMode::Slot),
+                            _ => None,
+                        }
+                    }
+                    _ if matches!(
+                        &rty,
+                        Some(Type::List(inner)) if **inner == Type::Int
+                    ) => Some(ListRemoveMode::Dynamic),
+                    _ => None,
+                },
+                _ if matches!(
+                    &rty,
+                    Some(Type::List(inner)) if **inner == Type::Int
+                ) => Some(ListRemoveMode::Dynamic),
+                _ => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
     let op = match (method, args.len()) {
         ("len", 0) => {
             if is_string {
@@ -183,7 +222,7 @@ pub(crate) fn resolve_builtin_op(
         ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
         ("merge", 1) if is_map => TBuiltinOp::MapMerge,
         ("merge", 2) if is_map => TBuiltinOp::MapMergeWith,
-        ("remove", 1) => {
+        ("remove", 1 | 2) => {
             if is_set {
                 TBuiltinOp::SetRemove
             } else if is_sorted_set {
@@ -196,11 +235,14 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::RemoveMap
             } else if is_lru {
                 TBuiltinOp::RemoveMap
-            } else if is_list || rty.is_none() {
+            } else if (is_list || rty.is_none()) && list_remove_mode.is_some() {
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
-                TBuiltinOp::RemoveList { line }
+                TBuiltinOp::RemoveList {
+                    line,
+                    mode: list_remove_mode.unwrap(),
+                }
             } else {
                 return None;
             }
@@ -253,7 +295,10 @@ pub(crate) fn resolve_builtin_op(
         ("replace", 2) => TBuiltinOp::Replace,
         ("pad_start", 2) => TBuiltinOp::PadStart,
         ("pad_end", 2) => TBuiltinOp::PadEnd,
+        ("count", 1) if is_list => TBuiltinOp::CountList,
         ("count", 1) if is_string => TBuiltinOp::StringCount,
+        ("extend", 1) if is_list => TBuiltinOp::ExtendList,
+        ("concat", 1) if is_list => TBuiltinOp::ConcatList,
         ("is_alphabetic", 0) if is_string => TBuiltinOp::StringIsAlphabetic,
         ("is_numeric", 0) if is_string => TBuiltinOp::StringIsNumeric,
         ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,
@@ -387,7 +432,16 @@ pub(crate) fn resolve_builtin_op(
                 vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
             });
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            TBuiltinOp::Zip { tuple_struct: ts }
+            let field_types = fields.iter().map(|(_, ty)| ty.clone()).collect();
+            TBuiltinOp::Zip {
+                tuple_struct: ts,
+                mode: crate::Codegen::TIR::TZipMode::Strict,
+                fields: fields.into_iter().map(|(name, _)| name).collect(),
+                flatten: false,
+                input_count: 2,
+                fill_mode: crate::Codegen::TIR::TZipFillMode::DefaultNone,
+                field_types,
+            }
         }
         ("unzip", 0) => {
             let fields = tuple_fields(resolved_ret).unwrap_or_else(|| {
@@ -491,6 +545,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::AddNewMap
             | TBuiltinOp::InsertList
             | TBuiltinOp::RemoveMap
+            | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
             | TBuiltinOp::Sort
             | TBuiltinOp::Clear

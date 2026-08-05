@@ -1303,6 +1303,54 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
             }
+            // D-ZIPPAD1: free zip-family calls carry their complete result type
+            // from sema. Lower the same variadic contract as the method form;
+            // no ordinary function lookup or codegen-side type inference is
+            // involved.
+            if matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+                && !cx.sigs.contains_key(&call.name)
+                && call.resolved_ret.is_some()
+            {
+                let is_pad = call.name == "zip_pad";
+                let mut inputs = Vec::new();
+                let mut fields = Vec::new();
+                let mut fills = Vec::new();
+                for arg in &call.args {
+                    match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                        (true, Some("fill")) | (true, Some("fills")) => {
+                            fills.push(lower_expr(&arg.expr, cx, env));
+                        }
+                        _ => {
+                            let index = fields.len();
+                            let name = arg.label.as_ref().map(|(name, _)| name.as_str());
+                            let field = name.map_or_else(
+                                || {
+                                    ["a", "b", "c", "d", "e", "f"]
+                                        .get(index)
+                                        .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
+                                },
+                                str::to_string,
+                            );
+                            fields.push(field);
+                            inputs.push(lower_expr(&arg.expr, cx, env));
+                        }
+                    }
+                }
+                let ret = call.resolved_ret.as_ref().expect("zip result resolved by sema");
+                if inputs.is_empty() {
+                    return crate::Codegen::TIR::lower_empty_zip_family(ret, &call.name);
+                }
+                let mut all = inputs.into_iter();
+                let first = all.next().expect("non-empty zip inputs");
+                return crate::Codegen::TIR::lower_zip_family(
+                    first,
+                    all.collect(),
+                    fills,
+                    fields,
+                    &call.name,
+                    Some(ret),
+                );
+            }
             // D-BIGINT1 / D-DECIMAL1: `BigInt(…)` / `Decimal(…)` constructors.
             if !env.locals.contains_key(&call.name)
                 && (call.name == crate::Syntax::TYPE_BIGINT
@@ -1850,6 +1898,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
                             enum_type: "DataEvent".to_string(),
+                            variant: member.clone(),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                // D-LISTREMOVE1/F: `RemoveBy.Val` / `RemoveBy.Slot` is a
+                // built-in enum with a registered type fact, so it does not
+                // pass through the user-enum field path above.
+                if enum_name == crate::Syntax::TYPE_REMOVE_BY
+                    && matches!(member.as_str(), "Val" | "Slot")
+                {
+                    return TExpr {
+                        ty: Type::Named(crate::Syntax::TYPE_REMOVE_BY.to_string()),
+                        kind: TExprKind::EnumLit {
+                            enum_type: crate::Syntax::TYPE_REMOVE_BY.to_string(),
                             variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },

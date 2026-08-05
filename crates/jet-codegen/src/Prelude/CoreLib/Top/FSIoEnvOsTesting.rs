@@ -512,17 +512,142 @@ fn jet_std_io_style_force(style: &String, text: &String) -> String {
         None => text.clone(),
     }
 }
-fn jet_std_io_progress(text: &String) -> Result<(), jet_std::IOError> {
+
+struct JetProgressIter<T> {
+    inner: Box<dyn Iterator<Item = T>>,
+    total: Option<usize>,
+    description: String,
+    format: String,
+    started: std::time::Instant,
+    count: usize,
+    displayed: bool,
+    finished: bool,
+}
+
+impl<T> Iterator for JetProgressIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = match self.inner.next() {
+            Some(item) => item,
+            None => {
+                self.finish();
+                return None;
+            }
+        };
+        self.count += 1;
+        let text = jet_progress_render(
+            &self.description,
+            &self.format,
+            self.count,
+            self.total,
+            self.started.elapsed().as_secs_f64(),
+            jet_env_value_raw("NO_COLOR").is_some(),
+        );
+        if let Err(error) = jet_std_io_progress_emit(&text) {
+            jet_panic("<progress>", 0, &format!("{error:?}"));
+        }
+        self.displayed = true;
+        Some(item)
+    }
+}
+
+impl<T> JetProgressIter<T> {
+    fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        if self.displayed {
+            if let Err(error) = jet_std_io_progress_finish() {
+                jet_panic("<progress>", 0, &format!("{error:?}"));
+            }
+        }
+    }
+}
+
+impl<T> Drop for JetProgressIter<T> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn jet_std_io_progress_iter<T: 'static>(
+    it: JetIter<T>,
+    description: &String,
+    format: &String,
+) -> JetIter<T> {
+    let (lower, upper) = it.0.size_hint();
+    let total = upper.filter(|upper| *upper == lower);
+    jet_std_io_progress_iter_with_total(it, description, format, total)
+}
+
+fn jet_std_io_progress_iter_with_total<T: 'static>(
+    it: JetIter<T>,
+    description: &String,
+    format: &String,
+    total: Option<usize>,
+) -> JetIter<T> {
+    JetIter(Box::new(JetProgressIter {
+        inner: it.0,
+        total,
+        description: description.clone(),
+        format: format.clone(),
+        started: std::time::Instant::now(),
+        count: 0,
+        displayed: false,
+        finished: false,
+    }))
+}
+
+fn jet_std_io_progress_list<T: 'static>(
+    xs: Vec<T>,
+    description: &String,
+    format: &String,
+) -> JetIter<T> {
+    let total = xs.len();
+    jet_std_io_progress_iter_with_total(
+        jet_iter_from_vec(xs),
+        description,
+        format,
+        Some(total),
+    )
+}
+
+fn jet_std_io_progress_emit(text: &str) -> Result<(), jet_std::IOError> {
     use std::io::{IsTerminal, Write};
     let mut out = std::io::stdout();
     if out.is_terminal() {
-        out.write_all(b"\r").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-        out.flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
-    } else {
-        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-        out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+        out.write_all(b"\r")
+            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
     }
+    out.write_all(text.as_bytes())
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+    if !out.is_terminal() {
+        out.write_all(b"\n")
+            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+    }
+    out.flush()
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+}
+
+fn jet_std_io_progress_finish() -> Result<(), jet_std::IOError> {
+    use std::io::{IsTerminal, Write};
+    let mut out = std::io::stdout();
+    if out.is_terminal() {
+        out.write_all(b"\n")
+            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+        out.flush()
+            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))?;
+    }
+    Ok(())
+}
+
+fn jet_std_io_progress(text: &String) -> Result<(), jet_std::IOError> {
+    // Preserve the legacy one-string helper's terminal behavior. Iterable
+    // progress owns its lifecycle through `JetProgressIter::finish`; the
+    // string form has never added a prompt-terminating newline.
+    jet_std_io_progress_emit(text)
 }
 
 // D-ENV-MUTATE1=A: Jet owns a raw, process-global logical environment. User

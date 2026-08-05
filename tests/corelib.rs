@@ -10902,7 +10902,7 @@ fn perf_static_api_lowers_to_core_helpers() {
     let out = compile_temp(
         "perf_static.jet",
         r#"
-fn run() => Void ? {
+fn run() => () ? {
     print(Perf.default_fidelity())
     Perf.override_fidelity(0.25)?
     print(Perf.fidelity())
@@ -10921,7 +10921,7 @@ fn perf_set_fidelity_alias_is_not_exported() {
     let src = r#"
 use core.perf as perf
 
-fn run() => Void ? {
+fn run() => () ? {
     perf.set_fidelity(0.25)?
 }
 "#;
@@ -10960,7 +10960,7 @@ fn perf_override_is_range_checked_and_resettable() {
         r#"
 use core.perf as perf
 
-fn run() => Void ? {
+fn run() => () ? {
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
     print(perf.fidelity())
@@ -11144,12 +11144,12 @@ fn async_event_overflow_and_failure_policies() {
 use core.event as event
 use core.tasks as tasks
 
-fn panic_log_handler(n: Int) => Void ? String {
+fn panic_log_handler(n: Int) => () ? String {
     panic("log boom")
     return .Err("unreachable")
 }
 
-fn panic_ignore_handler(n: Int) => Void ? String {
+fn panic_ignore_handler(n: Int) => () ? String {
     panic("ignore boom")
     return .Err("unreachable")
 }

@@ -436,7 +436,7 @@ impl LowerCtx<'_, '_> {
 
     fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
-        let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit" || n == "Void") {
+        let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit") {
             (self.host.result_new_i64, self.b.ins().iconst(types::I64, 0))
         } else {
             let value = self.lower_expr(inner)?;
@@ -471,7 +471,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn result_payload(&mut self, handle: Value, ty: &Type) -> Result<Value, String> {
-        if matches!(ty, Type::Named(n) if n == "Unit" || n == "Void")
+        if matches!(ty, Type::Named(n) if n == "Unit")
             || matches!(ty, Type::Tuple(items) if items.is_empty())
         {
             return Ok(self.b.ins().iconst(types::I8, 0));
@@ -517,7 +517,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn cell_unpack_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
-        if matches!(ty, Type::Named(name) if matches!(name.as_str(), "Unit" | "Void"))
+        if matches!(ty, Type::Named(name) if name == "Unit")
             || matches!(ty, Type::Tuple(fields) if fields.is_empty())
         {
             return Ok(self.b.ins().iconst(types::I8, 0));
@@ -2904,7 +2904,7 @@ impl LowerCtx<'_, '_> {
                 let val = self.lower_expr(init)?;
                 // TIR often stamps `Unit` on void calls and some handle results;
                 // prefer the Cranelift value's real ABI over guessing I8 vs I64.
-                let ty = if matches!(&init.ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                let ty = if matches!(&init.ty, Type::Named(n) if n == "Unit") {
                     self.b.func.dfg.value_type(val)
                 } else {
                     init_clif_ty(init, self.meta)?
@@ -2916,7 +2916,7 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
                 self.vars.insert(TIR::local_place(name), var);
-                let stored_ty = if matches!(&init.ty, Type::Named(n) if n == "Unit" || n == "Void")
+                let stored_ty = if matches!(&init.ty, Type::Named(n) if n == "Unit")
                 {
                     Self::recover_core_return_ty(init).unwrap_or_else(|| match ty {
                         types::I8 => Type::Bool,
@@ -4080,6 +4080,7 @@ impl LowerCtx<'_, '_> {
                     let header = self.b.create_block();
                     let body_block = self.b.create_block();
                     let step_block = self.b.create_block();
+                    let exhausted = self.b.create_block();
                     let exit = self.b.create_block();
                     let idx_var = self.fresh_var(types::I64);
                     let zero = self.b.ins().iconst(types::I64, 0);
@@ -4098,7 +4099,15 @@ impl LowerCtx<'_, '_> {
                     let len_call = self.b.ins().call(len_ref, &[coll]);
                     let len = self.b.inst_results(len_call)[0];
                     let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
-                    self.b.ins().brif(done, exit, &[], body_block, &[]);
+                    self.b.ins().brif(done, exhausted, &[], body_block, &[]);
+
+                    self.b.switch_to_block(exhausted);
+                    self.b.seal_block(exhausted);
+                    let progress_exhaust = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_exhaust, self.b.func);
+                    self.b.ins().call(progress_exhaust, &[coll]);
+                    self.b.ins().jump(exit, &[]);
 
                     self.loop_stack.push(LoopTargets {
                         label: label.clone(),
@@ -4110,6 +4119,13 @@ impl LowerCtx<'_, '_> {
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let first = self.b.ins().icmp(IntCC::Equal, idx, zero);
+                    let pulls = self.b.ins().select(first, one, stride);
+                    let progress_pull = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_pull, self.b.func);
+                    self.b.ins().call(progress_pull, &[coll, pulls]);
                     if map_pairs {
                         let value_ty = match &collection.ty {
                             Type::Map { value, .. } => value.as_ref().clone(),
@@ -4202,6 +4218,10 @@ impl LowerCtx<'_, '_> {
 
                     self.b.switch_to_block(exit);
                     self.b.seal_block(exit);
+                    let progress_finish = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_finish, self.b.func);
+                    self.b.ins().call(progress_finish, &[coll]);
                     self.dead = false;
                 } else {
                     let elem_ty = if matches!(
@@ -4284,6 +4304,7 @@ impl LowerCtx<'_, '_> {
                     let header = self.b.create_block();
                     let body_block = self.b.create_block();
                     let step_block = self.b.create_block();
+                    let exhausted = self.b.create_block();
                     let exit = self.b.create_block();
                     let idx_var = self.fresh_var(types::I64);
                     let zero = self.b.ins().iconst(types::I64, 0);
@@ -4298,7 +4319,15 @@ impl LowerCtx<'_, '_> {
                     let len_call = self.b.ins().call(len_ref, &[coll]);
                     let len = self.b.inst_results(len_call)[0];
                     let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
-                    self.b.ins().brif(done, exit, &[], body_block, &[]);
+                    self.b.ins().brif(done, exhausted, &[], body_block, &[]);
+
+                    self.b.switch_to_block(exhausted);
+                    self.b.seal_block(exhausted);
+                    let progress_exhaust = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_exhaust, self.b.func);
+                    self.b.ins().call(progress_exhaust, &[coll]);
+                    self.b.ins().jump(exit, &[]);
 
                     self.loop_stack.push(LoopTargets {
                         label: label.clone(),
@@ -4310,6 +4339,13 @@ impl LowerCtx<'_, '_> {
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let first = self.b.ins().icmp(IntCC::Equal, idx, zero);
+                    let pulls = self.b.ins().select(first, one, stride);
+                    let progress_pull = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_pull, self.b.func);
+                    self.b.ins().call(progress_pull, &[coll, pulls]);
                     let line = self.b.ins().iconst(types::I32, 1);
                     let get_ref = self.module.declare_func_in_func(
                         match elem_ty {
@@ -4356,6 +4392,10 @@ impl LowerCtx<'_, '_> {
 
                     self.b.switch_to_block(exit);
                     self.b.seal_block(exit);
+                    let progress_finish = self
+                        .module
+                        .declare_func_in_func(self.host.io.progress_finish, self.b.func);
+                    self.b.ins().call(progress_finish, &[coll]);
                     self.dead = false;
                 }
             }
@@ -7348,13 +7388,13 @@ impl LowerCtx<'_, '_> {
                                 }
                             }
                             let erased = self.erase_distinct_ty(&e.ty);
-                            if matches!(&erased, Type::Named(n) if n == "Unit" || n == "Void") {
+                            if matches!(&erased, Type::Named(n) if n == "Unit") {
                                 self.print_result_ty(e)
                             } else {
                                 erased
                             }
                         });
-                    if matches!(&push_ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                    if matches!(&push_ty, Type::Named(n) if n == "Unit") {
                         continue;
                     }
                     // Generic param leftovers (`Named("T")`) — use concrete expr ty.
@@ -9555,8 +9595,50 @@ impl LowerCtx<'_, '_> {
                             self.host.io.style_force,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        "progress" if args.len() == 1 => {
+                        "progress" if args.len() == 1
+                            && matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) =>
+                        {
                             (self.host.io.progress, vec![self.lower_expr(&args[0])?])
+                        }
+                        "progress" if (1..=3).contains(&args.len()) => {
+                            let source = self.lower_expr(&args[0])?;
+                            let description = args
+                                .get(1)
+                                .map(|arg| self.lower_expr(arg))
+                                .unwrap_or_else(|| {
+                                    Ok(self.b.ins().iconst(
+                                        types::I64,
+                                        self.runtime.heap.alloc_string("Progress".to_string()),
+                                    ))
+                                })?;
+                            let format = args
+                                .get(2)
+                                .map(|arg| self.lower_expr(arg))
+                                .unwrap_or_else(|| {
+                                    Ok(self.b.ins().iconst(
+                                        types::I64,
+                                        self.runtime.heap.alloc_string(String::new()),
+                                    ))
+                                })?;
+                            let exact_iter = matches!(
+                                args.first().map(|arg| &arg.kind),
+                                Some(TExprKind::BuiltinMethod {
+                                    op: TBuiltinOp::ListLazy,
+                                    ..
+                                })
+                            );
+                            let host = match args.first().map(|arg| &arg.ty) {
+                                Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
+                                    self.host.io.progress_list
+                                }
+                                Some(Type::Apply { name, .. })
+                                    if name == jet_foundation::Syntax::TYPE_ITER && exact_iter =>
+                                {
+                                    self.host.io.progress_list
+                                }
+                                _ => self.host.io.progress_iter,
+                            };
+                            (host, vec![source, description, format])
                         }
                         "confirm" if args.len() == 1 => {
                             (self.host.io.confirm, vec![self.lower_expr(&args[0])?])
@@ -12492,7 +12574,7 @@ impl LowerCtx<'_, '_> {
                     .map(|(ok, _)| ok.clone())
                     .or_else(|| Self::result_ok_ty_recover(value))
                     .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
-                let is_unit = matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void")
+                let is_unit = matches!(&ok_ty, Type::Named(n) if n == "Unit")
                     || matches!(&ok_ty, Type::Tuple(items) if items.is_empty());
                 let ret_ty = if is_unit {
                     types::I8
@@ -14616,6 +14698,18 @@ impl LowerCtx<'_, '_> {
             return Ok(self.b.inst_results(call)[0]);
         }
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = if matches!(
+            op,
+            TBuiltinOp::JoinSep
+                | TBuiltinOp::Sum { .. }
+                | TBuiltinOp::Product { .. }
+                | TBuiltinOp::Min { .. }
+                | TBuiltinOp::Max { .. }
+        ) {
+            self.collect_progress(recv_val)
+        } else {
+            recv_val
+        };
         match op {
             TBuiltinOp::LenString => {
                 let host_ref = self
@@ -14999,16 +15093,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             },
             TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::RemoveList { .. } => {
-                let idx = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_remove, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
-                let removed = self.b.inst_results(call)[0];
-                self.emit_trap_check()?;
-                Ok(removed)
-            }
+            // D-LISTREMOVE1/F: the JIT list ABI only has an untagged scalar
+            // return and cannot carry the new Option<T> value/remove-by mode.
+            // Deopt keeps the same Prelude semantics as AOT and interpreter.
+            TBuiltinOp::RemoveList { .. }
+            | TBuiltinOp::CountList
+            | TBuiltinOp::ExtendList
+            | TBuiltinOp::ConcatList => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::GetMap => {
                 if matches!(
                     &recv.ty,
@@ -15862,10 +15953,23 @@ impl LowerCtx<'_, '_> {
             // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
             // (String.split, list adapters) already return list handles of the same
             // pieces AOT would yield lazily — to_list / collect is identity.
-            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => Ok(recv_val),
-            // D-LOOPMAP1=B: AOT wraps via jet_iter_from_vec; JIT already walks list
-            // handles as the iter plane, so `.lazy()` is identity here.
-            TBuiltinOp::ListLazy => Ok(recv_val),
+            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.progress_collect, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            // D-LOOPMAP1=B: JIT uses list handles as the iter plane. Keep an
+            // exact-size fact beside the handle so a later bound `io.progress`
+            // call agrees with AOT's `size_hint()` result.
+            TBuiltinOp::ListLazy => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.progress_mark_exact, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
         }
     }
 
@@ -19366,7 +19470,7 @@ impl LowerCtx<'_, '_> {
                         }
                     }
                 }
-                if !matches!(ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                if !matches!(ty, Type::Named(n) if n == "Unit") {
                     return self.erase_distinct_ty(ty);
                 }
             }
@@ -19400,7 +19504,7 @@ impl LowerCtx<'_, '_> {
             }
             if let TOrFallback::Value(fb) = fallback {
                 let fb_ty = self.print_result_ty(fb);
-                if !matches!(&fb_ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                if !matches!(&fb_ty, Type::Named(n) if n == "Unit") {
                     return fb_ty;
                 }
             }
@@ -20075,7 +20179,7 @@ impl LowerCtx<'_, '_> {
                 let print_ty = self.print_result_ty(inner);
                 // Some method chains type `list.join(sep)` as Unit in TIR even though
                 // the lowered value is a String handle (seen on Url.path_segments().join).
-                if matches!(&print_ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                if matches!(&print_ty, Type::Named(n) if n == "Unit") {
                     if matches!(
                         &inner.kind,
                         TExprKind::BuiltinMethod {
@@ -20242,6 +20346,78 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
+    fn transfer_progress(&mut self, source: Value, target: Value) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_transfer, self.b.func);
+        self.b.ins().call(host, &[source, target]);
+    }
+
+    fn transfer_progress_filter(&mut self, source: Value, target: Value) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_transfer_filter, self.b.func);
+        self.b.ins().call(host, &[source, target]);
+    }
+
+    fn transfer_progress_take_while(&mut self, source: Value, target: Value, is_skip: bool) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_transfer_take_while, self.b.func);
+        let flag = self.b.ins().iconst(types::I64, if is_skip { 1 } else { 0 });
+        self.b.ins().call(host, &[source, target, flag]);
+    }
+
+    fn progress_source_pull(&mut self, source: Value, index: Value) -> Value {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_source_pull, self.b.func);
+        let call = self.b.ins().call(host, &[source, index]);
+        self.b.inst_results(call)[0]
+    }
+
+    fn transfer_progress_plan(
+        &mut self,
+        source: Value,
+        target: Value,
+        plan: Value,
+        tail: Value,
+    ) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_transfer_plan, self.b.func);
+        self.b.ins().call(host, &[source, target, plan, tail]);
+    }
+
+    fn collect_progress(&mut self, value: Value) -> Value {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_collect, self.b.func);
+        let call = self.b.ins().call(host, &[value]);
+        self.b.inst_results(call)[0]
+    }
+
+    fn progress_pull(&mut self, source: Value, pulls: Value) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_pull, self.b.func);
+        self.b.ins().call(host, &[source, pulls]);
+    }
+
+    fn progress_finish(&mut self, source: Value) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_finish, self.b.func);
+        self.b.ins().call(host, &[source]);
+    }
+
+    fn progress_exhaust(&mut self, source: Value) {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.io.progress_exhaust, self.b.func);
+        self.b.ins().call(host, &[source]);
+    }
+
     /// Native Iter/list closure adapters — lambda bodies inlined in Cranelift.
     fn lower_closure_method(
         &mut self,
@@ -20385,6 +20561,7 @@ impl LowerCtx<'_, '_> {
             return Err("jit count_by types unsupported".to_string());
         }
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
         let map_new = self
@@ -20603,7 +20780,14 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
-        Ok(self.b.use_var(out_var))
+        let source = self.b.use_var(coll_var);
+        let output = self.b.use_var(out_var);
+        if is_filter {
+            self.transfer_progress_filter(source, output);
+        } else {
+            self.transfer_progress(source, output);
+        }
+        Ok(output)
     }
 
     fn lower_iter_each(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
@@ -20626,6 +20810,7 @@ impl LowerCtx<'_, '_> {
         }
         let param_place = TIR::local_place(&lam.source_params[0]);
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
@@ -21098,6 +21283,13 @@ impl LowerCtx<'_, '_> {
         let out_val = self.b.inst_results(out_call)[0];
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_val);
+        let plan_call = self.b.ins().call(new_ref, &[]);
+        let plan_init = self.b.inst_results(plan_call)[0];
+        let plan_var = self.fresh_var(types::I64);
+        self.b.def_var(plan_var, plan_init);
+        let pending_var = self.fresh_var(types::I64);
+        let pending_zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(pending_var, pending_zero);
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -21131,6 +21323,10 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
+        let pull = self.progress_source_pull(coll, idx);
+        let pending = self.b.use_var(pending_var);
+        let pending = self.b.ins().iadd(pending, pull);
+        self.b.def_var(pending_var, pending);
 
         let res = self.with_bound_local(&param_place, elem_ty, elem, |this| {
             this.lower_expr(body_expr)
@@ -21153,6 +21349,11 @@ impl LowerCtx<'_, '_> {
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
         self.b.ins().call(push_ref, &[out, payload]);
+        let plan = self.b.use_var(plan_var);
+        let pending = self.b.use_var(pending_var);
+        self.b.ins().call(push_ref, &[plan, pending]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(pending_var, zero);
         self.b.ins().jump(step, &[]);
 
         self.b.switch_to_block(step);
@@ -21166,7 +21367,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
-        Ok(self.b.use_var(out_var))
+        let source = self.b.use_var(coll_var);
+        let output = self.b.use_var(out_var);
+        let plan = self.b.use_var(plan_var);
+        let tail = self.b.use_var(pending_var);
+        self.transfer_progress_plan(source, output, plan, tail);
+        Ok(output)
     }
 
     fn lower_iter_sort_by(
@@ -21184,6 +21390,7 @@ impl LowerCtx<'_, '_> {
             return Err("jit sort_by key must be Int".to_string());
         }
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
@@ -21308,6 +21515,8 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let res = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
+        let one = self.b.ins().iconst(types::I64, 1);
+        self.progress_pull(coll, one);
         let status_ref = self
             .module
             .declare_func_in_func(self.host.result_is_ok, self.b.func);
@@ -21339,6 +21548,8 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit_ok);
         self.b.seal_block(header);
         self.b.seal_block(exit_ok);
+        let source = self.b.use_var(coll_var);
+        self.progress_exhaust(source);
         let out = self.b.use_var(out_var);
         // Ok(list) — list handle is i64 payload.
         let tag = self.b.ins().iconst(types::I8, 1);
@@ -21351,6 +21562,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(exit_err);
         self.b.seal_block(exit_err);
+        let source = self.b.use_var(coll_var);
+        self.progress_finish(source);
         let err_res = self.b.block_params(exit_err)[0];
         let err_payload = self.result_payload(err_res, &err_ty)?;
         let tag = self.b.ins().iconst(types::I8, 0);
@@ -21484,7 +21697,10 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
-        Ok(self.b.use_var(out_var))
+        let source = self.b.use_var(coll_var);
+        let output = self.b.use_var(out_var);
+        self.transfer_progress_take_while(source, output, is_skip);
+        Ok(output)
     }
 
     fn lower_iter_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
@@ -21507,6 +21723,7 @@ impl LowerCtx<'_, '_> {
         let acc_place = TIR::local_place(&lam.source_params[0]);
         let elem_place = TIR::local_place(&lam.source_params[1]);
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
         let acc_var = self.fresh_var(types::I64);
@@ -21775,6 +21992,7 @@ impl LowerCtx<'_, '_> {
         let header = self.b.create_block();
         let body = self.b.create_block();
         let step = self.b.create_block();
+        let exhausted = self.b.create_block();
         let exit = self.b.create_block();
         let idx_var = self.fresh_var(types::I64);
         let zero = self.b.ins().iconst(types::I64, 0);
@@ -21793,10 +22011,25 @@ impl LowerCtx<'_, '_> {
             .b
             .ins()
             .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
-        self.b.ins().brif(done, exit, &[], body, &[]);
+        self.b.ins().brif(done, exhausted, &[], body, &[]);
+
+        self.b.switch_to_block(exhausted);
+        self.b.seal_block(exhausted);
+        let progress_exhaust = self
+            .module
+            .declare_func_in_func(self.host.io.progress_exhaust, self.b.func);
+        let coll = self.b.use_var(coll_var);
+        self.b.ins().call(progress_exhaust, &[coll]);
+        self.b.ins().jump(exit, &[]);
 
         self.b.switch_to_block(body);
         self.b.seal_block(body);
+        let progress_pull = self
+            .module
+            .declare_func_in_func(self.host.io.progress_pull, self.b.func);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let coll = self.b.use_var(coll_var);
+        self.b.ins().call(progress_pull, &[coll, one]);
         let get_ref = self
             .module
             .declare_func_in_func(self.host.coll.list_get, self.b.func);
@@ -21829,6 +22062,11 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
+        let progress_finish = self
+            .module
+            .declare_func_in_func(self.host.io.progress_finish, self.b.func);
+        let coll = self.b.use_var(coll_var);
+        self.b.ins().call(progress_finish, &[coll]);
         Ok(self.b.use_var(result_var))
     }
 
@@ -21845,6 +22083,7 @@ impl LowerCtx<'_, '_> {
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
@@ -21973,6 +22212,13 @@ impl LowerCtx<'_, '_> {
         let out_init = self.b.inst_results(out_call)[0];
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_init);
+        let plan_call = self.b.ins().call(new_ref, &[]);
+        let plan_init = self.b.inst_results(plan_call)[0];
+        let plan_var = self.fresh_var(types::I64);
+        self.b.def_var(plan_var, plan_init);
+        let pending_var = self.fresh_var(types::I64);
+        let pending_zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(pending_var, pending_zero);
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -22006,6 +22252,10 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let inner_list = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
+        let pull = self.progress_source_pull(coll, idx);
+        let pending = self.b.use_var(pending_var);
+        let pending = self.b.ins().iadd(pending, pull);
+        self.b.def_var(pending_var, pending);
         let list_ty = Type::List(Box::new(Type::Int));
         let mapped = self.with_bound_local(&param_place, list_ty, inner_list, |this| this.lower_expr(body_expr))?;
 
@@ -22043,6 +22293,26 @@ impl LowerCtx<'_, '_> {
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
         self.b.ins().call(push_ref, &[out, v]);
+        let first = self.b.create_block();
+        let rest = self.b.create_block();
+        let zero_j = self.b.ins().iconst(types::I64, 0);
+        let is_first = self.b.ins().icmp(IntCC::Equal, j, zero_j);
+        self.b.ins().brif(is_first, first, &[], rest, &[]);
+
+        self.b.switch_to_block(first);
+        self.b.seal_block(first);
+        let plan = self.b.use_var(plan_var);
+        let pending = self.b.use_var(pending_var);
+        self.b.ins().call(push_ref, &[plan, pending]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(pending_var, zero);
+        self.b.ins().jump(inner_step, &[]);
+
+        self.b.switch_to_block(rest);
+        self.b.seal_block(rest);
+        let plan = self.b.use_var(plan_var);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.ins().call(push_ref, &[plan, zero]);
         self.b.ins().jump(inner_step, &[]);
 
         self.b.switch_to_block(inner_step);
@@ -22069,7 +22339,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
-        Ok(self.b.use_var(out_var))
+        let source = self.b.use_var(coll_var);
+        let output = self.b.use_var(out_var);
+        let plan = self.b.use_var(plan_var);
+        let tail = self.b.use_var(pending_var);
+        self.transfer_progress_plan(source, output, plan, tail);
+        Ok(output)
     }
 }
 

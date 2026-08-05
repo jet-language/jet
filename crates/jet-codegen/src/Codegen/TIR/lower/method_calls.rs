@@ -33,6 +33,23 @@ use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_sketch_method_name;
 use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
+
+fn progress_return_ty(args: &[TExpr]) -> Type {
+    if matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) {
+        return Type::Result {
+            ok: Box::new(unit_type()),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string())),
+        };
+    }
+    match args.first().map(|arg| &arg.ty) {
+        Some(Type::List(elem) | Type::FixedList { elem, .. }) => crate::Collections::iter_ty((**elem).clone()),
+        Some(Type::Apply { name, args })
+            if name == crate::Syntax::TYPE_ITER && args.len() == 1 => {
+                crate::Collections::iter_ty(args[0].clone())
+            }
+        _ => unit_type(),
+    }
+}
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
 use crate::Codegen::TIR::lambda_body_ty;
@@ -97,6 +114,42 @@ fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
         [StrPart::Lit(value)] => Some(value.clone()),
         _ => None,
     }
+}
+
+/// Route the public archive surface through the loaded source package. The
+/// package module itself is the only caller that may lower the internal ABI
+/// calls below; all other callers use the ordinary file-module TIR path.
+fn lower_archive_source_call(
+    method: &str,
+    type_args: &[Type],
+    resolved_ret: Option<&Type>,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    // Comptime evaluates a standalone fragment, not the emitted module graph.
+    // Keep its existing Core evaluator path; runtime bundles use the source
+    // module above and therefore remain subject to the normal frontend/TIR
+    // route.
+    if !cx.core_archive_source || cx.module_alias == "core_archive" || super::is_eval_fragment() {
+        return None;
+    }
+    let (sig, fixed_ret) = crate::Sema::core_fixed_sig("core.archive", method)?;
+    let targs = lower_module_args(args, Some(sig.as_slice()), env, cx);
+    Some(TExpr {
+        ty: resolved_ret
+            .cloned()
+            .or(fixed_ret)
+            .unwrap_or_else(unit_type),
+        kind: TExprKind::ModuleCall {
+            form: TModuleCallForm::Qualified {
+                rust_mod: "user_core_archive".to_string(),
+                rust_fn: mangle(method).to_string(),
+            },
+            type_args: type_args.to_vec(),
+            args: targs,
+        },
+    })
 }
 
 /// A prelude/host static-call owner whose path is prefixed by the generated
@@ -184,6 +237,14 @@ fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
 }
 
 fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
+    if module == "core.io"
+        && method == "progress"
+        && matches!(args.first().map(|arg| &arg.ty), Some(Type::FixedList { .. }))
+    {
+        return std::iter::once(true)
+            .chain(std::iter::repeat(false).take(args.len().saturating_sub(1)))
+            .collect();
+    }
     let params = crate::Sema::core_fixed_sig(module, method)
         .map(|(params, _)| params)
         .unwrap_or_default();
@@ -259,6 +320,149 @@ fn fragment_serde_encode_type(ty: &Type, cx: &Cx) -> bool {
         || cx.sigs.contains_key(&format!("{}::encode", ty.name()))
         || matches!(ty, Type::Apply { name, .. }
             if cx.sigs.contains_key(&format!("{name}::encode")))
+}
+
+fn zip_family_mode(method: &str) -> crate::Codegen::TIR::TZipMode {
+    match method {
+        "zip_short" => crate::Codegen::TIR::TZipMode::Short,
+        "zip_pad" => crate::Codegen::TIR::TZipMode::Pad,
+        _ => crate::Codegen::TIR::TZipMode::Strict,
+    }
+}
+
+fn zip_tuple_fields(ty: &Type) -> Option<Vec<(String, Type)>> {
+    let inner = match ty {
+        Type::List(inner) => inner.as_ref(),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_ITER && args.len() == 1 => &args[0],
+        _ => return None,
+    };
+    match inner {
+        Type::Tuple(fields) => Some(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), (**ty).clone()))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn zip_sequence_type(ty: &Type) -> bool {
+    match ty {
+        Type::Tagged { inner, .. } => zip_sequence_type(inner),
+        Type::List(_) | Type::FixedList { .. } => true,
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_ITER && args.len() == 1 => true,
+        _ => false,
+    }
+}
+
+fn zip_field_name(index: usize, label: Option<&str>) -> String {
+    label.map_or_else(
+        || {
+            ["a", "b", "c", "d", "e", "f"]
+                .get(index)
+                .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
+        },
+        str::to_string,
+    )
+}
+
+/// Build one typed zip-family TIR node. The emitter composes this node's
+/// inputs through the shared binary Prelude primitives; the node itself still
+/// carries the complete variadic contract.
+pub(crate) fn lower_zip_family(
+    receiver: TExpr,
+    inputs: Vec<TExpr>,
+    fills: Vec<TExpr>,
+    fields: Vec<String>,
+    method: &str,
+    resolved_ret: Option<&Type>,
+) -> TExpr {
+    let input_count = inputs.len() + 1;
+    let ret = resolved_ret
+        .cloned()
+        .unwrap_or_else(|| crate::Collections::iter_ty(Type::Int));
+    if input_count == 1 {
+        if crate::Collections::is_iter_type(&receiver.ty) {
+            return receiver;
+        }
+        return TExpr {
+            ty: ret,
+            kind: TExprKind::BuiltinMethod {
+                recv: Box::new(receiver),
+                op: TBuiltinOp::ListLazy,
+                args: Vec::new(),
+            },
+        };
+    }
+    let tuple_fields = resolved_ret.and_then(zip_tuple_fields);
+    let field_types = tuple_fields
+        .as_ref()
+        .map(|fields| fields.iter().map(|(_, ty)| ty.clone()).collect())
+        .unwrap_or_else(|| fields.iter().map(|_| Type::Int).collect());
+    let fill_mode = if method != "zip_pad" {
+        crate::Codegen::TIR::TZipFillMode::DefaultNone
+    } else if fills.len() == 1 {
+        if matches!(fills[0].ty, Type::Tuple(_)) {
+            crate::Codegen::TIR::TZipFillMode::Columns
+        } else {
+            crate::Codegen::TIR::TZipFillMode::Common
+        }
+    } else {
+        crate::Codegen::TIR::TZipFillMode::DefaultNone
+    };
+    TExpr {
+        ty: ret,
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(receiver),
+            op: TBuiltinOp::Zip {
+                tuple_struct: tuple_fields
+                    .as_ref()
+                    .map(|fields| crate::Codegen::Tuples::tuple_struct_name(&fields))
+                    .unwrap_or_default(),
+                mode: zip_family_mode(method),
+                fields,
+                flatten: false,
+                input_count,
+                fill_mode,
+                field_types,
+            },
+            args: inputs.into_iter().chain(fills).collect(),
+        },
+    }
+}
+
+pub(crate) fn lower_empty_zip_family(resolved_ret: &Type, method: &str) -> TExpr {
+    let tuple_fields = zip_tuple_fields(resolved_ret);
+    let fields = tuple_fields
+        .as_ref()
+        .map(|fields| fields.iter().map(|(name, _)| name.clone()).collect())
+        .unwrap_or_default();
+    let field_types = tuple_fields
+        .as_ref()
+        .map(|fields| fields.iter().map(|(_, ty)| ty.clone()).collect())
+        .unwrap_or_default();
+    TExpr {
+        ty: resolved_ret.clone(),
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(TExpr {
+                ty: unit_type(),
+                kind: TExprKind::Unit,
+            }),
+            op: TBuiltinOp::Zip {
+                tuple_struct: String::new(),
+                mode: zip_family_mode(method),
+                fields,
+                flatten: false,
+                input_count: 0,
+                fill_mode: crate::Codegen::TIR::TZipFillMode::DefaultNone,
+                field_types,
+            },
+            args: Vec::new(),
+        },
+    }
 }
 
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
@@ -557,6 +761,39 @@ pub(crate) fn lower_method_call(
             }
             lower_expr(expr, cx, env)
         };
+
+    // D-ZIPPAD1: lower the complete list/iterator zip family as one TIR
+    // contract. The shared node keeps free and method spellings identical;
+    // the Prelude emitter supplies the lazy binary composition.
+    if recv_type.is_none() && matches!(method, "zip" | "zip_short" | "zip_pad") {
+        let lowered_recv = lower_expr(receiver, cx, env);
+        if zip_sequence_type(&lowered_recv.ty) {
+            let is_pad = method == "zip_pad";
+            let mut inputs = Vec::new();
+            let mut fields = vec![zip_field_name(0, None)];
+            let mut fills = Vec::new();
+            for arg in args {
+                match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                    (true, Some("fill")) | (true, Some("fills")) => {
+                        fills.push(lower_expr(&arg.expr, cx, env));
+                    }
+                    _ => {
+                        fields.push(zip_field_name(fields.len(), arg.label.as_ref().map(|(name, _)| name.as_str())));
+                        inputs.push(lower_expr(&arg.expr, cx, env));
+                    }
+                }
+            }
+            return lower_zip_family(
+                lowered_recv,
+                inputs,
+                fills,
+                fields,
+                method,
+                resolved_ret,
+            );
+        }
+        *lowered_receiver.borrow_mut() = Some(lowered_recv);
+    }
 
     if let Expr::Ident(name, _) = receiver {
         if env.is_gc(name) {
@@ -1568,7 +1805,7 @@ pub(crate) fn lower_method_call(
             }
         }
     }
-    // D-ENV-MUTATE1=A: current editions retain `env.set -> Void`, but invalid
+    // D-ENV-MUTATE1=A: current editions retain `env.set -> ()`, but invalid
     // runtime strings must produce existing E3001 at the Jet call span. Lower
     // this compatibility wrapper with all panic facts resolved before emit.
     if method == "set" && args.len() == 2 && !super::is_eval_fragment() {
@@ -1604,6 +1841,18 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
+                if module == "core.archive" {
+                    if let Some(source_call) = lower_archive_source_call(
+                        method,
+                        type_args,
+                        resolved_ret,
+                        args,
+                        cx,
+                        env,
+                    ) {
+                        return source_call;
+                    }
+                }
                 // D-VERDICT-1321-1: variadic io.print/io.eprint — join the
                 // arguments with newlines so the engines keep one-value calls.
                 if module == "core.io" && matches!(method, "print" | "eprint") && args.len() > 1 {
@@ -1690,7 +1939,13 @@ pub(crate) fn lower_method_call(
                         )))),
                     })
                 } else if crate::Sema::is_polymorphic_core_special(&module, method) {
-                    resolved_ret.cloned().unwrap_or_else(unit_type)
+                    resolved_ret.cloned().unwrap_or_else(|| {
+                        if module == "core.io" && method == "progress" {
+                            progress_return_ty(&targs)
+                        } else {
+                            unit_type()
+                        }
+                    })
                 } else if module == "core.event"
                     && matches!(method, "new" | "with_policy" | "hook" | "async_result")
                 {
@@ -1725,6 +1980,18 @@ pub(crate) fn lower_method_call(
         if matches!(receiver, Expr::Field(..)) {
             if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
             {
+                if submodule == "core.archive" {
+                    if let Some(source_call) = lower_archive_source_call(
+                        method,
+                        type_args,
+                        resolved_ret,
+                        args,
+                        cx,
+                        env,
+                    ) {
+                        return source_call;
+                    }
+                }
                 let targs: Vec<TExpr> = args
                     .iter()
                     .enumerate()
@@ -1734,7 +2001,13 @@ pub(crate) fn lower_method_call(
                     .collect();
                 let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                 let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
-                    resolved_ret.cloned().unwrap_or_else(|| core_call_return_ty(&submodule, method))
+                    resolved_ret.cloned().unwrap_or_else(|| {
+                        if submodule == "core.io" && method == "progress" {
+                            progress_return_ty(&targs)
+                        } else {
+                            core_call_return_ty(&submodule, method)
+                        }
+                    })
                 } else {
                     core_call_return_ty(&submodule, method)
                 };
@@ -2096,7 +2369,7 @@ pub(crate) fn lower_method_call(
         };
         let expected_hook_result = match &recv_t.ty {
             Type::Apply { name, args } if name == "AsyncEvent" && args.len() >= 2 => Some(Type::Result {
-                ok: Box::new(Type::Named("Void".to_string())),
+                ok: Box::new(Type::Named("Unit".to_string())),
                 err: Box::new(args[1].clone()),
             }),
             Type::Apply { name, args } if name == "DecisionHook" && args.len() >= 2 => Some(Type::Apply {

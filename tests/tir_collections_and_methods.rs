@@ -4,6 +4,7 @@
 mod tir_support;
 
 use tir_support::{build_and_run, have_rustc};
+use jet::Interpreter::{dev_iteration, RunOutcome};
 
 // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
 // and `loop x, coll` / `loop (k, v), map` iteration. The `IndexKind` (List/Map)
@@ -717,8 +718,8 @@ fn run() {
     assert_eq!(stdout, "jet.dev\nnate\nno-separator\nno-separator\n");
 }
 
-/// Map methods: add, add_new, get, has_key, keys, values, len, clear. BTreeMap
-/// iterates/collects in sorted key order, so output is deterministic.
+/// Map methods: add, add_new, get, has_key, lazy keys/values, len, clear.
+/// JetMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_builtin_methods() {
     if !have_rustc() {
@@ -747,7 +748,7 @@ fn run() {
     assert_eq!(stdout, "0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n");
 }
 
-/// `remove` on both a list (the `jet_list_remove` panic-framed helper) and a map
+/// `remove` on both a list (value default and explicit slot mode) and a map
 /// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
 #[test]
 fn list_and_map_remove() {
@@ -757,7 +758,7 @@ fn list_and_map_remove() {
     let src = "\
 fn drop_first(xs: [Int]) => Int {
     ys := ~xs
-    r := ys.remove(0)
+    r := ys.remove(0, .Slot)
     return ys.len()
 }
 fn drop_key(m: [String: Int]) => Int {
@@ -776,6 +777,63 @@ fn run() {
     let (code, stdout) = build_and_run("tir_remove", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "2\n1\n");
+}
+
+/// D-LISTREMOVE1/F plus the missing list verbs: value removal is the default,
+/// `.Slot` preserves positional removal, `count` counts equal items, `extend`
+/// mutates in order, and `concat` returns a new list.
+#[test]
+fn list_remove_modes_and_surface_gaps() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    xs := [1, 2, 1]
+    print(xs.remove(1) ?? 0)
+    print(xs.count(1))
+    print(xs.remove(0, .Slot) ?? 0)
+    xs.extend([3, 4])
+    print(xs.concat([5]).len())
+    print(xs.len())
+    by :: RemoveBy.Val
+    print(xs.remove(1, by) ?? 0)
+    print(xs.len())
+    ss := [\"a\", \"b\", \"a\"]
+    print(ss.remove(\"a\", .Val) ?? \"\")
+    print(ss.len())
+}
+";
+    let (code, stdout) = build_and_run("tir_list_remove_modes", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n1\n2\n4\n3\n1\n2\na\n2\n");
+}
+
+/// D-LISTREMOVE1/F: the same surface must run through the forced interpreter
+/// path, including the map-view calls that use its list-shaped iterator value.
+#[test]
+fn list_surface_forced_interpreter() {
+    let path = format!(
+        "{}/examples/features/collections/list_surface.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    match dev_iteration(&path, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stderr, "");
+            assert_eq!(
+                stdout,
+                "1\n1\n2\n4\n0\n0\n[a, b]\n[1, 2]\n"
+            );
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected list surface: {diagnostics:?}")
+        }
+    }
 }
 
 /// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.

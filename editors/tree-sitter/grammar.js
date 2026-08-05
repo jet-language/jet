@@ -518,7 +518,7 @@ module.exports = grammar({
         "Bool",
         "String",
         "Char",
-        "Void",
+        "()",
         "Error",
         "I8",
         "I16",

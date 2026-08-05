@@ -200,16 +200,29 @@ fn text_to_ct(doc: &JetSyncText) -> CtValue {
         fields: vec![
             ("show".to_string(), CtValue::Str(jet_sync_text_show(doc))),
             (
-                "replicas".to_string(),
+                "atoms".to_string(),
                 CtValue::List(
-                    doc.replicas
+                    doc.atoms
                         .iter()
-                        .map(|(replica, text, clock)| CtValue::Struct {
-                            type_name: "SyncTextReplica".to_string(),
+                        .map(|atom| CtValue::Struct {
+                            type_name: "SyncTextAtom".to_string(),
                             fields: vec![
-                                ("replica".to_string(), CtValue::Str(replica.clone())),
-                                ("text".to_string(), CtValue::Str(text.clone())),
-                                ("clock".to_string(), CtValue::Str(clock.to_string())),
+                                ("replica".to_string(), CtValue::Str(atom.replica.clone())),
+                                ("counter".to_string(), CtValue::Str(atom.counter.to_string())),
+                                (
+                                    "after".to_string(),
+                                    CtValue::Str(match &atom.after {
+                                        Some((replica, counter)) => {
+                                            format!("{replica}:{counter}")
+                                        }
+                                        None => String::new(),
+                                    }),
+                                ),
+                                ("ch".to_string(), CtValue::Str(atom.ch.to_string())),
+                                (
+                                    "deleted".to_string(),
+                                    CtValue::Str(atom.deleted.to_string()),
+                                ),
                             ],
                         })
                         .collect(),
@@ -308,77 +321,89 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncText" || type_name == "JetSyncText" =>
         {
-            if let Some(value) = fields.iter().find(|(n, _)| n == "replicas").map(|(_, v)| v) {
-                let CtValue::List(entries) = value else {
-                    return Err(unsupported("SyncText replicas", span));
+            let Some(value) = fields.iter().find(|(n, _)| n == "atoms").map(|(_, v)| v) else {
+                return Err(unsupported("SyncText atoms", span));
+            };
+            let CtValue::List(entries) = value else {
+                return Err(unsupported("SyncText atoms", span));
+            };
+            if entries.len() > MAX_SYNC_ATOMS {
+                return Err(unsupported("SyncText atom limit", span));
+            }
+            let mut atoms = Vec::with_capacity(entries.len());
+            let mut seen: std::collections::BTreeSet<(String, u64)> =
+                std::collections::BTreeSet::new();
+            for entry in entries {
+                let CtValue::Struct { type_name, fields } = entry else {
+                    return Err(unsupported("SyncText atom", span));
                 };
-                if entries.len() > MAX_SYNC_REPLICAS {
-                    return Err(unsupported("SyncText replica limit", span));
+                if type_name != "SyncTextAtom" {
+                    return Err(unsupported("SyncText atom", span));
                 }
-                let mut replicas = Vec::with_capacity(entries.len());
-                for entry in entries {
-                    let CtValue::Struct { type_name, fields } = entry else {
-                        return Err(unsupported("SyncText replica", span));
-                    };
-                    if type_name != "SyncTextReplica" {
-                        return Err(unsupported("SyncText replica", span));
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, v)| v)
+                        .ok_or_else(|| unsupported("SyncText atom field", span))
+                };
+                let text = |name: &str| match field(name)? {
+                    CtValue::Str(s) => Ok(s.clone()),
+                    _ => Err(unsupported("SyncText atom field", span)),
+                };
+                let replica = text("replica")?;
+                let counter = match field("counter")? {
+                    CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+                        .map_err(|_| unsupported("SyncText atom counter", span))?,
+                    CtValue::Str(value) => value
+                        .parse::<u64>()
+                        .map_err(|_| unsupported("SyncText atom counter", span))?,
+                    _ => return Err(unsupported("SyncText atom counter", span)),
+                };
+                let after = text("after")?;
+                let after = if after.is_empty() {
+                    None
+                } else {
+                    let (replica, counter) = after
+                        .rsplit_once(':')
+                        .ok_or_else(|| unsupported("SyncText atom anchor", span))?;
+                    let counter = counter
+                        .parse::<u64>()
+                        .map_err(|_| unsupported("SyncText atom anchor", span))?;
+                    if !jet_sync_token_is_valid(replica) {
+                        return Err(unsupported("SyncText atom anchor", span));
                     }
-                    let field = |name: &str| {
-                        fields
-                            .iter()
-                            .find(|(n, _)| n == name)
-                            .map(|(_, v)| v)
-                            .ok_or_else(|| unsupported("SyncText replica field", span))
-                    };
-                    let replica = match field("replica")? {
-                        CtValue::Str(s) => s.clone(),
-                        _ => return Err(unsupported("SyncText replica id", span)),
-                    };
-                    let text = match field("text")? {
-                        CtValue::Str(s) => s.clone(),
-                        _ => return Err(unsupported("SyncText replica text", span)),
-                    };
-                    let clock = match field("clock")? {
-                        CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
-                            .map_err(|_| unsupported("SyncText replica clock", span))?,
-                        CtValue::Str(value) => value
-                            .parse::<u64>()
-                            .map_err(|_| unsupported("SyncText replica clock", span))?,
-                        _ => return Err(unsupported("SyncText replica clock", span)),
-                    };
-                    if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
-                        return Err(unsupported("SyncText replica value", span));
-                    }
-                    replicas.push((replica, text, clock));
+                    Some((replica.to_string(), counter))
+                };
+                let ch = text("ch")?;
+                let mut chars = ch.chars();
+                let (Some(ch), None) = (chars.next(), chars.next()) else {
+                    return Err(unsupported("SyncText atom character", span));
+                };
+                let deleted = match text("deleted")?.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err(unsupported("SyncText atom tombstone", span)),
+                };
+                if !jet_sync_token_is_valid(&replica) {
+                    return Err(unsupported("SyncText atom replica", span));
                 }
-                return Ok(JetSyncText { replicas });
+                if counter == 0 || !seen.insert((replica.clone(), counter)) {
+                    return Err(unsupported("SyncText atom identity", span));
+                }
+                atoms.push(JetSyncTextAtom {
+                    replica,
+                    counter,
+                    after,
+                    ch,
+                    deleted,
+                });
             }
-            let show = match fields.iter().find(|(n, _)| n == "show") {
-                Some((_, CtValue::Str(s))) => s.clone(),
-                Some(_) => return Err(unsupported("SyncText show", span)),
-                None => return Err(unsupported("SyncText replicas", span)),
-            };
-            // Round-trip via replica encoding `SyncText(a:x|b:y)`.
-            let body = show
-                .strip_prefix("SyncText(")
-                .and_then(|s| s.strip_suffix(')'))
-                .ok_or_else(|| unsupported("SyncText show", span))?;
-            let mut doc = JetSyncText {
-                replicas: Vec::new(),
-            };
-            if !body.is_empty() {
-                for part in body.split('|') {
-                    let (r, t) = part
-                        .split_once(':')
-                        .ok_or_else(|| unsupported("SyncText show", span))?;
-                    if !jet_sync_token_is_valid(r) || t.len() > MAX_SYNC_TEXT {
-                        return Err(unsupported("SyncText show", span));
-                    }
-                    doc.replicas.push((r.to_string(), t.to_string(), 1));
-                }
-            }
-            if doc.replicas.len() > MAX_SYNC_REPLICAS {
-                return Err(unsupported("SyncText replica limit", span));
+            // I9: refuse here exactly what the Prelude decode refuses, so the
+            // comptime tier cannot evaluate a document AOT would reject.
+            let doc = JetSyncText { atoms };
+            if jet_sync_text_order(&doc).len() != doc.atoms.len() {
+                return Err(unsupported("SyncText reachability", span));
             }
             Ok(doc)
         }
@@ -713,6 +738,16 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_text(one(1)?, span)?,
         ))),
         "text_show" => Ok(CtValue::Str(jet_sync_text_show(&ct_to_text(
+            one(0)?, span,
+        )?))),
+        "text_edit" => Ok(text_to_ct(&jet_sync_text_edit(
+            ct_to_text(one(0)?, span)?,
+            as_str(1)?,
+            as_int(2)?,
+            as_int(3)?,
+            as_str(4)?,
+        ))),
+        "text_metadata" => Ok(CtValue::Str(jet_sync_text_metadata(&ct_to_text(
             one(0)?, span,
         )?))),
         "counter_new" => Ok(counter_to_ct(&jet_sync_counter_new(as_str(0)?, as_int(1)?))),

@@ -164,7 +164,7 @@ renumbered, and no new `W` code may be allocated.
 | E0070 | parse | a callable result uses retired `->`; use `=>` (D-ARROW-CONTROL1) |
 | E0071 | parse/sema | an effect-only `if` or loop uses a result arrow (D-ARROW-CONTROL1) |
 | E0072 | sema | a non-finite loop uses a yield arrow (D-LOOPEVAL1) |
-| E0073 | sema | a yielding loop path produces no item or `Void` (D-LOOPEVAL1) |
+| E0073 | sema | a yielding loop path produces no item or `()` (D-LOOPEVAL1) |
 | E0074 | sema | yielding loop item types do not agree (D-LOOPEVAL1, D-COMPREHENSION1) |
 | E0075 | sema | a yielding loop uses a break payload instead of its List result (D-LOOPSTATE1) |
 | E0076 | sema | ordinary-loop exits omit a result or use incompatible payload types (D-LOOPSTATE1) |
@@ -202,7 +202,7 @@ renumbered, and no new `W` code may be allocated.
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a parameter without move (`^`) access |
 | E0121 | sema  | value used after it was given away        |
-| E0122 | sema  | `run` returns something other than nothing or `Void ?` in run mode |
+| E0122 | sema  | `run` returns something other than nothing or `() ?` in run mode |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
@@ -378,6 +378,7 @@ renumbered, and no new `W` code may be allocated.
 | E0428 | parse | duplicate `#NoPrelude` marker in one file (D-PRELUDEX1) |
 | E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
+| E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -806,9 +807,9 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0057 | This closure uses the retired `take(...)` capture prefix. | Escaping closures infer ownership. Copyable values copy at closure creation, and other owned values move. A capture prefix cannot create a second owner. | Remove `take(...)` and use the captured names directly. |
 | E0066 | This function uses the retired effect-arrow spelling. | Callable results use `=>`. An explicit effect ceiling belongs inside that callable arrow. | Replace it with `=[Effects]=>`, or write `=[]=>` for an empty effect ceiling. |
 | E0070 | This callable result uses `->`. | `=>` defines callable results. `->` is reserved for selected or yielded control values. | Replace `->` with `=>`. For an effect ceiling, write `=[Effects]=>`. |
-| E0071 | This effect-only body uses a result arrow. | An arrow says that control selects or yields a value. A Void body only performs work. | Remove `->`. Keep the body adjacent on one line, or use braces for several lines. |
+| E0071 | This effect-only body uses a result arrow. | An arrow says that control selects or yields a value. A () body only performs work. | Remove `->`. Keep the body adjacent on one line, or use braces for several lines. |
 | E0072 | This loop cannot yield a List because it has no finite exhaustion edge. | A yielding loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary. | Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`. |
-| E0073 | This yielding loop path produces no item. | Every accepted iteration must contribute one non-Void value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
+| E0073 | This yielding loop path produces no item. | Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
 | E0074 | This yielding loop produces incompatible item types. | One yielding loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This yielding loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary non-yielding loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
@@ -880,7 +881,7 @@ names never provide an alternate lookup path.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `Void` or `Void ?`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
+| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `() ?`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
 
 ### Ecosystem and environment composition diagnostics
 
@@ -1314,6 +1315,7 @@ parse error (E0426) pointing at the new spelling —
 | E0428 | only one `#NoPrelude` marker is allowed per file. | A file may opt out of the ambient prelude at most once. | Remove the duplicate `#NoPrelude` marker. |
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
+| E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

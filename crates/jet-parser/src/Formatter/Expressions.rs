@@ -433,6 +433,7 @@ impl<'a> Fmt<'a> {
                     let _ = synthetic;
                 }
             }
+            Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
             Type::Named(n) => self.write(n),
             // D-CAP9: the raw-pointer type renders as the canonical `*T`, never
             // the deprecated `Ptr<T>` alias.

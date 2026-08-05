@@ -686,29 +686,49 @@ fn string_elems_eq(a: i64, b: i64) -> bool {
     })
 }
 
+fn transfer_progress(source: i64, target: i64) -> i64 {
+    crate::IO::progress_transfer_state(source, target);
+    target
+}
+
+fn transfer_progress_take(source: i64, target: i64, n: i64) -> i64 {
+    crate::IO::progress_transfer_take_state(source, target, n);
+    target
+}
+
+fn transfer_progress_skip(source: i64, target: i64, n: i64) -> i64 {
+    crate::IO::progress_transfer_skip_state(source, target, n);
+    target
+}
+
+fn transfer_progress_step(source: i64, target: i64, n: i64) -> i64 {
+    crate::IO::progress_transfer_step_state(source, target, n);
+    target
+}
+
 extern "C" fn jet_jit_iter_take(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let n = n.max(0) as usize;
-    alloc_from_ints(&xs[..n.min(xs.len())])
+    transfer_progress_take(list, alloc_from_ints(&xs[..n.min(xs.len())]), n as i64)
 }
 
 extern "C" fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let n = n.max(0) as usize;
     if n >= xs.len() {
-        alloc_from_ints(&[])
+        transfer_progress_skip(list, alloc_from_ints(&[]), n as i64)
     } else {
-        alloc_from_ints(&xs[n..])
+        transfer_progress_skip(list, alloc_from_ints(&xs[n..]), n as i64)
     }
 }
 
 extern "C" fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     if n <= 0 {
-        return alloc_from_ints(&[]);
+        return transfer_progress_step(list, alloc_from_ints(&[]), n);
     }
     let stepped: Vec<i64> = xs.into_iter().step_by(n as usize).collect();
-    alloc_from_ints(&stepped)
+    transfer_progress_step(list, alloc_from_ints(&stepped), n)
 }
 
 /// `string_elems != 0` → compare string contents (handles may differ); else i64 eq.
@@ -729,13 +749,15 @@ extern "C" fn jet_jit_iter_dedup(list: i64, string_elems: i64) -> i64 {
         prev = Some(x);
         out.push(x);
     }
-    alloc_from_ints(&out)
+    let out = alloc_from_ints(&out);
+    crate::IO::progress_transfer_dedup_state(list, out, string_elems);
+    out
 }
 
 extern "C" fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let size = n.max(1) as usize;
-    Concurrency::with_runtime_mut(|rt| {
+    let out = Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         let mut i = 0usize;
         while i < xs.len() {
@@ -752,16 +774,20 @@ extern "C" fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
             i = end;
         }
         out
-    })
+    });
+    crate::IO::progress_transfer_chunks_state(list, out, n);
+    out
 }
 
 extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let size = n.max(1) as usize;
     if xs.len() < size {
-        return alloc_from_ints(&[]);
+        let out = alloc_from_ints(&[]);
+        crate::IO::progress_transfer_windows_state(list, out, n);
+        return out;
     }
-    Concurrency::with_runtime_mut(|rt| {
+    let out = Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         for start in 0..=(xs.len() - size) {
             let win = rt.heap.alloc_empty_list();
@@ -775,7 +801,9 @@ extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
                 .expect("jit iter windows: outer push");
         }
         out
-    })
+    });
+    crate::IO::progress_transfer_windows_state(list, out, n);
+    out
 }
 
 extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
@@ -820,7 +848,7 @@ extern "C" fn jet_jit_list_max_i64(list: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_list_flatten(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let out = Concurrency::with_runtime_mut(|rt| {
         let outer = rt.heap.clone_int_list(list).unwrap_or_default();
         let out = rt.heap.alloc_empty_list();
         for inner in outer {
@@ -829,11 +857,13 @@ extern "C" fn jet_jit_list_flatten(list: i64) -> i64 {
             }
         }
         out
-    })
+    });
+    crate::IO::progress_transfer_flatten_state(list, out);
+    out
 }
 
 extern "C" fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let out = Concurrency::with_runtime_mut(|rt| {
         let values = rt.heap.clone_int_list(list).unwrap_or_default();
         let out = rt.heap.alloc_empty_list();
         for (index, value) in values.into_iter().enumerate() {
@@ -843,11 +873,13 @@ extern "C" fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
             let _ = rt.heap.list_push_int(out, value);
         }
         out
-    })
+    });
+    crate::IO::progress_transfer_intersperse_state(list, out);
+    out
 }
 
 extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let out = Concurrency::with_runtime_mut(|rt| {
         let left = rt.heap.clone_int_list(left).unwrap_or_default();
         let right = rt.heap.clone_int_list(right).unwrap_or_default();
         let out = rt.heap.alloc_empty_list();
@@ -858,7 +890,9 @@ extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
             let _ = rt.heap.list_push_int(out, pair);
         }
         out
-    })
+    });
+    crate::IO::progress_transfer_zip_state(left, right, out);
+    out
 }
 
 extern "C" fn jet_jit_list_unzip(pairs: i64) -> i64 {

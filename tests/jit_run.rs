@@ -34,10 +34,15 @@ fn root_receiver_calls_share_the_direct_call_path() {
     return value * factor
 }
 
+fn add_half(#Root value: Float) => Float {
+    return value + 0.5
+}
+
 fn run() {
     total :: 3
     print(total.scale(4))
     print(scale(total, 4))
+    print(total.add_half())
     total.print()
 }
 "#,
@@ -63,7 +68,7 @@ fn run() {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(diags) => panic!("#Root fixture failed: {diags:?}"),
     };
-    assert_eq!(stdout, "12\n12\n3\n");
+    assert_eq!(stdout, "12\n12\n3.5\n3\n");
     assert!(jet_jit::jit_executed_for_test(), "#Root fixture must execute in resident JIT");
     assert!(!jet_jit::fallback_invoked_for_test(), "#Root fixture must not fall back to the interpreter");
 

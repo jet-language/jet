@@ -1,6 +1,6 @@
 //! `core.archive` host shims (#729).
-//! Calls the canonical dependency-free archive ABI source through Foundation —
-//! no third algorithm.
+//! Adapts the source package's internal dependency-free archive ABI calls through
+//! Foundation — no public semantic or engine-specific fallback.
 
 use super::Concurrency;
 use jet_foundation::CoreArchive as runtime;

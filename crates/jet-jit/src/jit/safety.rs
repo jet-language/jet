@@ -185,6 +185,15 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
             if (name == jet_foundation::Syntax::TYPE_ITER
                 || matches!(name.as_str(), "View" | "ViewMut"))
                 && args.len() == 1
+                && jit_list_native_type(&args[0]) =>
+        {
+            Some(args[0].clone())
+        }
+        // Iterators produced by chunks/windows carry list-valued elements.
+        Type::Apply { name, args }
+            if (name == jet_foundation::Syntax::TYPE_ITER
+                || matches!(name.as_str(), "View" | "ViewMut"))
+                && args.len() == 1
                 && (matches!(
                     &args[0],
                     Type::Int | Type::Float | Type::String | Type::Char
@@ -470,19 +479,21 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
 
 fn jit_cell_value_type(ty: &Type) -> bool {
     let ty = erase_runtime_qualifiers(ty);
-    matches!(ty, Type::Named(name) if matches!(name.as_str(), "Unit" | "Void"))
+    matches!(ty, Type::Named(name) if name == "Unit")
         || matches!(ty, Type::Tuple(fields) if fields.is_empty())
         || super::types_meta::clif_ty(ty).is_some()
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "Unit" || n == "Void" || n == "Error")
+    matches!(ty, Type::Named(n) if n == "Unit" || n == "Error")
         || jit_value_type(ty)
 }
 
 pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
-        TExprKind::Print(inner) => resident_safe_expr(inner, callees),
+        TExprKind::Print(inner) => {
+            resident_safe_expr(inner, callees)
+        }
         TExprKind::Call { name, args, .. } => {
             if !callees.contains(name) {
                 return false;
@@ -621,6 +632,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             if module == "core.io" {
                 return match method.as_str() {
                     "args" => args.is_empty(),
+                    "progress" if (1..=3).contains(&args.len()) => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
                     "confirm" | "input_secret" => {
                         args.len() == 1 && resident_safe_expr(&args[0], callees)
                     }
@@ -1120,7 +1134,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::CtLit(jet_foundation::AST::CtValue::Struct { fields, .. }) => {
             resident_safe_ct_struct_fields(fields)
         }
-        TExprKind::StrLit(parts) => resident_safe_string_parts(parts, callees),
+        TExprKind::StrLit(parts) => {
+            resident_safe_string_parts(parts, callees)
+        }
         TExprKind::Local(_) => true,
         TExprKind::Unary { op, operand } => {
             matches!(op, UnOp::Neg | UnOp::Not) && resident_safe_expr(operand, callees)
@@ -1761,7 +1777,8 @@ fn resident_safe_builtin_op(
     args: &[TExpr],
     callees: &HashSet<String>,
 ) -> bool {
-    if !resident_safe_expr(recv, callees) {
+    let recv_safe = resident_safe_expr(recv, callees);
+    if !recv_safe {
         return false;
     }
     match op {
@@ -1917,9 +1934,15 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::Zip { .. } => {
-            jit_list_iter_elem_type(&recv.ty).is_some()
+        TBuiltinOp::Zip { mode, input_count, .. } => {
+            // The resident host ABI is the old two-Int short zip. All other
+            // policies/shapes deopt to the canonical TIR evaluator, which
+            // owns heterogeneous rows and fill values.
+            *mode == TIR::TZipMode::Short
+                && *input_count == 2
+                && matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
                 && args.len() == 1
+                && matches!(jit_list_iter_elem_type(&args[0].ty), Some(Type::Int))
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Unzip { .. } => args.is_empty(),
@@ -1975,12 +1998,13 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
-        TBuiltinOp::RemoveList { .. } => {
-            jit_list_int_type(&recv.ty)
-                && args.len() == 1
-                && matches!(&args[0].ty, Type::Int)
-                && resident_safe_expr(&args[0], callees)
-        }
+        // D-LISTREMOVE1/F: these operations use the canonical Prelude through
+        // deopt; the resident list-handle ABI cannot carry Option<T> or a
+        // value-vs-slot selector without inventing a second semantic path.
+        TBuiltinOp::RemoveList { .. }
+        | TBuiltinOp::CountList
+        | TBuiltinOp::ExtendList
+        | TBuiltinOp::ConcatList => false,
         TBuiltinOp::SetFrom => {
             (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
         }
@@ -2731,6 +2755,8 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
 
 fn expr_kind_tag(expr: &TExpr) -> &'static str {
     match &expr.kind {
+        TExprKind::Print(_) => "Print",
+        TExprKind::StrLit(_) => "StrLit",
         TExprKind::CoreCall { module, method, .. } => {
             // Leak short tag for diagnostics only.
             Box::leak(format!("CoreCall:{module}.{method}").into_boxed_str())
@@ -2744,6 +2770,9 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
             _ => "CoreClosure:Other",
         },
         TExprKind::HandleMethod { op, .. } => "HandleMethod",
+        TExprKind::MethodCall { .. } => "MethodCall",
+        TExprKind::BuiltinMethod { .. } => "BuiltinMethod",
+        TExprKind::ClosureMethod { .. } => "ClosureMethod",
         TExprKind::Call { name, .. } => Box::leak(format!("Call:{name}").into_boxed_str()),
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Local(_) => "Local",
@@ -2872,7 +2901,7 @@ pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
                 && f.params.is_empty()
                 && (f.ret.is_none()
                     || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
                             && matches!(err.as_ref(), Type::String | Type::Named(_))))
                 && resident_safe_func(f, &names)
         })

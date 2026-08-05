@@ -1557,11 +1557,11 @@ impl<'a> Checker<'a> {
                         let got = self.infer(e).map(|ty| self.resolve_type(ty));
                         self.expected_type = saved_expected;
                         if let Some(got) = got {
-                            if matches!(&got, Type::Named(name) if name == Syntax::TYPE_VOID) {
+                            if matches!(&got, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) {
                                 self.diags.push(Diagnostic::error(
                                     "E0073",
                                     "this yielding loop path produces no item".to_string(),
-                                    "every accepted iteration must contribute one non-Void value unless `next` omits it".to_string(),
+                                    "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
                                     "return a value on this path, or remove `->`".to_string(),
                                     Some(e.span()),
                                 ));

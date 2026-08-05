@@ -475,12 +475,12 @@ use std::collections::HashSet;
                     }
                     // S46 one-line bodies: `() => transfer(...)` is the brace-free
                     // form of `() => { transfer(...) }`. When no value is expected
-                    // (Void / Void ? E callback, or inferred spawn body), treat the
+                    // (() / () ? E callback, or inferred spawn body), treat the
                     // call as a statement so void functions do not trip E0116.
                     let needs_value = match exp_ret.map(|r| r.as_ref()) {
-                        Some(Type::Named(name)) if name == "Void" => false,
+                        Some(Type::Named(name)) if name == "Unit" => false,
                         Some(Type::Result { ok, .. })
-                            if matches!(ok.as_ref(), Type::Named(name) if name == "Void") =>
+                            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit") =>
                         {
                             false
                         }
@@ -518,7 +518,7 @@ use std::collections::HashSet;
                     self.diags.push(Diagnostic::error(
                         "E0073",
                         "this yielding loop path produces no item".to_string(),
-                        "every accepted iteration must contribute one non-Void value unless `next` omits it".to_string(),
+                        "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
                         "add a yielded value, or remove `->`".to_string(),
                         Some(lam.span),
                     ));
@@ -802,7 +802,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                         spread: false,
                     }],
                     recv_type: None,
-                    resolved_ret: Some(Type::Named(Syntax::TYPE_VOID.to_string())),
+                    resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 });
             }
             Stmt::Loop { body, .. }

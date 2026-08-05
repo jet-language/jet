@@ -266,6 +266,260 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     );
 }
 
+const STATE_RESTART_SOURCE: &str = r#"
+use core.env as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    adapter :: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
+    tree := services.tree("state")
+    store :: services.state_store(store_path) ?? panic("state store")
+    if adapter == "snapshot" {
+        services.set_state_snapshot(&tree, store, "app-state", 1) ?? panic("snapshot state")
+    } else {
+        if adapter == "schema-drift" {
+            services.set_state_event_log(&tree, store, "other-events", 1) ?? panic("event state")
+        } else {
+            if adapter == "version-drift" {
+                services.set_state_event_log(&tree, store, "app-state", 2) ?? panic("event state")
+            } else {
+                services.set_state_event_log(&tree, store, "app-state", 1) ?? panic("event state")
+            }
+        }
+    }
+    services.worker(&tree, "worker", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    if adapter == "snapshot" {
+        if phase == "write" {
+            services.commit_snapshot(&tree, "state-v1") ?? panic("commit")
+            print("wrote:{services.restore_snapshot(tree) ?? panic("restore")}")
+        } else {
+            print("restored:{services.restore_snapshot(tree) ?? panic("restore")}")
+            services.commit_snapshot(&tree, "state-v2") ?? panic("recommit")
+            print("recommitted:{services.restore_snapshot(tree) ?? panic("restore")}")
+        }
+    } else {
+        if phase == "write" {
+            services.append_event(&tree, "first") ?? panic("first")
+            services.append_event(&tree, "second") ?? panic("second")
+            print("wrote:{services.event_count(tree)}")
+        } else {
+            print("count:{services.event_count(tree)}")
+            print("replay:{services.replay_events(tree)}")
+            services.append_event(&tree, "third") ?? panic("third")
+            print("appended:{services.replay_events(tree)}")
+        }
+    }
+}
+"#;
+
+/// A durable state adapter that cannot be read by a later process is not
+/// durable.  Restart is the only check that separates a store from a cache.
+#[test]
+fn state_adapters_survive_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(STATE_RESTART_SOURCE);
+
+    let events = dir.join("events.log");
+    assert_eq!(
+        run_restart_process(&bin, &events, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &events, "read", Some("event-log")),
+        "count:2\nreplay:first|second\nappended:first|second|third\n"
+    );
+
+    let events_reversed = dir.join("events-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &events_reversed, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &events_reversed, "read", Some("event-log")),
+        "count:2\nreplay:first|second\nappended:first|second|third\n"
+    );
+
+    let snapshot = dir.join("snapshot.log");
+    assert_eq!(
+        run_restart_process(&bin, &snapshot, "write", Some("snapshot")),
+        "wrote:state-v1\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &snapshot, "read", Some("snapshot")),
+        "restored:state-v1\nrecommitted:state-v2\n"
+    );
+
+    let snapshot_reversed = dir.join("snapshot-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &snapshot_reversed, "write", Some("snapshot")),
+        "wrote:state-v1\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &snapshot_reversed, "read", Some("snapshot")),
+        "restored:state-v1\nrecommitted:state-v2\n"
+    );
+
+    // A store written under one schema or version must not open under another,
+    // and a tail lost to a crash mid-append must fail closed rather than read
+    // as a shorter history.
+    let drift = dir.join("events-drift.log");
+    assert_eq!(
+        run_restart_process(&bin, &drift, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    for adapter in ["schema-drift", "version-drift"] {
+        assert!(
+            !restart_status(&bin, &drift, "read", adapter).success(),
+            "a store opened under a mismatched {adapter}"
+        );
+    }
+
+    let torn = dir.join("events-torn.log");
+    assert_eq!(
+        run_restart_process(&bin, &torn, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    let bytes = fs::read(&torn).unwrap();
+    fs::write(&torn, &bytes[..bytes.len() - 3]).unwrap();
+    assert!(
+        !restart_status(&bin, &torn, "read", "event-log").success(),
+        "a truncated state store was accepted"
+    );
+}
+
+fn restart_status(bin: &Path, store: &Path, phase: &str, id: &str) -> std::process::ExitStatus {
+    Command::new(bin)
+        .env("JET_SERVICE_AUTH_STORE", store)
+        .env("JET_SERVICE_AUTH_PHASE", phase)
+        .env("JET_SERVICE_AUTH_ID", id)
+        .output()
+        .unwrap()
+        .status
+}
+
+const WORKFLOW_RESTART_SOURCE: &str = r#"
+use core.env as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("workflows")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "wf-events", 1) ?? panic("state")
+    services.worker(&tree, "worker", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    if phase == "write" {
+        run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("workflow start")
+        services.workflow_step(&tree, run_id, "charge") ?? panic("charge step")
+        services.workflow_step(&tree, run_id, "ship:express") ?? panic("ship step")
+        print("run:{run_id}")
+    } else {
+        history :: services.workflow_history(tree, 1) ?? panic("history")
+        print("history:{history}")
+        replay :: services.workflow_start(&tree, "checkout", 1) ?? panic("replay")
+        print("replay:{replay}")
+        versioned :: services.workflow_start(&tree, "checkout", 2)
+        if versioned == {
+            .Ok(_) -> { print("version:accepted") }
+            .Err(_) -> { print("version:rejected") }
+        }
+        if phase == "extend" {
+            refund :: services.workflow_start(&tree, "refund", 1) ?? panic("refund")
+            services.workflow_step(&tree, refund, "credit") ?? panic("credit step")
+            print("refund:{refund}")
+        }
+        if phase == "final" {
+            print("refund_history:{services.workflow_history(tree, 2) ?? panic("refund history")}")
+        }
+    }
+}
+"#;
+
+const WORKFLOW_RESTART_HISTORY: &str =
+    "history:start@v1|step:charge|step:ship:express\nreplay:1\nversion:rejected\n";
+
+/// A versioned workflow history is only durable if a later process reads back
+/// the same runs, steps, and version conflicts the writer recorded.
+#[test]
+fn workflow_history_survives_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(WORKFLOW_RESTART_SOURCE);
+
+    let store = dir.join("workflow.log");
+    assert_eq!(run_restart_process(&bin, &store, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &store, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    let default_store = dir.join("workflow-default.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "write", None),
+        "run:1\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    let crossed = dir.join("workflow-aot-to-default.log");
+    assert_eq!(run_restart_process(&bin, &crossed, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_default_process(&dir, &crossed, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    let reversed = dir.join("workflow-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &reversed, "write", None),
+        "run:1\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &reversed, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    // A truncated tail is the shape a crash mid-append leaves behind.  The
+    // next process must say so, not silently drop the run it cannot read.
+    let corrupt = dir.join("workflow-corrupt.log");
+    assert_eq!(run_restart_process(&bin, &corrupt, "write", None), "run:1\n");
+    let log = corrupt.with_extension("log.workflows");
+    let bytes = fs::read(&log).unwrap();
+    fs::write(&log, &bytes[..bytes.len() - 4]).unwrap();
+    let mut failed = Command::new(&bin);
+    failed
+        .env("JET_SERVICE_AUTH_STORE", &corrupt)
+        .env("JET_SERVICE_AUTH_PHASE", "read");
+    let output = failed.output().unwrap();
+    assert!(
+        !output.status.success(),
+        "a truncated workflow log was accepted: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // A replayed history has to be writable, not just readable: the third
+    // process only sees run 2 if the second process numbered and recorded it
+    // from replayed state.
+    let extended = dir.join("workflow-extended.log");
+    assert_eq!(run_restart_process(&bin, &extended, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &extended, "extend", None),
+        format!("{WORKFLOW_RESTART_HISTORY}refund:2\n")
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &extended, "final", None),
+        format!("{WORKFLOW_RESTART_HISTORY}refund_history:start@v1|step:credit\n")
+    );
+}
+
 const SOURCE: &str = r#"
 use core.path as path
 use core.services as services
@@ -416,5 +670,127 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
     assert_eq!(
         stdout,
         "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
+    );
+}
+
+/// Durable delivery and an event log share one service tree but must not share
+/// one file. The delivery log and the state store use different framing, and
+/// the state store is read back with the adapter its header declares, so a
+/// durable send used to leave records the typed read could not parse: a later
+/// `append_event` failed on any tree that had accepted a `send_durable`.
+///
+/// No existing check combined the two surfaces on one tree, so the collision
+/// only showed up in an example.
+const DURABLE_PLUS_EVENT_LOG_SOURCE: &str = r#"
+use core.path as path
+use core.services as services
+use core.testing as testing
+
+fn run() {
+    tree := services.tree("app")
+    services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("services-delivery-eventlog")
+    store_path :: path.join(temp, "state.log")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "app-events", 1) ?? panic("state")
+    worker :: services.worker(&tree, "a", 4) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+
+    services.send_durable(&tree, worker, "ping", "k1") ?? panic("durable send")
+    services.append_event(&tree, "after-durable-send") ?? panic("append after durable send")
+    services.send_durable(&tree, worker, "pong", "k2") ?? panic("second durable send")
+    services.append_event(&tree, "after-second-send") ?? panic("append after second send")
+
+    print("events:{services.event_count(tree)}")
+}
+"#;
+
+#[test]
+fn durable_delivery_does_not_corrupt_the_event_log_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_durable_eventlog", DURABLE_PLUS_EVENT_LOG_SOURCE);
+    assert_eq!(code, 0, "durable send beside an event log must not fail");
+    assert_eq!(stdout, "events:2\n");
+}
+
+#[test]
+fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_durable_eventlog_jit",
+        "main.jet",
+        &[("main.jet", DURABLE_PLUS_EVENT_LOG_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, "events:2\n");
+}
+
+/// #1149: the snapshot and event-log adapters must survive a reopen and refuse
+/// a store they cannot trust. The state store is framed with a magic line, an
+/// adapter line and a schema line, so garbage in the file has to surface as a
+/// typed error rather than a panic or a silently empty restore.
+const STATE_ADAPTER_SOURCE: &str = r#"
+use core.files as files
+use core.path as path
+use core.services as services
+use core.testing as testing
+
+fn run() {
+    temp := testing.temp_dir("services-state-adapters")
+
+    snapshot_path :: path.join(temp, "snapshot.log")
+    snap_tree := services.tree("snap")
+    snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
+    services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1) ?? panic("snapshot adapter")
+    _snap_worker :: services.worker(&snap_tree, "a", 2) ?? panic("snapshot worker")
+    services.start(&snap_tree) ?? panic("snapshot start")
+    services.commit_snapshot(&snap_tree, "state-v1") ?? panic("commit")
+    print("restored:{services.restore_snapshot(snap_tree) ?? panic("restore")}")
+
+    event_path :: path.join(temp, "events.log")
+    log_tree := services.tree("log")
+    log_store :: services.state_store(event_path) ?? panic("event store")
+    services.set_state_event_log(&log_tree, log_store, "app-events", 1) ?? panic("event adapter")
+    _log_worker :: services.worker(&log_tree, "a", 2) ?? panic("event worker")
+    services.start(&log_tree) ?? panic("event start")
+    services.append_event(&log_tree, "first") ?? panic("first event")
+    services.append_event(&log_tree, "second") ?? panic("second event")
+    print("replay:{services.replay_events(log_tree)}")
+
+    // A store the runtime cannot trust must fail closed, not restore nothing.
+    files.write(snapshot_path, "not a service state store") ?? panic("corrupt write")
+    corrupted :: services.restore_snapshot(snap_tree)
+    if corrupted == {
+        .Ok(_) -> { print("corrupt:accepted") }
+        .Err(_) -> { print("corrupt:rejected") }
+    }
+}
+"#;
+
+#[test]
+fn state_adapters_reopen_and_reject_corrupt_stores_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_state_adapters", STATE_ADAPTER_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
+    );
+}
+
+#[test]
+fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_state_adapters_jit",
+        "main.jet",
+        &[("main.jet", STATE_ADAPTER_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
     );
 }

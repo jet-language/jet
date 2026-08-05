@@ -17,6 +17,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
+    Syntax::TYPE_REMOVE_BY,
     Syntax::TYPE_RANGE,
     Syntax::TYPE_SHARED_GUARD,
     Syntax::TYPE_SHARED_WEAK,
@@ -421,7 +422,7 @@ fn build_result(ok: &str) -> Option<Option<Type>> {
 fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<Type>> {
     match (method, arg_count) {
         ("generate", 2) => Some(Some(Type::Result {
-            ok: Box::new(Type::Named(Syntax::TYPE_VOID.to_string())),
+            ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
         ("find", 1) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -431,7 +432,7 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
         ("plugin", 2) => Some(Some(Type::Result {
-            ok: Box::new(Type::Named(Syntax::TYPE_VOID.to_string())),
+            ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
@@ -831,7 +832,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("push" | "insert" | "remove" | "reverse" | "sort" | "clear", _) => Some(None),
+        ("push" | "insert" | "reverse" | "sort" | "clear", _) => Some(None),
+        ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("count", 1) => Some(Some(Type::Int)),
+        ("extend", 1) => Some(None),
+        ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("pop" | "get" | "first" | "last" | "index_of", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
         }
@@ -861,8 +866,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
         // D-RANGE-EXCL1=C: every valid Int index for this sequence.
         ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
-        // D-ZIPPAD1: the family is variadic; sema replaces the placeholder
-        // with the concrete row type after checking every input and fill.
+        // D-ITER1: zip([U]) → Iter<(a: T, b: U)>; sema refines `b` from arg type.
         ("zip" | "zip_short" | "zip_pad", _) => {
             // placeholder element type (Int for `b`); sema will correct via resolved_ret.
             Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int))))
@@ -1061,8 +1065,9 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("add_new", 2) => Some(Some(Type::Bool)),
         ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("has_key", 1) => Some(Some(Type::Bool)),
-        ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
-        ("values", 0) => Some(Some(Type::List(Box::new(value.clone())))),
+        // D-LISTREMOVE1/F: map projections are lazy Iter views, not eager copies.
+        ("keys", 0) => Some(Some(iter_ty(key.clone()))),
+        ("values", 0) => Some(Some(iter_ty(value.clone()))),
         // D-MAP-MERGE1=E: merge(other) / merge(other, conflict) → same map type.
         ("merge", 1 | 2) => Some(Some(Type::Map {
             key: Box::new(key.clone()),
@@ -1687,6 +1692,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "pop"
                 | "insert"
                 | "remove"
+                | "extend"
                 | "reverse"
                 | "sort"
                 | "sort_by"
@@ -1856,7 +1862,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::List(inner) => match method {
             "push" | "contains" => Some(vec![(**inner).clone()]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
-            "get" | "index_of" | "remove" => Some(vec![Type::Int]),
+            "get" | "index_of" => Some(vec![Type::Int]),
+            "remove" => Some(vec![
+                (**inner).clone(),
+                Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
+            ]),
+            "count" => Some(vec![(**inner).clone()]),
+            "extend" | "concat" => Some(vec![Type::List(Box::new((**inner).clone()))]),
             "split_write" => Some(vec![Type::Int]),
             "get_disjoint_write" => Some(vec![Type::List(Box::new(Type::Int))]),
             "edit_disjoint" => Some(vec![
@@ -1961,7 +1973,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             // D-ITER1: non-closure adapters.
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
             "intersperse" => Some(vec![(**inner).clone()]),
-            "zip" | "zip_short" | "zip_pad" => Some(vec![]),
+            "zip" => Some(vec![]),
             "dedup" | "indexed" | "indexes" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
                 Some(vec![])
             }
@@ -2142,7 +2154,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let payload = args.first().cloned().unwrap_or(Type::Int);
             let error = args.get(1).cloned().unwrap_or(Type::String);
             let handler_ret = Type::Result {
-                ok: Box::new(Type::Named("Void".to_string())),
+                ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 err: Box::new(error),
             };
             match method {

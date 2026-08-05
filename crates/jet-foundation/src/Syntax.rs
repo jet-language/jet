@@ -83,7 +83,7 @@
 // D-IFDIST1=A (ratified 2026-07-28, card #1305) adds no token: any comparison
 // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
 // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
-// The same table is a Void-or-value expression in expression position.
+// The same table is a ()-or-value expression in expression position.
 // D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
 // D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
 // D-BRANCH-TEACH1=A (ratified 2026-07-28, card #1259) add no token:

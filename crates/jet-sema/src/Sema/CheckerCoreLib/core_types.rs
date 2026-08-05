@@ -157,7 +157,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum

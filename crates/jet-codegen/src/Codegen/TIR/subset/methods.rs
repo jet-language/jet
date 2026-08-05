@@ -487,7 +487,9 @@ pub(crate) fn method_call_in_subset(
     // `recv_type`) to claim builtins first.
     if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
         // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
-        let labels_ok = if method == "merge" && args.len() == 2 {
+        let labels_ok = if matches!(method, "zip" | "zip_short" | "zip_pad") {
+            true
+        } else if method == "merge" && args.len() == 2 {
             args[0].label.is_none()
                 && matches!(
                     args[1].label.as_ref().map(|(n, _)| n.as_str()),
@@ -1406,7 +1408,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "sort_by" | "reduce"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
-        | "indexed" | "indexes" | "zip"
+        | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
         | "para_map" | "para_filter" | "para_partition" | "para_fold"

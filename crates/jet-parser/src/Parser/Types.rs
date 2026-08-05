@@ -22,6 +22,26 @@ impl<'a> Parser<'a> {
 
     fn type_generic_arg(&mut self, label: &str) -> Result<(Type, Span), Diagnostic> {
         let span = self.peek().span;
+        // D-COMPUTE-TYPE1: `Vec<N>` and `Matrix<M, N>` use literal shape
+        // arguments, not ordinary types. Keep the value in the existing type
+        // tree so sema can enforce exact shaped aliases without adding a
+        // second parser or runtime representation.
+        if matches!(label.rsplit('.').next(), Some("Vec" | "Matrix")) {
+            if let TokKind::Int(value, _) = self.peek().kind {
+                self.bump();
+                if value >= 0 {
+                    return Ok((Type::compute_dimension_type(value as u64), span));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    "compute shape dimensions must be non-negative".to_string(),
+                    "fixed compute aliases use literal dimensions known at compile time".to_string(),
+                    "write a non-negative dimension such as `Vec<3>`".to_string(),
+                    Some(span),
+                ));
+                return Ok((Type::compute_dimension_type(0), span));
+            }
+        }
         if !self.enter_generic_type_layer(label, span) {
             self.sync_type_arg();
             return Ok((Type::Int, span));
@@ -59,16 +79,6 @@ impl<'a> Parser<'a> {
         // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
         // rules as every other type position. Parentheses only group
         // (including optional `=> (T?)` when the author wants them).
-        if matches!(self.peek().kind, TokKind::LParen) {
-            let start = self.bump().span;
-            if self.looks_like_named_tuple(true) {
-                let ty = self.parse_tuple_type(start)?;
-                return Ok((ty, start));
-            }
-            let (ty, _) = self.type_()?;
-            self.expect(TokKind::RParen, "to close this parenthesized return type")?;
-            return Ok((ty, start));
-        }
         self.type_()
     }
 
@@ -476,6 +486,14 @@ impl<'a> Parser<'a> {
                 self.bump();
                 self.parse_tuple_type(start)?
             }
+            // D-VOID1: the empty tuple spelling is the one public
+            // no-information result type. It lowers to the existing internal
+            // unit value; non-empty tuple syntax is unchanged.
+            TokKind::LParen if matches!(self.peek2().kind, TokKind::RParen) => {
+                self.bump();
+                self.bump();
+                Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+            }
             TokKind::LParen => {
                 self.bump();
                 let (inner, _) = self.type_()?;
@@ -543,6 +561,16 @@ impl<'a> Parser<'a> {
                         Type::String
                     }
                     Syntax::TYPE_CHAR => Type::Char,
+                    Syntax::RETIRED_TYPE_VOID => {
+                        self.diags.push(Diagnostic::error(
+                            "E0431",
+                            "`Void` is retired".to_string(),
+                            "Jet uses `()` for a result with no information; non-returning paths are compiler facts under D-NEVER1".to_string(),
+                            "replace `Void` with `()`".to_string(),
+                            Some(start),
+                        ));
+                        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                    }
                     Syntax::FOREIGN_DYN if retired_s14_teaching_enabled() => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_DYN, start));
                         let (trait_name, _) = self.expect_ident("after `dyn`")?;

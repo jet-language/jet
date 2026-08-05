@@ -3069,7 +3069,7 @@ pub enum TExprKind {
         fields: Vec<(String, TExpr)>,
     },
     /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. The empty form
-    /// lowers to `std::collections::BTreeMap::new()` (Rust infers the element
+    /// lowers to `JetMap::new()` (Rust infers the element
     /// types from the binding context); a non-empty form lowers to the
     /// `{ let mut _m = …; _m.insert((k).clone(), v); … _m }` builder, byte-for-byte
     /// the AST `Expr::MapLit` form.
@@ -3797,6 +3797,16 @@ pub struct TEnumArg {
     pub boxed: bool,
 }
 
+/// D-LISTREMOVE1/F: the selector is resolved before emission. `Dynamic` is only
+/// used for an Int list when the selector is stored in a variable; other element
+/// types cannot accept both a value and a positional Int in one statically typed call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListRemoveMode {
+    Value,
+    Slot,
+    Dynamic,
+}
+
 /// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
 /// one emit form from `emit_builtin_method` (Source/Codegen/Expression.rs). The
 /// receiver-type dispatch (`rty = expr_jet_ty(receiver)` → Map vs List vs String)
@@ -3805,6 +3815,20 @@ pub struct TEnumArg {
 /// lowering; `cx.file`/`cx.root_prefix` are read at emit (program-level, not a
 /// per-node decision). Args are emitted plainly (no clone/borrow wrappers), exactly
 /// as `emit_builtin_method`'s `arg(i)` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TZipMode {
+    Strict,
+    Short,
+    Pad,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TZipFillMode {
+    DefaultNone,
+    Common,
+    Columns,
+}
+
 pub enum TBuiltinOp {
     /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
     LenString,
@@ -3828,10 +3852,17 @@ pub enum TBuiltinOp {
     InsertList,
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
     RemoveMap,
-    /// `remove(i)` on a list → `jet_list_remove(&mut (recv), a0, file, line)`.
+    /// `remove(x[, by])` on a list; the selector is fixed at lowering.
     RemoveList {
         line: usize,
+        mode: ListRemoveMode,
     },
+    /// `count(value)` on a list.
+    CountList,
+    /// `extend(other)` on a list.
+    ExtendList,
+    /// `concat(other)` on a list.
+    ConcatList,
     /// `get(k)` on a map → `(recv).get(&(a0).clone()).cloned()`.
     GetMap,
     /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
@@ -3923,9 +3954,9 @@ pub enum TBuiltinOp {
     /// D-MEM1 stage S5: the zero-copy sibling of `Before`, same `string_view`
     /// gate → `jet_string_before_view(&(recv), &a0)`.
     BeforeView,
-    /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
+    /// `keys()` → a lazy `JetIter` over map keys.
     Keys,
-    /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.
+    /// `values()` → a lazy `JetIter` over map values.
     Values,
     /// `contains_key(k)` → `(recv).contains_key(&a0)`.
     ContainsKey,
@@ -3961,6 +3992,16 @@ pub enum TBuiltinOp {
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
     Zip {
         tuple_struct: String,
+        mode: TZipMode,
+        /// Output field names in source input order.
+        fields: Vec<String>,
+        /// The left input is a nested pair from an earlier n-ary stage.
+        flatten: bool,
+        /// Number of source inputs in the complete zip family call.
+        input_count: usize,
+        fill_mode: TZipFillMode,
+        /// Resolved row-field types, used to marshal typed fills per column.
+        field_types: Vec<Type>,
     },
     // D-HOLE1: Option combinators.
     /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`

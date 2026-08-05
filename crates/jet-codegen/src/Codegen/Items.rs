@@ -842,7 +842,7 @@ fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
     let Type::Result { ok, err } = ty else {
         return None;
     };
-    if !matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID) {
+    if !matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE) {
         return None;
     }
     match err.as_ref() {

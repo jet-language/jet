@@ -743,6 +743,65 @@ fn load_entry_with_overlays_mode_with_sink(
         active_os: Syntax::OSTarget::host(),
         edition: package_edition,
     };
+    if bundle.modules.iter().any(|module| {
+        module
+            .imports
+            .iter()
+            .any(|import| core_module_path(import).as_deref() == Some("core.archive"))
+    }) {
+        let source = include_str!("../../../corelib/core.archive/pkgs/archive/archive.jet").to_string();
+        let display = "corelib/core.archive/pkgs/archive/archive.jet".to_string();
+        let (tokens, lex_diags) = Lexer::lex_generated(&source);
+        if !lex_diags.is_empty() {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&display, &source, lex_diags),
+            ));
+        }
+        let (mut program, teaching) = match Parser::parse_for_check(&tokens) {
+            Ok(parsed) => parsed,
+            Err(diags) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(&display, &source, diags),
+                ));
+            }
+        };
+        bundle.parse_teaching.extend(teaching);
+        let alias = "core_archive".to_string();
+        if bundle.modules.iter().any(|module| module.alias == alias) {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(
+                    &display,
+                    &source,
+                    vec![Diagnostic::error(
+                        "E0608",
+                        "the reserved Core source module alias is already in use".to_string(),
+                        "Core source packages use a private module namespace during emission".to_string(),
+                        "rename the imported file module that uses `core_archive`".to_string(),
+                        None,
+                    )],
+                ),
+            ));
+        }
+        bundle.modules.push(LoadedModule {
+            path: PathBuf::from("<corelib>/core.archive/pkgs/archive/archive.jet"),
+            display,
+            source,
+            alias,
+            imports: std::mem::take(&mut program.imports),
+            items: program.items,
+            block_spans: program.block_spans,
+            web_target_ceiling: program.web_target_ceiling,
+            pub_file: program.pub_file,
+            no_prelude: program.no_prelude,
+            html_path: program.html_path,
+            no_alloc_policy: program.no_alloc_policy,
+            policy_declarations: program.policy_declarations,
+            rule_facts: program.rule_facts,
+        });
+    }
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
     if let Err(diagnostics) = crate::Foreign::assemble_active_namespaces_with_provenance(&mut bundle) {

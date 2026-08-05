@@ -1,0 +1,90 @@
+// D-COREIO1=A: io.progress wraps a List/Iter and updates as the loop pulls.
+use core.io as io
+
+fn run() {
+    items :: [String].{"one", "two", "three"}
+    lazy_items :: items.lazy()
+    progressed :: io.progress(lazy_items, "work", "{{description}} {{percent}}% {{count}}/{{total}}")
+    loop item, progressed {
+        print(item)
+    }
+
+    stepped :: io.progress(items.lazy(), "step", "{{description}} {{count}}/{{total}}")
+    loop item, stepped, 2 {
+        print("step {item}")
+    }
+
+    stopped :: io.progress(items.lazy(), "break", "{{description}} {{count}}/{{total}}")
+    loop item, stopped {
+        print("break {item}")
+        break
+    }
+
+    collected :: io.progress(items.lazy(), "collect", "{{description}} {{count}}/{{total}}").to_list()
+    print("collected {collected.len()}")
+
+    skipped :: io.progress(items.lazy(), "skip", "{{description}} {{count}}/{{total}}").skip(1).to_list()
+    print("skipped {skipped.len()}")
+
+    filter_source :: io.progress(items.lazy(), "filter", "{{description}} {{count}}/{{total}}")
+    filtered_iter :: filter_source.filter(item => item != "two")
+    filtered :: filtered_iter.to_list()
+    print("filtered {filtered.len()}")
+
+    unknown_source :: items.lazy().filter(item => item != "two")
+    unknown_progress :: io.progress(unknown_source, "unknown", "{{description}} {{percent}}% {{count}}/{{total}}")
+    unknown_values :: unknown_progress.to_list()
+    print("unknown {unknown_values.len()}")
+
+    mapped :: io.progress(items.lazy(), "map", "{{description}} {{count}}/{{total}}").map(item => item)
+    loop item, mapped {
+        print("map {item}")
+    }
+
+    dupes :: [String].{"one", "one", "two", "two", "three"}
+    deduped :: io.progress(dupes.lazy(), "dedup", "{{description}} {{count}}/{{total}}").dedup().to_list()
+    print("deduped {deduped.len()}")
+
+    chunked :: io.progress(items.lazy(), "chunks", "{{description}} {{count}}/{{total}}").chunks(2).to_list()
+    print("chunks {chunked.len()}")
+
+    ints :: [Int].{1, 2, 3, 4}
+    windowed :: io.progress(ints.lazy(), "windows", "{{description}} {{count}}/{{total}}").windows(3).to_list()
+    print("windows {windowed.len()}")
+
+    short_items :: [Int].{1, 2}
+    short_window :: io.progress(short_items.lazy(), "short-window", "{{description}} {{count}}/{{total}}").windows(3).to_list()
+    print("short-window {short_window.len()}")
+
+    flatten_source :: [[Int]].{[1, 2], [Int].{}, [3]}
+    flattened :: io.progress(flatten_source.lazy(), "flatten", "{{description}} {{count}}/{{total}}").flatten().to_list()
+    print("flatten {flattened.len()}")
+
+    interspersed :: io.progress(ints.lazy(), "intersperse", "{{description}} {{count}}/{{total}}").intersperse(0).to_list()
+    print("intersperse {interspersed.len()}")
+
+    zip_left :: [Int].{1, 2, 3}
+    zipped :: io.progress(zip_left.lazy(), "zip", "{{description}} {{count}}/{{total}}").zip([4, 5]).to_list()
+    print("zip {zipped.len()}")
+
+    taken :: io.progress(ints.lazy(), "take-while", "{{description}} {{count}}/{{total}}").take_while((n: Int) => n < 3).to_list()
+    print("take-while {taken.len()}")
+
+    skipped_while :: io.progress(ints.lazy(), "skip-while", "{{description}} {{count}}/{{total}}").skip_while((n: Int) => n < 3).to_list()
+    print("skip-while {skipped_while.len()}")
+
+    filtered_map_source :: [String].{"1", "bad", "3"}
+    filtered_map :: io.progress(filtered_map_source.lazy(), "filter-map", "{{description}} {{count}}/{{total}}").filter_map((item: String) => Int.parse(item)).to_list()
+    print("filter-map {filtered_map.len()}")
+
+    try_source :: [String].{"1", "oops", "3"}
+    tried :: io.progress(try_source.lazy(), "try-collect", "{{description}} {{count}}/{{total}}").map((item: String) => Int.parse(item)).try_collect()
+    if tried == .Err(error) {
+        print("try-collect stopped")
+    }
+
+    nested :: [[1, 2], [Int].{}, [3]]
+    flattened_map :: io.progress(nested.lazy(), "flat-map", "{{description}} {{count}}/{{total}}").flat_map((group: [Int]) => group).to_list()
+    print("flat-map {flattened_map.len()}")
+
+}

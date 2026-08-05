@@ -989,9 +989,9 @@ impl CtValue {
             }
             CtValue::Map(m) => {
                 if m.is_empty() {
-                    "std::collections::BTreeMap::new()".to_string()
+                    "JetMap::new()".to_string()
                 } else {
-                    let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                    let mut s = String::from("{ let mut _m = JetMap::new(); ");
                     for (k, v) in m {
                         s.push_str(&format!(
                             "_m.insert(({}), {}); ",
@@ -1013,6 +1013,14 @@ impl CtValue {
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
                 format!("user_{} {{ {} }}", type_name, parts.join(", "))
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "RemoveBy" => {
+                debug_assert!(args.is_empty(), "RemoveBy variants are unit values");
+                format!("JetRemoveBy::{}", variant.strip_prefix("user_").unwrap_or(variant))
             }
             CtValue::Enum {
                 type_name,

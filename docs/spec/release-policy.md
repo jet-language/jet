@@ -46,8 +46,8 @@ after a Jet mutation now sees the original host value. This is the ratified
 narrow safety exception to the normal compatibility promise: mutating a
 process-global host environment while foreign threads may read it cannot meet
 Jet's memory-safety guarantee. Pass changed values to foreign APIs explicitly.
-Existing editions keep `core.env.set => Void`; its fallible
-`Void ? EnvError` signature requires a future major release and edition opt-in.
+Existing editions keep `core.env.set => ()`; its fallible
+`() ? EnvError` signature requires a future major release and edition opt-in.
 
 ## Deprecation policy + migration window
 

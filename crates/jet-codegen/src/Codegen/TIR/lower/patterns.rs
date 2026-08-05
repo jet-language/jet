@@ -630,6 +630,12 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == crate::Syntax::TYPE_KEY {
         return format!("{}JetKey::{}", cx.root_prefix, variant);
     }
+    if type_name == crate::Syntax::TYPE_REMOVE_BY
+        || type_name == format!("user_{}", crate::Syntax::TYPE_REMOVE_BY)
+    {
+        let variant = variant.strip_prefix("user_").unwrap_or(variant);
+        return format!("{}JetRemoveBy::{}", cx.root_prefix, variant);
+    }
     if type_name == "DataEvent" {
         return format!("{}jet_std::DataEvent::{}", cx.root_prefix, variant);
     }
