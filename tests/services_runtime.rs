@@ -266,6 +266,77 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     );
 }
 
+const STATE_RESTART_SOURCE: &str = r#"
+use core.env as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    adapter :: env.get("JET_SERVICE_AUTH_ID") ?? panic("adapter")
+    tree := services.tree("state")
+    store :: services.state_store(store_path) ?? panic("state store")
+    if adapter == "snapshot" {
+        services.set_state_snapshot(&tree, store, "app-state", 1) ?? panic("snapshot state")
+    } else {
+        services.set_state_event_log(&tree, store, "app-state", 1) ?? panic("event state")
+    }
+    services.worker(&tree, "worker", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    if adapter == "snapshot" {
+        if phase == "write" {
+            services.commit_snapshot(&tree, "state-v1") ?? panic("commit")
+            print("wrote:{services.restore_snapshot(tree) ?? panic("restore")}")
+        } else {
+            print("restored:{services.restore_snapshot(tree) ?? panic("restore")}")
+            services.commit_snapshot(&tree, "state-v2") ?? panic("recommit")
+            print("recommitted:{services.restore_snapshot(tree) ?? panic("restore")}")
+        }
+    } else {
+        if phase == "write" {
+            services.append_event(&tree, "first") ?? panic("first")
+            services.append_event(&tree, "second") ?? panic("second")
+            print("wrote:{services.event_count(tree)}")
+        } else {
+            print("count:{services.event_count(tree)}")
+            print("replay:{services.replay_events(tree)}")
+            services.append_event(&tree, "third") ?? panic("third")
+            print("appended:{services.replay_events(tree)}")
+        }
+    }
+}
+"#;
+
+/// A durable state adapter that cannot be read by a later process is not
+/// durable.  Restart is the only check that separates a store from a cache.
+#[test]
+fn state_adapters_survive_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(STATE_RESTART_SOURCE);
+
+    let events = dir.join("events.log");
+    assert_eq!(
+        run_restart_process(&bin, &events, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &events, "read", Some("event-log")),
+        "count:2\nreplay:first|second\nappended:first|second|third\n"
+    );
+
+    let snapshot = dir.join("snapshot.log");
+    assert_eq!(
+        run_restart_process(&bin, &snapshot, "write", Some("snapshot")),
+        "wrote:state-v1\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &snapshot, "read", Some("snapshot")),
+        "restored:state-v1\nrecommitted:state-v2\n"
+    );
+}
+
 const WORKFLOW_RESTART_SOURCE: &str = r#"
 use core.env as env
 use core.services as services
