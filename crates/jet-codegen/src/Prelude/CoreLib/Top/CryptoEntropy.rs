@@ -439,3 +439,20 @@ pub use jet_crypto_entropy::{
     jet_crypto_entropy_set_wasi_attempt_test_observer, jet_crypto_entropy_wasi_with_for_test,
     JetCryptoEntropyStep, JetCryptoWasiAttemptEvent,
 };
+
+// D-CRYPTO-RNG1=A: the core.crypto.random.bytes shim lives beside its entropy
+// provider. It previously sat in Top/Process.rs, which only emits for
+// core.process, so a crypto-only program called a symbol that was absent.
+
+// D-CRYPTO-RNG1=A: cryptographic bytes use the shared fail-closed OS provider.
+// Edition 2026 keeps this infallible Rust shim; failure takes the ratified
+// E3001/exit-70 compatibility path and never returns weak or partial bytes.
+fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
+    match jet_crypto_entropy_bytes(n) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("Error [E3001]: panic: core.crypto.random.bytes: {error}");
+            std::process::exit(70);
+        }
+    }
+}

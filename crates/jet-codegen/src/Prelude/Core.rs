@@ -1791,6 +1791,18 @@ impl<K, V> JetMap<K, V> {
     }
 }
 
+// Codegen lowers map construction from a sequence of pairs to
+// `.into_iter().collect()`, so the map has to be buildable from its own pairs.
+// Without this, decoding a table into a typed map emitted Rust that rustc
+// rejected (I2).
+impl<K: Ord, V> FromIterator<(K, V)> for JetMap<K, V> {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
+        Self(std::sync::Arc::new(
+            pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>(),
+        ))
+    }
+}
+
 impl<K, V> std::ops::Deref for JetMap<K, V> {
     type Target = std::collections::BTreeMap<K, V>;
 

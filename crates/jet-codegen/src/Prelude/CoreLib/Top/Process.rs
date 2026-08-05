@@ -378,17 +378,3 @@ fn jet_process_stream_next_line<R: std::io::Read>(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
 ) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
-}
-
-// D-CRYPTO-RNG1=A: cryptographic bytes use the shared fail-closed OS provider.
-// Edition 2026 keeps this infallible Rust shim; failure takes the ratified
-// E3001/exit-70 compatibility path and never returns weak or partial bytes.
-fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
-    match jet_crypto_entropy_bytes(n) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!("Error [E3001]: panic: core.crypto.random.bytes: {error}");
-            std::process::exit(70);
-        }
-    }
-}
