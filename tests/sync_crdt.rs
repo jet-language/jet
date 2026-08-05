@@ -10,10 +10,23 @@ use core.sync as sync
 use app
 
 fn run() {
-    text_a0 :: sync.text_new("r1", "hello")
-    text_a :: sync.text_set(text_a0, "r1", "hellp")
-    text_b :: sync.text_new("r2", "world")
-    print("text_converges:{sync.text_show(sync.text_merge(text_a, text_b)) == sync.text_show(sync.text_merge(text_b, text_a))}")
+    // Three replicas edit one document while apart.  Comparing the two merge
+    // orders alone is not convergence: a merge that keeps each replica's own
+    // copy passes that and still never agrees on a document.  So also assert
+    // the text itself, which only holds if every edit survived in one reading.
+    base :: sync.text_new("r1", "hello world")
+    text_a :: sync.text_edit(base, "r1", 5, 0, ",")
+    text_b :: sync.text_edit(base, "r2", 11, 0, "!")
+    text_c :: sync.text_edit(base, "r3", 0, 5, "goodbye")
+    ab :: sync.text_show(sync.text_merge(text_a, text_b))
+    print("text_commutes:{ab == sync.text_show(sync.text_merge(text_b, text_a))}")
+    print("text_merged:{ab}")
+    abc :: sync.text_merge(sync.text_merge(text_a, text_b), text_c)
+    a_bc :: sync.text_merge(text_a, sync.text_merge(text_b, text_c))
+    print("text_associates:{sync.text_show(abc) == sync.text_show(a_bc)}")
+    print("text_idempotent:{sync.text_show(sync.text_merge(abc, abc)) == sync.text_show(abc)}")
+    print("text_all_edits:{sync.text_show(abc)}")
+    print("text_clock:{sync.text_metadata(abc)}")
 
     left :: sync.map_set(sync.map_new(), "k", "left")
     right :: sync.map_set(sync.map_new(), "k", "right")
@@ -59,7 +72,7 @@ fn sync_laws_hold_on_aot_path() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "text_converges:true\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=2, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:VectorClock(r1=12,r2=1,r3=7)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=2, doc=SyncMap(k=right))\n"
     );
 }
 
@@ -69,6 +82,6 @@ fn sync_laws_hold_on_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "text_converges:true\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=2, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:VectorClock(r1=12,r2=1,r3=7)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=2, doc=SyncMap(k=right))\n"
     );
 }

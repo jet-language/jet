@@ -2379,6 +2379,18 @@ pub(crate) fn emit_tir_core_call(
         ("core.sync", "text_show") => {
             format!("{}(&({}))", helper("jet_sync_text_show"), arg(0))
         }
+        ("core.sync", "text_edit") => format!(
+            "{}(({}), ({}).clone(), {}, {}, ({}).clone())",
+            helper("jet_sync_text_edit"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3),
+            arg(4)
+        ),
+        ("core.sync", "text_metadata") => {
+            format!("{}(&({}))", helper("jet_sync_text_metadata"), arg(0))
+        }
         ("core.sync", "counter_new") => format!(
             "{}(({}).clone(), {})",
             helper("jet_sync_counter_new"),

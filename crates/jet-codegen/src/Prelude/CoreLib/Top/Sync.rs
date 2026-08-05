@@ -1,14 +1,34 @@
 // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
 
 const MAX_SYNC_TEXT: usize = 1024 * 1024;
+/// Tombstones outlive the characters they replace, so a document holds more
+/// atoms than it shows.  This bounds the whole atom set, checked before a
+/// write rather than by discarding atoms during a merge.
+const MAX_SYNC_ATOMS: usize = 4 * 1024 * 1024;
 const MAX_SYNC_REPLICAS: usize = 4096;
 const MAX_SYNC_ENTRIES: usize = 100_000;
 const MAX_SYNC_SESSION: usize = 256;
 const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
 
+/// D-SYNC1: SyncText is a sequence CRDT, not a copy per replica.  Every
+/// character is one atom carrying a unique `(replica, counter)` identity and
+/// the identity of the atom it follows.  Reading order is recomputed from
+/// those identities, so a merge is the union of two atom sets with deletions
+/// winning: commutative, associative, and idempotent.  Two replicas that edit
+/// while apart converge on one document, and neither loses characters.
 #[derive(Clone, Debug)]
 pub struct JetSyncText {
-    pub replicas: Vec<(String, String, u64)>, // replica_id, text, logical clock
+    pub atoms: Vec<JetSyncTextAtom>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetSyncTextAtom {
+    pub replica: String,
+    pub counter: u64,
+    /// The atom this one follows.  `None` places it at the document start.
+    pub after: Option<(String, u64)>,
+    pub ch: char,
+    pub deleted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -65,122 +85,202 @@ pub struct JetSyncListGeneric<T> {
     pub items: Vec<(String, T)>, // replica_id, item
 }
 
-fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
-    if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
-        return JetSyncText { replicas: Vec::new() };
+/// Reading order (RGA).  Atoms sharing an anchor are ordered by descending
+/// counter, then descending replica, so concurrent inserts at one point land
+/// in the same order on every replica.  An atom whose anchor is absent is
+/// unreachable and stays out of the order rather than moving to the start.
+fn jet_sync_text_order(doc: &JetSyncText) -> Vec<usize> {
+    let mut children: std::collections::BTreeMap<Option<(String, u64)>, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (index, atom) in doc.atoms.iter().enumerate() {
+        children.entry(atom.after.clone()).or_default().push(index);
     }
-    JetSyncText {
-        replicas: vec![(replica, text, 1)],
+    for kids in children.values_mut() {
+        kids.sort_by(|left, right| {
+            let left = &doc.atoms[*left];
+            let right = &doc.atoms[*right];
+            right
+                .counter
+                .cmp(&left.counter)
+                .then_with(|| right.replica.cmp(&left.replica))
+        });
+    }
+    let mut order = Vec::with_capacity(doc.atoms.len());
+    let mut stack: Vec<usize> = Vec::new();
+    if let Some(roots) = children.get(&None) {
+        stack.extend(roots.iter().rev().copied());
+    }
+    while let Some(index) = stack.pop() {
+        order.push(index);
+        let id = Some((doc.atoms[index].replica.clone(), doc.atoms[index].counter));
+        if let Some(kids) = children.get(&id) {
+            stack.extend(kids.iter().rev().copied());
+        }
+    }
+    order
+}
+
+fn jet_sync_text_visible(doc: &JetSyncText) -> Vec<usize> {
+    jet_sync_text_order(doc)
+        .into_iter()
+        .filter(|index| !doc.atoms[*index].deleted)
+        .collect()
+}
+
+fn jet_sync_text_read(doc: &JetSyncText) -> String {
+    jet_sync_text_visible(doc)
+        .into_iter()
+        .map(|index| doc.atoms[index].ch)
+        .collect()
+}
+
+fn jet_sync_text_next_counter(doc: &JetSyncText, replica: &str) -> u64 {
+    doc.atoms
+        .iter()
+        .filter(|atom| atom.replica == replica)
+        .map(|atom| atom.counter)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Write `text` as a chain of atoms following `anchor`.  Each character keeps
+/// its own identity, which is what lets a later insert land between two
+/// existing characters.
+fn jet_sync_text_insert_after(
+    doc: &mut JetSyncText,
+    replica: &str,
+    anchor: Option<(String, u64)>,
+    text: &str,
+) {
+    let mut anchor = anchor;
+    let mut counter = jet_sync_text_next_counter(doc, replica);
+    for ch in text.chars() {
+        doc.atoms.push(JetSyncTextAtom {
+            replica: replica.to_string(),
+            counter,
+            after: anchor,
+            ch,
+            deleted: false,
+        });
+        anchor = Some((replica.to_string(), counter));
+        counter = counter.saturating_add(1);
     }
 }
 
-fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
-    if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
+fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
+    let mut doc = JetSyncText { atoms: Vec::new() };
+    if !jet_sync_token_is_valid(&replica) || text.chars().count() > MAX_SYNC_TEXT {
         return doc;
     }
-    let next_clock = doc
-        .replicas
-        .iter()
-        .filter(|(existing, _, _)| existing == &replica)
-        .map(|(_, _, clock)| *clock)
-        .max()
-        .unwrap_or(0)
-        .saturating_add(1);
-    if let Some((_, existing, clock)) = doc.replicas.iter_mut().find(|(r, _, _)| r == &replica) {
-        *existing = text;
-        *clock = next_clock;
-    } else {
-        if doc.replicas.len() >= MAX_SYNC_REPLICAS {
-            return doc;
-        }
-        doc.replicas.push((replica, text, next_clock));
-    }
-    doc.replicas.sort_by(|left, right| left.0.cmp(&right.0));
+    jet_sync_text_insert_after(&mut doc, &replica, None, &text);
     doc
 }
 
-/// Apply one UTF-8-safe edit to a replica's current text. Replica-local
-/// logical clocks make repeated edits deterministic; concurrent replicas still
-/// merge through the explicit clock rule below. Indices are Unicode scalar
-/// positions, never byte offsets.
+/// Replace the whole document: every visible atom becomes a tombstone and the
+/// new text is written at the start.  The tombstones stay so a replica that
+/// never saw them still converges here after a merge.
+fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
+    let inserted = text.chars().count();
+    if !jet_sync_token_is_valid(&replica)
+        || inserted > MAX_SYNC_TEXT
+        || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
+    {
+        return doc;
+    }
+    for index in jet_sync_text_visible(&doc) {
+        doc.atoms[index].deleted = true;
+    }
+    jet_sync_text_insert_after(&mut doc, &replica, None, &text);
+    doc
+}
+
+/// Apply one edit at a visible-character position.  Indices are Unicode scalar
+/// positions, never byte offsets.  The insert anchors to the character before
+/// the replaced range, so it survives a concurrent edit to that range.
 fn jet_sync_text_edit(
-    doc: JetSyncText,
+    mut doc: JetSyncText,
     replica: String,
     index: i64,
     delete_count: i64,
     insert: String,
 ) -> JetSyncText {
+    let inserted = insert.chars().count();
     if !jet_sync_token_is_valid(&replica)
         || index < 0
         || delete_count < 0
-        || insert.len() > MAX_SYNC_TEXT
+        || inserted > MAX_SYNC_TEXT
+        || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
     {
         return doc;
     }
-    let Some(index) = usize::try_from(index).ok() else { return doc };
-    let Some(delete_count) = usize::try_from(delete_count).ok() else { return doc };
-    let current = doc
-        .replicas
-        .iter()
-        .find(|(existing, _, _)| existing == &replica)
-        .map(|(_, text, _)| text.as_str())
-        .unwrap_or("");
-    let chars: Vec<char> = current.chars().collect();
-    if index > chars.len() || delete_count > chars.len().saturating_sub(index) {
+    let (Ok(index), Ok(delete_count)) = (usize::try_from(index), usize::try_from(delete_count))
+    else {
+        return doc;
+    };
+    let visible = jet_sync_text_visible(&doc);
+    if index > visible.len() || delete_count > visible.len().saturating_sub(index) {
         return doc;
     }
-    let mut next = String::new();
-    for ch in chars.iter().take(index) {
-        next.push(*ch);
+    let anchor = index.checked_sub(1).map(|before| {
+        let atom = &doc.atoms[visible[before]];
+        (atom.replica.clone(), atom.counter)
+    });
+    for offset in 0..delete_count {
+        doc.atoms[visible[index + offset]].deleted = true;
     }
-    next.push_str(&insert);
-    for ch in chars.iter().skip(index.saturating_add(delete_count)) {
-        next.push(*ch);
-    }
-    if next.len() > MAX_SYNC_TEXT {
-        return doc;
-    }
-    jet_sync_text_set(doc, replica, next)
+    jet_sync_text_insert_after(&mut doc, &replica, anchor, &insert);
+    doc
 }
 
+/// Union the two atom sets.  Nothing is dropped: a merge that discarded atoms
+/// to stay under a limit would lose a replica's writing.  A deletion is
+/// monotone, so once either side has seen it the merged atom stays deleted.
 fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
-    let mut merged = std::collections::BTreeMap::<String, (String, u64)>::new();
-    for (replica, text, clock) in a.replicas.iter().chain(&b.replicas) {
-        if !jet_sync_token_is_valid(replica) || text.len() > MAX_SYNC_TEXT {
+    let mut merged: std::collections::BTreeMap<(String, u64), JetSyncTextAtom> =
+        std::collections::BTreeMap::new();
+    for atom in a.atoms.iter().chain(&b.atoms) {
+        if !jet_sync_token_is_valid(&atom.replica) {
             continue;
         }
-        let replace = merged.get(replica).map_or(true, |(existing, existing_clock)| {
-            *clock > *existing_clock
-                || (*clock == *existing_clock && text.as_str() > existing.as_str())
-        });
-        if replace {
-            merged.insert(replica.clone(), (text.clone(), *clock));
+        let key = (atom.replica.clone(), atom.counter);
+        match merged.get_mut(&key) {
+            Some(existing) => {
+                let deleted = existing.deleted || atom.deleted;
+                // One identity carrying two readings can only come from a
+                // forged document.  Keep the smaller one so the merge answers
+                // the same either way round.
+                if (atom.ch, &atom.after) < (existing.ch, &existing.after) {
+                    existing.ch = atom.ch;
+                    existing.after = atom.after.clone();
+                }
+                existing.deleted = deleted;
+            }
+            None => {
+                merged.insert(key, atom.clone());
+            }
         }
     }
     JetSyncText {
-        replicas: merged
-            .into_iter()
-            .take(MAX_SYNC_REPLICAS)
-            .map(|(replica, (text, clock))| (replica, text, clock))
-            .collect(),
+        atoms: merged.into_values().collect(),
     }
 }
 
 fn jet_sync_text_show(doc: &JetSyncText) -> String {
-    let parts = doc
-        .replicas
-        .iter()
-        .map(|(r, t, _)| format!("{r}:{t}"))
-        .collect::<Vec<_>>()
-        .join("|");
-    format!("SyncText({parts})")
+    format!("SyncText({})", jet_sync_text_read(doc))
 }
 
 fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
-    let parts = doc
-        .replicas
+    let mut clocks: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+    for atom in &doc.atoms {
+        let slot = clocks.entry(atom.replica.as_str()).or_insert(0);
+        if atom.counter > *slot {
+            *slot = atom.counter;
+        }
+    }
+    let parts = clocks
         .iter()
-        .map(|(replica, _, clock)| format!("{replica}={clock}"))
+        .map(|(replica, clock)| format!("{replica}={clock}"))
         .collect::<Vec<_>>()
         .join(",");
     format!("VectorClock({parts})")
@@ -830,43 +930,58 @@ fn jet_sync_frame_entry(
 
 impl user_Encode for JetSyncText {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Object(vec![
-            (
-                "replicas".to_string(),
-                jet_std::DataTree::Array(
-                    self.replicas
-                        .iter()
-                        .map(|(replica, text, clock)| {
-                            jet_std::DataTree::Object(vec![
-                                ("replica".to_string(), jet_std::DataTree::Text(replica.clone())),
-                                ("text".to_string(), jet_std::DataTree::Text(text.clone())),
-                                ("clock".to_string(), jet_std::DataTree::Text(clock.to_string())),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "atoms".to_string(),
+            jet_std::DataTree::Array(
+                self.atoms
+                    .iter()
+                    .map(|atom| {
+                        jet_std::DataTree::Object(vec![
+                            (
+                                "replica".to_string(),
+                                jet_std::DataTree::Text(atom.replica.clone()),
+                            ),
+                            (
+                                "counter".to_string(),
+                                jet_std::DataTree::Text(atom.counter.to_string()),
+                            ),
+                            (
+                                "after".to_string(),
+                                jet_std::DataTree::Text(match &atom.after {
+                                    Some((replica, counter)) => format!("{replica}:{counter}"),
+                                    None => String::new(),
+                                }),
+                            ),
+                            ("ch".to_string(), jet_std::DataTree::Text(atom.ch.to_string())),
+                            (
+                                "deleted".to_string(),
+                                jet_std::DataTree::Bool(atom.deleted),
+                            ),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
 impl user_Decode for JetSyncText {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        let fields = jet_sync_object(tree, &["replicas"], "SyncText")?;
+        let fields = jet_sync_object(tree, &["atoms"], "SyncText")?;
         let values = jet_sync_decode_array(
-            jet_sync_object_field(fields, "replicas", "SyncText")?,
-            "SyncText.replicas",
+            jet_sync_object_field(fields, "atoms", "SyncText")?,
+            "SyncText.atoms",
         )?;
-        if values.len() > MAX_SYNC_REPLICAS {
-            return Err(jet_sync_decode_error("SyncText replica limit exceeded"));
+        if values.len() > MAX_SYNC_ATOMS {
+            return Err(jet_sync_decode_error("SyncText atom limit exceeded"));
         }
-        let mut replicas = Vec::with_capacity(values.len());
+        let mut atoms: Vec<JetSyncTextAtom> = Vec::with_capacity(values.len());
         let mut errors = Vec::new();
         for (index, value) in values.iter().enumerate() {
             let fields = match jet_sync_object(
                 value,
-                &["replica", "text", "clock"],
-                "SyncText replica",
+                &["replica", "counter", "after", "ch", "deleted"],
+                "SyncText atom",
             ) {
                 Ok(fields) => fields,
                 Err(entry_errors) => {
@@ -878,33 +993,87 @@ impl user_Decode for JetSyncText {
             let replica = jet_sync_decode_field(
                 fields,
                 "replica",
-                "SyncText replica",
+                "SyncText atom",
                 &mut entry_errors,
                 |tree| jet_sync_decode_string(tree, "SyncText.replica"),
             );
-            let text = jet_sync_decode_field(
+            let counter = jet_sync_decode_field(
                 fields,
-                "text",
-                "SyncText replica",
+                "counter",
+                "SyncText atom",
                 &mut entry_errors,
-                |tree| jet_sync_decode_string(tree, "SyncText.text"),
+                |tree| jet_sync_decode_u64(tree, "SyncText.counter"),
             );
-            let clock = jet_sync_decode_field(
+            let after = jet_sync_decode_field(
                 fields,
-                "clock",
-                "SyncText replica",
+                "after",
+                "SyncText atom",
                 &mut entry_errors,
-                |tree| jet_sync_decode_u64(tree, "SyncText.clock"),
+                |tree| jet_sync_decode_string(tree, "SyncText.after"),
             );
-            if let (Some(replica), Some(text), Some(clock)) = (replica, text, clock) {
-                if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT || clock == 0 {
-                    entry_errors.extend(jet_sync_decode_error("SyncText replica is invalid"));
-                } else if replicas.iter().any(|(existing, _, _)| existing == &replica) {
-                    entry_errors.extend(jet_sync_decode_error(
-                        "SyncText contains duplicate replicas",
-                    ));
+            let ch = jet_sync_decode_field(
+                fields,
+                "ch",
+                "SyncText atom",
+                &mut entry_errors,
+                |tree| jet_sync_decode_string(tree, "SyncText.ch"),
+            );
+            let deleted = jet_sync_decode_field(
+                fields,
+                "deleted",
+                "SyncText atom",
+                &mut entry_errors,
+                |tree| match tree {
+                    jet_std::DataTree::Bool(value) => Ok(*value),
+                    _ => Err(jet_sync_decode_error("SyncText.deleted expects a Bool")),
+                },
+            );
+            if let (Some(replica), Some(counter), Some(after), Some(ch), Some(deleted)) =
+                (replica, counter, after, ch, deleted)
+            {
+                let anchor = if after.is_empty() {
+                    Ok(None)
                 } else {
-                    replicas.push((replica, text, clock));
+                    match after.rsplit_once(':') {
+                        Some((replica, counter)) => match counter.parse::<u64>() {
+                            Ok(counter) if jet_sync_token_is_valid(replica) && counter > 0 => {
+                                Ok(Some((replica.to_string(), counter)))
+                            }
+                            _ => Err(()),
+                        },
+                        None => Err(()),
+                    }
+                };
+                let mut chars = ch.chars();
+                let single = match (chars.next(), chars.next()) {
+                    (Some(ch), None) => Some(ch),
+                    _ => None,
+                };
+                match (anchor, single) {
+                    (Ok(anchor), Some(ch))
+                        if jet_sync_token_is_valid(&replica) && counter > 0 =>
+                    {
+                        if atoms
+                            .iter()
+                            .any(|atom| atom.replica == replica && atom.counter == counter)
+                        {
+                            entry_errors.extend(jet_sync_decode_error(
+                                "SyncText contains duplicate atom identities",
+                            ));
+                        } else {
+                            atoms.push(JetSyncTextAtom {
+                                replica,
+                                counter,
+                                after: anchor,
+                                ch,
+                                deleted,
+                            });
+                        }
+                    }
+                    _ => {
+                        entry_errors
+                            .extend(jet_sync_decode_error("SyncText atom is invalid"));
+                    }
                 }
             }
             if !entry_errors.is_empty() {
@@ -914,8 +1083,26 @@ impl user_Decode for JetSyncText {
         if !errors.is_empty() {
             return Err(errors);
         }
-        replicas.sort_by(|left, right| left.0.cmp(&right.0));
-        Ok(JetSyncText { replicas })
+        // An anchor naming an atom the document does not carry would silently
+        // drop that character from the reading order, so refuse it here.
+        for atom in &atoms {
+            if let Some((replica, counter)) = &atom.after {
+                if !atoms
+                    .iter()
+                    .any(|other| &other.replica == replica && other.counter == *counter)
+                {
+                    return Err(jet_sync_decode_error(
+                        "SyncText atom follows a character the document does not carry",
+                    ));
+                }
+            }
+        }
+        atoms.sort_by(|left, right| {
+            left.replica
+                .cmp(&right.replica)
+                .then_with(|| left.counter.cmp(&right.counter))
+        });
+        Ok(JetSyncText { atoms })
     }
 }
 
