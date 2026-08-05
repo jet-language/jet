@@ -1,8 +1,13 @@
 //! Stable JSON encoding for `SemIndex` (no external crates — I6 path deps only).
 
+use std::collections::BTreeMap;
+
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
-use jet_pkg_model::Package::{OutputPayload, PackageFacts};
+use jet_pkg_model::Package::{
+    ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef, OutputFact as PackageOutputFact,
+    OutputPayload, PackageFacts, ServiceFact,
+};
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
@@ -64,6 +69,150 @@ fn json_output_payload(value: &OutputPayload) -> String {
     }
 }
 
+fn json_optional_str(value: Option<&str>) -> String {
+    value.map(json_str).unwrap_or_else(|| "null".to_string())
+}
+
+fn json_string_map(values: &BTreeMap<String, String>) -> String {
+    values
+        .iter()
+        .map(|(name, value)| format!("{}:{}", json_str(name), json_str(value)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_service(value: &ServiceFact) -> String {
+    let ports = value
+        .ports
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"enable\":{},\"ports\":[{}],\"ready\":{},\"fields\":{{{}}}}}",
+        value.enable,
+        ports,
+        json_optional_str(value.ready.as_deref()),
+        json_string_map(&value.fields),
+    )
+}
+
+fn json_services(values: &BTreeMap<String, ServiceFact>) -> String {
+    values
+        .iter()
+        .map(|(name, value)| format!("{}:{}", json_str(name), json_service(value)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_environment(value: &EnvironmentFact) -> String {
+    let tools = value
+        .tools
+        .iter()
+        .map(|tool| json_str(tool))
+        .collect::<Vec<_>>()
+        .join(",");
+    let secrets = json_string_map(&value.secrets);
+    format!(
+        "{{\"name\":{},\"tools\":[{}],\"services\":{{{}}},\"secrets\":{{{}}},\"fields\":{{{}}}}}",
+        json_str(&value.name),
+        tools,
+        json_services(&value.services),
+        secrets,
+        json_string_map(&value.fields),
+    )
+}
+
+fn json_environments(values: &BTreeMap<String, EnvironmentFact>) -> String {
+    values
+        .iter()
+        .map(|(name, value)| format!("{}:{}", json_str(name), json_environment(value)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_package_output(
+    value: &PackageOutputFact,
+    provenance: Option<&[String]>,
+) -> String {
+    let provenance = provenance
+        .unwrap_or_default()
+        .iter()
+        .map(|origin| json_str(origin))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"name\":{},\"kind\":{},\"entry\":{},\"fields\":{{{}}},\"payload\":{},\"provenance\":[{}]}}",
+        json_str(&value.name),
+        json_str(&format!("{:?}", value.kind).to_lowercase()),
+        json_optional_str(value.entry.as_deref()),
+        json_string_map(&value.fields),
+        json_output_payload(&value.payload),
+        provenance,
+    )
+}
+
+fn json_package_outputs(
+    values: &BTreeMap<String, PackageOutputFact>,
+    provenance: Option<&BTreeMap<String, Vec<String>>>,
+) -> String {
+    values
+        .iter()
+        .map(|(name, value)| {
+            let field = format!("outputs.{name}");
+            let origins = provenance.and_then(|all| all.get(&field)).map(Vec::as_slice);
+            json_package_output(value, origins)
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_config_facts(value: &PackageConfigFacts) -> String {
+    let outputs = json_package_outputs(&value.outputs, None);
+    format!(
+        "{{\"name\":{},\"version\":{},\"source\":{},\"deps\":[{}],\"services\":{{{}}},\"outputs\":[{}],\"environments\":{{{}}},\"defaults\":{{{}}},\"origin\":{}}}",
+        json_optional_str(value.name.as_deref()),
+        json_optional_str(value.version.as_deref()),
+        json_optional_str(value.source.as_deref()),
+        value
+            .deps
+            .iter()
+            .map(|(name, source)| {
+                format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(source))
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        json_services(&value.services),
+        outputs,
+        json_environments(&value.environments),
+        json_string_map(&value.defaults),
+        json_str(&value.origin),
+    )
+}
+
+fn json_inline_configs(values: &BTreeMap<String, PackageConfigFacts>) -> String {
+    values
+        .iter()
+        .map(|(name, value)| format!("{}:{}", json_str(name), json_config_facts(value)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_members(values: &[MemberRef]) -> String {
+    values
+        .iter()
+        .map(|member| match member {
+            MemberRef::Path(path) => {
+                format!("{{\"kind\":\"path\",\"path\":{}}}", json_str(path))
+            }
+            MemberRef::Find(path) => {
+                format!("{{\"kind\":\"find\",\"path\":{}}}", json_str(path))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Canonical package/config projection shared by semantic-index and Canvas.
 /// The typed PackageFacts model remains the only source of these values.
 pub fn package_facts_json(facts: &PackageFacts) -> String {
@@ -73,27 +222,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
         .map(|(name, source)| format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(source)))
         .collect::<Vec<_>>()
         .join(",");
-    let outputs = facts
-        .outputs
-        .iter()
-        .map(|(name, output)| {
-            let provenance = facts
-                .field_provenance(&format!("outputs.{name}"))
-                .iter()
-                .map(|origin| json_str(origin))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!(
-                "{{\"name\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":[{}]}}",
-                json_str(&output.name),
-                json_str(&format!("{:?}", output.kind).to_lowercase()),
-                output.entry.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
-                json_output_payload(&output.payload),
-                provenance,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
+    let outputs = json_package_outputs(&facts.outputs, Some(&facts.provenance));
     let provenance = facts
         .provenance
         .iter()
@@ -107,23 +236,30 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
         .collect::<Vec<_>>()
         .join(",");
     let configs = facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(",");
-    let members = facts
-        .members
+    let services = json_services(&facts.services);
+    let environments = json_environments(&facts.environments);
+    let defaults = json_string_map(&facts.defaults);
+    let members = json_members(&facts.members);
+    let resolved_config_paths = facts
+        .resolved_config_paths
         .iter()
-        .map(|member| match member {
-            jet_pkg_model::Package::MemberRef::Path(path) => json_str(path),
-            jet_pkg_model::Package::MemberRef::Find(path) => json_str(path),
-        })
+        .map(|path| json_str(path))
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{},\"version\":{},\"source\":{},\"deps\":[{}],\"outputs\":[{}],\"configs\":[{}],\"members\":[{}],\"provenance\":{{{}}},\"origin\":{},\"semantic_digest\":{}}}",
+        "{{\"name\":{},\"version\":{},\"jet\":{},\"source\":{},\"deps\":[{}],\"services\":{{{}}},\"outputs\":[{}],\"environments\":{{{}}},\"defaults\":{{{}}},\"configs\":[{}],\"resolved_config_paths\":[{}],\"inline_configs\":{{{}}},\"members\":[{}],\"provenance\":{{{}}},\"origin\":{},\"semantic_digest\":{}}}",
         json_str(&facts.name),
-        facts.version.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
-        facts.source.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+        json_optional_str(facts.version.as_deref()),
+        json_optional_str(facts.jet.as_deref()),
+        json_optional_str(facts.source.as_deref()),
         deps,
+        services,
         outputs,
+        environments,
+        defaults,
         configs,
+        resolved_config_paths,
+        json_inline_configs(&facts.inline_configs),
         members,
         provenance,
         json_str(&facts.origin),

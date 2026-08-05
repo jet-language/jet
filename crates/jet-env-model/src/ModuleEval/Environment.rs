@@ -556,6 +556,68 @@ pub struct ResolvedProfile {
     pub variables: BTreeMap<String, String>,
 }
 
+/// D-JPK-PROFILE1=D: one source-backed package-profile declaration. This is
+/// deliberately separate from `ProfileSpec`, which is the environment-shell
+/// profile surface and may select host/user variables.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageProfileSpec {
+    pub name: String,
+    pub extends: Vec<String>,
+    /// Canonical package refs as written by the shared package-sugar parser.
+    pub packages: Vec<String>,
+    /// Exact path -> selected provider identity, from the ratified collision
+    /// map. The provider is checked against realized contenders later.
+    pub collisions: BTreeMap<String, String>,
+    /// Source modules that contributed this equal declaration.
+    pub sources: Vec<String>,
+}
+
+/// One package ref after profile composition. `declared_by` keeps source
+/// profile identity when equal package facts are de-duplicated.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageProfilePackage {
+    pub raw: String,
+    pub declared_by: Vec<String>,
+}
+
+/// D-JPK-PROFILE1=D: one resolved profile view. It is still source-backed;
+/// generation publication and activation consume this exact object later.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedPackageProfile {
+    pub name: String,
+    pub selected_profiles: Vec<String>,
+    pub applied: Vec<String>,
+    pub packages: Vec<PackageProfilePackage>,
+    pub collisions: BTreeMap<String, String>,
+    pub sources: Vec<String>,
+}
+
+/// One resolved package fact with both the source spelling and the realization
+/// identity that a lock, explain view, or generation writer must preserve.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageProfileFact {
+    pub raw: String,
+    pub target: String,
+    pub source: String,
+    pub upstream: Option<String>,
+    pub provider: String,
+    pub channel: Option<String>,
+    pub declared_by: Vec<String>,
+}
+
+/// The read-only, source-backed profile plan. Realization and activation may
+/// consume this plan later; they must not reconstruct package identity from
+/// the display string.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageProfilePlan {
+    pub name: String,
+    pub selected_profiles: Vec<String>,
+    pub applied: Vec<String>,
+    pub packages: Vec<PackageProfileFact>,
+    pub collisions: BTreeMap<String, String>,
+    pub sources: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileError {
     Missing(String),
@@ -574,6 +636,25 @@ impl std::fmt::Display for ProfileError {
 }
 
 impl std::error::Error for ProfileError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageProfileError {
+    Missing(String),
+    Cycle(Vec<String>),
+    Conflict { name: String },
+}
+
+impl std::fmt::Display for PackageProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing(name) => write!(f, "package profile '{name}' does not exist"),
+            Self::Cycle(names) => write!(f, "package profile inheritance cycle: {}", names.join(" -> ")),
+            Self::Conflict { name } => write!(f, "package profile fact '{name}' conflicts"),
+        }
+    }
+}
+
+impl std::error::Error for PackageProfileError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProfileSet {
@@ -701,6 +782,114 @@ impl ProfileSet {
                 }
             } else {
                 resolved.variables.insert(key.clone(), value.clone());
+            }
+        }
+        stack.pop();
+        Ok(())
+    }
+}
+
+/// One resolver for source-backed package profiles. JetOS/user composition,
+/// tool projections, and package-profile commands use this same data shape.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageProfileSet {
+    pub profiles: BTreeMap<String, PackageProfileSpec>,
+}
+
+impl PackageProfileSet {
+    pub fn insert_checked(&mut self, profile: PackageProfileSpec) -> Result<(), PackageProfileError> {
+        if let Some(existing) = self.profiles.get_mut(&profile.name) {
+            if existing.extends != profile.extends
+                || existing.packages != profile.packages
+                || existing.collisions != profile.collisions
+            {
+                return Err(PackageProfileError::Conflict {
+                    name: profile.name.clone(),
+                });
+            }
+            for source in profile.sources {
+                if !existing.sources.iter().any(|item| item == &source) {
+                    existing.sources.push(source);
+                }
+            }
+            return Ok(());
+        }
+        self.profiles.insert(profile.name.clone(), profile);
+        Ok(())
+    }
+
+    pub fn resolve(&self, name: &str) -> Result<ResolvedPackageProfile, PackageProfileError> {
+        self.resolve_many(&[name.to_string()])
+    }
+
+    pub fn resolve_many(&self, names: &[String]) -> Result<ResolvedPackageProfile, PackageProfileError> {
+        let mut selected_profiles = Vec::new();
+        for name in names {
+            if !selected_profiles.iter().any(|item| item == name) {
+                selected_profiles.push(name.clone());
+            }
+        }
+        let mut resolved = ResolvedPackageProfile {
+            name: selected_profiles.join("+"),
+            selected_profiles,
+            ..Default::default()
+        };
+        let mut stack = Vec::new();
+        for name in resolved.selected_profiles.clone() {
+            self.resolve_into(&name, &mut stack, &mut resolved)?;
+        }
+        Ok(resolved)
+    }
+
+    fn resolve_into(
+        &self,
+        name: &str,
+        stack: &mut Vec<String>,
+        resolved: &mut ResolvedPackageProfile,
+    ) -> Result<(), PackageProfileError> {
+        if stack.iter().any(|item| item == name) {
+            let start = stack.iter().position(|item| item == name).unwrap_or(0);
+            let mut cycle = stack[start..].to_vec();
+            cycle.push(name.to_string());
+            return Err(PackageProfileError::Cycle(cycle));
+        }
+        let profile = self
+            .profiles
+            .get(name)
+            .ok_or_else(|| PackageProfileError::Missing(name.to_string()))?;
+        stack.push(name.to_string());
+        for parent in &profile.extends {
+            self.resolve_into(parent, stack, resolved)?;
+        }
+        if !resolved.applied.iter().any(|item| item == name) {
+            resolved.applied.push(name.to_string());
+        }
+        for source in &profile.sources {
+            if !resolved.sources.iter().any(|item| item == source) {
+                resolved.sources.push(source.clone());
+            }
+        }
+        for raw in &profile.packages {
+            if let Some(existing) = resolved.packages.iter_mut().find(|item| item.raw == *raw) {
+                if !existing.declared_by.iter().any(|item| item == name) {
+                    existing.declared_by.push(name.to_string());
+                }
+            } else {
+                resolved.packages.push(PackageProfilePackage {
+                    raw: raw.clone(),
+                    declared_by: vec![name.to_string()],
+                });
+            }
+        }
+        for (path, provider) in &profile.collisions {
+            if let Some(existing) = resolved.collisions.get(path) {
+                if existing != provider {
+                    return Err(PackageProfileError::Conflict {
+                        name: format!("{name}.collisions.{path}"),
+                    });
+                }
+            } else {
+                resolved.collisions.insert(path.clone(), provider.clone());
             }
         }
         stack.pop();

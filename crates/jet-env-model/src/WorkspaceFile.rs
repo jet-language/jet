@@ -633,13 +633,28 @@ fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
                 .map(|n| n.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| rel_path.to_string());
+    let canonical_path = abs
+        .canonicalize()
+        .ok()
+        .and_then(|path| {
+            base_dir.canonicalize().ok().and_then(|root| {
+                path.strip_prefix(root).ok().map(|relative| {
+                    let relative = relative
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/");
+                    if relative.is_empty() {
+                        ".".to_string()
+                    } else {
+                        relative
+                    }
+                })
+            })
+        })
+        .unwrap_or_default();
     WorkspaceMember {
         name,
         path: rel_path.to_string(),
-        canonical_path: abs
-            .canonicalize()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+        canonical_path,
     }
 }
 
@@ -800,6 +815,7 @@ module workspace {
         assert_eq!(plan.members.len(), 1);
         assert_eq!(plan.members[0].path, ".");
         assert_eq!(plan.members[0].name, "root");
+        assert_eq!(plan.members[0].canonical_path, ".");
         std::fs::remove_dir_all(tmp).ok();
     }
 

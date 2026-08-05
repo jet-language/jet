@@ -10,8 +10,8 @@
     }
 
     // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert controls stay on
-    // ProcessSpec and ProcessChild. Native PTY/ConPTY backends fill the session
-    // handle in their successor slices.
+    // ProcessSpec and ProcessChild. The Unix PTY successor fills the session
+    // handle while unsupported targets keep the launch fail-closed.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct TerminalSize {
         pub cols: i64,
@@ -39,8 +39,37 @@
         }
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct TerminalSession;
+    #[derive(Clone, Debug)]
+    pub struct TerminalSession {
+        // The master stays shared by the child stream handles and resize. The
+        // public Jet value remains an opaque, cloneable session handle.
+        pub(crate) master: std::rc::Rc<std::fs::File>,
+    }
+
+    impl PartialEq for TerminalSession {
+        fn eq(&self, other: &Self) -> bool {
+            std::rc::Rc::ptr_eq(&self.master, &other.master)
+        }
+    }
+
+    impl Eq for TerminalSession {}
+
+    // The two enums keep the normal pipe path and the PTY path behind one
+    // ProcessChild shape. A terminal has one byte stream, so it is exposed as
+    // stdout; stderr is intentionally absent rather than a second reader on
+    // the same PTY master.
+    #[derive(Debug)]
+    pub enum ProcessStdin {
+        Pipe(std::process::ChildStdin),
+        Terminal(std::fs::File),
+    }
+
+    #[derive(Debug)]
+    pub enum ProcessReader {
+        Stdout(std::process::ChildStdout),
+        Stderr(std::process::ChildStderr),
+        Terminal(std::fs::File),
+    }
 
     // D-ENCSTREAM-SURFACE1=A: shared, handle-free encoding ABI.  These are
     // ordinary owned values; codec state itself remains behind non-Clone
@@ -320,18 +349,18 @@
         // D-PROCESS-SESSION1=A: `.terminal()` asks for a terminal-backed
         // session. Argv execution with no terminal stays the default, so this
         // flag is the one opt-in. A launch that asks for a terminal never runs
-        // without one: it fails when no PTY/ConPTY backend is available.
+        // without one: it fails when no native PTY/ConPTY backend is available.
         pub terminal: Option<TerminalPolicy>,
     }
 
     #[derive(Clone, Debug)]
     pub struct ProcessChild {
         pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
-        pub stdin: std::rc::Rc<std::cell::RefCell<Option<std::process::ChildStdin>>>,
+        pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:
-            std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStdout>>>>,
+            std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub stderr:
-            std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStderr>>>>,
+            std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub terminal: Option<TerminalSession>,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,

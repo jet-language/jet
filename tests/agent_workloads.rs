@@ -19,9 +19,21 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "exit=0;stdout=exact",
     ),
     (
+        "repository-semantic-edit",
+        "repository-search-and-edit",
+        "semantic-rename",
+        "exit=0;stdout=exact",
+    ),
+    (
         "git-diff-review",
         "build-test-debug-and-git",
         "mixed-change",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "build-test-failure-recovery",
+        "build-test-debug-and-git",
+        "compile-check-recovery",
         "exit=0;stdout=exact",
     ),
     (
@@ -128,8 +140,12 @@ fn corpus_root() -> PathBuf {
 fn adapter_stem(task_id: &str) -> &'static str {
     if task_id == "repository-marker-scan" {
         "repository_marker_scan"
+    } else if task_id == "repository-semantic-edit" {
+        "repository_semantic_edit"
     } else if task_id == "git-diff-review" {
         "git_diff_review"
+    } else if task_id == "build-test-failure-recovery" {
+        "build_test_recovery"
     } else if task_id.starts_with("incident-report-") {
         "incident_report"
     } else if task_id.starts_with("process-batch-") {
@@ -249,7 +265,10 @@ fn adapter_command(
         }
         other => panic!("unknown adapter {other}"),
     };
-    command.arg(input).current_dir(scratch);
+    command
+        .arg(input)
+        .env("JET_CORPUS_JET", jet_cli)
+        .current_dir(scratch);
     command
 }
 
@@ -459,7 +478,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 23, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 35, "all inputs and declared outputs must be frozen");
 }
 
 #[test]

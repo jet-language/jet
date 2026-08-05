@@ -301,6 +301,33 @@ pub fn environment_definition_hash(
             content.push('\n');
         }
     }
+    content.push_str("--package-profiles--\n");
+    for profile in &facts.package_profiles {
+        content.push_str(&profile.name);
+        content.push('\n');
+        for parent in &profile.extends {
+            content.push_str("extends=");
+            content.push_str(parent);
+            content.push('\n');
+        }
+        for package in &profile.packages {
+            content.push_str("package=");
+            content.push_str(package);
+            content.push('\n');
+        }
+        for (path, provider) in &profile.collisions {
+            content.push_str("collision=");
+            content.push_str(path);
+            content.push('=');
+            content.push_str(provider);
+            content.push('\n');
+        }
+        for source in &profile.sources {
+            content.push_str("source=");
+            content.push_str(source);
+            content.push('\n');
+        }
+    }
     content.push_str("--environment-names--\n");
     for name in &facts.environment_names {
         content.push_str(name);
@@ -495,6 +522,7 @@ pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts)
         || !facts.lifecycle.checks.is_empty()
         || facts.lifecycle.reload_explicit
         || !facts.profiles.is_empty()
+        || !facts.package_profiles.is_empty()
         || !facts.languages.is_empty()
         || facts.selected_profile.is_some()
         || !facts.language_packs.is_empty()

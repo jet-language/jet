@@ -120,6 +120,8 @@ pub const NAME_SEGMENT_SEP: &str = "-";
 pub const NS_ENV: &str = "env";
 pub const NS_SYSTEM: &str = "system";
 pub const NS_IMAGE: &str = "image";
+/// D-JPK-PROFILE1=D: a source-backed package profile declaration.
+pub const NS_PROFILE: &str = "profile";
 
 /// D-WORKSPACE2 (ratified 2026-06-25, option A): the monorepo index is the
 /// reserved namespace `workspace` — `module workspace { members: … }` in
@@ -183,6 +185,8 @@ pub const NS_VMTEST: &str = "vmtest";
 
 /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
 pub const TYPE_ENV: &str = "Env";
+/// D-JPK-PROFILE1=D: the type name of a `profile.<name>` contribution.
+pub const TYPE_PROFILE: &str = "Profile";
 /// D-FE-PROMPT-STRIP1: structured prompt config inside an `Env` contribution.
 pub const TYPE_PROMPT: &str = "Prompt";
 pub const TYPE_SYSTEM: &str = "System";
@@ -223,6 +227,11 @@ pub const SYSTEM_FIELD_TARGET: &str = "target";
 pub const SYSTEM_FIELD_PACKAGES: &str = "packages";
 pub const SYSTEM_FIELD_SERVICES: &str = "services";
 pub const SYSTEM_FIELD_OPTIONS: &str = "options";
+/// D-JPK-PROFILE1=D: package-profile fields. Profiles are source-backed
+/// package sets; generation switching belongs to the shared profile engine.
+pub const PROFILE_FIELD_EXTENDS: &str = "extends";
+pub const PROFILE_FIELD_PACKAGES: &str = "packages";
+pub const PROFILE_FIELD_COLLISIONS: &str = "collisions";
 
 /// D-JPK-SERVICE1: the required first field of every `Service` record.
 pub const SERVICE_FIELD_ENABLE: &str = "enable";

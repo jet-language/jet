@@ -5903,14 +5903,13 @@ fn run() {{
     assert!(stdout.contains("line-one\n"), "{stdout}");
 }
 
-/// D-PROCESS-SESSION1=A (#771): `.terminal()` is the one opt-in for a
+/// D-PROCESS-SESSION1=A (#1181): `.terminal()` is the one opt-in for a
 /// terminal-backed session, and it lives on the same `ProcessSpec`. Argv
-/// execution with no terminal stays the default. Every launch path that asks
-/// for a terminal fails while no PTY or ConPTY backend is present, because a
-/// child that runs on plain pipes is not the session the caller asked for.
+/// execution with no terminal stays the default. Unix run/spawn use a real PTY;
+/// pipeline stages reject terminal specs rather than coercing them to pipes.
 #[cfg(unix)]
 #[test]
-fn core_process_terminal_opt_in_refuses_every_launch_without_a_backend() {
+fn core_process_terminal_uses_unix_pty_for_run_and_spawn() {
     let dir = std::env::temp_dir().join(format!("jet_core_process_terminal_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -5921,38 +5920,29 @@ fn run() {
     plain :: process.cmd(["echo", "plain-ok"]).stdout(.Capture).run() ?? panic("default run failed")
     print(plain.output.trim())
 
-    if process.cmd(["echo", "session"]).stdout(.Capture).terminal().run() == {
-        .Ok(_) -> { print("run: terminal launch unexpectedly succeeded") }
-        .Err(e) -> {
-            if e == {
-                .Other(_) -> { print("run: refused") }
-                else -> { print("run: wrong error") }
-            }
+    run_result :: process.cmd(["printf", "run-ok"]).terminal().run() ?? panic("terminal run failed")
+    print(run_result.output.contains("run-ok"))
+
+    child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize.{ cols: 100, rows: 30 }) ?? panic("resize failed")
+            print("spawn: session")
         }
+        .None -> { print("spawn: no session") }
     }
-    if process.cmd(["echo", "session"]).stdout(.Capture).terminal().spawn() == {
-        .Ok(_) -> { print("spawn: terminal launch unexpectedly succeeded") }
-        .Err(e) -> {
-            if e == {
-                .Other(_) -> { print("spawn: refused") }
-                else -> { print("spawn: wrong error") }
-            }
-        }
-    }
+    waited :: child.wait() ?? panic("terminal wait failed")
+    print(waited.output.contains("spawn-ok"))
+
     if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {
-        .Ok(_) -> { print("pipeline: terminal launch unexpectedly succeeded") }
-        .Err(e) -> {
-            if e == {
-                .Other(_) -> { print("pipeline: refused") }
-                else -> { print("pipeline: wrong error") }
-            }
-        }
+        .Ok(_) -> { print("pipeline: accepted") }
+        .Err(_) -> { print("pipeline: refused") }
     }
     if process.cmd([]).terminal().run() == {
-        .Ok(_) -> { print("empty: terminal launch unexpectedly succeeded") }
+        .Ok(_) -> { print("empty: accepted") }
         .Err(e) -> {
             if e == {
-                .InvalidInput(_) -> { print("empty: invalid input") }
+                .InvalidInput(_) -> { print("empty: invalid") }
                 else -> { print("empty: wrong error") }
             }
         }
@@ -5962,33 +5952,22 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal", src, &[], None);
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(stdout.starts_with("plain-ok\n"), "{stdout}");
-    for stage in ["run", "spawn", "pipeline"] {
-        assert!(
-            stdout.contains(&format!("{stage}: refused")),
-            "{stage} must refuse the terminal launch:\n{stdout}"
-        );
-    }
-    // Hostile: an empty argv is still the first failure, so a terminal request
-    // never hides a malformed command.
-    assert!(stdout.contains("empty: invalid input"), "{stdout}");
-    // The refusal names the missing backend, so the reason is not a bare
-    // "other" error at the terminal.
+    assert!(stdout.contains("true\nspawn: session\ntrue\npipeline: refused\nempty: invalid\n"), "{stdout}");
+    // The production path carries the native PTY primitive into the emitted
+    // program; this guards against a test-only or pipe fallback.
     let compiled = compile_temp("process_terminal_text.jet", src);
     assert!(
-        compiled
-            .rust
-            .contains("terminal sessions need a PTY or ConPTY backend, and this build has none"),
-        "the refusal must name the missing PTY/ConPTY backend"
+        compiled.rust.contains("posix_openpt"),
+        "the Unix terminal path must include the native PTY backend"
     );
 }
 
-/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#771): the beginner and expert
-/// forms share one ProcessSpec. The public model is useful before a native
-/// backend lands: host facts are empty and every terminal launch still refuses
-/// instead of falling back to pipes.
+/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the beginner and expert
+/// forms share one ProcessSpec. Stable host facts advertise the Unix PTY and a
+/// policy controls the initial terminal size and mode.
 #[cfg(unix)]
 #[test]
-fn core_process_terminal_policy_and_capabilities_are_typed_and_fail_closed() {
+fn core_process_terminal_policy_and_capabilities_are_typed_and_resizable() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_process_terminal_policy_{}",
         std::process::id()
@@ -6010,8 +5989,8 @@ fn run() {
     print(facts.has(TerminalFact.raw))
     print(facts.has("preview_x"))
     if plan.run() == {
-        .Ok(_) -> { print("terminal launch unexpectedly succeeded") }
-        .Err(_) -> { print("terminal unavailable") }
+        .Ok(_) -> { print("terminal:ok") }
+        .Err(_) -> { print("terminal:unavailable") }
     }
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
@@ -6029,7 +6008,7 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "false\nfalse\nfalse\nfalse\nterminal unavailable\nplain child has no terminal\nplain\n"
+        "true\ntrue\ntrue\nfalse\nterminal:ok\nplain child has no terminal\nplain\n"
     );
 
     let typo = jet::compile(

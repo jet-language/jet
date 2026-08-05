@@ -1,0 +1,38 @@
+// D-DATA-PLOT1: one deterministic line-series model feeds text and SVG.
+use core.data as data
+
+#Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("csv")
+    groups :: data.group_sum(rows, t => t.team, t => t.minutes) ?? panic("group")
+    chart :: data.line_text(
+        groups,
+        "Minutes by team",
+        "Team",
+        "Minutes",
+        true,
+        8.0,
+        "dashed",
+        "#2f6f73",
+        "Minutes"
+    ) ?? panic("text")
+    svg :: data.line_svg(
+        groups,
+        "Minutes by team",
+        "Team",
+        "Minutes",
+        true,
+        8.0,
+        "dashed",
+        "#2f6f73",
+        "Minutes"
+    ) ?? panic("svg")
+    print(chart)
+    print("svg: {svg.starts_with(\"<svg\")}")
+}

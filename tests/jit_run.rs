@@ -64,7 +64,7 @@ fn skip_if_cranelift_host_unsupported() -> bool {
 /// reports what the AOT lens reports:
 ///   * `env_clear` still runs the command and captures its output;
 ///   * `detached` drops the streams, so the output is empty;
-///   * `terminal` refuses, because no PTY or ConPTY backend exists.
+///   * `terminal` runs through the native PTY backend and returns its output.
 ///
 /// The expected text is the recorded `jet run --release` stdout for the same
 /// program, so a divergence here is a lens gap.
@@ -87,9 +87,9 @@ fn run() {
     detached :: process.cmd(["echo", "y"]).detached().run() ?? panic("detached failed")
     print(detached.success)
     print("[{detached.output.trim()}]")
-    if process.cmd(["echo", "z"]).terminal().run() == {
-        .Ok(v) -> { print("terminal ok") }
-        .Err(e) -> { print("terminal err") }
+    if process.cmd(["printf", "z"]).terminal().run() == {
+        .Ok(v) -> { print(v.output.contains("z")) }
+        .Err(_) -> { print("terminal err") }
         else -> {}
     }
 }
@@ -106,7 +106,7 @@ fn run() {
             diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
         ),
     };
-    assert_eq!(stdout, "true\nx\ntrue\n[]\nterminal err\n");
+    assert_eq!(stdout, "true\nx\ntrue\n[]\ntrue\n");
     assert!(
         jet_jit::jit_executed_for_test(),
         "the builders must lower to host calls, not deopt"
@@ -119,10 +119,8 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#771): the expert policy,
+/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the expert policy,
 /// checked capability keys, and child terminal handle stay resident too.
-/// Until a PTY/ConPTY backend lands, capabilities are empty and both launch
-/// and resize fail closed.
 #[cfg(unix)]
 #[test]
 fn expert_terminal_model_runs_resident_and_fails_closed() {
@@ -148,9 +146,19 @@ fn run() {
     print(facts.has(TerminalFact.raw))
     print(facts.has("preview_x"))
     if plan.run() == {
-        .Ok(_) -> { print("terminal ok") }
+        .Ok(result) -> { print(result.output.contains("terminal")) }
         .Err(_) -> { print("terminal err") }
     }
+    terminal_child :: process.cmd(["printf", "child"]).terminal().spawn() ?? panic("terminal spawn failed")
+    if terminal_child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("terminal present")
+        }
+        .None -> { print("terminal absent") }
+    }
+    terminal_waited :: terminal_child.wait() ?? panic("terminal wait failed")
+    print(terminal_waited.output.contains("child"))
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
         .Val(session) -> {
@@ -177,7 +185,7 @@ fn run() {
     };
     assert_eq!(
         stdout,
-        "false\nfalse\nfalse\nfalse\nterminal err\nterminal absent\nplain\n"
+        "true\ntrue\ntrue\nfalse\ntrue\nterminal present\ntrue\nterminal absent\nplain\n"
     );
     assert!(
         jet_jit::jit_executed_for_test(),

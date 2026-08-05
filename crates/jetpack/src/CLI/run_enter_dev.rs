@@ -1704,6 +1704,47 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .iter()
         .map(|reference| reference.raw.as_str())
         .collect::<Vec<_>>();
+    let entry = find_project_entry(&plan.project_root);
+    let mut tasks = list_project_tasks(&entry);
+    for hook in plan
+        .environment
+        .lifecycle
+        .on_enter
+        .iter()
+        .chain(plan.environment.lifecycle.checks.iter())
+    {
+        if let ModuleEval::HookAction::Task(name) = &hook.action {
+            tasks.push(name.clone());
+        }
+    }
+    tasks.sort();
+    tasks.dedup();
+    let mut variable_sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut add_variable = |name: &str, source: String| {
+        let sources = variable_sources.entry(name.to_string()).or_default();
+        if !sources.iter().any(|existing| existing == &source) {
+            sources.push(source);
+        }
+    };
+    if let Some(profile) = &plan.environment.selected_profile {
+        for name in profile.variables.keys() {
+            add_variable(name, "profile".to_string());
+        }
+    }
+    for name in plan.environment.language_expansion.variables.keys() {
+        add_variable(name, "language".to_string());
+    }
+    for dotenv in &plan.environment.lifecycle.dotenv {
+        for name in &dotenv.allow {
+            add_variable(name, format!("dotenv:{}", dotenv.file));
+        }
+        for name in &dotenv.secrets {
+            add_variable(name, format!("dotenv-secret:{}", dotenv.file));
+        }
+    }
+    for name in &plan.environment.lifecycle.unset {
+        add_variable(name, "unset".to_string());
+    }
     if parsed.flags.json {
         let quote_list = |values: &[&str]| {
             values
@@ -1892,12 +1933,81 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 )
             })
             .collect::<Vec<_>>();
+        let package_profiles = plan
+            .environment
+            .package_profiles
+            .iter()
+            .map(|profile| {
+                let collisions = profile
+                    .collisions
+                    .iter()
+                    .map(|(path, provider)| {
+                        format!("{}:{}", crate::JSON::quote(path), crate::JSON::quote(provider))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "{{\"name\":{},\"extends\":[{}],\"packages\":[{}],\"collisions\":{{{}}},\"sources\":[{}]}}",
+                    crate::JSON::quote(&profile.name),
+                    quote_list(&profile.extends.iter().map(String::as_str).collect::<Vec<_>>()),
+                    quote_list(&profile.packages.iter().map(String::as_str).collect::<Vec<_>>()),
+                    collisions,
+                    quote_list(&profile.sources.iter().map(String::as_str).collect::<Vec<_>>()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let services = plan
+            .dev_services
+            .iter()
+            .map(|service| {
+                let ports = service
+                    .ports
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let after = service
+                    .after
+                    .iter()
+                    .map(|name| crate::JSON::quote(name))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let readiness = service.ready.is_some()
+                    || service.ready_probe.is_some()
+                    || !service.ports.is_empty();
+                format!(
+                    "{{\"name\":{},\"enabled\":{},\"ports\":[{}],\"readiness\":{},\"after\":[{}]}}",
+                    crate::JSON::quote(&service.name),
+                    service.enable,
+                    ports,
+                    readiness,
+                    after,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let variables = variable_sources
+            .iter()
+            .map(|(name, sources)| {
+                format!(
+                    "{{\"name\":{},\"sources\":[{}]}}",
+                    crate::JSON::quote(name),
+                    sources
+                        .iter()
+                        .map(|source| crate::JSON::quote(source))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         println!(
-            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"tasks\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(profile),
             quote_list(&selected_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
+            package_profiles.join(","),
             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
             plan.environment
                 .active_environment
@@ -1919,6 +2029,9 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             language_packs,
             language_projections,
             quote_list(&packages),
+            services,
+            quote_list(&tasks.iter().map(String::as_str).collect::<Vec<_>>()),
+            variables,
             quote_list(&files),
             dotenv.join(","),
             integrations.join(","),
@@ -1939,6 +2052,19 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     theme.detail(&format!("selected profiles: {selected}"));
     theme.detail(&format!("profiles: {applied}"));
+    theme.detail(&format!(
+        "package profiles: {}",
+        if plan.environment.package_profiles.is_empty() {
+            "<none>".to_string()
+        } else {
+            plan.environment
+                .package_profiles
+                .iter()
+                .map(|profile| profile.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    ));
     theme.detail(&format!(
         "active environment: {} (from {})",
         plan.environment
@@ -1994,6 +2120,30 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .collect::<Vec<_>>();
     theme.detail(&format!("language projections: {}", if expanded.is_empty() { "<none>".to_string() } else { expanded.join("; ") }));
     theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
+    let services = plan
+        .dev_services
+        .iter()
+        .map(|service| {
+            let state = if service.enable { "enabled" } else { "disabled" };
+            format!("{} ({state})", service.name)
+        })
+        .collect::<Vec<_>>();
+    theme.detail(&format!(
+        "services: {}",
+        if services.is_empty() { "<none>".to_string() } else { services.join(", ") }
+    ));
+    theme.detail(&format!(
+        "tasks: {}",
+        if tasks.is_empty() { "<none>".to_string() } else { tasks.join(", ") }
+    ));
+    let variables = variable_sources
+        .iter()
+        .map(|(name, sources)| format!("{} [{}]", name, sources.join(",")))
+        .collect::<Vec<_>>();
+    theme.detail(&format!(
+        "variables: {}",
+        if variables.is_empty() { "<none>".to_string() } else { variables.join(", ") }
+    ));
     theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
     let integrations = plan
         .environment

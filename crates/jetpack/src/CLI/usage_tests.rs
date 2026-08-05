@@ -23,6 +23,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools profile generation)
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
+  {bin} profile plan <name>             plan a source-backed package profile
   {bin} browser lock <engine> --binary <path>  lock a browser binary into .jet/lock
   {bin} browser provision <engine>@src realize and lock a browser package
   {bin} browser resolve <engine>       verify and print the locked browser
@@ -42,6 +43,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} test  [-p <member>…]           (workspace) realize/test selected members
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
+  {bin} hangar path                    print the resolved user Hangar path
   {bin} hangar export <entry> --to <archive.hangar>
                                       export one signed closure archive
   {bin} hangar import <archive.hangar> verify + import a signed archive
@@ -184,6 +186,16 @@ mod tests {
         assert_eq!(
             RuntimePolicy::verb_policy(Syntax::TOOL_SUBCOMMAND, &[]).verb,
             Syntax::TOOL_SUBCOMMAND
+        );
+    }
+
+    #[test]
+    fn package_profile_is_in_canonical_route_registry_and_help() {
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::PROFILE_SUBCOMMAND));
+        assert!(usage_with_color(false).contains("profile plan"));
+        assert_eq!(
+            RuntimePolicy::verb_policy(Syntax::PROFILE_SUBCOMMAND, &[]).verb,
+            Syntax::PROFILE_SUBCOMMAND
         );
     }
 

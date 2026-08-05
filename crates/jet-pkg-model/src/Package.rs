@@ -314,6 +314,7 @@ impl PackageFacts {
     pub fn compose_configs(&mut self, dir: &std::path::Path) -> Result<(), PackageParseError> {
         let configs = self.configs.clone();
         let mut parsed = Vec::with_capacity(configs.len());
+        let mut resolved_config_paths = self.resolved_config_paths.clone();
         for relative in configs {
             if self.inline_configs.contains_key(&relative) {
                 continue;
@@ -360,8 +361,8 @@ impl PackageFacts {
                 .expect("validated Config path must stay below Package root")
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
-            if !self.resolved_config_paths.contains(&relative_path) {
-                self.resolved_config_paths.push(relative_path);
+            if !resolved_config_paths.contains(&relative_path) {
+                resolved_config_paths.push(relative_path);
             }
             let text = std::fs::read_to_string(&path).map_err(|error| {
                 PackageParseError::Composition(format!(
@@ -373,6 +374,7 @@ impl PackageFacts {
         }
         self.compose(parsed)
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
+        self.resolved_config_paths = resolved_config_paths;
         Ok(())
     }
 
@@ -827,14 +829,20 @@ impl ConfigFacts {
 /// These files use the typed ecosystem surface rather than the compiler's
 /// ordinary module grammar. Validate with the same Package model that loads
 /// them, then apply one deterministic record layout for `jet fmt` and editor
-/// callers. Commented files retain their authored text because this small
-/// model formatter must not discard comments it does not own.
+/// callers. Files with comments fail closed until this model owns comment
+/// placement; returning an error is safer than reporting an unformatted file
+/// as clean or discarding authored comments.
 pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, String> {
     let origin = origin.into();
     let stripped = strip_comments(text);
     let trimmed = stripped.trim();
     if trimmed.is_empty() {
         return Err("Package or Config source is empty".to_string());
+    }
+    if stripped != text {
+        return Err(format!(
+            "Package or Config formatter cannot safely rewrite comments in `{origin}`"
+        ));
     }
 
     let is_config = config_wrapper(trimmed)
@@ -847,12 +855,6 @@ pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, St
     } else {
         PackageFacts::parse(text, origin)
             .map_err(|error| error.to_string())?;
-    }
-
-    if stripped != text {
-        let mut preserved = text.trim_end().to_string();
-        preserved.push('\n');
-        return Ok(preserved);
     }
 
     let entries = top_level_entries(text);
@@ -2577,6 +2579,34 @@ defaults: .{ run: app, test: check }
         let left = PackageFacts::parse(source, "/checkout/one/package.jet").unwrap();
         let right = PackageFacts::parse(source, "/checkout/two/package.jet").unwrap();
         assert_eq!(left.semantic_digest(), right.semantic_digest());
+    }
+
+    #[test]
+    fn config_composition_does_not_publish_paths_before_success() {
+        let dir = temp_dir("config-transaction");
+        let mut facts = PackageFacts::parse_uncomposed(
+            "name: \"demo\"\nconfigs: [first, second]\n",
+            dir.join("package.jet").display().to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("first.jet"),
+            "pub first :: Config.{ version: \"1\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("second.jet"),
+            "pub second :: Config.{ version: \"2\" }\n",
+        )
+        .unwrap();
+
+        let error = facts
+            .compose_configs(&dir)
+            .expect_err("a malformed later Config must abort composition");
+        assert!(error.to_string().contains("second.jet"), "{error}");
+        assert!(facts.resolved_config_paths.is_empty());
+        assert!(facts.version.is_none());
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

@@ -9,7 +9,7 @@ use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 use super::Environment::{
     EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion, LanguagePack,
-    LanguageProjection, LanguageSpec, ProfileSpec, ResolvedProfile,
+    LanguageProjection, LanguageSpec, PackageProfileSpec, ProfileSpec, ResolvedProfile,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +81,9 @@ pub struct EvaluatedModule {
     /// module and lowered into ordinary environment facts.
     pub integrations: Vec<EnvironmentIntegration>,
     pub environment_names: Vec<String>,
+    /// D-JPK-PROFILE1=D: source-backed package profile declarations. These
+    /// are not active environment profiles and never affect shell selection.
+    pub package_profiles: Vec<PackageProfileSpec>,
 }
 
 /// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
@@ -404,6 +407,9 @@ pub struct EnvPlan {
     /// D-ENV-INTEGRATIONS1: typed integrations before host realization.
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
+    /// D-JPK-PROFILE1=D: source-backed package-profile declarations. These
+    /// remain separate from the selected shell environment profile.
+    pub package_profiles: Vec<PackageProfileSpec>,
     pub environment_names: Vec<String>,
     /// The one environment profile whose packages/settings are active for this
     /// plan. `dev` is the deterministic beginner default when present.
@@ -429,4 +435,5 @@ pub struct EnvironmentFacts {
     pub files: Vec<super::Environment::ManagedFile>,
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
+    pub package_profiles: Vec<PackageProfileSpec>,
 }

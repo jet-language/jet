@@ -19,7 +19,7 @@ use super::DevService::evaluate_dev_service;
 use super::Environment::{
     files_from_value, lifecycle_from_field, languages_from_value, profiles_from_value,
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
-    LanguageSpec, ProfileSpec,
+    LanguageSpec, PackageProfileSpec, ProfileSpec,
 };
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -142,6 +142,7 @@ fn evaluate_module<'a>(
     let mut profiles = Vec::new();
     let mut languages = Vec::new();
     let mut files = Vec::new();
+    let mut package_profiles = Vec::new();
     let integrations = evaluate_integration_imports(&m.imports, base_dir, funcs, globals)?;
     let mut integration_secrets = Vec::new();
     for integration in &integrations {
@@ -203,6 +204,28 @@ fn evaluate_module<'a>(
             (Namespace::VmTest, ContribValue::VmTest(lit)) => {
                 vmtests.push(evaluate_vmtest(&c.path, lit, src, base_dir, funcs, globals)?);
             }
+            (Namespace::Profile, ContribValue::Profile(lit)) => {
+                package_profiles.push(evaluate_package_profile_fields(
+                    &c.path,
+                    &lit.fields,
+                    src,
+                    base_dir,
+                    funcs,
+                    globals,
+                    &m.name,
+                )?);
+            }
+            (Namespace::Profile, ContribValue::Expr(value)) => {
+                package_profiles.push(evaluate_package_profile_expr(
+                    &c.path,
+                    value,
+                    src,
+                    base_dir,
+                    funcs,
+                    globals,
+                    &m.name,
+                )?);
+            }
             // Namespace/value-shape mismatches can't occur: the parser pairs each
             // namespace with its dedicated value parser (see `contribution`).
             _ => unreachable!("contribution namespace/value shape mismatch"),
@@ -233,6 +256,7 @@ fn evaluate_module<'a>(
         files,
         integrations,
         environment_names,
+        package_profiles,
     })
 }
 
@@ -582,8 +606,216 @@ fn namespace_type(ns: Namespace) -> &'static str {
         Namespace::Image => Syntax::TYPE_IMAGE,
         Namespace::Fleet => Syntax::TYPE_FLEET,
         Namespace::VmTest => Syntax::TYPE_VMTEST,
+        Namespace::Profile => Syntax::TYPE_PROFILE,
         Namespace::Perf => Syntax::TYPE_BUDGET,
     }
+}
+
+fn evaluate_package_profile_expr(
+    name: &str,
+    value: &Expr,
+    src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+    module_name: &str,
+) -> Result<PackageProfileSpec, Diagnostic> {
+    let Expr::StructLit {
+        type_name, fields, ..
+    } = value
+    else {
+        return Err(not_a_namespace_literal(Syntax::TYPE_PROFILE, value.span()));
+    };
+    if !type_name.is_empty() && type_name != Syntax::TYPE_PROFILE {
+        return Err(wrong_namespace_type(Syntax::TYPE_PROFILE, type_name, value.span()));
+    }
+    evaluate_package_profile_fields(
+        name,
+        fields,
+        src,
+        base_dir,
+        funcs,
+        globals,
+        module_name,
+    )
+}
+
+fn evaluate_package_profile_fields(
+    name: &str,
+    fields: &[(String, crate::Diagnostics::Span, Expr)],
+    src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+    module_name: &str,
+) -> Result<PackageProfileSpec, Diagnostic> {
+    let allowed = [
+        Syntax::PROFILE_FIELD_EXTENDS,
+        Syntax::PROFILE_FIELD_PACKAGES,
+        Syntax::PROFILE_FIELD_COLLISIONS,
+    ];
+    let mut seen = HashSet::new();
+    for (field, span, _) in fields {
+        if !allowed.iter().any(|allowed| *allowed == field) {
+            return Err(Diagnostic::error(
+                "E1333",
+                format!("package profile `{name}` has unknown field `{field}`"),
+                "a source-backed package profile has only `extends`, `packages`, and `collisions` facts".to_string(),
+                "remove the field or move user/environment settings into a declared `user.<name>` profile".to_string(),
+                Some(*span),
+            ));
+        }
+        if !seen.insert(field) {
+            return Err(Diagnostic::error(
+                "E1332",
+                format!("package profile `{name}` repeats field `{field}`"),
+                "one package profile must have one value for each typed fact".to_string(),
+                "keep one declaration for the field, or split the profiles and compose them with `extends`".to_string(),
+                Some(*span),
+            ));
+        }
+    }
+    let field_map = fields
+        .iter()
+        .filter(|(field, _, _)| field != Syntax::PROFILE_FIELD_PACKAGES)
+        .map(|(field, span, value)| (field.clone(), (*span, value)))
+        .collect::<HashMap<_, _>>();
+    let computed = evaluate_named_fields(
+        &field_map,
+        globals,
+        funcs,
+        &HashSet::new(),
+        base_dir,
+        Some(src),
+        "package profile fields are pure computed values; a cycle has no deterministic evaluation order",
+        "break the cycle by making one profile field a literal or by moving the shared computation into a pure function",
+    )?;
+    let resolved = computed.values;
+    let mut packages = Vec::new();
+    for (field, _, value) in fields {
+        if field != Syntax::PROFILE_FIELD_PACKAGES {
+            continue;
+        }
+        let extracted = extract_packages(value, src)?;
+        for package in extracted.packages {
+            let raw = pkg_ref(&package);
+            if !packages.iter().any(|existing| existing == &raw) {
+                packages.push(raw);
+            }
+        }
+        if !extracted.adapters.is_empty() {
+            return Err(Diagnostic::error(
+                "E1335",
+                format!("package profile `{name}` contains an adapter package"),
+                "profile packages must retain provider identity and cannot hide a build recipe inside the profile declaration".to_string(),
+                "realize the adapter as a named package, then reference its exact package identity".to_string(),
+                Some(value.span()),
+            ));
+        }
+    }
+    let extends = match resolved.get(Syntax::PROFILE_FIELD_EXTENDS) {
+        None => Vec::new(),
+        Some(value) => names_from(value).ok_or_else(|| {
+            Diagnostic::error(
+                "E1333",
+                format!("package profile `{name}` has invalid `extends`"),
+                "profile inheritance is a deterministic list of profile names".to_string(),
+                "write `extends: [\"base\"]`".to_string(),
+                Some(value_span(fields, Syntax::PROFILE_FIELD_EXTENDS)),
+            )
+        })?,
+    };
+    let collisions = match resolved.get(Syntax::PROFILE_FIELD_COLLISIONS) {
+        None => BTreeMap::new(),
+        Some(value) => package_profile_collisions(value, name, fields)?,
+    };
+    Ok(PackageProfileSpec {
+        name: name.to_string(),
+        extends,
+        packages,
+        collisions,
+        sources: vec![module_name.to_string()],
+    })
+}
+
+fn value_span(
+    fields: &[(String, crate::Diagnostics::Span, Expr)],
+    name: &str,
+) -> crate::Diagnostics::Span {
+    fields
+        .iter()
+        .find(|(field, _, _)| field == name)
+        .map(|(_, span, _)| *span)
+        .unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0))
+}
+
+fn package_profile_collisions(
+    value: &crate::Comptime::CtValue,
+    name: &str,
+    fields: &[(String, crate::Diagnostics::Span, Expr)],
+) -> Result<BTreeMap<String, String>, Diagnostic> {
+    let entries = match value {
+        crate::Comptime::CtValue::Map(entries) => {
+            let mut out = Vec::new();
+            for (key, value) in entries {
+                let crate::Comptime::CtKey::Str(key) = key else {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        format!("package profile `{name}` has a non-string collision path"),
+                        "collision policy is an exact string path-to-provider map".to_string(),
+                        "use a quoted path as the map key".to_string(),
+                        Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+                    ));
+                };
+                out.push((key.clone(), value));
+            }
+            out
+        }
+        crate::Comptime::CtValue::Struct { fields, .. } => fields
+            .iter()
+            .map(|(key, value)| (key.clone(), value))
+            .collect::<Vec<_>>(),
+        _ => {
+            return Err(Diagnostic::error(
+                "E1333",
+                format!("package profile `{name}` has invalid `collisions`"),
+                "collision policy is an exact path-to-provider map".to_string(),
+                "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
+                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+            ));
+        }
+    };
+    let mut out = BTreeMap::new();
+    for (path, provider) in entries {
+        let Some(provider) = string_value(provider) else {
+            return Err(Diagnostic::error(
+                "E1333",
+                format!("package profile `{name}` has a non-string collision provider"),
+                "each exact path needs one explicit provider identity".to_string(),
+                "use a quoted package ref as the map value".to_string(),
+                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+            ));
+        };
+        if path.trim().is_empty() || provider.trim().is_empty() || path.contains('\0') {
+            return Err(Diagnostic::error(
+                "E1333",
+                format!("package profile `{name}` has an invalid collision entry"),
+                "exact collision paths and provider identities cannot be empty or contain NUL".to_string(),
+                "name the path and the exact package provider".to_string(),
+                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+            ));
+        }
+        if out.insert(path.clone(), provider).is_some() {
+            return Err(Diagnostic::error(
+                "E1332",
+                format!("package profile `{name}` repeats collision path `{path}`"),
+                "one profile cannot choose two providers for one exact path".to_string(),
+                "keep one collision selection for the path".to_string(),
+                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// E3402: builtins that perform ambient I/O or network access. A sandboxed

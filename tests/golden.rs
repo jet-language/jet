@@ -782,6 +782,7 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
+    let s = strip_mod(&s, "jet_process_pty");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
     // D-CRYPTO-RNG1=A: direct OS entropy calls and volatile zeroization live in

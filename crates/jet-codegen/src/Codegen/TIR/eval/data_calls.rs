@@ -453,6 +453,27 @@ impl<'a> EvalCtx<'a> {
                     Ok(v)
                 }
             }
+            "line_text" | "line_svg" => {
+                let argv = args
+                    .iter()
+                    .map(|arg| self.eval_expr(arg, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let v = apply_core_call(
+                    "core.data",
+                    method,
+                    argv,
+                    span,
+                    self.repl_mode,
+                )?;
+                if checked {
+                    match v {
+                        CtValue::Str(_) => Ok(ok(v)),
+                        other => Ok(other),
+                    }
+                } else {
+                    Ok(v)
+                }
+            }
             "series" => {
                 let values = self.eval_expr(&args[0], scope)?;
                 Ok(ct_struct(

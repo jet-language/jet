@@ -983,7 +983,9 @@ trailing `;` on statements (S6). General line width is not enforced in v1;
 long multi-clause loop headers wrap only after their canonical semicolons.
 
 `//` and `/* … */` comments are preserved and re-attached by source span. Real
-parse errors still block fmt.
+parse errors still block fmt. The typed `package.jet`/Config formatter is a
+separate closed-record path: when it sees comments, it fails closed until it
+owns their placement rather than reporting the source as clean unchanged.
 
 Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 `tests/ui/*.fixed.jet` (`tests/fmt.rs`).
@@ -2330,8 +2332,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer inputs handled
   by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
-  `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
-  `"./vendor/tool"`; Jetpack realizes `Recipe.copy()`,
+  `Pkg.adapt(name:, source:, deps:, recipe:)`. `source:` is a provider ref such as
+  `"./vendor/tool"`; each `deps:` package is realized and its verified executable
+  members are the only tools available to a `Recipe.build` `.exec` step. Jetpack realizes `Recipe.copy()`,
   `Recipe.prebuilt(bin:, as:)`, and finite `Recipe.build(steps: […])` actions
   (`.fetch`, `.exec`, `.install`, and `.install_tree`) into ordinary hangar
   packages, with the same store/lock path as any other package. `jetpack add

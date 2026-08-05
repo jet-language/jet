@@ -326,16 +326,22 @@ fn systemd_escape_path(path: &Path) -> String {
 
 #[cfg(unix)]
 fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> String {
+    let writable_paths = [
+        config.shared_root.join(".incoming"),
+        config.shared_root.join("hangar"),
+        config.shared_root.join(".locks"),
+    ]
+    .into_iter()
+    .map(|path| systemd_escape_path(&path))
+    .collect::<Vec<_>>()
+    .join(" ");
     format!(
-        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory=jet/shared-store/broker\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={} {}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={} {} {} {}\n",
+        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory=jet/shared-store/broker\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={} {}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
         systemd_escape_path(executable),
         systemd_escape_path(&config.trust_key),
         systemd_escape_path(&config.grants),
         systemd_escape_path(&config.trust_key.parent().unwrap_or(Path::new("/"))),
-        systemd_escape_path(&config.shared_root.join(".incoming")),
-        systemd_escape_path(&config.shared_root.join(".stage")),
-        systemd_escape_path(&config.shared_root.join("objects")),
-        systemd_escape_path(&config.shared_root.join("closure-db"))
+        writable_paths
     )
 }
 
@@ -1946,8 +1952,10 @@ mod tests {
         assert!(service.contains("StateDirectory=jet/shared-store/broker\n"));
         assert!(service.contains("ReadOnlyPaths=/var/lib/jet/shared-store/users"));
         assert!(service.contains(
-            "ReadWritePaths=/var/lib/jet/shared-store/root/.incoming /var/lib/jet/shared-store/root/.stage /var/lib/jet/shared-store/root/objects /var/lib/jet/shared-store/root/closure-db"
+            "ReadWritePaths=/var/lib/jet/shared-store/root/.incoming /var/lib/jet/shared-store/root/hangar /var/lib/jet/shared-store/root/.locks\n"
         ));
+        assert!(!service.contains("/var/lib/jet/shared-store/root/objects"));
+        assert!(!service.contains("/var/lib/jet/shared-store/root/closure-db"));
         assert!(service.contains("NoNewPrivileges=yes"));
         assert!(service.contains("RestrictAddressFamilies=AF_UNIX"));
     }

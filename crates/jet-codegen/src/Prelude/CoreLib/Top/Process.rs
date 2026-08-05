@@ -32,26 +32,35 @@ fn jet_process_spec_terminal_with_policy(
 }
 // D-PROCESS-SESSION2=D: an open keyed report lets new preview facts use String
 // keys without changing a public report type. Known facts come from the
-// checked TerminalFact namespace. No backend means no supported facts.
+// checked TerminalFact namespace. Unix PTY support advertises the three
+// stable facts; unsupported targets keep the set empty.
 fn jet_process_spec_capabilities(
     _spec: &jet_std::ProcessSpec,
 ) -> std::collections::HashSet<String> {
-    std::collections::HashSet::new()
+    let mut facts = std::collections::HashSet::new();
+    if jet_process_pty::supported() {
+        facts.insert("terminal".to_string());
+        facts.insert("resize".to_string());
+        facts.insert("raw".to_string());
+    }
+    facts
 }
-// D-PROCESS-SESSION1=A: a terminal session needs a Unix PTY or a Windows
-// ConPTY. Report the missing backend at launch. Running the child on plain
-// pipes instead would change what an interactive program prints, so the launch
-// fails rather than silently drop the terminal the caller asked for.
+// D-PROCESS-SESSION1=A: a terminal session needs a native backend. Running the
+// child on plain pipes instead would change what an interactive program prints,
+// so the launch fails rather than silently dropping the requested terminal.
 fn jet_process_terminal_backend_check(
     spec: &jet_std::ProcessSpec,
 ) -> Result<(), jet_std::IOError> {
     if spec.terminal.is_none() {
         return Ok(());
     }
+    if jet_process_pty::supported() {
+        return Ok(());
+    }
     Err(jet_std::IOError::other(
         jet_std::IOOperation::Resolve,
         spec.cmd.first().cloned(),
-        "terminal sessions need a PTY or ConPTY backend, and this build has none",
+        "terminal sessions need a native PTY or ConPTY backend, and this build has none",
     ))
 }
 fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
@@ -64,7 +73,7 @@ fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
         jet_std::ProcessStreamMode::Inherit => std::process::Stdio::inherit(),
     }
 }
-fn jet_process_command(
+fn jet_process_command_base(
     spec: &jet_std::ProcessSpec,
 ) -> Result<std::process::Command, jet_std::IOError> {
     if spec.cmd.is_empty() {
@@ -75,7 +84,6 @@ fn jet_process_command(
             Some("process command needs at least one word".to_string()),
         )));
     }
-    jet_process_terminal_backend_check(spec)?;
     let mut command = std::process::Command::new(&spec.cmd[0]);
     command.args(&spec.cmd[1..]);
     if let Some(cwd) = &spec.cwd {
@@ -121,10 +129,31 @@ fn jet_process_command(
     command.stderr(jet_process_stdio(&spec.stderr));
     Ok(command)
 }
+
+// Pipelines use ordinary pipe edges. A PTY session is one bidirectional byte
+// stream with one controlling process group, so it cannot be silently coerced
+// into a pipeline edge. Keep the failure explicit and direct callers to
+// `spawn()` for the terminal-backed child.
+fn jet_process_command(
+    spec: &jet_std::ProcessSpec,
+) -> Result<std::process::Command, jet_std::IOError> {
+    if spec.terminal.is_some() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "terminal sessions cannot be used as pipeline stages; spawn the session directly",
+        ));
+    }
+    jet_process_command_base(spec)
+}
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-    let mut command = jet_process_command(spec)?;
+    jet_process_terminal_backend_check(spec)?;
+    if spec.terminal.is_some() {
+        return jet_process_terminal_spawn(spec);
+    }
+    let mut command = jet_process_command_base(spec)?;
     if spec.detached {
         command.stdin(std::process::Stdio::null());
         command.stdout(std::process::Stdio::null());
@@ -134,18 +163,109 @@ fn jet_process_spec_spawn(
         jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
     })?;
     Ok(jet_std::ProcessChild {
-        stdin: std::rc::Rc::new(std::cell::RefCell::new(child.stdin.take())),
+        stdin: std::rc::Rc::new(std::cell::RefCell::new(
+            child.stdin.take().map(jet_std::ProcessStdin::Pipe),
+        )),
         stdout: std::rc::Rc::new(std::cell::RefCell::new(
-            child.stdout.take().map(std::io::BufReader::new),
+            child
+                .stdout
+                .take()
+                .map(jet_std::ProcessReader::Stdout)
+                .map(std::io::BufReader::new),
         )),
         stderr: std::rc::Rc::new(std::cell::RefCell::new(
-            child.stderr.take().map(std::io::BufReader::new),
+            child
+                .stderr
+                .take()
+                .map(jet_std::ProcessReader::Stderr)
+                .map(std::io::BufReader::new),
         )),
         terminal: None,
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
         started: std::time::Instant::now(),
     })
+}
+
+#[cfg(unix)]
+fn jet_process_terminal_spawn(
+    spec: &jet_std::ProcessSpec,
+) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    if spec.detached {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "terminal sessions cannot be detached",
+        ));
+    }
+    let policy = spec.terminal.as_ref().expect("terminal spawn needs policy");
+    let config = jet_process_pty::PtyConfig {
+        cols: policy.size.cols,
+        rows: policy.size.rows,
+        raw: matches!(policy.mode, jet_std::TerminalMode::Raw),
+    };
+    let pair = jet_process_pty::open(config).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
+    })?;
+    let mut command = jet_process_command_base(spec)?;
+    let stdin = pair.slave.try_clone().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    let stdout = pair.slave.try_clone().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    let stderr = pair.slave.try_clone().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    command.stdin(std::process::Stdio::from(stdin));
+    command.stdout(std::process::Stdio::from(stdout));
+    command.stderr(std::process::Stdio::from(stderr));
+    jet_process_pty::attach_command(&mut command).map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    let child = command.spawn().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
+    })?;
+    drop(pair.slave);
+    let master = std::rc::Rc::new(pair.master);
+    let stdin = master.as_ref().try_clone().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    let stdout = master.as_ref().try_clone().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+    })?;
+    Ok(jet_std::ProcessChild {
+        stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
+            jet_std::ProcessStdin::Terminal(stdin),
+        ))),
+        stdout: std::rc::Rc::new(std::cell::RefCell::new(Some(std::io::BufReader::new(
+            jet_std::ProcessReader::Terminal(stdout),
+        )))),
+        // A PTY has one combined output stream. Do not create a second reader
+        // on the same master: stderr is represented by the unified stdout
+        // stream, matching native terminal behavior.
+        stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        terminal: Some(jet_std::TerminalSession { master }),
+        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
+        timeout_ms: spec.timeout_ms,
+        started: std::time::Instant::now(),
+    })
+}
+
+#[cfg(not(unix))]
+fn jet_process_terminal_spawn(
+    spec: &jet_std::ProcessSpec,
+) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    jet_process_terminal_backend_check(spec)?;
+    Err(jet_std::IOError::other(
+        jet_std::IOOperation::Resolve,
+        spec.cmd.first().cloned(),
+        "terminal sessions need a native PTY or ConPTY backend, and this build has none",
+    ))
 }
 fn jet_process_drain_reader<R>(
     reader: Option<std::io::BufReader<R>>,
@@ -292,7 +412,18 @@ fn jet_process_child_wait(
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
+                #[cfg(unix)]
+                if child.terminal.is_some()
+                    && jet_process_pty::signal_group(inner.id(), jet_process_signal_kill()).is_err()
+                {
+                    inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
+                }
+                #[cfg(not(unix))]
                 inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
+                #[cfg(unix)]
+                if child.terminal.is_none() {
+                    inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
+                }
                 timed_out = true;
                 break inner.wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
             }
@@ -320,33 +451,124 @@ fn jet_process_child_wait(
     })
 }
 fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-    if let Some(inner) = child.inner.borrow_mut().as_mut() {
-        inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
-    }
-    Ok(())
+    jet_process_child_signal(child, jet_process_signal_kill())
 }
 fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-    jet_process_child_kill(child)
+    jet_process_child_signal(child, jet_process_signal_terminate())
 }
 fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-    jet_process_child_kill(child)
+    jet_process_child_signal(child, jet_process_signal_interrupt())
 }
 fn jet_terminal_session_resize(
-    _session: &jet_std::TerminalSession,
-    _size: &jet_std::TerminalSize,
+    session: &jet_std::TerminalSession,
+    size: &jet_std::TerminalSize,
 ) -> Result<(), jet_std::IOError> {
-    Err(jet_std::IOError::other(
-        jet_std::IOOperation::Resolve,
-        Some("process terminal".to_string()),
-        "this child has no terminal session",
-    ))
+    jet_process_pty::resize(
+        session.master.as_ref(),
+        jet_process_pty::PtyConfig {
+            cols: size.cols,
+            rows: size.rows,
+            raw: false,
+        },
+    )
+    .map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
+    })
+}
+
+impl std::io::Read for jet_std::ProcessReader {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let result = match self {
+            Self::Stdout(reader) => std::io::Read::read(reader, bytes),
+            Self::Stderr(reader) => std::io::Read::read(reader, bytes),
+            Self::Terminal(reader) => std::io::Read::read(reader, bytes),
+        };
+        match result {
+            Err(error) if matches!(self, Self::Terminal(_)) && jet_process_pty::is_terminal_eof(&error) => {
+                Ok(0)
+            }
+            other => other,
+        }
+    }
+}
+
+impl std::io::Write for jet_std::ProcessStdin {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Pipe(writer) => std::io::Write::write(writer, bytes),
+            Self::Terminal(writer) => std::io::Write::write(writer, bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Pipe(writer) => std::io::Write::flush(writer),
+            Self::Terminal(writer) => std::io::Write::flush(writer),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn jet_process_signal_interrupt() -> i32 {
+    jet_process_pty::SIGINT
+}
+
+#[cfg(not(unix))]
+fn jet_process_signal_interrupt() -> i32 {
+    0
+}
+
+#[cfg(unix)]
+fn jet_process_signal_terminate() -> i32 {
+    jet_process_pty::SIGTERM
+}
+
+#[cfg(not(unix))]
+fn jet_process_signal_terminate() -> i32 {
+    0
+}
+
+#[cfg(unix)]
+fn jet_process_signal_kill() -> i32 {
+    jet_process_pty::SIGKILL
+}
+
+#[cfg(not(unix))]
+fn jet_process_signal_kill() -> i32 {
+    0
+}
+
+fn jet_process_child_signal(
+    child: &jet_std::ProcessChild,
+    signal: i32,
+) -> Result<(), jet_std::IOError> {
+    if let Some(inner) = child.inner.borrow_mut().as_mut() {
+        #[cfg(unix)]
+        if child.terminal.is_some() {
+            if jet_process_pty::signal_group(inner.id(), signal).is_ok() {
+                return Ok(());
+            }
+        }
+        inner.kill().map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                error,
+            )
+        })?;
+    }
+    Ok(())
 }
 // D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
 // `loop line; child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
 // — sema restricts the field access + `.lines()` result to that position, E2502).
 fn jet_process_stdin_write(
-    handle: &std::rc::Rc<std::cell::RefCell<Option<std::process::ChildStdin>>>,
+    handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
     text: &String,
 ) -> Result<(), jet_std::IOError> {
     if let Some(stdin) = handle.borrow_mut().as_mut() {

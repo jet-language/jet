@@ -325,6 +325,48 @@ fn bar_svg_checked(groups: &[DataGroup]) -> Result<String, DataError> {
     Ok(out)
 }
 
+fn line_render_checked(
+    groups: &[DataGroup],
+    title: String,
+    x_label: String,
+    y_label: String,
+    markers: bool,
+    reference: f64,
+    style: String,
+    color: String,
+    legend: String,
+    svg: bool,
+) -> Result<String, DataError> {
+    let points = groups
+        .iter()
+        .map(|group| jet_foundation::DataPlot::LinePoint {
+            label: group.key.clone(),
+            value: group.sum,
+        })
+        .collect::<Vec<_>>();
+    let config = jet_foundation::DataPlot::LineConfig {
+        title,
+        x_label,
+        y_label,
+        markers,
+        reference,
+        style,
+        color,
+        legend,
+    };
+    jet_foundation::DataPlot::validate_line(&points, &config).map_err(|error| DataError {
+        kind: error.kind,
+        operation: if svg { "line_svg" } else { "line_text" }.into(),
+        reason: error.reason,
+        index: error.index,
+    })?;
+    Ok(if svg {
+        jet_foundation::DataPlot::render_line_svg(&points, &config)
+    } else {
+        jet_foundation::DataPlot::render_line_text(&points, &config)
+    })
+}
+
 struct DataStatus {
     step: String,
     path: String,
@@ -622,6 +664,72 @@ extern "C" fn jet_jit_data_bar_svg(groups: i64) -> i64 {
             crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
         }
     })
+}
+
+fn clone_heap_string(handle: i64) -> String {
+    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
+}
+
+fn line_result(result: Result<String, DataError>) -> i64 {
+    match result {
+        Ok(value) => Concurrency::with_runtime_mut(|rt| {
+            let handle = rt.heap.alloc_string(value);
+            crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
+        }),
+        Err(error) => result_data_err(error),
+    }
+}
+
+extern "C" fn jet_jit_data_line_text(
+    groups: i64,
+    title: i64,
+    x_label: i64,
+    y_label: i64,
+    markers: i64,
+    reference: i64,
+    style: i64,
+    color: i64,
+    legend: i64,
+) -> i64 {
+    let result = line_render_checked(
+        &load_groups(groups),
+        clone_heap_string(title),
+        clone_heap_string(x_label),
+        clone_heap_string(y_label),
+        markers != 0,
+        f64::from_bits(reference as u64),
+        clone_heap_string(style),
+        clone_heap_string(color),
+        clone_heap_string(legend),
+        false,
+    );
+    line_result(result)
+}
+
+extern "C" fn jet_jit_data_line_svg(
+    groups: i64,
+    title: i64,
+    x_label: i64,
+    y_label: i64,
+    markers: i64,
+    reference: i64,
+    style: i64,
+    color: i64,
+    legend: i64,
+) -> i64 {
+    let result = line_render_checked(
+        &load_groups(groups),
+        clone_heap_string(title),
+        clone_heap_string(x_label),
+        clone_heap_string(y_label),
+        markers != 0,
+        f64::from_bits(reference as u64),
+        clone_heap_string(style),
+        clone_heap_string(color),
+        clone_heap_string(legend),
+        true,
+    );
+    line_result(result)
 }
 
 extern "C" fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
@@ -1264,6 +1372,8 @@ pub(crate) struct DataHostFns {
     pub describe: FuncId,
     pub bar_text: FuncId,
     pub bar_svg: FuncId,
+    pub line_text: FuncId,
+    pub line_svg: FuncId,
     pub group_reduce: FuncId,
     pub group_reduce_limited: FuncId,
     pub error_show: FuncId,
@@ -1293,6 +1403,8 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_data_describe", jet_jit_data_describe as *const u8);
     builder.symbol("jet_jit_data_bar_text", jet_jit_data_bar_text as *const u8);
     builder.symbol("jet_jit_data_bar_svg", jet_jit_data_bar_svg as *const u8);
+    builder.symbol("jet_jit_data_line_text", jet_jit_data_line_text as *const u8);
+    builder.symbol("jet_jit_data_line_svg", jet_jit_data_line_svg as *const u8);
     builder.symbol(
         "jet_jit_data_group_reduce",
         jet_jit_data_group_reduce as *const u8,
@@ -1363,6 +1475,10 @@ pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
     sig_ternary.params.push(AbiParam::new(types::I64));
     let mut sig_quaternary = sig_ternary.clone();
     sig_quaternary.params.push(AbiParam::new(types::I64));
+    let mut sig_plot = sig_unary.clone();
+    for _ in 0..8 {
+        sig_plot.params.push(AbiParam::new(types::I64));
+    }
     let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -1376,6 +1492,8 @@ pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
         describe: import("jet_jit_data_describe", &sig_unary)?,
         bar_text: import("jet_jit_data_bar_text", &sig_unary)?,
         bar_svg: import("jet_jit_data_bar_svg", &sig_unary)?,
+        line_text: import("jet_jit_data_line_text", &sig_plot)?,
+        line_svg: import("jet_jit_data_line_svg", &sig_plot)?,
         group_reduce: import("jet_jit_data_group_reduce", &sig_ternary)?,
         group_reduce_limited: import("jet_jit_data_group_reduce_limited", &sig_ternary)?,
         error_show: import("jet_jit_data_error_show", &sig_unary)?,

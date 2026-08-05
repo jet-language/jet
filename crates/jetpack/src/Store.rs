@@ -1,7 +1,9 @@
 //! Jetpack state + store roots (D-JPK12; hangar per unified ecosystem U2).
 //!
-//! End-state roots are user-owned by default: `$XDG_STATE_HOME/jet` (or
-//! `~/.local/state/jet`) holds the content-addressed store — the **hangar**.
+//! End-state roots are user-owned by default: Linux uses
+//! `$XDG_DATA_HOME/jet` (or `~/.local/share/jet`), macOS uses
+//! `~/Library/Application Support/Jet`, and Windows uses
+//! `%LOCALAPPDATA%/Jet`; each holds the content-addressed **Hangar**.
 //! Jetpack *owns* the lifecycle even when the Nix provider realizes bytes into
 //! `/nix/store` — a Jetpack hangar entry is a small metadata record under our
 //! root that points at the realized output.
@@ -23,12 +25,13 @@
 //! leasing, GC). Re-exported here so every other call site in this crate is
 //! unchanged.
 pub use jet_pkg_model::Store::{
-    lock_path, managed_dir, parse_meta, resolve, CacheIdentity, ParsedMeta, Roots, StoreEntry,
+    legacy_user_hangar_dir, legacy_user_root, lock_path, managed_dir, parse_meta, resolve,
+    CacheIdentity, ParsedMeta, Roots, StoreEntry,
 };
 
 use crate::SHA256;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -71,6 +74,158 @@ pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
 /// `list_checked`.
 pub fn list(roots: &Roots) -> Vec<StoreEntry> {
     list_checked(roots).unwrap_or_default()
+}
+
+/// Move a pre-D-ECO-HANGARPATH1 user Hangar into the native per-user data
+/// path. The old tree stays in place, so an operator can roll back by removing
+/// the new tree and restoring the old resolver. A staging tree makes a crash
+/// visible instead of presenting a partial migration as a live Hangar.
+pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
+    if !roots.dev_mode {
+        return Ok(false);
+    }
+    let destination = roots.hangar_dir();
+    if fs::symlink_metadata(&destination).is_ok() {
+        return Ok(false);
+    }
+    let legacy_source = legacy_user_hangar_dir();
+    let mut sources = vec![legacy_source.clone(), PathBuf::from(crate::Syntax::HANGAR_DIR)];
+    sources.dedup();
+    let Some(source) = sources
+        .into_iter()
+        .find(|candidate| fs::symlink_metadata(candidate).is_ok())
+    else {
+        return Ok(false);
+    };
+    if source == destination {
+        return Ok(false);
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| std::io::Error::other("native Hangar path has no parent"))?;
+    let stage = parent.join(format!(
+        ".{}-migration.partial",
+        destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("hangar")
+    ));
+    let migrate_unlocked = || {
+        if fs::symlink_metadata(&destination).is_ok() {
+            return Ok(false);
+        }
+        if fs::symlink_metadata(&stage).is_ok() {
+            return Err(std::io::Error::other(format!(
+                "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
+                stage.display()
+            )));
+        }
+        fs::create_dir_all(parent)?;
+        copy_migration_tree(&source, &stage, &source)?;
+        sync_store_directory(&stage)?;
+        fs::rename(&stage, &destination)?;
+        sync_store_directory(parent)?;
+        Ok(true)
+    };
+    super::RuntimePolicy::with_lock(&roots.root, "hangar-migration", || {
+        if source == legacy_source {
+            super::RuntimePolicy::with_lock(
+                &legacy_user_root(),
+                "hangar-migration-source",
+                migrate_unlocked,
+            )
+        } else {
+            migrate_unlocked()
+        }
+    })
+}
+
+fn copy_migration_tree(source: &Path, destination: &Path, root: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        let target = fs::read_link(source)?;
+        if target.is_absolute() {
+            if !target.starts_with("/nix/store") {
+                return Err(std::io::Error::other(format!(
+                    "legacy Hangar symlink `{}` escapes the approved compatibility root",
+                    source.display()
+                )));
+            }
+        } else if !relative_target_stays_in_root(source, &target, root) {
+            return Err(std::io::Error::other(format!(
+                "legacy Hangar symlink `{}` escapes its migration root",
+                source.display()
+            )));
+        }
+        create_migration_symlink(&target, destination, source)?;
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        fs::create_dir(destination)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            copy_migration_tree(&entry.path(), &destination.join(entry.file_name()), root)?;
+        }
+        fs::set_permissions(destination, metadata.permissions())?;
+        return Ok(());
+    }
+    if metadata.is_file() {
+        fs::copy(source, destination)?;
+        fs::set_permissions(destination, metadata.permissions())?;
+        return Ok(());
+    }
+    Err(std::io::Error::other(format!(
+        "legacy Hangar contains unsupported node `{}`",
+        source.display()
+    )))
+}
+
+fn relative_target_stays_in_root(link: &Path, target: &Path, root: &Path) -> bool {
+    let Some(parent) = link.parent() else {
+        return false;
+    };
+    let Ok(relative_parent) = parent.strip_prefix(root) else {
+        return false;
+    };
+    let mut normalized = root.join(relative_parent);
+    for component in target.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => normalized.push(name),
+            std::path::Component::ParentDir => {
+                if normalized == root || !normalized.pop() {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn create_migration_symlink(target: &Path, destination: &Path, source: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, destination)
+    }
+    #[cfg(windows)]
+    {
+        let target_is_dir = fs::metadata(source)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if target_is_dir {
+            std::os::windows::fs::symlink_dir(target, destination)
+        } else {
+            std::os::windows::fs::symlink_file(target, destination)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, destination, source);
+        Err(std::io::Error::other(
+            "legacy Hangar migration needs symlink support on this host",
+        ))
+    }
 }
 
 /// Refresh the immutable producer facts after the Nix provider publishes the
@@ -274,6 +429,7 @@ pub enum RealizeRequest<'a> {
     },
     Adapter {
         plan: &'a jet_env_model::ModuleEval::AdapterPlan,
+        table: &'a super::RefSpec::SourceTable,
         expectation: &'a CacheExpectation,
     },
 }
@@ -1718,7 +1874,11 @@ pub fn realize_verified(
                 super::Provider::cache_expectation(spec, table, ctx),
             )
         }
-        RealizeRequest::Adapter { plan, expectation } => (
+        RealizeRequest::Adapter {
+            plan,
+            expectation,
+            ..
+        } => (
             format!("adapt:{}:{}", plan.name, plan.source),
             Some((*expectation).clone()),
         ),
@@ -1773,8 +1933,13 @@ pub fn realize_verified(
         RealizeRequest::Package { spec, table } => {
             super::Provider::realize(spec, table, ctx).map_err(RealizeError::Provider)?
         }
-        RealizeRequest::Adapter { plan, expectation } => {
-            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation)
+        RealizeRequest::Adapter {
+            plan,
+            table,
+            expectation,
+        } => {
+            let (tools, _dependency_leases) = realize_adapter_tools(roots, ctx, plan, table)?;
+            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation, &tools)
                 .map_err(RealizeError::Provider)?;
             bind_adapter_hook_identity(&mut realized, plan, expectation, ctx)
                 .map_err(RealizeError::Store)?;
@@ -1797,6 +1962,74 @@ pub fn realize_verified(
         source_state: realized.source_state,
         lease,
     })
+}
+
+/// Resolve every declared adapter dependency through the normal verified-store
+/// boundary and expose its exact executable members to the recipe. Keeping the
+/// leases alive for the duration of the adapter build prevents a dependency
+/// snapshot from disappearing while the child process is using it.
+fn realize_adapter_tools(
+    roots: &Roots,
+    ctx: &super::Provider::Ctx<'_>,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    table: &super::RefSpec::SourceTable,
+) -> Result<(HashMap<String, PathBuf>, Vec<CacheLease>), RealizeError> {
+    let mut tools = HashMap::new();
+    let mut dependency_leases = Vec::new();
+
+    for dependency in &plan.deps {
+        let raw = jet_env_model::ModuleEval::pkg_ref(dependency);
+        let spec = if dependency.source.is_empty()
+            || dependency.source == crate::Syntax::DEFAULT_SOURCE
+        {
+            // `default` is the typed surface's name for the built-in nixpkgs
+            // provider. It is not a named SourceTable entry.
+            super::RefSpec::RefSpec {
+                source: super::RefSpec::Source::Nixpkgs,
+                package: dependency.name.clone(),
+                raw,
+            }
+        } else {
+            super::RefSpec::classify_in(&raw, table).map_err(|error| {
+                RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
+                    "build dependency `{raw}` is not a resolvable package ref: {error:?}"
+                )))
+            })?
+        };
+        let realized = realize_verified(
+            roots,
+            ctx,
+            RealizeRequest::Package {
+                spec: &spec,
+                table,
+            },
+        )?;
+        let (_entry, _state, lease) = realized.into_parts();
+        let receipt = lease.profile_install_receipt().map_err(|error| {
+            RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
+                "build dependency `{}` has no verified executable output: {error}",
+                dependency.name
+            )))
+        })?;
+        for member in receipt.executable_members {
+            let path = lease.executable(&member).ok_or_else(|| {
+                RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
+                    "build dependency `{}` lost executable `{member}` from its verified lease",
+                    dependency.name
+                )))
+            })?;
+            if tools.insert(member.clone(), path).is_some() {
+                return Err(RealizeError::Provider(
+                    super::Provider::ProviderError::Adapter(format!(
+                        "build dependencies provide the same executable `{member}`"
+                    )),
+                ));
+            }
+        }
+        dependency_leases.push(lease);
+    }
+
+    Ok((tools, dependency_leases))
 }
 
 fn integrity_failure(

@@ -94,18 +94,19 @@ impl<'a> Parser<'a> {
             _ if ns_word == Syntax::NS_IMAGE => Namespace::Image,
             _ if ns_word == Syntax::NS_FLEET => Namespace::Fleet,
             _ if ns_word == Syntax::NS_VMTEST => Namespace::VmTest,
+            _ if ns_word == Syntax::NS_PROFILE => Namespace::Profile,
             _ if ns_word == Syntax::NS_PERF => Namespace::Perf,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), or `{}` (performance policy)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PERF
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), `{}` (a package profile), or `{}` (performance policy)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE, Syntax::NS_PERF
                     ),
                     format!(
-                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PERF
+                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE, Syntax::NS_PERF
                     ),
                     Some(ns_span),
                 ));
@@ -130,6 +131,7 @@ impl<'a> Parser<'a> {
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
         let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
         let mut vmtest_fields: Vec<crate::AST::VmTestField> = Vec::new();
+        let mut profile_fields: Vec<(String, Span, Expr)> = Vec::new();
         let mut perf_budgets: Option<(Span, Expr)> = None;
         let body_start = self.peek().span.start;
 
@@ -192,6 +194,14 @@ impl<'a> Parser<'a> {
                             self.bump();
                         }
                     }
+                    Namespace::Profile => {
+                        let (field, field_span) = self.expect_ident("for a package profile field")?;
+                        self.expect(TokKind::Colon, "after a package profile field")?;
+                        profile_fields.push((field, field_span, self.expr()?));
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
                     Namespace::Perf => {
                         let (field, field_span) = self.expect_ident("for a performance policy field")?;
                         self.expect(TokKind::Colon, "after a performance policy field")?;
@@ -240,6 +250,10 @@ impl<'a> Parser<'a> {
             Namespace::VmTest => crate::AST::ContribValue::VmTest(crate::AST::VmTestLit {
                 explicit_type: None,
                 fields: vmtest_fields,
+                span: body_span,
+            }),
+            Namespace::Profile => crate::AST::ContribValue::Profile(crate::AST::ProfileLit {
+                fields: profile_fields,
                 span: body_span,
             }),
             Namespace::Perf => {
@@ -984,18 +998,19 @@ impl<'a> Parser<'a> {
             Syntax::NS_IMAGE => Namespace::Image,
             Syntax::NS_FLEET => Namespace::Fleet,
             Syntax::NS_VMTEST => Namespace::VmTest,
+            Syntax::NS_PROFILE => Namespace::Profile,
             Syntax::NS_PERF => Namespace::Perf,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_name),
                     format!(
-                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), and `{}` (a VM test)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
+                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), and `{}` (a package profile)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE
                     ),
                     format!(
-                        "begin the contribution with `{}`, `{}`, `{}`, `{}`, or `{}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
+                        "begin the contribution with `{}`, `{}`, `{}`, `{}`, `{}`, or `{}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PROFILE
                     ),
                     Some(ns_span),
                 ));
@@ -1016,6 +1031,7 @@ impl<'a> Parser<'a> {
             Namespace::Image => crate::AST::ContribValue::Image(self.image_lit()?),
             Namespace::Fleet => crate::AST::ContribValue::Fleet(self.fleet_lit()?),
             Namespace::VmTest => crate::AST::ContribValue::VmTest(self.vmtest_lit()?),
+            Namespace::Profile => crate::AST::ContribValue::Expr(self.expr()?),
             Namespace::Perf => {
                 return Err(Diagnostic::error(
                     "E2903",

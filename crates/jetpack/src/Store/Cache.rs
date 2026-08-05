@@ -91,16 +91,16 @@ impl CacheEndpoint {
                 credential: true,
                 credential_required: false,
             },
-            // Jetpack has no rootless projected-store or typed Nix transfer
-            // adapter yet. Do not advertise the raw `nix` CLI path: the
-            // fail-closed capability is the only honest fallback until the
-            // ratified Nix store projection exists.
+            // Nix transfers use the dedicated path-info/verify/copy adapter
+            // below. They do not use cache-object PUT/GET or remote
+            // execution, and Jetpack credentials are not implicitly attached
+            // to the host's Nix configuration.
             Self::Nix(_) => EndpointCapabilities {
-                read: false,
-                write: false,
+                read: true,
+                write: true,
                 promote: false,
                 remote_execute: false,
-                trust: false,
+                trust: true,
                 credential: false,
                 credential_required: false,
             },
@@ -2253,17 +2253,30 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_nix_store_and_credential_adapters_fail_closed() {
+    fn nix_store_transfer_uses_typed_capabilities_and_rejects_ambient_credentials() {
         let nix = parse_endpoint("daemon://").unwrap();
-        assert!(!nix.capabilities().read);
+        let capabilities = nix.capabilities();
+        assert!(capabilities.read);
+        assert!(capabilities.write);
+        assert!(capabilities.trust);
+        assert!(!capabilities.promote);
+        assert!(!capabilities.remote_execute);
+        let host_bound = CacheBinding {
+            role: "remote".to_string(),
+            mirrors: vec!["daemon://".to_string()],
+            trust_key: PathBuf::from("/tmp/cache.key"),
+            credential_provider: None,
+            allow_write: false,
+        };
+        assert!(host_bound.validate().is_ok());
         let binding = CacheBinding {
             role: "remote".to_string(),
-            mirrors: vec!["ssh://cache.example/var/cache/jet".to_string()],
+            mirrors: vec!["daemon://".to_string()],
             trust_key: PathBuf::from("/tmp/cache.key"),
             credential_provider: Some("host-keychain".to_string()),
             allow_write: false,
         };
         let error = binding.validate().unwrap_err();
-        assert!(error.to_string().contains("typed credential adapter"), "{error}");
+        assert!(error.to_string().contains("typed credential"), "{error}");
     }
 }

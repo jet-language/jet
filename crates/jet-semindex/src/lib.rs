@@ -325,7 +325,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("package.jet"),
-            "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\n",
+            "name: \"demo\"\nversion: \"0.1.0\"\njet: \"0.4\"\nservices: .{ cache: .{ enable: true, ports: [6379], ready: \"ping\" } }\nenvironments: .{ dev: .Environment.{ tools: [\"git\"], services: .{ cache: .{ enable: true, ports: [6379] } }, secrets: .{ token: \"x\" } } }\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\ndev :: Config.{ source: \"local\" }\n",
         )
         .unwrap();
         std::fs::write(
@@ -348,6 +348,17 @@ mod tests {
         let json = index.to_json();
         assert!(json.contains("\"package_facts\""));
         assert!(json.contains("\"semantic_digest\":\""));
+        for field in [
+            "\"jet\":\"0.4\"",
+            "\"services\":{\"cache\"",
+            "\"environments\":{\"dev\"",
+            "\"defaults\":{\"run\":\"app\"}",
+            "\"resolved_config_paths\":[\"release.jet\"]",
+            "\"inline_configs\":{\"dev\"",
+            "\"kind\":\"executable\"",
+        ] {
+            assert!(json.contains(field), "package projection omitted {field}: {json}");
+        }
         assert!(json.contains("release.jet"));
         let _ = std::fs::remove_dir_all(root);
     }

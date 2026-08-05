@@ -3,7 +3,7 @@ use super::realize::{
     channel_download_size_from_fixture, channel_sources, load_project_plan, offline_refusal,
     report_provider_error, resolve_source_channel,
 };
-use super::workspace_sources::fixtures_for;
+use super::workspace_sources::{fixtures_for, workspace_root};
 use crate::Output::{self, Theme};
 use crate::Store::{self, Roots};
 use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
@@ -435,7 +435,7 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
         .map(|(package, _)| package)
         .unwrap_or(reference)
         .to_string();
-    let workspace = std::env::current_dir().unwrap_or_default();
+    let workspace = workspace_root(&std::env::current_dir().unwrap_or_default());
     let path = workspace.join(Syntax::WORKSPACE_FILE);
     let existing = std::fs::read_to_string(&path).ok();
     let next = Overlay::draft_overlay_source(

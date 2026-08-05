@@ -84,6 +84,11 @@ fn flagship_analysis_example_matches_golden_aot() {
 }
 
 #[test]
+fn line_plot_example_matches_golden_aot() {
+    assert_example_matches_golden("data_line");
+}
+
+#[test]
 fn hostile_data_corpus_matches_golden_aot() {
     assert_example_matches_golden("data_hostile");
 }

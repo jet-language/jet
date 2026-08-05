@@ -281,6 +281,48 @@ fn as_data_groups(v: &CtValue, span: Span) -> Result<Vec<(String, i64)>, Diagnos
     }
 }
 
+fn as_line_groups(
+    v: &CtValue,
+    span: Span,
+) -> Result<Vec<jet_foundation::DataPlot::LinePoint>, Diagnostic> {
+    match v {
+        CtValue::List(xs) => xs
+            .iter()
+            .map(|x| match x {
+                CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
+                    let label = fields
+                        .iter()
+                        .find(|(name, _)| name == "key")
+                        .and_then(|(_, value)| match value {
+                            CtValue::Str(value) => Some(value.clone()),
+                            _ => None,
+                        });
+                    let value = fields
+                        .iter()
+                        .find(|(name, _)| name == "sum")
+                        .and_then(|(_, value)| match value {
+                            CtValue::Float(value) => Some(value.as_f64()),
+                            CtValue::Int(value) => Some(*value as f64),
+                            _ => None,
+                        });
+                    match (label, value) {
+                        (Some(label), Some(value)) => Ok(jet_foundation::DataPlot::LinePoint {
+                            label,
+                            value,
+                        }),
+                        _ => Err(unsupported(
+                            "core.data: a \`DataGroup\` needs \`key: String\` and \`sum: Float\`",
+                            span,
+                        )),
+                    }
+                }
+                _ => Err(unsupported("core.data: argument must be \`[DataGroup]\`", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("core.data: argument must be \`[DataGroup]\`", span)),
+    }
+}
+
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 fn hex_encode(bytes: Vec<u8>) -> String {
@@ -2100,6 +2142,47 @@ pub fn apply_core_call(
             one(0)?,
             span,
         )?))),
+        ("core.data", "line_text" | "line_svg") => {
+            let points = as_line_groups(one(0)?, span)?;
+            let markers = match one(4)? {
+                CtValue::Bool(value) => *value,
+                _ => {
+                    return Err(unsupported(
+                        "core.data line plots need a Bool marker flag",
+                        span,
+                    ))
+                }
+            };
+            let config = jet_foundation::DataPlot::LineConfig {
+                title: as_string(one(1)?, span)?.to_string(),
+                x_label: as_string(one(2)?, span)?.to_string(),
+                y_label: as_string(one(3)?, span)?.to_string(),
+                markers,
+                reference: as_float(one(5)?, span)?,
+                style: as_string(one(6)?, span)?.to_string(),
+                color: as_string(one(7)?, span)?.to_string(),
+                legend: as_string(one(8)?, span)?.to_string(),
+            };
+            if let Err(error) = jet_foundation::DataPlot::validate_line(&points, &config) {
+                let index = error
+                    .index
+                    .map(|index| format!(", index {index}"))
+                    .unwrap_or_default();
+                return Err(unsupported(
+                    &format!(
+                        "core.data.{method}: {}{}: {}",
+                        error.kind, index, error.reason
+                    ),
+                    span,
+                ));
+            }
+            let rendered = if method == "line_text" {
+                jet_foundation::DataPlot::render_line_text(&points, &config)
+            } else {
+                jet_foundation::DataPlot::render_line_svg(&points, &config)
+            };
+            Ok(CtValue::Str(rendered))
+        }
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
             as_string(one(0)?, span)?.chars().count() as i64,

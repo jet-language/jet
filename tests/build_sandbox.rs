@@ -94,6 +94,74 @@ fn sandbox_tool_must_be_a_dep_e1238() {
     std::fs::remove_dir_all(&base).ok();
 }
 
+#[test]
+fn sandbox_tool_path_must_be_an_absolute_realized_artifact() {
+    let base = scratch("relative-tool");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    std::fs::create_dir_all(&src).unwrap();
+    let mut tools = HashMap::new();
+    tools.insert("cc".to_string(), PathBuf::from("cc"));
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![BuildStep::Exec {
+            tool: "cc".to_string(),
+            args: vec![],
+        }],
+    };
+    assert_eq!(Recipe::validate(&recipe, &ctx).unwrap_err().code, "E1238");
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn build_hook_does_not_inherit_host_credentials() {
+    let base = scratch("clean-env");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    std::fs::create_dir_all(&src).unwrap();
+
+    let secret_name = "JET_TEST_SECRET_DO_NOT_LEAK";
+    let previous = std::env::var_os(secret_name);
+    std::env::set_var(secret_name, "sentinel");
+    let mut tools = HashMap::new();
+    tools.insert("sh".to_string(), PathBuf::from("/bin/sh"));
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![BuildStep::Exec {
+            tool: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    "test \"${{{secret_name}:-}}\" = \"\" && printf clean > \"$JET_BUILD_OUTPUT/clean\""
+                ),
+            ],
+        }],
+    };
+    let result = Recipe::run(&recipe, &ctx, None);
+    match previous {
+        Some(value) => std::env::set_var(secret_name, value),
+        None => std::env::remove_var(secret_name),
+    }
+    result.unwrap();
+    assert_eq!(std::fs::read_to_string(out.join("clean")).unwrap(), "clean");
+    std::fs::remove_dir_all(&base).ok();
+}
+
 #[cfg(unix)]
 #[test]
 fn failed_recipe_preserves_previous_output_and_removes_partial_stage() {

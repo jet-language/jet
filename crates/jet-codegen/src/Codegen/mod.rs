@@ -688,6 +688,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     // `jet_process_spec_run_inner`) — emit whenever either surface is needed (I9).
     // Process must come before FSIoEnvOsTesting so those symbols are in scope.
     if needs_process || needs_fs_runtime {
+        out.push_str("\nmod jet_process_pty {\n");
+        out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
+        out.push_str("\n}\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
@@ -704,6 +707,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         // Encoding templates already in kernel closure.
     }
     if needs_data {
+        out.push_str("mod jet_data_plot {\n");
+        out.push_str(include_str!("../../../jet-foundation/src/DataPlot.rs"));
+        out.push_str("\n}\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }

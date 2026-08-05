@@ -16,8 +16,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The subdir of the resolved root that holds the content-addressed store.
-/// Mirrors the trailing segment of the historical `Syntax::HANGAR_DIR`.
+/// D-ECO-HANGARPATH1 uses the platform's native data-directory spelling.
+#[cfg(any(target_os = "macos", windows))]
+const HANGAR_SUBDIR: &str = "Hangar";
+#[cfg(not(any(target_os = "macos", windows)))]
 const HANGAR_SUBDIR: &str = "hangar";
+const LEGACY_HANGAR_SUBDIR: &str = "hangar";
 
 /// The resolved root, plus whether we are using the default user-owned root.
 pub struct Roots {
@@ -28,7 +32,13 @@ pub struct Roots {
 impl Roots {
     /// The global content-addressed store (hangar) under this root.
     pub fn hangar_dir(&self) -> PathBuf {
-        self.root.join(HANGAR_SUBDIR)
+        self.root.join(if self.dev_mode {
+            HANGAR_SUBDIR
+        } else {
+            // Explicit JETPACK_ROOT and administrator-owned broker roots keep
+            // their historical lower-case child for test/custom-root parity.
+            LEGACY_HANGAR_SUBDIR
+        })
     }
 }
 
@@ -43,10 +53,10 @@ pub fn lock_path(project: &Path) -> PathBuf {
     managed_dir(project).join("lock")
 }
 
-/// Resolve the Jetpack root with a dev-mode fallback.
+/// Resolve the Jetpack root with a user-owned default.
 ///
 /// 1. `JETPACK_ROOT` if set (tests, custom installs).
-/// 2. `$XDG_STATE_HOME/jet` (or `~/.local/state/jet`) in dev mode otherwise.
+/// 2. The platform data directory from D-ECO-HANGARPATH1 otherwise.
 pub fn resolve() -> Roots {
     if let Some(dir) = std::env::var_os("JETPACK_ROOT") {
         return Roots {
@@ -55,19 +65,58 @@ pub fn resolve() -> Roots {
         };
     }
     Roots {
-        root: dev_root(),
+        root: user_data_root(),
         dev_mode: true,
     }
 }
 
-fn dev_root() -> PathBuf {
-    if let Some(x) = std::env::var_os("XDG_STATE_HOME") {
-        return PathBuf::from(x).join("jet");
+fn home_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        return std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
     }
-    let home = std::env::var_os("HOME")
+    #[cfg(not(windows))]
+    std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".local").join("state").join("jet")
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn user_data_root() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        return home_dir().join("Library").join("Application Support").join("Jet");
+    }
+    #[cfg(windows)]
+    {
+        return std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir().join("AppData").join("Local"))
+            .join("Jet");
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir().join(".local").join("share"))
+            .join("jet")
+    }
+}
+
+/// The pre-D-ECO-HANGARPATH1 user root. It is kept as a migration source only;
+/// new resolution never selects it.
+pub fn legacy_user_root() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".local").join("state"))
+        .join("jet")
+}
+
+/// The old Hangar path used by the pre-D-ECO-HANGARPATH1 resolver.
+pub fn legacy_user_hangar_dir() -> PathBuf {
+    legacy_user_root().join(LEGACY_HANGAR_SUBDIR)
 }
 
 /// A realized package recorded under the Jetpack store.
@@ -315,4 +364,34 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Roots;
+    use std::path::PathBuf;
+
+    #[test]
+    fn hangar_dir_uses_the_native_leaf() {
+        let roots = Roots {
+            root: PathBuf::from("/tmp/jet-root"),
+            dev_mode: true,
+        };
+        let expected_leaf = if cfg!(any(target_os = "macos", windows)) {
+            "Hangar"
+        } else {
+            "hangar"
+        };
+        assert_eq!(roots.hangar_dir(), PathBuf::from("/tmp/jet-root").join(expected_leaf));
+    }
+
+    #[test]
+    fn explicit_root_keeps_the_custom_hangar_child() {
+        let roots = Roots {
+            root: PathBuf::from("/tmp/jet-root"),
+            dev_mode: false,
+        };
+        assert_eq!(roots.hangar_dir(), PathBuf::from("/tmp/jet-root/hangar"));
+    }
+
 }

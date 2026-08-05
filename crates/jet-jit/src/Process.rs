@@ -6,6 +6,8 @@ use super::Concurrency;
 use super::CoreHost::{
     jit_env_key_eq, jit_env_snapshot_raw, jit_env_validate_name, jit_env_validate_value,
 };
+use jet_codegen::process_pty::{self, PtyConfig};
+use std::fs::File;
 use std::io::{BufRead, Read};
 use std::time::Instant;
 
@@ -34,6 +36,31 @@ impl StreamMode {
     }
 }
 
+#[derive(Debug)]
+enum JitProcessReader {
+    Stdout(std::process::ChildStdout),
+    Stderr(std::process::ChildStderr),
+    Terminal(File),
+}
+
+impl Read for JitProcessReader {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let result = match self {
+            Self::Stdout(reader) => reader.read(bytes),
+            Self::Stderr(reader) => reader.read(bytes),
+            Self::Terminal(reader) => reader.read(bytes),
+        };
+        match result {
+            Err(error)
+                if matches!(self, Self::Terminal(_)) && process_pty::is_terminal_eof(&error) =>
+            {
+                Ok(0)
+            }
+            other => other,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct JitProcessSpec {
     cmd: Vec<String>,
@@ -43,7 +70,7 @@ pub(crate) struct JitProcessSpec {
     output_limit: Option<i64>,
     env_clear: bool,
     detached: bool,
-    terminal: bool,
+    terminal: Option<PtyConfig>,
     cwd: Option<String>,
     env_set: Vec<(String, String)>,
     env_remove: Vec<String>,
@@ -59,7 +86,7 @@ impl JitProcessSpec {
             output_limit: None,
             env_clear: false,
             detached: false,
-            terminal: false,
+            terminal: None,
             cwd: None,
             env_set: Vec::new(),
             env_remove: Vec::new(),
@@ -69,8 +96,9 @@ impl JitProcessSpec {
 
 pub(crate) struct JitProcessChild {
     inner: Option<std::process::Child>,
-    stdout: Option<std::io::BufReader<std::process::ChildStdout>>,
-    stderr: Option<std::io::BufReader<std::process::ChildStderr>>,
+    stdout: Option<std::io::BufReader<JitProcessReader>>,
+    stderr: Option<std::io::BufReader<JitProcessReader>>,
+    terminal_master: Option<File>,
     timeout_ms: Option<i64>,
     started: Instant,
 }
@@ -178,19 +206,9 @@ fn clone_spec(handle: i64) -> Option<JitProcessSpec> {
     })
 }
 
-fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String> {
+fn build_command_base(spec: &JitProcessSpec) -> Result<std::process::Command, String> {
     if spec.cmd.is_empty() {
         return Err("process command needs at least one word".to_string());
-    }
-    // D-PROCESS-SESSION1=A: same refusal as `jet_process_terminal_backend_check`
-    // in the AOT prelude, and the same text `IOError::jet_show` prints there, so
-    // both lenses report one message. No PTY/ConPTY backend exists in either.
-    if spec.terminal {
-        return Err(format!(
-            "I/O error during resolve `{}`: \
-             terminal sessions need a PTY or ConPTY backend, and this build has none",
-            spec.cmd[0]
-        ));
     }
     let first = &spec.cmd[0];
     let mut command = if first.ends_with(".jet") {
@@ -250,6 +268,16 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
     Ok(command)
 }
 
+fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String> {
+    if spec.terminal.is_some() {
+        return Err(
+            "I/O error during resolve: terminal sessions cannot be used as pipeline stages; spawn the session directly"
+                .to_string(),
+        );
+    }
+    build_command_base(spec)
+}
+
 /// `jet_process_spec_spawn` in the AOT prelude drops every stream for a
 /// detached child. Same rule here, so `run()` and `spawn()` report the same
 /// empty output under both lenses.
@@ -286,14 +314,80 @@ fn join_drain(
         .map_err(|e| format!("process {stream}: {e}"))
 }
 
+fn spawn_process(
+    spec: &JitProcessSpec,
+) -> Result<(
+    std::process::Child,
+    Option<std::io::BufReader<JitProcessReader>>,
+    Option<std::io::BufReader<JitProcessReader>>,
+    Option<File>,
+), String> {
+    if let Some(config) = spec.terminal {
+        if spec.detached {
+            return Err("terminal sessions cannot be detached".to_string());
+        }
+        let pair = process_pty::open(config).map_err(|error| {
+            format!(
+                "I/O error during resolve `{}`: {error}",
+                spec.cmd.first().cloned().unwrap_or_default()
+            )
+        })?;
+        let mut command = build_command_base(spec)?;
+        let stdin = pair
+            .slave
+            .try_clone()
+            .map_err(|error| format!("process terminal stdin: {error}"))?;
+        let stdout = pair
+            .slave
+            .try_clone()
+            .map_err(|error| format!("process terminal stdout: {error}"))?;
+        let stderr = pair
+            .slave
+            .try_clone()
+            .map_err(|error| format!("process terminal stderr: {error}"))?;
+        command.stdin(std::process::Stdio::from(stdin));
+        command.stdout(std::process::Stdio::from(stdout));
+        command.stderr(std::process::Stdio::from(stderr));
+        process_pty::attach_command(&mut command)
+            .map_err(|error| format!("process terminal setup: {error}"))?;
+        let child = command
+            .spawn()
+            .map_err(|error| format!("spawn {}: {error}", spec.cmd.first().cloned().unwrap_or_default()))?;
+        drop(pair.slave);
+        let terminal_output = pair
+            .master
+            .try_clone()
+            .map_err(|error| format!("process terminal reader: {error}"))?;
+        Ok((
+            child,
+            Some(std::io::BufReader::new(JitProcessReader::Terminal(
+                terminal_output,
+            ))),
+            None,
+            Some(pair.master),
+        ))
+    } else {
+        let mut command = build_command(spec)?;
+        apply_detached(spec, &mut command);
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("spawn {}: {error}", spec.cmd.first().cloned().unwrap_or_default()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .map(JitProcessReader::Stdout)
+            .map(std::io::BufReader::new);
+        let stderr = child
+            .stderr
+            .take()
+            .map(JitProcessReader::Stderr)
+            .map(std::io::BufReader::new);
+        Ok((child, stdout, stderr, None))
+    }
+}
+
 fn run_spec(spec: &JitProcessSpec) -> Result<RunOutcome, String> {
-    let mut command = build_command(spec)?;
-    apply_detached(spec, &mut command);
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("spawn {}: {e}", spec.cmd.first().cloned().unwrap_or_default()))?;
-    let stdout = child.stdout.take().map(std::io::BufReader::new);
-    let stderr = child.stderr.take().map(std::io::BufReader::new);
+    let (mut child, stdout, stderr, _terminal_master) = spawn_process(spec)?;
     let stdout_drain = drain_reader(stdout);
     let stderr_drain = drain_reader(stderr);
     let started = Instant::now();
@@ -305,7 +399,12 @@ fn run_spec(spec: &JitProcessSpec) -> Result<RunOutcome, String> {
                 if let Some(timeout) = spec.timeout_ms {
                     if started.elapsed() >= std::time::Duration::from_millis(timeout.max(0) as u64)
                     {
-                        let _ = child.kill();
+                        if spec.terminal.is_some() {
+                            let _ = process_pty::signal_group(child.id(), process_pty::SIGKILL)
+                                .or_else(|_| child.kill());
+                        } else {
+                            let _ = child.kill();
+                        }
                         timed_out = true;
                         break child.wait().map_err(|e| format!("wait after kill: {e}"))?;
                     }
@@ -500,27 +599,16 @@ extern "C" fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
     let Some(s) = clone_spec(spec) else {
         return result_err_msg("invalid ProcessSpec");
     };
-    let mut command = match build_command(&s) {
-        Ok(c) => c,
-        Err(e) => return result_err_msg(&e),
+    let (child, stdout, stderr, terminal_master) = match spawn_process(&s) {
+        Ok(value) => value,
+        Err(error) => return result_err_msg(&error),
     };
-    apply_detached(&s, &mut command);
-    let mut child = match command.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return result_err_msg(&format!(
-                "spawn {}: {e}",
-                s.cmd.first().cloned().unwrap_or_default()
-            ))
-        }
-    };
-    let stdout = child.stdout.take().map(std::io::BufReader::new);
-    let stderr = child.stderr.take().map(std::io::BufReader::new);
     let handle = Concurrency::with_runtime_mut(|rt| {
         rt.process_children.push(JitProcessChild {
             inner: Some(child),
             stdout,
             stderr,
+            terminal_master,
             timeout_ms: s.timeout_ms,
             started: Instant::now(),
         });
@@ -547,29 +635,104 @@ extern "C" fn jet_jit_process_spec_detached(spec: i64) -> i64 {
     }
 }
 
+fn terminal_config_from_policy(policy: i64) -> PtyConfig {
+    Concurrency::with_runtime_mut(|rt| {
+        let size = rt.heap.record_get_int(policy, 0).unwrap_or(0);
+        PtyConfig {
+            cols: rt.heap.record_get_int(size, 0).unwrap_or(0),
+            rows: rt.heap.record_get_int(size, 1).unwrap_or(0),
+            raw: rt.heap.record_get_int(policy, 1).unwrap_or(1) == 0,
+        }
+    })
+}
+
+fn terminal_size_from_handle(size: i64) -> (i64, i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        (
+            rt.heap.record_get_int(size, 0).unwrap_or(0),
+            rt.heap.record_get_int(size, 1).unwrap_or(0),
+        )
+    })
+}
+
 extern "C" fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
     match with_spec_mut(spec, |s| {
-        s.terminal = true;
+        s.terminal = Some(PtyConfig {
+            cols: 80,
+            rows: 24,
+            raw: false,
+        });
     }) {
         Some(()) => spec,
         None => 0,
     }
 }
 
-extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, _policy: i64) -> i64 {
-    jet_jit_process_spec_terminal(spec)
+extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, policy: i64) -> i64 {
+    let config = terminal_config_from_policy(policy);
+    match with_spec_mut(spec, |s| {
+        s.terminal = Some(config);
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
 }
 
 extern "C" fn jet_jit_process_spec_capabilities(_spec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.sets.push(std::collections::HashSet::new());
+        let mut facts = std::collections::HashSet::new();
+        if process_pty::supported() {
+            facts.insert("terminal".to_string());
+            facts.insert("resize".to_string());
+            facts.insert("raw".to_string());
+        }
+        rt.sets.push(facts);
         rt.set_string_kinds.push(false);
         rt.sets.len() as i64
     })
 }
 
-extern "C" fn jet_jit_terminal_session_resize(_session: i64, _size: i64) -> i64 {
-    result_err_msg("I/O error during resolve `process terminal`: this child has no terminal session")
+extern "C" fn jet_jit_process_child_terminal(child: i64) -> i64 {
+    if child <= 0 {
+        return 0;
+    }
+    let idx = (child as usize).saturating_sub(1);
+    Concurrency::with_runtime_mut(|rt| {
+        rt.process_children
+            .get(idx)
+            .and_then(|slot| slot.terminal_master.as_ref())
+            .map(|_| child)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
+    if session <= 0 {
+        return result_err_msg("I/O error during resolve `process terminal`: this child has no terminal session");
+    }
+    let (cols, rows) = terminal_size_from_handle(size);
+    let idx = (session as usize).saturating_sub(1);
+    let result = Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = rt.process_children.get(idx) else {
+            return Err("this child has no terminal session".to_string());
+        };
+        let Some(master) = slot.terminal_master.as_ref() else {
+            return Err("this child has no terminal session".to_string());
+        };
+        process_pty::resize(
+            master,
+            PtyConfig {
+                cols,
+                rows,
+                raw: false,
+            },
+        )
+        .map_err(|error| error.to_string())
+    });
+    match result {
+        Ok(()) => result_ok_bits(0),
+        Err(error) => result_err_msg(&format!("I/O error during resolve `process terminal`: {error}")),
+    }
 }
 
 extern "C" fn jet_jit_process_spec_stdin(spec: i64, _mode: i64) -> i64 {
@@ -660,23 +823,48 @@ extern "C" fn jet_jit_process_child_id(child: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_process_child_kill(child: i64) -> i64 {
+fn process_child_signal(child: i64, signal: i32) -> Option<String> {
     if child <= 0 {
-        return result_err_msg("invalid ProcessChild");
+        return Some("invalid ProcessChild".to_string());
     }
     let idx = (child as usize).saturating_sub(1);
-    let err = Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let Some(slot) = rt.process_children.get_mut(idx) else {
             return Some("invalid ProcessChild".to_string());
         };
         let Some(inner) = slot.inner.as_mut() else {
             return None;
         };
-        match inner.kill() {
+        let result = if slot.terminal_master.is_some() {
+            process_pty::signal_group(inner.id(), signal).or_else(|_| inner.kill())
+        } else {
+            inner.kill()
+        };
+        match result {
             Ok(()) => None,
             Err(e) => Some(e.to_string()),
         }
-    });
+    })
+}
+
+extern "C" fn jet_jit_process_child_kill(child: i64) -> i64 {
+    let err = process_child_signal(child, process_pty::SIGKILL);
+    match err {
+        None => result_ok_bits(0),
+        Some(e) => result_err_msg(&e),
+    }
+}
+
+extern "C" fn jet_jit_process_child_terminate(child: i64) -> i64 {
+    let err = process_child_signal(child, process_pty::SIGTERM);
+    match err {
+        None => result_ok_bits(0),
+        Some(e) => result_err_msg(&e),
+    }
+}
+
+extern "C" fn jet_jit_process_child_interrupt(child: i64) -> i64 {
+    let err = process_child_signal(child, process_pty::SIGINT);
     match err {
         None => result_ok_bits(0),
         Some(e) => result_err_msg(&e),
@@ -765,7 +953,12 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                         if slot.started.elapsed()
                             >= std::time::Duration::from_millis(timeout.max(0) as u64)
                         {
-                            let _ = inner.kill();
+                            if slot.terminal_master.is_some() {
+                                let _ = process_pty::signal_group(inner.id(), process_pty::SIGKILL)
+                                    .or_else(|_| inner.kill());
+                            } else {
+                                let _ = inner.kill();
+                            }
                             let status = match inner.wait() {
                                 Ok(s) => s,
                                 Err(_) => {
@@ -839,7 +1032,10 @@ pub(crate) struct ProcessHostFns {
     pub spec_run_checked: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
     pub child_id: cranelift_module::FuncId,
+    pub child_terminal: cranelift_module::FuncId,
     pub child_kill: cranelift_module::FuncId,
+    pub child_terminate: cranelift_module::FuncId,
+    pub child_interrupt: cranelift_module::FuncId,
     pub child_wait: cranelift_module::FuncId,
     pub terminal_resize: cranelift_module::FuncId,
     pub stream_lines: cranelift_module::FuncId,
@@ -894,7 +1090,19 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
     );
     builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
     builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
+    builder.symbol(
+        "jet_jit_process_child_terminal",
+        jet_jit_process_child_terminal as *const u8,
+    );
     builder.symbol("jet_jit_process_child_kill", jet_jit_process_child_kill as *const u8);
+    builder.symbol(
+        "jet_jit_process_child_terminate",
+        jet_jit_process_child_terminate as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_process_child_interrupt",
+        jet_jit_process_child_interrupt as *const u8,
+    );
     builder.symbol("jet_jit_process_child_wait", jet_jit_process_child_wait as *const u8);
     builder.symbol("jet_jit_process_stream_lines", jet_jit_process_stream_lines as *const u8);
 }
@@ -949,7 +1157,10 @@ pub(crate) fn declare_process_host_fns(
         spec_run_checked: import("jet_jit_process_spec_run_checked", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
         child_id: import("jet_jit_process_child_id", &sig_unary)?,
+        child_terminal: import("jet_jit_process_child_terminal", &sig_unary)?,
         child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
+        child_terminate: import("jet_jit_process_child_terminate", &sig_unary)?,
+        child_interrupt: import("jet_jit_process_child_interrupt", &sig_unary)?,
         child_wait: import("jet_jit_process_child_wait", &sig_unary)?,
         terminal_resize: import("jet_jit_terminal_session_resize", &sig_binary)?,
         stream_lines: import("jet_jit_process_stream_lines", &sig_binary)?,

@@ -35,6 +35,8 @@ const MAX_SERVICE_BACKOFF_MS: u64 = 60_000;
 const MAX_SERVICE_RESTART_DELAY_MS: u64 = 60_000;
 const MAX_WATCH_DEPTH: usize = 64;
 const MAX_READY_PROBE_TIME: Duration = Duration::from_millis(750);
+const AUTHORITY_STOP_TIMEOUT: Duration = Duration::from_secs(3);
+const AUTHORITY_STOP_POLL: Duration = Duration::from_millis(25);
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
@@ -55,6 +57,7 @@ struct Catalog {
     port: i64,
     run: fn(port: i64, data_dir: &Path) -> Vec<String>,
     ready: fn(port: i64) -> String,
+    prepare: fn(port: i64, data_dir: &Path, env: &ShellEnv) -> Result<(), String>,
 }
 
 /// A catalog entry that can be shown to an author or extended by a typed
@@ -65,6 +68,116 @@ pub struct ServicePreset {
     pub name: String,
     pub package: String,
     pub default_port: i64,
+}
+
+fn prepare_none(_port: i64, _data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    Ok(())
+}
+
+fn catalog_marker(data_dir: &Path) -> PathBuf {
+    data_dir.join(".jet-preset-initialized")
+}
+
+fn run_catalog_tool(
+    env: &ShellEnv,
+    tool: &str,
+    args: &[String],
+    data_dir: &Path,
+) -> Result<(), String> {
+    let mut command = Command::new(tool);
+    command.args(args).current_dir(data_dir);
+    env.apply_to(&mut command);
+    let output = command
+        .output()
+        .map_err(|error| format!("couldn't initialize service preset with `{tool}`: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if detail.is_empty() {
+        format!("service preset initializer `{tool}` exited with {}", output.status)
+    } else {
+        format!("service preset initializer `{tool}` failed: {detail}")
+    })
+}
+
+fn prepare_database(
+    port: i64,
+    data_dir: &Path,
+    env: &ShellEnv,
+    tool: &str,
+    args: Vec<String>,
+) -> Result<(), String> {
+    let marker = catalog_marker(data_dir);
+    if marker.is_file() {
+        return Ok(());
+    }
+    if data_dir.join("PG_VERSION").is_file() || data_dir.join("mysql").is_dir() {
+        return write_atomic(&marker, format!("port={port}\n").as_bytes())
+            .map_err(|error| format!("couldn't record service preset initialization: {error}"));
+    }
+    run_catalog_tool(env, tool, &args, data_dir)?;
+    write_atomic(&marker, format!("port={port}\n").as_bytes())
+        .map_err(|error| format!("couldn't record service preset initialization: {error}"))
+}
+
+fn prepare_postgres(port: i64, data_dir: &Path, env: &ShellEnv) -> Result<(), String> {
+    prepare_database(
+        port,
+        data_dir,
+        env,
+        "initdb",
+        vec![
+            "--no-locale".to_string(),
+            "--encoding=UTF8".to_string(),
+            "--pgdata".to_string(),
+            data_dir.display().to_string(),
+        ],
+    )
+}
+
+fn prepare_mysql(port: i64, data_dir: &Path, env: &ShellEnv) -> Result<(), String> {
+    prepare_database(
+        port,
+        data_dir,
+        env,
+        "mysqld",
+        vec![
+            "--initialize-insecure".to_string(),
+            format!("--datadir={}", data_dir.display()),
+        ],
+    )
+}
+
+fn prepare_mariadb(port: i64, data_dir: &Path, env: &ShellEnv) -> Result<(), String> {
+    prepare_database(
+        port,
+        data_dir,
+        env,
+        "mariadb-install-db",
+        vec![
+            "--auth-root-authentication-method=normal".to_string(),
+            "--skip-test-db".to_string(),
+            format!("--datadir={}", data_dir.display()),
+        ],
+    )
+}
+
+fn nginx_prefix(port: i64, data_dir: &Path) -> PathBuf {
+    data_dir.join(format!("nginx-{port}"))
+}
+
+fn prepare_nginx(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let prefix = nginx_prefix(port, data_dir);
+    let config_dir = prefix.join("conf");
+    fs::create_dir_all(&config_dir)
+        .map_err(|error| format!("couldn't create Nginx preset config directory: {error}"))?;
+    let config = format!(
+        "worker_processes 1;\npid {}/nginx.pid;\nerror_log stderr notice;\nevents {{ worker_connections 64; }}\nhttp {{\n    access_log off;\n    server {{\n        listen 127.0.0.1:{port};\n        location / {{ return 200 \"jet nginx preset\"; }}\n    }}\n}}\n",
+        prefix.display()
+    );
+    write_atomic(&config_dir.join("nginx.conf"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Nginx preset config: {error}"))
 }
 
 fn catalog(name: &str) -> Option<Catalog> {
@@ -83,6 +196,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 data_dir.display().to_string(),
             ],
             ready: |port| format!("redis-cli -p {port} ping"),
+            prepare: prepare_none,
         }),
         "postgres" | "postgresql" => Some(Catalog {
             pkg_ref: "postgresql@nixpkgs",
@@ -96,6 +210,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 port.to_string(),
             ],
             ready: |port| format!("pg_isready -h 127.0.0.1 -p {port}"),
+            prepare: prepare_postgres,
         }),
         "mysql" => Some(Catalog {
             pkg_ref: "mysql@nixpkgs",
@@ -108,6 +223,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 "--skip-networking=0".to_string(),
             ],
             ready: |port| format!("mysqladmin ping -h 127.0.0.1 -P {port}"),
+            prepare: prepare_mysql,
         }),
         "mariadb" => Some(Catalog {
             pkg_ref: "mariadb@nixpkgs",
@@ -120,6 +236,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 "--skip-networking=0".to_string(),
             ],
             ready: |port| format!("mariadb-admin ping -h 127.0.0.1 -P {port}"),
+            prepare: prepare_mariadb,
         }),
         "nginx" => Some(Catalog {
             pkg_ref: "nginx@nixpkgs",
@@ -128,11 +245,17 @@ fn catalog(name: &str) -> Option<Catalog> {
             run: |port, data_dir| vec![
                 "nginx".to_string(),
                 "-p".to_string(),
-                data_dir.join(format!("nginx-{port}")).display().to_string(),
+                nginx_prefix(port, data_dir).display().to_string(),
+                "-c".to_string(),
+                nginx_prefix(port, data_dir)
+                    .join("conf/nginx.conf")
+                    .display()
+                    .to_string(),
                 "-g".to_string(),
                 "daemon off;".to_string(),
             ],
             ready: |port| format!("curl -fsS http://127.0.0.1:{port}/"),
+            prepare: prepare_nginx,
         }),
         "minio" => Some(Catalog {
             pkg_ref: "minio@nixpkgs",
@@ -146,6 +269,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 format!(":{port}"),
             ],
             ready: |port| format!("curl -fsS http://127.0.0.1:{port}/minio/health/live"),
+            prepare: prepare_none,
         }),
         "mail" | "mailpit" => Some(Catalog {
             pkg_ref: "mailpit@nixpkgs",
@@ -159,6 +283,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 format!("127.0.0.1:{port}"),
             ],
             ready: |port| format!("curl -fsS http://127.0.0.1:{port}/api/v1/info"),
+            prepare: prepare_none,
         }),
         "adminer" => Some(Catalog {
             pkg_ref: "adminer@nixpkgs",
@@ -172,6 +297,7 @@ fn catalog(name: &str) -> Option<Catalog> {
                 data_dir.display().to_string(),
             ],
             ready: |port| format!("curl -fsS http://127.0.0.1:{port}/"),
+            prepare: prepare_none,
         }),
         _ => None,
     }
@@ -1387,7 +1513,9 @@ mod windows_job {
 
     type Handle = *mut c_void;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+    const JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION: u32 = 1;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const JOB_OBJECT_QUERY: u32 = 0x0004;
     const JOB_OBJECT_TERMINATE: u32 = 0x0008;
     const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
     const CTRL_BREAK_EVENT: u32 = 1;
@@ -1425,6 +1553,18 @@ mod windows_job {
         peak_job_memory_used: usize,
     }
 
+    #[repr(C)]
+    struct BasicAccountingInformation {
+        total_user_time: i64,
+        total_kernel_time: i64,
+        this_period_total_user_time: i64,
+        this_period_total_kernel_time: i64,
+        total_page_fault_count: u32,
+        total_processes: u32,
+        active_processes: u32,
+        total_terminated_processes: u32,
+    }
+
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
@@ -1438,6 +1578,13 @@ mod windows_job {
             class: u32,
             information: *mut c_void,
             length: u32,
+        ) -> i32;
+        fn QueryInformationJobObject(
+            job: Handle,
+            class: u32,
+            information: *mut c_void,
+            length: u32,
+            return_length: *mut u32,
         ) -> i32;
         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
         fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
@@ -1549,7 +1696,9 @@ mod windows_job {
             let name = wide(name);
             // SAFETY: the name is a bounded, NUL-terminated UTF-16 string;
             // the returned handle is owned by this Job value.
-            let handle = unsafe { OpenJobObjectW(JOB_OBJECT_TERMINATE, 0, name.as_ptr()) };
+            let handle = unsafe {
+                OpenJobObjectW(JOB_OBJECT_TERMINATE | JOB_OBJECT_QUERY, 0, name.as_ptr())
+            };
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
@@ -1570,6 +1719,35 @@ mod windows_job {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
+        }
+
+        pub(super) fn has_active_processes(&self) -> io::Result<bool> {
+            let mut information = BasicAccountingInformation {
+                total_user_time: 0,
+                total_kernel_time: 0,
+                this_period_total_user_time: 0,
+                this_period_total_kernel_time: 0,
+                total_page_fault_count: 0,
+                total_processes: 0,
+                active_processes: 0,
+                total_terminated_processes: 0,
+            };
+            let mut return_length = 0;
+            // SAFETY: the output buffer and length match the documented
+            // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION layout.
+            if unsafe {
+                QueryInformationJobObject(
+                    self.0,
+                    JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+                    (&mut information as *mut BasicAccountingInformation).cast(),
+                    std::mem::size_of::<BasicAccountingInformation>() as u32,
+                    &mut return_length,
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(information.active_processes != 0)
         }
 
         pub(super) fn request_graceful_stop(&self, process_group_id: u32) -> io::Result<()> {
@@ -1925,160 +2103,183 @@ fn start_one_with_recovery(
     );
     write_lifecycle(&resolved.dir, &lifecycle)
         .map_err(|error| format!("couldn't publish service lifecycle state: {error}"))?;
-    let allocated_ports = allocate_ports(&resolved.ports)?;
-    let prepared_sockets = prepare_sockets(project_dir, &plan.sockets)?;
-    if allocated_ports.ports != resolved.ports.iter().map(|port| *port as u16).collect::<Vec<_>>() {
-        resolved.ports = allocated_ports.ports.iter().map(|port| i64::from(*port)).collect();
+    let result = (|| {
+        let allocated_ports = allocate_ports(&resolved.ports)?;
+        let prepared_sockets = prepare_sockets(project_dir, &plan.sockets)?;
+        if allocated_ports.ports != resolved.ports.iter().map(|port| *port as u16).collect::<Vec<_>>() {
+            resolved.ports = allocated_ports.ports.iter().map(|port| i64::from(*port)).collect();
+            if plan.run.is_none() {
+                if let Some(catalog) = catalog(&plan.name) {
+                    resolved.run = (catalog.run)(
+                        resolved.ports.first().copied().unwrap_or(catalog.port as i64),
+                        &resolved.data_dir,
+                    );
+                }
+            }
+            if plan.ready.is_none() && plan.ready_probe.is_none() {
+                if let Some(catalog) = catalog(&plan.name) {
+                    resolved.ready = Some((catalog.ready)(
+                        resolved.ports.first().copied().unwrap_or(catalog.port as i64),
+                    ));
+                }
+            }
+        }
         if plan.run.is_none() {
             if let Some(catalog) = catalog(&plan.name) {
-                resolved.run = (catalog.run)(
-                    resolved.ports.first().copied().unwrap_or(catalog.port as i64),
+                (catalog.prepare)(
+                    resolved.ports.first().copied().unwrap_or(catalog.port),
                     &resolved.data_dir,
+                    env,
+                )?;
+            }
+        }
+        let _ = fs::remove_file(stopping_path(&resolved.dir));
+        let stdout = File::create(stdout_path(&resolved.dir)).map_err(|e| e.to_string())?;
+        let stderr = File::create(stderr_path(&resolved.dir)).map_err(|e| e.to_string())?;
+        if resolved.run.is_empty() {
+            return Err(format!("service `{}` has an empty `run:` command", plan.name));
+        }
+        let base_path = std::env::var("PATH").unwrap_or_default();
+        let mut service_env = env.vars.clone();
+        for name in &env.unset_vars {
+            service_env.remove(name);
+        }
+        service_env.insert("PATH".to_string(), env.composed_path(&base_path));
+        service_env.insert(Syntax::JETPACK_ENV_MARKER.to_string(), "1".to_string());
+        service_env.insert(Syntax::JETPACK_REF_VAR.to_string(), env.refs.join(" "));
+        service_env.remove(SERVICE_SUPERVISOR_ENV);
+
+        if !resolved.ports.is_empty() {
+            let ports = resolved
+                .ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            service_env.insert("JETPACK_SERVICE_PORTS".to_string(), ports);
+            if let Some(port) = resolved.ports.first() {
+                service_env.insert("JETPACK_SERVICE_PORT".to_string(), port.to_string());
+            }
+        }
+        if !prepared_sockets.paths.is_empty() {
+            let sockets = prepared_sockets
+                .paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("\n");
+            service_env.insert("JETPACK_SERVICE_SOCKETS".to_string(), sockets);
+            for (index, path) in prepared_sockets.paths.iter().enumerate() {
+                service_env.insert(
+                    format!("JETPACK_SERVICE_SOCKET_{index}"),
+                    path.to_string_lossy().into_owned(),
                 );
             }
         }
-        if plan.ready.is_none() && plan.ready_probe.is_none() {
-            if let Some(catalog) = catalog(&plan.name) {
-                resolved.ready = Some((catalog.ready)(
-                    resolved.ports.first().copied().unwrap_or(catalog.port as i64),
-                ));
+        let mut cmd = match &authority {
+            ServiceAuthority::LinuxSystemdUser { unit } => {
+                let mut command = Command::new("systemd-run");
+                command.args([
+                    "--user",
+                    "--scope",
+                    "--collect",
+                    "--quiet",
+                    "--property=Delegate=yes",
+                    "--property=KillMode=control-group",
+                ]);
+                command.arg(format!("--unit={unit}"));
+                command.arg(format!("--working-directory={}", resolved.data_dir.display()));
+                for (name, value) in &service_env {
+                    command.arg(format!("--setenv={name}={value}"));
+                }
+                for name in &env.unset_vars {
+                    command.arg(format!("--unsetenv={name}"));
+                }
+                command.arg(format!("--unsetenv={SERVICE_SUPERVISOR_ENV}"));
+                command.arg("--");
+                command.arg(&resolved.run[0]);
+                command.args(&resolved.run[1..]);
+                command
             }
-        }
-    }
-    let _ = fs::remove_file(stopping_path(&resolved.dir));
-    let stdout = File::create(stdout_path(&resolved.dir)).map_err(|e| e.to_string())?;
-    let stderr = File::create(stderr_path(&resolved.dir)).map_err(|e| e.to_string())?;
-    if resolved.run.is_empty() {
-        return Err(format!("service `{}` has an empty `run:` command", plan.name));
-    }
-    let base_path = std::env::var("PATH").unwrap_or_default();
-    let mut service_env = env.vars.clone();
-    for name in &env.unset_vars {
-        service_env.remove(name);
-    }
-    service_env.insert("PATH".to_string(), env.composed_path(&base_path));
-    service_env.insert(Syntax::JETPACK_ENV_MARKER.to_string(), "1".to_string());
-    service_env.insert(Syntax::JETPACK_REF_VAR.to_string(), env.refs.join(" "));
-    service_env.remove(SERVICE_SUPERVISOR_ENV);
-
-    if !resolved.ports.is_empty() {
-        let ports = resolved
-            .ports
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
-        service_env.insert("JETPACK_SERVICE_PORTS".to_string(), ports);
-        if let Some(port) = resolved.ports.first() {
-            service_env.insert("JETPACK_SERVICE_PORT".to_string(), port.to_string());
-        }
-    }
-    if !prepared_sockets.paths.is_empty() {
-        let sockets = prepared_sockets
-            .paths
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("\n");
-        service_env.insert("JETPACK_SERVICE_SOCKETS".to_string(), sockets);
-        for (index, path) in prepared_sockets.paths.iter().enumerate() {
-            service_env.insert(
-                format!("JETPACK_SERVICE_SOCKET_{index}"),
-                path.to_string_lossy().into_owned(),
-            );
-        }
-    }
-    let mut cmd = match &authority {
-        ServiceAuthority::LinuxSystemdUser { unit } => {
-            let mut command = Command::new("systemd-run");
-            command.args([
-                "--user",
-                "--scope",
-                "--collect",
-                "--quiet",
-                "--property=Delegate=yes",
-                "--property=KillMode=control-group",
-            ]);
-            command.arg(format!("--unit={unit}"));
-            command.arg(format!("--working-directory={}", resolved.data_dir.display()));
-            for (name, value) in &service_env {
-                command.arg(format!("--setenv={name}={value}"));
+            _ => {
+                let mut command = Command::new(&resolved.run[0]);
+                command.args(&resolved.run[1..]);
+                command
             }
-            for name in &env.unset_vars {
-                command.arg(format!("--unsetenv={name}"));
+        };
+        cmd.current_dir(&resolved.data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        env.apply_to(&mut cmd);
+        cmd.env_remove(SERVICE_SUPERVISOR_ENV);
+        if !matches!(authority, ServiceAuthority::LinuxSystemdUser { .. }) {
+            cmd.envs(&service_env);
+        }
+        #[cfg(windows)]
+        // CREATE_NEW_PROCESS_GROUP lets the Job Object authority request a
+        // graceful Ctrl+Break before falling back to forced termination.
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NEW_PROCESS_GROUP);
+        prepared_sockets.release()?;
+        // Release the parent-side port listeners immediately before spawn so the
+        // service can bind the reserved ports without an EADDRINUSE race.
+        drop(allocated_ports);
+        // A new process group (pgid = the child's own pid), not jetpack's —
+        // The direct argv command is the process-group leader, so `down` signals
+        // the whole group without also hitting jetpack's own process group.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("couldn't start `{}`: {e}", plan.name))?;
+        let runtime = match attach_authority(&authority, &mut child) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let cleanup = cleanup_child_with_authority(&mut child, &authority);
+                return Err(format!("{error}{cleanup}"));
             }
-            command.arg(format!("--unsetenv={SERVICE_SUPERVISOR_ENV}"));
-            command.arg("--");
-            command.arg(&resolved.run[0]);
-            command.args(&resolved.run[1..]);
-            command
-        }
-        _ => {
-            let mut command = Command::new(&resolved.run[0]);
-            command.args(&resolved.run[1..]);
-            command
-        }
-    };
-    cmd.current_dir(&resolved.data_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    env.apply_to(&mut cmd);
-    cmd.env_remove(SERVICE_SUPERVISOR_ENV);
-    if !matches!(authority, ServiceAuthority::LinuxSystemdUser { .. }) {
-        cmd.envs(&service_env);
-    }
-    #[cfg(windows)]
-    // CREATE_NEW_PROCESS_GROUP lets the Job Object authority request a
-    // graceful Ctrl+Break before falling back to forced termination.
-    std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NEW_PROCESS_GROUP);
-    prepared_sockets.release()?;
-    // Release the parent-side port listeners immediately before spawn so the
-    // service can bind the reserved ports without an EADDRINUSE race.
-    drop(allocated_ports);
-    // A new process group (pgid = the child's own pid), not jetpack's —
-    // The direct argv command is the process-group leader, so `down` signals
-    // the whole group without also hitting jetpack's own process group.
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("couldn't start `{}`: {e}", plan.name))?;
-    let runtime = match attach_authority(&authority, &mut child) {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let cleanup = cleanup_child_with_authority(&mut child, &authority);
-            return Err(format!("{error}{cleanup}"));
-        }
-    };
-    let state = publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)?;
-    lifecycle.pid = Some(state.pid);
-    lifecycle.phase = "running".to_string();
-    if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
-        let cleanup = cleanup_child_with_authority(&mut child, &authority);
-        let _ = fs::remove_file(pid_path(&resolved.dir));
-        return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
-    }
-    if !resolved.ports.is_empty() {
-        let encoded = resolved
-            .ports
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Err(error) = write_atomic(&ports_path(&resolved.dir), encoded.as_bytes()) {
+        };
+        let state = publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)?;
+        lifecycle.pid = Some(state.pid);
+        lifecycle.phase = "running".to_string();
+        if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
             let cleanup = cleanup_child_with_authority(&mut child, &authority);
             let _ = fs::remove_file(pid_path(&resolved.dir));
-            let _ = fs::remove_file(ports_path(&resolved.dir));
-            return Err(format!("couldn't publish service ports: {error}{cleanup}"));
+            return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
         }
+        if !resolved.ports.is_empty() {
+            let encoded = resolved
+                .ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if let Err(error) = write_atomic(&ports_path(&resolved.dir), encoded.as_bytes()) {
+                let cleanup = cleanup_child_with_authority(&mut child, &authority);
+                let _ = fs::remove_file(pid_path(&resolved.dir));
+                let _ = fs::remove_file(ports_path(&resolved.dir));
+                return Err(format!("couldn't publish service ports: {error}{cleanup}"));
+            }
+        }
+        Ok(Some(StartedService {
+            child,
+            state,
+            authority,
+            runtime,
+        }))
+    })();
+    if let Err(error) = &result {
+        record_start_failure(&resolved.dir, &mut lifecycle, error);
     }
-    Ok(Some(StartedService {
-        child,
-        state,
-        authority,
-        runtime,
-    }))
+    result
+}
+
+fn record_start_failure(dir: &Path, lifecycle: &mut LifecycleFacts, error: &str) {
+    lifecycle.phase = "failed".to_string();
+    lifecycle.recovery = "startup-failed".to_string();
+    lifecycle.pid = None;
+    let _ = write_lifecycle(dir, lifecycle);
+    let _ = write_atomic(&supervisor_error_path(dir), error.as_bytes());
 }
 
 fn monitor_service(
@@ -2342,12 +2543,11 @@ fn finish_supervisor(
             || (facts.phase == "stopped" && facts.recovery == "down")
     });
 
-    // The service owns a process group whose leader was state.pid. Recheck
-    // the recorded start identity before signaling it. If the process has
-    // already exited, there is nothing to kill. If the identity probe or the
-    // kill fails, preserve the PID and ports as live evidence instead of
-    // claiming cleanup and risking a PID-reuse signal or an orphan.
-    let cleanup_error = stop_started_process(started, Some(&ShutdownPolicy::Kill)).err();
+    // The service owns a persisted authority for the whole process group. If
+    // the leader still matches, stop through the live runtime. If the leader
+    // has exited, verify the persisted authority facts and stop that authority
+    // directly before removing state; never equate leader exit with group exit.
+    let cleanup_error = stop_supervisor_authority(project_dir, plan, started).err();
     if let Some(cleanup_error) = cleanup_error {
         if preserve_terminal_state {
             return;
@@ -2637,6 +2837,12 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         }
     };
     if !process_matches_start(&state)? {
+        if let Some(facts) = lifecycle.as_ref() {
+            if lifecycle_needs_authority_cleanup(facts) {
+                verify_persisted_authority_identity(project_dir, plan, facts, &authority)?;
+                stop_persisted_authority_after_leader_exit(&state, &authority)?;
+            }
+        }
         match fs::remove_file(pid_path(&dir)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -2646,8 +2852,8 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         let _ = fs::remove_file(ports_path(&dir));
         let _ = fs::remove_file(supervisor_error_path(&dir));
         if let Some(mut facts) = lifecycle {
-            facts.phase = "stale".to_string();
-            facts.recovery = "stale-process-state".to_string();
+            facts.phase = "stopped".to_string();
+            facts.recovery = "leader-exited".to_string();
             facts.pid = None;
             let _ = write_lifecycle(&dir, &facts);
         }
@@ -2691,6 +2897,194 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         let _ = write_lifecycle(&dir, &facts);
     }
     result
+}
+
+fn stop_supervisor_authority(
+    project_dir: &Path,
+    plan: &DevServicePlan,
+    started: &StartedService,
+) -> Result<(), String> {
+    let live_result = match process_matches_start(&started.state) {
+        Ok(true) => Some(stop_started_process(started, Some(&ShutdownPolicy::Kill))),
+        Ok(false) => None,
+        Err(error) => Some(Err(error)),
+    };
+    let dir = service_dir(project_dir, &plan.name);
+    let Some(facts) = read_lifecycle(&dir)? else {
+        return live_result
+            .unwrap_or_else(|| Err("service lifecycle state is missing its authority facts".to_string()));
+    };
+    if !lifecycle_needs_authority_cleanup(&facts) {
+        return live_result.unwrap_or(Ok(()));
+    }
+    verify_persisted_authority_identity(project_dir, plan, &facts, &started.authority)?;
+    if let Err(error) = stop_persisted_authority_after_leader_exit(&started.state, &started.authority)
+    {
+        return Err(match live_result {
+            Some(Err(live_error)) => format!("{live_error}; {error}"),
+            _ => error,
+        });
+    }
+    Ok(())
+}
+
+fn lifecycle_needs_authority_cleanup(facts: &LifecycleFacts) -> bool {
+    matches!(facts.phase.as_str(), "starting" | "running" | "ready")
+        || (facts.phase == "failed" && facts.recovery == "cleanup-failed")
+}
+
+fn verify_persisted_authority_identity(
+    project_dir: &Path,
+    plan: &DevServicePlan,
+    facts: &LifecycleFacts,
+    authority: &ServiceAuthority,
+) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        let _ = (project_dir, plan, facts);
+        if !matches!(authority, ServiceAuthority::TestProcessGroup) {
+            return Err("service lifecycle authority does not match the test process group".to_string());
+        }
+    }
+    #[cfg(all(not(test), target_os = "linux"))]
+    {
+        let expected = authority_for(project_dir, plan, facts.generation)?;
+        if &expected != authority {
+            return Err("service lifecycle authority does not match this service generation".to_string());
+        }
+    }
+    #[cfg(all(not(test), windows))]
+    {
+        let _ = (project_dir, plan, facts);
+        if !matches!(authority, ServiceAuthority::WindowsGuardianJobObject { .. }) {
+            return Err("service lifecycle authority is not a Windows guardian".to_string());
+        }
+    }
+    #[cfg(all(not(test), target_os = "macos"))]
+    {
+        let _ = (project_dir, plan, facts, authority);
+        return Err("service lifecycle authority is unavailable on macOS".to_string());
+    }
+    #[cfg(all(
+        not(test),
+        not(any(target_os = "linux", target_os = "macos", windows))
+    ))]
+    {
+        let _ = (project_dir, plan, facts, authority);
+        return Err("service lifecycle authority is unavailable on this platform".to_string());
+    }
+    Ok(())
+}
+
+fn stop_persisted_authority_after_leader_exit(
+    state: &ProcessState,
+    authority: &ServiceAuthority,
+) -> Result<(), String> {
+    if let Err(error) = run_authority_stop_action(state.pid, StopAction::Kill, Some(authority), None)
+    {
+        if persisted_authority_is_active(state.pid, authority)? {
+            return Err(error);
+        }
+    }
+    let deadline = Instant::now() + AUTHORITY_STOP_TIMEOUT;
+    loop {
+        if !persisted_authority_is_active(state.pid, authority)? {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "service authority remains active after bounded kill of leader {}",
+                state.pid
+            ));
+        }
+        std::thread::sleep(AUTHORITY_STOP_POLL);
+    }
+}
+
+fn persisted_authority_is_active(pid: u32, authority: &ServiceAuthority) -> Result<bool, String> {
+    match authority {
+        ServiceAuthority::LinuxSystemdUser { unit } => {
+            let status = Command::new("systemctl")
+                .args(["--user", "is-active", "--quiet", unit])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| format!("couldn't inspect service authority: {error}"))?;
+            match status.code() {
+                Some(0) => Ok(true),
+                Some(3 | 4) => Ok(false),
+                Some(code) => Err(format!(
+                    "service authority activity probe exited with status {code}"
+                )),
+                None => Err("service authority activity probe was terminated by a signal".to_string()),
+            }
+        }
+        ServiceAuthority::TestProcessGroup => {
+            #[cfg(target_os = "linux")]
+            {
+                return linux_process_group_is_active(pid);
+            }
+            #[cfg(all(unix, not(target_os = "linux")))]
+            {
+                let status = Command::new("kill")
+                    .args(["-0", "--", &format!("-{pid}")])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map_err(|error| format!("couldn't inspect service process group: {error}"))?;
+                return Ok(status.success());
+            }
+            #[cfg(not(unix))]
+            {
+                return process_alive(pid);
+            }
+        }
+        ServiceAuthority::WindowsGuardianJobObject { guardian } => {
+            #[cfg(windows)]
+            {
+                return match windows_job::Job::open(guardian) {
+                    Ok(job) => job
+                        .has_active_processes()
+                        .map_err(|error| format!("couldn't inspect service guardian: {error}")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                    Err(error) => Err(format!("couldn't open service guardian: {error}")),
+                };
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (pid, guardian);
+                Ok(false)
+            }
+        }
+        ServiceAuthority::Unsupported => Ok(false),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_group_is_active(pgid: u32) -> Result<bool, String> {
+    for entry in fs::read_dir("/proc").map_err(|error| format!("couldn't inspect /proc: {error}"))? {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(stat) = read_text_bounded(&entry.path().join("stat"), 4096) else {
+            continue;
+        };
+        let Some((_, fields)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = fields.split_whitespace();
+        let Some(state) = fields.next() else { continue };
+        let _parent = fields.next();
+        let Some(member_pgid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid != 0 && member_pgid == pgid && state != "Z" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3654,6 +4048,23 @@ mod tests {
     }
 
     #[test]
+    fn startup_failure_persists_terminal_lifecycle() {
+        let dir = scratch("startup-failure-lifecycle");
+        let mut p = plan("fixture", "sleep 1");
+        p.run = Some(Vec::new());
+        let error = up_one(&dir, &env(), &p).expect_err("an empty run command must fail");
+        assert!(error.contains("empty `run:` command"), "{error}");
+        let facts = read_lifecycle(&service_dir(&dir, "fixture"))
+            .unwrap()
+            .expect("startup failure must retain lifecycle facts");
+        assert_eq!(facts.phase, "failed");
+        assert_eq!(facts.recovery, "startup-failed");
+        assert_eq!(facts.pid, None);
+        assert!(supervisor_error_path(&service_dir(&dir, "fixture")).is_file());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn up_is_idempotent() {
         let dir = scratch("up-idempotent");
         let p = plan("fixture", "sleep 30");
@@ -3985,6 +4396,127 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn down_stops_persisted_authority_after_leader_exit() {
+        let dir = scratch("leader-exit-authority");
+        let p = plan(
+            "fixture",
+            "sleep 30 & child=$!; echo $child > child.pid",
+        );
+        let mut started = start_one(&dir, &env(), &p)
+            .unwrap()
+            .expect("fixture must start");
+        let child_path = service_dir(&dir, "fixture").join("data/child.pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !child_path.is_file() {
+            assert!(Instant::now() < deadline, "descendant pid was not published");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child_pid = fs::read_to_string(&child_path)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        started.child.wait().unwrap();
+        assert!(!is_alive(started.state.pid), "the recorded leader must exit");
+        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+
+        down_one(&dir, &p).expect("down must stop the persisted authority");
+        assert!(!is_alive(child_pid), "the persisted process group must be gone");
+        let facts = read_lifecycle(&service_dir(&dir, "fixture"))
+            .unwrap()
+            .expect("stopped lifecycle facts must remain explainable");
+        assert_eq!(facts.phase, "stopped");
+        assert_eq!(facts.recovery, "leader-exited");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn down_retries_cleanup_failed_authority_after_leader_exit() {
+        let dir = scratch("cleanup-failed-authority");
+        let p = plan(
+            "fixture",
+            "sleep 30 & child=$!; echo $child > child.pid",
+        );
+        let mut started = start_one(&dir, &env(), &p)
+            .unwrap()
+            .expect("fixture must start");
+        let service_dir = service_dir(&dir, "fixture");
+        let child_path = service_dir.join("data/child.pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !child_path.is_file() {
+            assert!(Instant::now() < deadline, "descendant pid was not published");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child_pid = fs::read_to_string(&child_path)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        started.child.wait().unwrap();
+        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+
+        let mut facts = read_lifecycle(&service_dir)
+            .unwrap()
+            .expect("running lifecycle facts must exist");
+        facts.phase = "failed".to_string();
+        facts.recovery = "cleanup-failed".to_string();
+        write_lifecycle(&service_dir, &facts).unwrap();
+
+        down_one(&dir, &p).expect("down must retry pending authority cleanup");
+        assert!(!is_alive(child_pid), "cleanup-failed state must not orphan descendants");
+        let facts = read_lifecycle(&service_dir)
+            .unwrap()
+            .expect("stopped lifecycle facts must remain explainable");
+        assert_eq!(facts.phase, "stopped");
+        assert_eq!(facts.recovery, "leader-exited");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn supervisor_cleanup_stops_persisted_authority_after_leader_exit() {
+        let dir = scratch("supervisor-leader-exit-authority");
+        let p = plan(
+            "fixture",
+            "sleep 30 & child=$!; echo $child > child.pid",
+        );
+        let mut started = start_one(&dir, &env(), &p)
+            .unwrap()
+            .expect("fixture must start");
+        let child_path = service_dir(&dir, "fixture").join("data/child.pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !child_path.is_file() {
+            assert!(Instant::now() < deadline, "descendant pid was not published");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child_pid = fs::read_to_string(&child_path)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+
+        // A leader can lose the live identity race between the supervisor's
+        // check and its stop request. Model that outcome while the group is
+        // still alive; cleanup must fall back to the persisted authority.
+        started.state.start_identity = "linux-proc-start:race-after-identity-check".to_string();
+        finish_supervisor(&dir, &p, &started, Some("service exited unexpectedly"));
+        started.child.wait().unwrap();
+        assert!(!is_alive(child_pid), "supervisor cleanup must stop the authority");
+        assert!(read_process_state(&service_dir(&dir, "fixture"))
+            .unwrap()
+            .is_none());
+        let facts = read_lifecycle(&service_dir(&dir, "fixture"))
+            .unwrap()
+            .expect("failed lifecycle facts must remain explainable");
+        assert_eq!(facts.phase, "failed");
+        assert_eq!(facts.recovery, "service exited unexpectedly");
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn term_kill_and_final_liveness_failures_propagate() {
         let term = stop_process_with(
@@ -4275,6 +4807,48 @@ mod tests {
         };
         let err = up_one(&dir, &env(), &p).unwrap_err();
         assert!(err.contains("no `run:`"), "{err}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn typed_catalog_presets_share_runtime_package_and_port_facts() {
+        let dir = scratch("typed-catalog");
+        let expected = [
+            ("redis", "redis@nixpkgs", 6379, "redis-server"),
+            ("postgres", "postgresql@nixpkgs", 5432, "postgres"),
+            ("mysql", "mysql@nixpkgs", 3306, "mysqld"),
+            ("mariadb", "mariadb@nixpkgs", 3306, "mariadbd"),
+            ("nginx", "nginx@nixpkgs", 8080, "nginx"),
+            ("minio", "minio@nixpkgs", 9000, "minio"),
+            ("mailpit", "mailpit@nixpkgs", 8025, "mailpit"),
+            ("adminer", "adminer@nixpkgs", 8081, "adminer"),
+        ];
+        let presets = catalog_presets();
+        assert_eq!(presets.len(), expected.len());
+        for ((name, package, port, executable), preset) in expected.iter().zip(&presets) {
+            assert_eq!(&preset.name, name);
+            assert_eq!(&preset.package, package);
+            assert_eq!(preset.default_port, *port);
+            assert_eq!(catalog_pkg_ref(name), Some(*package));
+            assert_eq!(catalog_executable(name), Some(*executable));
+
+            let plan = DevServicePlan {
+                name: (*name).to_string(),
+                enable: true,
+                ports: vec![*port],
+                ..Default::default()
+            };
+            let command = image_run_command(&plan).expect("every preset must have an image command");
+            assert_eq!(command.first().map(String::as_str), Some(*executable));
+            let resolved = resolve(&dir, &plan).expect("every preset must resolve for host services");
+            assert_eq!(resolved.run.first().map(String::as_str), Some(*executable));
+            assert_eq!(resolved.ports, vec![*port]);
+            match *name {
+                "redis" => assert_eq!(resolved.ready.as_deref(), Some("redis-cli -p 6379 ping")),
+                "postgres" => assert_eq!(resolved.ready.as_deref(), Some("pg_isready -h 127.0.0.1 -p 5432")),
+                _ => {}
+            }
+        }
         fs::remove_dir_all(&dir).ok();
     }
 

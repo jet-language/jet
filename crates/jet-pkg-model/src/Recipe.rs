@@ -168,4 +168,33 @@ mod tests {
         assert_eq!(copy.declared_capabilities(), vec!["fs.write"]);
         assert_eq!(exec.declared_capabilities(), vec!["exec:cc"]);
     }
+
+    #[test]
+    fn hook_identity_binds_all_authority_facts() {
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::Install {
+                src: "a".to_string(),
+                dest: "bin/a".to_string(),
+            }],
+        };
+        let identity = |package, source, digest, platform| {
+            recipe.build_identity_for_source(package, source, digest, platform)
+        };
+        let base = identity("tool", "registry:stable", "source-a", "linux-x86_64");
+
+        assert_ne!(base, identity("other", "registry:stable", "source-a", "linux-x86_64"));
+        assert_ne!(base, identity("tool", "registry:next", "source-a", "linux-x86_64"));
+        assert_ne!(base, identity("tool", "registry:stable", "source-b", "linux-x86_64"));
+        assert_ne!(base, identity("tool", "registry:stable", "source-a", "darwin-arm64"));
+        assert_ne!(
+            base,
+            BuildRecipe {
+                steps: vec![BuildStep::InstallTree {
+                    src: "a".to_string(),
+                    dest: "bin/a".to_string(),
+                }],
+            }
+            .build_identity_for_source("tool", "registry:stable", "source-a", "linux-x86_64")
+        );
+    }
 }

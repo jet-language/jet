@@ -31,7 +31,7 @@ pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{
     evaluate_env, evaluate_env_with_environment_profile, evaluate_env_with_profile,
-    evaluate_env_with_profiles, is_module_surface,
+    evaluate_env_with_profiles, evaluate_package_profile, is_module_surface,
 };
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
@@ -42,8 +42,9 @@ pub use Types::{
 pub use Environment::{
     DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookAction, HookSpec, LanguageExpansion, LanguagePack,
     LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
-    EnvironmentIntegration, IntegrationKind, ProfileError, ProfileSet, ProfileSpec, ReloadPolicy,
-    ResolvedProfile, valid_env_name,
+    EnvironmentIntegration, IntegrationKind, PackageProfileError, PackageProfileFact,
+    PackageProfilePackage, PackageProfilePlan, PackageProfileSet, PackageProfileSpec, ProfileError,
+    ProfileSet, ProfileSpec, ReloadPolicy, ResolvedPackageProfile, ResolvedProfile, valid_env_name,
 };
 
 #[cfg(test)]
@@ -164,6 +165,46 @@ module full {
         let error = evaluate_env_with_environment_profile(source, &base_dir(), Some("missing"))
             .expect_err("unknown environment profile must not fall through to another profile");
         assert_eq!(error.code, "E1337");
+    }
+
+    #[test]
+    fn package_profile_plan_preserves_composition_provider_and_collision_facts() {
+        let source = r#"
+module profile.base {
+    packages: [default.ripgrep]
+}
+module profile.dev {
+    extends: ["base"],
+    packages: [default.fd],
+    collisions: { "bin/editor": "fd@default" }
+}
+"#;
+        let plan = evaluate_package_profile(&source, &base_dir(), "dev").unwrap();
+        assert_eq!(plan.selected_profiles, vec!["dev"]);
+        assert_eq!(plan.applied, vec!["base", "dev"]);
+        assert_eq!(plan.sources, vec!["profile.base", "profile.dev"]);
+        assert_eq!(
+            plan.packages.iter().map(|package| package.raw.as_str()).collect::<Vec<_>>(),
+            vec!["ripgrep@default", "fd@default"]
+        );
+        assert_eq!(plan.packages[0].source, "default");
+        assert_eq!(plan.packages[0].provider, "nix");
+        assert_eq!(plan.packages[0].declared_by, vec!["base"]);
+        assert_eq!(
+            plan.collisions.get("bin/editor").map(String::as_str),
+            Some("fd@default")
+        );
+    }
+
+    #[test]
+    fn package_profile_cycles_are_rejected_before_planning() {
+        let source = r#"
+module profile.a { extends: ["b"] }
+module profile.b { extends: ["a"] }
+"#;
+        let error = evaluate_package_profile(&source, &base_dir(), "a").unwrap_err();
+        assert_eq!(error.code, "E1332");
+        assert!(error.what.contains("inheritance cycle"), "{}", error.what);
     }
 
     #[test]
@@ -725,6 +766,8 @@ module mobile {
         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
         env.platform.apple(targets: [.IOS]),
         env.security.certificates([dev_certificate]),
+        env.cloud.credentials([aws_production]),
+        env.security.vault([database_password]),
         env.network.hosts(["api.local": "127.0.0.1"]),
         env.agent.codex(mcp: [repo_server]),
         env.editor.vscode()
@@ -732,7 +775,7 @@ module mobile {
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
-        assert_eq!(plan.integrations.len(), 6);
+        assert_eq!(plan.integrations.len(), 8);
         assert!(plan
             .package_refs
             .iter()
@@ -768,20 +811,60 @@ module mobile {
             .iter()
             .find(|value| value.kind == IntegrationKind::Certificates)
             .unwrap();
+        assert_eq!(certs.preset, "certificate-store");
+        assert_eq!(certs.tasks, vec!["certificate-store-check"]);
+        assert_eq!(certs.providers, vec!["vault"]);
         assert_eq!(certs.secrets, vec!["dev_certificate"]);
+        assert_eq!(certs.grants, vec!["certificate.read"]);
         assert_eq!(certs.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        let cloud = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::CloudCredentials)
+            .unwrap();
+        assert_eq!(cloud.preset, "cloud-credentials");
+        assert_eq!(cloud.tasks, vec!["credential-store-check"]);
+        assert_eq!(cloud.providers, vec!["credential-store"]);
+        assert_eq!(cloud.secrets, vec!["aws_production"]);
+        assert_eq!(cloud.grants, vec!["credential.read"]);
+        assert_eq!(cloud.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        let vault = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Vault)
+            .unwrap();
+        assert_eq!(vault.preset, "vault");
+        assert_eq!(vault.tasks, vec!["vault-check"]);
+        assert_eq!(vault.providers, vec!["vault"]);
+        assert_eq!(vault.secrets, vec!["database_password"]);
+        assert_eq!(vault.grants, vec!["vault.read"]);
+        assert_eq!(vault.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
         let hosts = plan
             .integrations
             .iter()
             .find(|value| value.kind == IntegrationKind::Hosts)
             .unwrap();
+        assert_eq!(hosts.preset, "project-hosts");
+        assert_eq!(hosts.tasks, vec!["host-binding-check"]);
+        assert_eq!(hosts.providers, vec!["host-binding"]);
         assert_eq!(hosts.options.get("host.api.local").map(String::as_str), Some("127.0.0.1"));
         let agent = plan
             .integrations
             .iter()
             .find(|value| value.kind == IntegrationKind::CodexAgent)
             .unwrap();
+        assert_eq!(agent.preset, "codex");
+        assert_eq!(agent.tasks, vec!["mcp-agent-check"]);
+        assert_eq!(agent.providers, vec!["mcp"]);
         assert!(agent.grants.iter().any(|value| value == "mcp.read"));
+        let editor = plan
+            .integrations
+            .iter()
+            .find(|value| value.kind == IntegrationKind::Editor)
+            .unwrap();
+        assert_eq!(editor.preset, "vscode");
+        assert_eq!(editor.packages, vec!["vscode@nixpkgs"]);
+        assert_eq!(editor.providers, vec!["nixpkgs"]);
     }
 
     #[test]

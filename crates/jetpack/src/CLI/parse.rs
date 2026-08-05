@@ -6,6 +6,7 @@ use super::shared_store::cmd_shared_store;
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
+use super::profile::cmd_profile;
 use super::browser::cmd_browser;
 use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
@@ -381,7 +382,25 @@ pub fn main(args: Vec<String>) -> i32 {
     let theme = Theme::resolve_choice(color);
     // Doctor must observe state without repairing or migrating it.
     if verb != "doctor" {
-        if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
+        let roots = Store::resolve();
+        if let Err(error) = Store::migrate_legacy_hangar(&roots) {
+            Store::report_integrity(
+                &theme,
+                &Store::IntegrityFailure {
+                    package: "Hangar path migration".to_string(),
+                    version: "legacy".to_string(),
+                    expected: "complete native per-user Hangar".to_string(),
+                    actual: error.to_string(),
+                    reason: "reversible Hangar path migration".to_string(),
+                    disposition: "Jetpack stopped before reading or changing package state."
+                        .to_string(),
+                    fix: "Inspect the reported migration staging path, then retry the command."
+                        .to_string(),
+                },
+            );
+            return 2;
+        }
+        if let Err(error) = Store::migrate_nix_gc_roots(&roots) {
             Store::report_integrity(
                 &theme,
                 &Store::IntegrityFailure {
@@ -435,6 +454,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         v if v == Syntax::TOOL_SUBCOMMAND => cmd_tool(&theme, &parsed),
+        v if v == Syntax::PROFILE_SUBCOMMAND => cmd_profile(&theme, &parsed),
         v if v == Syntax::BROWSER_SUBCOMMAND => cmd_browser(&theme, &parsed),
         "help" | "--help" | "-h" => {
             let theme = Theme::resolve_for(color, std::io::stdout().is_terminal());

@@ -32,7 +32,7 @@ pub(super) fn project_root(start: &Path) -> PathBuf {
 /// Workspace member lookup has a wider boundary than a member Package. Keep
 /// it on the nearest workspace declaration so a package inside a monorepo
 /// still sees the monorepo's member index.
-fn workspace_root(start: &Path) -> PathBuf {
+pub(super) fn workspace_root(start: &Path) -> PathBuf {
     nearest_root_with_file(start, &[Syntax::WORKSPACE_FILE])
         .unwrap_or_else(|| start.to_path_buf())
 }

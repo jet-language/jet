@@ -95,9 +95,7 @@ pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnost
                 }
             }
             BuildStep::Exec { tool, .. } => {
-                if !ctx.tools.contains_key(tool) {
-                    return Err(e1238(tool));
-                }
+                realized_tool(&ctx.tools, tool)?;
             }
             BuildStep::Install { src, dest } => {
                 confined_source(ctx.source_dir, src, false)?;
@@ -148,7 +146,7 @@ pub fn lower_to_plan(
             .with_label("fetch.url", url.clone())
             .with_label("fetch.sha256", sha256.clone()),
             BuildStep::Exec { tool, args } => {
-                let tool_path = tools.get(tool).ok_or_else(|| e1238(tool))?;
+                let tool_path = realized_tool(tools, tool)?;
                 let mut argv = vec![tool_path.to_string_lossy().into_owned()];
                 argv.extend(args.iter().cloned());
                 ActionSpec::cached(argv)
@@ -642,21 +640,52 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// Construct the only environment a recipe tool may observe. Build hooks do
+/// not inherit the caller's credentials, proxy settings, locale, or other
+/// host state. The action graph declares the two deterministic policy values;
+/// `JET_BUILD_OUTPUT` is the private staging channel used by the recipe ABI.
+fn build_command(
+    exe: &Path,
+    args: &[String],
+    ctx: &BuildContext,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command
+        .env_clear()
+        .args(args)
+        .current_dir(ctx.source_dir)
+        .env("JET_BUILD_OUTPUT", ctx.output_root)
+        .env("SOURCE_DATE_EPOCH", "0")
+        .env("JET_PROFILE", "default");
+    command
+}
+
+/// A realized tool is an exact filesystem artifact. Relative names are
+/// rejected so an absent or malformed dependency cannot fall through to the
+/// caller's `PATH`.
+fn realized_tool<'a>(
+    tools: &'a HashMap<String, PathBuf>,
+    tool: &str,
+) -> Result<&'a Path, Diagnostic> {
+    let path = tools.get(tool).ok_or_else(|| e1238(tool))?;
+    if !path.is_absolute() {
+        return Err(e1238(tool));
+    }
+    Ok(path.as_path())
+}
+
 fn do_exec(
     tool: &str,
     args: &[String],
     ctx: &BuildContext,
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
-    let exe = ctx.tools.get(tool).ok_or_else(|| e1238(tool))?;
-    let status = std::process::Command::new(exe)
-        .args(args)
-        .current_dir(ctx.source_dir)
-        // Confine writes: run in the staged tree; the install root is the only
-        // sanctioned output surface. A hostile tool can still misbehave — the
-        // OS-level sandbox is D-JPK-NODAEMON1's unprivileged jail (U28); this
-        // seam enforces the *structural* contract.
-        .env("JET_BUILD_OUTPUT", ctx.output_root)
+    let exe = realized_tool(&ctx.tools, tool)?;
+    // Confine writes: run in the staged tree; the install root is the only
+    // sanctioned output surface. A hostile tool can still misbehave — the
+    // OS-level sandbox is D-JPK-NODAEMON1's unprivileged jail (U28); this
+    // seam enforces the *structural* contract.
+    let status = build_command(exe, args, ctx)
         .status()
         .map_err(|e| {
             Diagnostic::error(
@@ -689,12 +718,8 @@ fn do_exec_logged(
     ctx: &BuildContext,
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
-    let exe = ctx.tools.get(tool).ok_or_else(|| e1238(tool))?;
-    let out = std::process::Command::new(exe)
-        .args(args)
-        .current_dir(ctx.source_dir)
-        .env("JET_BUILD_OUTPUT", ctx.output_root)
-        .output()
+    let exe = realized_tool(&ctx.tools, tool)?;
+    let out = build_command(exe, args, ctx).output()
         .map_err(|e| {
             Diagnostic::error(
                 "E1238",
@@ -898,7 +923,7 @@ pub fn e1238(tool: &str) -> Diagnostic {
          reproducible. A build never falls through to host `/usr/bin`."
             .to_string(),
         format!(
-            "add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar."
+            "add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar."
         ),
         None,
     )

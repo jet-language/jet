@@ -2337,6 +2337,38 @@ fn canvas_and_semindex_share_composed_package_facts() {
 }
 
 #[test]
+fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_projection() {
+    let dir = temp_dir("package_config_discovery_boundary");
+    let entry = dir.join("main.jet");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"demo\"\nconfigs: [dev]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.jet"),
+        "pub dev :: Config.{ version: \"1\" }\n",
+    )
+    .unwrap();
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let composed = jet::Canvas::project_json_for_entry(&entry);
+    assert!(composed.contains("\"name\":\"demo\""), "{composed}");
+    assert!(composed.contains("\"version\":\"1\""), "{composed}");
+    assert!(composed.contains("one.jet"), "{composed}");
+
+    fs::write(
+        dir.join("two.jet"),
+        "pub dev :: Config.{ version: \"2\" }\n",
+    )
+    .unwrap();
+    let ambiguous = jet::Canvas::project_json_for_entry(&entry);
+    assert!(ambiguous.contains("\"code\":\"E1206\""), "{ambiguous}");
+    assert!(ambiguous.contains("Config `dev` is ambiguous"), "{ambiguous}");
+    assert!(!ambiguous.contains("\"version\":\"1\""), "{ambiguous}");
+}
+
+#[test]
 fn canvas_project_reports_and_filters_internal_parts() {
     let dir = temp_dir("project_internal_parts");
     let entry = dir.join("main.jet");
@@ -2502,7 +2534,7 @@ fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
 }
 
 #[test]
-fn canvas_project_discovery_malformed_ancestor_does_not_own_nested_package() {
+fn canvas_project_discovery_preserves_malformed_ancestor_workspace() {
     let dir = temp_dir("project_malformed_workspace_ancestor");
     let nested = dir.join("scratch");
     fs::create_dir_all(&nested).unwrap();
@@ -2525,12 +2557,11 @@ fn canvas_project_discovery_malformed_ancestor_does_not_own_nested_package() {
     fs::write(&entry, "fn run() {\n    print(\"scratch\")\n}\n").unwrap();
 
     let json = jet::Canvas::project_json_for_entry(&entry);
-    assert_eq!(json_field(&json, "project_root"), nested.to_string_lossy());
-    assert!(json.contains("\"mode\":\"package\""), "{json}");
-    assert!(json.contains("\"workspace\":null"), "{json}");
-    assert!(json.contains("\"envs\":[]"), "{json}");
-    assert!(!json.contains("workspace.jet"), "{json}");
-    assert!(!json.contains("E0996"), "{json}");
+    assert_eq!(json_field(&json, "project_root"), dir.to_string_lossy());
+    assert!(json.contains("\"mode\":\"workspace\""), "{json}");
+    assert!(json.contains("\"workspace\":{\"path\":\"workspace.jet\""), "{json}");
+    assert!(json.contains("\"code\":\"E0996\""), "{json}");
+    assert!(json.contains("\"name\":\"scratch\""), "{json}");
 }
 
 #[test]

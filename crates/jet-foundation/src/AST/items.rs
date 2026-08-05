@@ -308,6 +308,8 @@ pub enum ContribValue {
     Fleet(FleetLit),
     /// `vmtest.<name>:` — a VM scenario record (D-JOS-VMTEST1).
     VmTest(VmTestLit),
+    /// D-JPK-PROFILE1=D: a source-backed package profile declaration.
+    Profile(ProfileLit),
     /// D-PERFBUDGET-GRAMMAR1=A: `module perf.<role> { budgets: [...] }`.
     Perf(PerfLit),
 }
@@ -321,6 +323,7 @@ impl ContribValue {
             ContribValue::Image(i) => i.span,
             ContribValue::Fleet(f) => f.span,
             ContribValue::VmTest(v) => v.span,
+            ContribValue::Profile(p) => p.span,
             ContribValue::Perf(p) => p.span,
         }
     }
@@ -336,6 +339,15 @@ pub struct PerfLit {
     pub budgets: Vec<BudgetDecl>,
     pub budgets_span: Span,
     pub list_span: Span,
+    pub span: Span,
+}
+
+/// D-JPK-PROFILE1=D: `profile.<name>`'s source fields. The module evaluator
+/// lowers these fields into the shared package-profile fact graph; no
+/// generation or provider-specific state is stored in the AST.
+#[derive(Debug, Clone)]
+pub struct ProfileLit {
+    pub fields: Vec<(String, Span, Expr)>,
     pub span: Span,
 }
 
@@ -580,6 +592,8 @@ pub enum Namespace {
     VmTest,
     /// `perf` → typed performance-policy declarations.
     Perf,
+    /// `profile` → source-backed package-profile declarations.
+    Profile,
 }
 
 /// S45 (M9): type parameter with optional trait bounds.

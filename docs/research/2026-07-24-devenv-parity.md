@@ -138,7 +138,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Automatic port allocation | — | **gap** | #785 |
 | Process↔task dependency graph | — | **gap** | #785 |
 | Alternate managers (process-compose…) | — | **reject** | I8 one supervisor |
-| Service presets (postgres, redis, …) | typed Service; thin catalog | **gap** | #786 — full catalog path |
+| Service presets (postgres, redis, …) | typed Service; shared typed catalog constructors | **shipped** | — |
 | Service state dirs / init scripts | partial | **partial** | #786 |
 
 ### G. Containers (video)
@@ -175,9 +175,9 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 |---|---|---|---|
 | `devenv lsp` for options | U26 LSP for env fields | **partial** | #789 |
 | `devenv mcp` | #768 MCP campaign | **partial** | Link #768; env tools as MCP resources |
-| `claude.code` / `opencode` modules | — | **gap** | #792 P2 |
-| android / apple SDK modules | — | **gap** | #792 P2 |
-| certificates / hosts | — | **gap** | #792 P2 |
+| editor / agent tool modules | typed `env.editor.vscode` / `env.agent.codex` projections | **shipped** | #792 / #1101 |
+| android / apple SDK modules | typed `env.platform.android()` / `env.platform.apple()` presets | **shipped** | #792 / #1099 |
+| certificates / hosts | typed `env.security.certificates` / `env.network.hosts` projections | **shipped** | #792 / #1100 |
 | `outputs` language.import packaging | package recipes / adapters | **partial** | Flake-class + package program |
 
 ### Better-than-devenv (ergonomics / UX / DX)

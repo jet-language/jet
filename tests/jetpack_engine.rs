@@ -40,6 +40,251 @@ mod jetpack_fixtures;
 use jetpack_fixtures::*;
 
 #[test]
+fn hangar_path_reports_the_native_user_data_location() {
+    let data = Scratch::new("hangar-path-data");
+    let output = jetpack()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .expect("home directory environment variable");
+    let expected = if cfg!(target_os = "macos") {
+        Path::new(&home)
+            .join("Library/Application Support/Jet/Hangar")
+    } else if cfg!(windows) {
+        Path::new(&home)
+            .join("AppData/Local/Jet/Hangar")
+    } else {
+        data.path.join("jet/hangar")
+    };
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected.display().to_string()
+    );
+}
+
+#[test]
+fn hangar_migration_copies_legacy_state_and_keeps_a_rollback_source() {
+    let legacy = Scratch::new("hangar-migration-legacy");
+    let data = Scratch::new("hangar-migration-data");
+    let old_hangar = legacy.join("jet/hangar");
+    fs::create_dir_all(&old_hangar).unwrap();
+    fs::write(old_hangar.join("migration-marker"), "legacy bytes").unwrap();
+
+    let output = jetpack()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", &legacy.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let new_hangar = data.join("jet/hangar");
+    assert_eq!(
+        fs::read_to_string(new_hangar.join("migration-marker")).unwrap(),
+        "legacy bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(old_hangar.join("migration-marker")).unwrap(),
+        "legacy bytes"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn hangar_migration_rejects_path_escape_and_leaves_repair_state_visible() {
+    use std::os::unix::fs::symlink;
+
+    let legacy = Scratch::new("hangar-migration-escape-legacy");
+    let data = Scratch::new("hangar-migration-escape-data");
+    let old_hangar = legacy.join("jet/hangar");
+    fs::create_dir_all(&old_hangar).unwrap();
+    let outside = legacy.join("escape-target");
+    fs::write(&outside, "must stay outside").unwrap();
+    symlink("../../escape-target", old_hangar.join("escape")).unwrap();
+
+    let output = jetpack()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", &legacy.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("escapes its migration root"), "{stderr}");
+    assert!(!data.join("jet/hangar").exists());
+    assert!(data.join("jet/.hangar-migration.partial").is_dir());
+    assert_eq!(fs::read_to_string(outside).unwrap(), "must stay outside");
+}
+
+#[test]
+fn binary_cache_local_publish_verify_and_reject_corruption() {
+    let root = Scratch::new("cache-root");
+    let source = Scratch::new("cache-source");
+    let mirror = Scratch::new("cache-mirror");
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    fs::write(source.join("payload"), "cache bytes\n").unwrap();
+    let entry = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "cache-demo".into(),
+            version: "1".into(),
+            reference: "./cache-demo".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256:cache-source".into(),
+                recipe_fingerprint: "sha256:cache-recipe".into(),
+                policy_fingerprint: "sha256:cache-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+            signature: String::new(),
+            provenance: "cache test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    jetpack::Store::bind_cache(
+        &roots,
+        "public",
+        vec![mirror.path.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .unwrap();
+    let published = jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
+    assert_eq!(published.output_hash, entry.envelope.output_hash);
+    let verified = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+    assert_eq!(verified.output_hash, entry.envelope.output_hash);
+
+    let restored = Scratch::new("cache-restored");
+    jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &restored.join("out"),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(restored.join("out/payload")).unwrap(),
+        "cache bytes\n"
+    );
+
+    let nar = mirror
+        .join("nar")
+        .join(format!("{}.nar", entry.envelope.output_hash));
+    let info = mirror.join(format!(
+        "{}-{}.narinfo",
+        entry.envelope.output_hash, entry.id
+    ));
+    let nar_bytes = fs::read(&nar).unwrap();
+    let info_bytes = fs::read(&info).unwrap();
+    fs::remove_file(&nar).unwrap();
+    fs::remove_file(&info).unwrap();
+    fs::write(
+        nar.with_extension("partial"),
+        &nar_bytes[..nar_bytes.len().max(2) / 2],
+    )
+    .unwrap();
+    fs::write(
+        info.with_extension("partial"),
+        &info_bytes[..info_bytes.len().max(2) / 2],
+    )
+    .unwrap();
+    jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
+    assert_eq!(fs::read(&nar).unwrap(), nar_bytes);
+    assert_eq!(fs::read(&info).unwrap(), info_bytes);
+
+    fs::write(&nar, b"corrupted cache bytes").unwrap();
+    assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    let rejected = Scratch::new("cache-rejected");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &rejected.join("out")
+    )
+    .is_err());
+    assert!(!rejected.join("out").exists());
+}
+
+#[test]
+fn profile_plan_uses_the_production_source_backed_resolver() {
+    let project = Scratch::new("profile-plan");
+    fs::write(
+        project.join("env.jet"),
+        r#"
+module profile.base {
+    packages: [default.ripgrep]
+}
+module profile.dev {
+    extends: ["base"]
+    packages: [default.fd]
+    collisions: { "bin/editor": "fd@default" }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "plan", "dev", "--json", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"raw\":\"ripgrep@default\""), "{stdout}");
+    assert!(stdout.contains("\"provider\":\"nix\""), "{stdout}");
+    assert!(stdout.contains("\"bin/editor\":\"fd@default\""), "{stdout}");
+}
+
+#[test]
+fn profile_plan_reports_inheritance_cycles() {
+    let project = Scratch::new("profile-plan-cycle");
+    fs::write(
+        project.join("env.jet"),
+        "module profile.a { extends: [\"b\"] }\nmodule profile.b { extends: [\"a\"] }\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "plan", "a", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1332"), "{stderr}");
+    assert!(stderr.contains("inheritance cycle"), "{stderr}");
+}
+
+#[test]
 fn doctor_checks_real_state_and_is_read_only() {
     let project = Scratch::new("doctor-project");
     let root = Scratch::new("doctor-root");
@@ -1077,6 +1322,60 @@ module dev {
 
 
 #[test]
+fn typed_env_build_recipe_uses_declared_tool_dependencies() {
+    let proj = Scratch::new("build-recipe-dependency-project");
+    let root = Scratch::new("build-recipe-dependency-root");
+    let fixtures = Scratch::new("build-recipe-dependency-fixtures");
+    let staging = Scratch::new("build-recipe-dependency-staging");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    fs::create_dir_all(proj.join("vendor/tool")).unwrap();
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: "./vendor/tool",
+                deps: [default.greet],
+                recipe: Recipe.build(steps: [
+                    .exec(tool: "greet", args: []),
+                ])
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color", "--offline", "--trust"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    assert!(
+        jetpack::Store::list(&roots)
+            .iter()
+            .any(|entry| entry.reference == "adapt:tool:./vendor/tool"),
+        "adapter with a declared executable dependency was not realized: {:?}",
+        jetpack::Store::list(&roots)
+    );
+}
+
+
+#[test]
 fn typed_env_prebuilt_adapter_runs_from_path() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
@@ -1859,9 +2158,12 @@ fn env_info_json_discloses_selected_environment_profile_and_language_projection(
         project.join("env.jet"),
         r#"module env.dev {
     profiles: [
-        "host": .{ hostname: "epoch5-host" },
+        "host": .{ hostname: "epoch5-host", variables: { "MODE": "dev" } },
         "user": .{ user: "epoch5-user" }
     ]
+    services: {
+        redis: { enable: true, ports: [6379], after: ["database"] }
+    }
     languages: [
         "rust": Lang.{ enable: true, channel: .Stable },
         "zig": Lang.{ enable: true }
@@ -1874,6 +2176,7 @@ module env.full {
 "#,
     )
     .unwrap();
+    fs::write(project.join("main.jet"), "#Job\nfn lint() {}\n").unwrap();
     let output = jetpack()
         .args(["enter", "info", "--json", "--no-color"])
         .current_dir(&project.path)
@@ -1902,6 +2205,9 @@ module env.full {
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
     assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
     assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"services\":[{\"name\":\"redis\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"variables\":[{\"name\":\"MODE\""), "stdout: {stdout}");
 
     let full = jetpack()
         .args(["enter", "info", "--json", "--no-color", "--env-profile", "full"])
@@ -1944,6 +2250,73 @@ module env.full {
 }
 
 #[test]
+fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
+    let project = Scratch::new("env-sync-files");
+    let root = Scratch::new("env-sync-files-root");
+    let home = Scratch::new("env-sync-files-home");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    files: {
+        "generated/config.txt": File.{ content: "generated\n", mode: .Copy },
+        "seed/config.txt": File.{ content: "seeded\n", mode: .Seed }
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(project.join("seed")).unwrap();
+    fs::write(project.join("seed/config.txt"), "keep me\n").unwrap();
+
+    let output = jetpack()
+        .args(["enter", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("generated/config.txt")).unwrap(),
+        "generated\n"
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("seed/config.txt")).unwrap(),
+        "keep me\n"
+    );
+    assert!(project.join(".jet/files/state").is_file());
+
+    let blocked = Scratch::new("env-sync-files-blocked");
+    let blocked_root = Scratch::new("env-sync-files-blocked-root");
+    let blocked_home = Scratch::new("env-sync-files-blocked-home");
+    fs::write(blocked.join("env.jet"), fs::read(project.join("env.jet")).unwrap()).unwrap();
+    fs::create_dir_all(blocked.join("generated")).unwrap();
+    fs::write(blocked.join("generated/config.txt"), "user-owned\n").unwrap();
+    let refused = jetpack()
+        .args(["enter", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .current_dir(&blocked.path)
+        .env("JETPACK_ROOT", &blocked_root.path)
+        .env("HOME", &blocked_home.path)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("unmanaged destination"),
+        "stderr: {}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(blocked.join("generated/config.txt")).unwrap(),
+        "user-owned\n"
+    );
+    assert!(!blocked.join(".jet/files/state").exists());
+}
+
+#[test]
 fn env_info_json_discloses_typed_integration_projection() {
     let project = Scratch::new("env-info-integrations");
     fs::write(
@@ -1951,7 +2324,10 @@ fn env_info_json_discloses_typed_integration_projection() {
         r#"module env.dev {
     imports: [
         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+        env.platform.apple(targets: [.IOS]),
         env.security.certificates([dev_certificate]),
+        env.cloud.credentials([aws_production]),
+        env.security.vault([database_password]),
         env.network.hosts(["api.local": "127.0.0.1"]),
         env.agent.codex(mcp: [repo_server]),
         env.editor.vscode()
@@ -1973,7 +2349,10 @@ fn env_info_json_discloses_typed_integration_projection() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"integrations\":["), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"apple\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"certificates\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"cloud-credentials\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"vault\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"codex-agent\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}");
@@ -1981,9 +2360,48 @@ fn env_info_json_discloses_typed_integration_projection() {
         stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"),
         "stdout: {stdout}"
     );
+    assert!(
+        stdout.contains("\"option_keys\":[\"license\",\"targets\"]"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"host_checks\":["), "stdout: {stdout}");
     assert!(stdout.contains("\"grants\":["), "stdout: {stdout}");
     assert!(stdout.contains("\"secrets\":[\"dev_certificate\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":[\"certificate.read\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"secrets\":[\"aws_production\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":[\"credential.read\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"secrets\":[\"database_password\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":[\"vault.read\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":[\"mcp.read\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"packages\":[\"vscode@nixpkgs\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"option_keys\":[\"host.api.local\"]"), "stdout: {stdout}");
+}
+
+#[test]
+fn enter_requires_a_persisted_cloud_integration_grant() {
+    let project = Scratch::new("cloud-integration-grant");
+    let root = Scratch::new("cloud-integration-grant-root");
+    let home = Scratch::new("cloud-integration-grant-home");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.cloud.credentials([aws_production])]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "--trust", "--offline", "--no-color", "--", "true"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(stderr.contains("cloud-credentials:credential.read"), "stderr: {stderr}");
+    assert!(!stderr.contains("aws_production"), "secret name leaked: {stderr}");
 }
 
 #[test]

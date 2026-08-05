@@ -24,4 +24,8 @@ pub mod task_group;
 /// D-TYPEDTEXT1=D: typed SQL/HTML/Sh semantics shared by AOT and TIR.
 #[path = "Prelude/TypedText.rs"]
 pub mod typed_text;
+/// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
+/// emitted process prelude and the resident JIT adapter.
+#[path = "Prelude/CoreLib/ProcessPty.rs"]
+pub mod process_pty;
 // Prelude/ contains include_str-embedded text files, not Rust modules.

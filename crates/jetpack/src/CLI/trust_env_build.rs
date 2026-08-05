@@ -245,7 +245,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 "adapter",
             );
         }
-        match realize_adapter(theme, roots, flags, adapter, true) {
+        match realize_adapter(theme, roots, flags, adapter, &plan.table, true) {
             Some((entry, _state, lease)) => {
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
@@ -837,7 +837,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             // erase the pinned projection before handing control to it.
             live.clear();
         }
-        match realize_adapter(theme, &roots, &parsed.flags, adapter, false) {
+        match realize_adapter(theme, &roots, &parsed.flags, adapter, &plan.table, false) {
             Some((entry, state, _lease)) => {
                 realized_refs.push(entry.reference);
                 completed_steps += 1;

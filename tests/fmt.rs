@@ -29,6 +29,16 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 }
 
 #[test]
+fn package_formatter_fails_closed_on_comments() {
+    let error = jet::Package::format_source(
+        "name: \"demo\" // comment ownership is not typed yet\n",
+        "package.jet",
+    )
+    .expect_err("typed formatter must not report commented source as clean");
+    assert!(error.contains("cannot safely rewrite comments"), "{error}");
+}
+
+#[test]
 fn fixed_interpolation_selector_is_stable() {
     let src = "fn run(){price::1234.5\nprint(\"{price#Fixed(2)}\")}\n";
     let once = jet::format_source(src).expect("fixed interpolation should format");

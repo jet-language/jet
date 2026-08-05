@@ -423,7 +423,9 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    // The plan resolves the owning env.jet. Keep every service state and
+    // lifecycle operation anchored there when the command runs below it.
+    let project_dir = plan.project_root.clone();
     if matches!(
         verb.as_str(),
         v if v == Syntax::SERVICES_VERB_UP

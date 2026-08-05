@@ -93,6 +93,7 @@ pub(super) struct ProjectChange {
 struct WorkspaceBoundary {
     root: PathBuf,
     member_root: Option<PathBuf>,
+    malformed: bool,
 }
 
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
@@ -100,9 +101,9 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     let workspace_boundary = find_workspace_boundary(entry_dir);
     let workspace_root = workspace_boundary
         .as_ref()
-        .filter(|boundary| {
-            boundary.member_root.is_some() || same_path(entry_dir, &boundary.root)
-        })
+        .filter(|boundary| boundary.malformed
+            || boundary.member_root.is_some()
+            || same_path(entry_dir, &boundary.root))
         .map(|boundary| boundary.root.clone());
     let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir).filter(|manifest| {
         let Some(boundary) = &workspace_boundary else {
@@ -168,12 +169,14 @@ fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
                 return Some(WorkspaceBoundary {
                     root: dir,
                     member_root,
+                    malformed: false,
                 });
             }
             Some(Err(_)) => {
                 return Some(WorkspaceBoundary {
                     root: dir,
                     member_root: None,
+                    malformed: true,
                 });
             }
             None => {}

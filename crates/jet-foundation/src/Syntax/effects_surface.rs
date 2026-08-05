@@ -440,6 +440,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     IMAGE_SUBCOMMAND,
     USER_SUBCOMMAND,
     TOOL_SUBCOMMAND,
+    PROFILE_SUBCOMMAND,
     BROWSER_SUBCOMMAND,
 ];
 
@@ -570,6 +571,13 @@ pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
 pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";
+
+/// D-JPK-PROFILE1=D: source-backed package profile inspection and generation
+/// commands. The first delivery slice exposes `plan`; switching and history
+/// are owned by the dependent profile cards.
+pub const PROFILE_SUBCOMMAND: &str = "profile";
+pub const PROFILE_VERB_PLAN: &str = "plan";
+pub const PROFILE_VERBS: &[&str] = &[PROFILE_VERB_PLAN];
 
 /// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock|provision|resolve|list`.
 pub const BROWSER_SUBCOMMAND: &str = "browser";

@@ -5054,6 +5054,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/data_bridges",
         "tooling/data_core",
         "tooling/data_hostile",
+        "tooling/data_line",
         "tooling/data_json",
         "tooling/data_pipeline",
         "tooling/data_schema",

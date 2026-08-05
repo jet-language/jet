@@ -291,6 +291,74 @@ fn jet_data_bar_svg(groups: &Vec<jet_std::DataGroup>) -> String {
     out
 }
 
+fn jet_data_line_points(groups: &Vec<jet_std::DataGroup>) -> Vec<jet_data_plot::LinePoint> {
+    groups
+        .iter()
+        .map(|group| jet_data_plot::LinePoint {
+            label: group.key.clone(),
+            value: group.sum,
+        })
+        .collect()
+}
+
+fn jet_data_line_config(
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> jet_data_plot::LineConfig {
+    jet_data_plot::LineConfig {
+        title: title.clone(),
+        x_label: x_label.clone(),
+        y_label: y_label.clone(),
+        markers,
+        reference,
+        style: style.clone(),
+        color: color.clone(),
+        legend: legend.clone(),
+    }
+}
+
+fn jet_data_line_text(
+    groups: &Vec<jet_std::DataGroup>,
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> String {
+    let points = jet_data_line_points(groups);
+    let config = jet_data_line_config(
+        title, x_label, y_label, markers, reference, style, color, legend,
+    );
+    jet_data_plot::render_line_text(&points, &config)
+}
+
+fn jet_data_line_svg(
+    groups: &Vec<jet_std::DataGroup>,
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> String {
+    let points = jet_data_line_points(groups);
+    let config = jet_data_line_config(
+        title, x_label, y_label, markers, reference, style, color, legend,
+    );
+    jet_data_plot::render_line_svg(&points, &config)
+}
+
 fn jet_fmt_number(value: i64) -> String {
     comma_int(value)
 }

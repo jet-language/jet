@@ -20,7 +20,8 @@ use super::Diagnostics::{
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
-    IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, ProfileSet,
+    IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
+    PackageProfilePlan, PackageProfileSet, ProfileSet,
 };
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
@@ -56,6 +57,112 @@ pub fn is_module_surface(src: &str) -> bool {
 /// typed integration calls lower into the same source and environment graph.
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     evaluate_env_with_profile(src, base_dir, None)
+}
+
+/// Evaluate one source-backed package profile without realizing or mutating
+/// the store. This is the production path for `jet profile plan`; callers get
+/// provider identity, source provenance, and collision selections from the
+/// same graph used by environment evaluation.
+pub fn evaluate_package_profile(
+    src: &str,
+    base_dir: &Path,
+    name: &str,
+) -> Result<PackageProfilePlan, Diagnostic> {
+    let env = evaluate_env(src, base_dir)?;
+    let mut profiles = PackageProfileSet::default();
+    for profile in env.package_profiles {
+        profiles.insert_checked(profile).map_err(|error| {
+            Diagnostic::error(
+                "E1332",
+                format!("package profile composition failed: {error}"),
+                "one source-backed package profile cannot silently choose different inheritance, package, or collision facts".to_string(),
+                "merge the declarations so they agree, or give the profiles different names".to_string(),
+                None,
+            )
+        })?;
+    }
+    let resolved = profiles.resolve(name).map_err(|error| {
+        Diagnostic::error(
+            "E1332",
+            format!("package profile `{name}` could not be resolved: {error}"),
+            "profile inheritance is resolved parent-first and must remain acyclic".to_string(),
+            "fix the profile name, parent reference, or inheritance cycle".to_string(),
+            None,
+        )
+    })?;
+    let package_names = resolved
+        .packages
+        .iter()
+        .map(|package| package.raw.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for (path, provider) in &resolved.collisions {
+        if !package_names.contains(provider) {
+            return Err(Diagnostic::error(
+                "E1335",
+                format!(
+                    "package profile `{name}` selects `{provider}` for `{path}`, but that provider is not in the profile"
+                ),
+                "a collision selection must name one exact package contender retained by the source-backed profile".to_string(),
+                "add the selected package ref to `packages`, or select one of the existing contenders".to_string(),
+                None,
+            ));
+        }
+    }
+    let mut packages = Vec::new();
+    for package in &resolved.packages {
+        let spec = classify_profile_ref(&package.raw, &env.table).map_err(|error| {
+            Diagnostic::error(
+                "E1335",
+                format!("package profile `{name}` contains unsupported ref `{}`: {error}", package.raw),
+                "profile package facts must retain one lossless package and provider identity".to_string(),
+                "use `package@source` with a built-in or declared source".to_string(),
+                None,
+            )
+        })?;
+        let (target, channel) = RefSpec::split_channel_ref(&spec.package);
+        // Keep the source token from the declaration. `default` is the
+        // package-sugar spelling for nixpkgs, but changing it to `nixpkgs`
+        // here would erase source identity from the plan and later lock views.
+        let source = package
+            .raw
+            .rsplit_once(Syntax::REF_PROVIDER_AT)
+            .map(|(_, source)| source)
+            .unwrap_or_else(|| spec.source.label())
+            .to_string();
+        packages.push(PackageProfileFact {
+            raw: package.raw.clone(),
+            target: target.to_string(),
+            source: source.clone(),
+            upstream: env.table.upstream(&source).map(str::to_string),
+            provider: env.table.provider(&source).label().to_string(),
+            channel: channel.map(|value| value.as_str().to_string()),
+            declared_by: package.declared_by.clone(),
+        });
+    }
+    Ok(PackageProfilePlan {
+        name: resolved.name,
+        selected_profiles: resolved.selected_profiles,
+        applied: resolved.applied,
+        packages,
+        collisions: resolved.collisions,
+        sources: resolved.sources,
+    })
+}
+
+fn classify_profile_ref(
+    raw: &str,
+    table: &SourceTable,
+) -> Result<RefSpec::RefSpec, String> {
+    if let Some((package, source)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+        if source == Syntax::DEFAULT_SOURCE {
+            return Ok(RefSpec::RefSpec {
+                source: RefSpec::Source::Nixpkgs,
+                package: package.to_string(),
+                raw: raw.to_string(),
+            });
+        }
+    }
+    RefSpec::classify_in(raw, table).map_err(|error| format!("{error:?}"))
 }
 
 /// Evaluate a typed environment with one authoritative profile selection.
@@ -144,6 +251,7 @@ pub fn evaluate_env_with_profiles(
     let mut adapters: Vec<AdapterPlan> = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
     let mut profiles = ProfileSet::default();
+    let mut package_profiles = PackageProfileSet::default();
     let mut languages = Vec::new();
     let mut files: Vec<ManagedFile> = Vec::new();
     let mut integrations: Vec<EnvironmentIntegration> = Vec::new();
@@ -282,6 +390,17 @@ pub fn evaluate_env_with_profiles(
                     format!("environment profile composition failed: {error}"),
                     "one environment graph cannot silently choose between different facts for the same profile".to_string(),
                     "merge the profile declarations so they are identical, or give them different names".to_string(),
+                    None,
+                )
+            })?;
+        }
+        for profile in &module.package_profiles {
+            package_profiles.insert_checked(profile.clone()).map_err(|error| {
+                Diagnostic::error(
+                    "E1332",
+                    format!("package profile composition failed: {error}"),
+                    "one source-backed package profile cannot silently choose different inheritance, package, or collision facts".to_string(),
+                    "merge the declarations so they agree, or give the profiles different names".to_string(),
                     None,
                 )
             })?;
@@ -514,6 +633,7 @@ pub fn evaluate_env_with_profiles(
         files,
         integrations,
         integration_facts,
+        package_profiles: package_profiles.profiles.values().cloned().collect(),
         environment_names: environment_names.into_iter().collect(),
         active_environment,
         active_environment_provenance,

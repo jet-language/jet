@@ -346,6 +346,7 @@ pub(super) fn realize_adapter(
     roots: &Roots,
     flags: &Flags,
     plan: &ModuleEval::AdapterPlan,
+    table: &RefSpec::SourceTable,
     consume: bool,
 ) -> Option<(
     Store::StoreEntry,
@@ -355,8 +356,13 @@ pub(super) fn realize_adapter(
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
     let project_dir = current_project_dir();
+    let fixtures = if flags.offline {
+        fixtures_for(flags)
+    } else {
+        flags.fixtures.clone()
+    };
     let ctx = Provider::Ctx {
-        fixtures: None,
+        fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
@@ -386,6 +392,7 @@ pub(super) fn realize_adapter(
         &ctx,
         Store::RealizeRequest::Adapter {
             plan,
+            table,
             expectation: &expectation,
         },
     ) {
@@ -772,6 +779,7 @@ fn typed_plan_with_defaults(
             files: plan.files,
             integrations: plan.integrations,
             integration_facts: plan.integration_facts,
+            package_profiles: plan.package_profiles,
         },
     })
 }

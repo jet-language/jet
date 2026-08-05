@@ -648,6 +648,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             if module == "core.data" {
                 return match method.as_str() {
                     "status" if args.is_empty() => true,
+                    "line_text" | "line_svg" if args.len() == 9 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
                     "csv" | "json" | "count" | "mean" | "sum" | "min" | "max" | "median"
                     | "variance" | "stddev" | "describe" | "bar_text" | "bar_svg"
                     | "require_bridge" | "table" | "rows" | "schema" | "series"

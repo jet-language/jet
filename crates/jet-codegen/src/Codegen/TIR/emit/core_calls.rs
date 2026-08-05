@@ -1603,6 +1603,28 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_data_bar_svg"), arg(0))
             }
         }
+        ("core.data", "line_text") | ("core.data", "line_svg") => {
+            let helper_name = match (method, matches!(ret_ty, Type::Result { .. })) {
+                ("line_text", true) => "jet_data_line_text_checked",
+                ("line_text", false) => "jet_data_line_text",
+                ("line_svg", true) => "jet_data_line_svg_checked",
+                ("line_svg", false) => "jet_data_line_svg",
+                _ => unreachable!("line plot helper method"),
+            };
+            format!(
+                "{}(&({}), &({}), &({}), &({}), {}, {}, &({}), &({}), &({}))",
+                helper(helper_name),
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3),
+                arg(4),
+                arg(5),
+                arg(6),
+                arg(7),
+                arg(8),
+            )
+        }
         ("core.data", "csv_reader") => {
             format!(
                 "{}({}, {})",

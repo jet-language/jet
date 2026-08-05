@@ -257,6 +257,21 @@ fn native_devshell_bounds_lazy_thunk_chains() {
 }
 
 #[test]
+fn native_evaluator_rejects_deeply_nested_syntax_before_stack_overflow() {
+    let source = format!(
+        "{}true{}",
+        "(".repeat(Evaluator::MAX_EVAL_DEPTH * 2),
+        ")".repeat(Evaluator::MAX_EVAL_DEPTH * 2)
+    );
+    let error = evaluate_devshell(&source, "x86_64-linux").unwrap_err();
+    assert!(matches!(
+        error,
+        EvaluationError::ResourceLimit(reason)
+            if reason.contains("parser") && reason.contains("nested expressions")
+    ));
+}
+
+#[test]
 fn native_devshell_releases_lazy_scopes_after_each_evaluation() {
     let source =
         "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }";
@@ -643,7 +658,14 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
         entry.surface == "devshells" && entry.status == InventoryStatus::Covered
     }));
     assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
-    assert_eq!(evaluator_budget().input_bytes, 1 << 20);
+    let budget = evaluator_budget();
+    assert_eq!(budget.input_bytes, 1 << 20);
+    assert_eq!(budget.tokens, 65_536);
+    assert_eq!(budget.expression_steps, 256);
+    assert_eq!(budget.imports, 64);
+    assert_eq!(budget.string_bytes, 1 << 20);
+    assert!(budget.expression_steps < budget.tokens);
+    assert!(budget.imports < budget.expression_steps);
 }
 
 #[test]
@@ -926,5 +948,20 @@ fn native_evaluator_rejects_fetchers_and_cross_system_packages_without_authority
         cross_error,
         EvaluationError::Unsupported(reason)
             if reason.contains("explicit target")
+    ));
+
+    let external_flake_error = evaluate_devshell(
+        r#"{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.getFlake "github:NixOS/nixpkgs") ];
+          };
+        }"#,
+        "x86_64-linux",
+    )
+    .expect_err("external flakes must not gain implicit provider authority");
+    assert!(matches!(
+        external_flake_error,
+        EvaluationError::Unsupported(reason)
+            if reason.contains("external flakes") && reason.contains("provider authority")
     ));
 }

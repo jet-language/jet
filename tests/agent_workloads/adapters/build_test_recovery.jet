@@ -1,0 +1,39 @@
+use core.files as fs
+use core.io as io
+use core.process as process
+use core.time as time
+use core.env as env
+
+fn run() {
+    args :: io.args()
+    if args.len() != 2 { panic("usage: build_test_recovery INPUT_ROOT") }
+    input :: args.get(1) ?? panic("missing input root")
+    jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
+    project := "project"
+    fs.copy_dir(input, project) ?? panic("cannot copy build/test project")
+    timeout :: Duration.seconds(30) ?? panic("bad timeout")
+
+    invalid :: process.cmd([String].{~jet, "check", "{project}/invalid.jet"})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(timeout)
+        .run() ?? panic("invalid check could not run")
+    if invalid.timed_out || invalid.code == 0 { panic("invalid source did not fail closed") }
+
+    checked :: process.cmd([String].{~jet, "check", "{project}/build_test_recovery.jet"})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(timeout)
+        .run() ?? panic("valid check could not run")
+    if checked.timed_out || checked.code != 0 { panic("valid source did not build") }
+
+    tested :: process.cmd([String].{~jet, "run", "--release", "{project}/build_test_recovery.jet"})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(timeout)
+        .run() ?? panic("valid test could not run")
+    if tested.timed_out || tested.code != 0 { panic("valid source test failed") }
+    print("recovery=ok")
+    print("test={tested.output.trim()}")
+    fs.remove_all(project) ?? panic("cannot clean build/test project")
+}

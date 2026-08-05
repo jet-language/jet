@@ -1201,13 +1201,17 @@ second report type; a close literal typo suggests the nearest stable key.
 child, so its type is `TerminalSession?`. After unwrapping it, `resize(size)`
 returns `Unit ? IOError`.
 
-A terminal session needs a Unix PTY or a Windows ConPTY. While no such backend
-is present, every launch path that asks for a terminal — `run()`, `spawn()`,
-and `pipeline()` — fails with an `IOError` that names the missing backend. The
-child never runs on plain pipes with the requested terminal silently dropped.
-The capability set is empty, and a plain child's terminal field is `.None`.
-PTY/ConPTY transport,
-transcripts, binary streams, process-tree control, and resource limits are
+A terminal session needs a native PTY or ConPTY. On Unix, `run()` and
+`spawn()` create a real PTY, attach the child to a controlling session, and
+expose its one combined byte stream through `stdout`; `stderr` is empty because
+a PTY has no second output stream. The child session uses the requested size
+and mode, and `TerminalSession.resize` changes the PTY window size. The stable
+capability keys are `terminal`, `resize`, and `raw`. Unsupported targets fail
+closed with an `IOError` instead of silently falling back to pipes.
+
+`pipeline()` keeps ordinary pipe edges. A terminal-backed spec cannot be a
+pipeline stage; use `spawn()` for the interactive child. PTY/ConPTY transport,
+transcripts, binary streams, process-tree control, and resource limits remain
 separate backend slices of the same process mechanism.
 
 `ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
@@ -1921,6 +1925,7 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
 | `require_bridge(provider)` | `() ? DataError` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
 | `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
+| `line_text(groups, title, x_label, y_label, markers, reference, style, color, legend)` / `line_svg(…)` | `String ? DataError` | Deterministic line output from `DataGroup.key`/`.sum`; labels, markers, reference, style, color, and legend are explicit |
 
 `DataStream<T>.next()` returns `T? ? DataError`: clean EOF is stable `None`,
 terminal errors latch, and complete rows already returned stay valid. Edition
@@ -1928,6 +1933,8 @@ terminal errors latch, and complete rows already returned stay valid. Edition
 
 Flagship proof for this slice is `examples/features/tooling/data_analysis.jet`
 (CSV ingest → filter → sort → join → group → stats → plot → status). The
+line-plot proof is `examples/features/tooling/data_line.jet`; it uses the same
+`DataGroup` series for text and SVG output. The
 hostile corpus is `examples/features/tooling/data_hostile.jet`: empty and
 missing series, duplicate-key joins, delimiter-like pivot keys, stable sort
 ties, non-finite numerics, signed-zero collapse, population variance

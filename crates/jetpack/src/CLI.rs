@@ -21,6 +21,7 @@ mod bridge_os_studio;
 mod studio_server;
 mod studio_transactions;
 mod tool;
+mod profile;
 mod browser;
 #[doc(hidden)]
 pub mod ProfileDispatch;

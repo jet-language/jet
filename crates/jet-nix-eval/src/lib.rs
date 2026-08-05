@@ -87,7 +87,11 @@ const REQUIRED_SYSTEMS: [&str; 4] = [
     "x86_64-darwin",
     "x86_64-linux",
 ];
-const MAX_EVALUATOR_INPUT_BYTES: usize = 1 << 20;
+pub(crate) const EVALUATOR_INPUT_BYTES: usize = 1 << 20;
+pub(crate) const EVALUATOR_TOKEN_LIMIT: usize = 65_536;
+pub(crate) const EVALUATOR_EXPRESSION_LIMIT: usize = 256;
+pub(crate) const EVALUATOR_IMPORT_LIMIT: usize = 64;
+pub(crate) const EVALUATOR_STRING_BYTES: usize = 1 << 20;
 
 /// The bounded compatibility inventory is part of the evaluator contract.
 /// A skipped surface has an explicit authority or semantic reason; it is not
@@ -219,11 +223,11 @@ pub struct EvaluatorBudget {
 }
 
 pub const EVALUATOR_BUDGET: EvaluatorBudget = EvaluatorBudget {
-    input_bytes: MAX_EVALUATOR_INPUT_BYTES,
-    tokens: 65_536,
-    expression_steps: 256,
-    imports: 64,
-    string_bytes: 1 << 20,
+    input_bytes: EVALUATOR_INPUT_BYTES,
+    tokens: EVALUATOR_TOKEN_LIMIT,
+    expression_steps: EVALUATOR_EXPRESSION_LIMIT,
+    imports: EVALUATOR_IMPORT_LIMIT,
+    string_bytes: EVALUATOR_STRING_BYTES,
 };
 
 pub fn evaluator_budget() -> EvaluatorBudget {
@@ -370,7 +374,7 @@ pub fn evaluate_devshell_with_import_authority(
     system: &str,
     import_authority: Option<ImportAuthority>,
 ) -> core::result::Result<DevShellEvaluation, EvaluationError> {
-    if source.len() > MAX_EVALUATOR_INPUT_BYTES {
+    if source.len() > EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);
     }
     if !REQUIRED_SYSTEMS.contains(&system) {
@@ -391,7 +395,7 @@ pub fn evaluate_derivation(
     source: &str,
     system: &str,
 ) -> core::result::Result<DerivationEvaluation, EvaluationError> {
-    if source.len() > MAX_EVALUATOR_INPUT_BYTES {
+    if source.len() > EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);
     }
     if !REQUIRED_SYSTEMS.contains(&system) {
@@ -410,7 +414,7 @@ pub fn evaluate_derivation_output(
     system: &str,
     attribute: &str,
 ) -> core::result::Result<DerivationEvaluation, EvaluationError> {
-    if source.len() > MAX_EVALUATOR_INPUT_BYTES {
+    if source.len() > EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);
     }
     if !REQUIRED_SYSTEMS.contains(&system) {

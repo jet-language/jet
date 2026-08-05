@@ -15,8 +15,9 @@ pub use crate::WebPartition::{
 /// (and `pack.lock`); the manifest reshape chunk migrates the old paths.
 pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
 
-/// S52 (ratified M12; amended 2026-06-16, U2): the single shared, content-
-/// addressed store ("hangar"), global and never relocated.
+/// Legacy migration source only. D-ECO-HANGARPATH1 moved the default Hangar to
+/// the native per-user data path; this retired root-owned path is never used
+/// for new resolution.
 pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 
 /// D-JPK-FILES (ratified 2026-06-18): repo metadata and source defaults at

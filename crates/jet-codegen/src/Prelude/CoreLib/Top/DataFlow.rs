@@ -330,6 +330,95 @@ fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Result<String, 
     Ok(jet_data_bar_svg(groups))
 }
 
+fn jet_data_line_error(
+    operation: &str,
+    error: jet_data_plot::PlotError,
+) -> jet_std::DataError {
+    let kind = match error.kind {
+        "Empty" => jet_std::DataErrorKind::Empty,
+        "NonFinite" => jet_std::DataErrorKind::NonFinite,
+        "InvalidArgument" => jet_std::DataErrorKind::InvalidArgument,
+        _ => jet_std::DataErrorKind::State,
+    };
+    jet_data_error_at(kind, operation, error.index, error.reason)
+}
+
+fn jet_data_line_validate(
+    operation: &str,
+    groups: &Vec<jet_std::DataGroup>,
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> Result<(), jet_std::DataError> {
+    let points = jet_data_line_points(groups);
+    let config = jet_data_line_config(
+        title, x_label, y_label, markers, reference, style, color, legend,
+    );
+    jet_data_plot::validate_line(&points, &config)
+        .map_err(|error| jet_data_line_error(operation, error))
+}
+
+fn jet_data_line_text_checked(
+    groups: &Vec<jet_std::DataGroup>,
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> Result<String, jet_std::DataError> {
+    jet_data_line_validate(
+        "line_text",
+        groups,
+        title,
+        x_label,
+        y_label,
+        markers,
+        reference,
+        style,
+        color,
+        legend,
+    )?;
+    Ok(jet_data_line_text(
+        groups, title, x_label, y_label, markers, reference, style, color, legend,
+    ))
+}
+
+fn jet_data_line_svg_checked(
+    groups: &Vec<jet_std::DataGroup>,
+    title: &String,
+    x_label: &String,
+    y_label: &String,
+    markers: bool,
+    reference: f64,
+    style: &String,
+    color: &String,
+    legend: &String,
+) -> Result<String, jet_std::DataError> {
+    jet_data_line_validate(
+        "line_svg",
+        groups,
+        title,
+        x_label,
+        y_label,
+        markers,
+        reference,
+        style,
+        color,
+        legend,
+    )?;
+    Ok(jet_data_line_svg(
+        groups, title, x_label, y_label, markers, reference, style, color, legend,
+    ))
+}
+
 fn jet_data_pivot_sum_checked<T, FR, FC, FV>(
     rows: &Vec<T>,
     row_key: FR,

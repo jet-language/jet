@@ -13,14 +13,14 @@ use core::cell::{Cell, RefCell};
 use core::fmt;
 use core::mem;
 
-const MAX_TOKENS: usize = 65_536;
-const MAX_EVAL_DEPTH: usize = 256;
+const MAX_TOKENS: usize = super::EVALUATOR_TOKEN_LIMIT;
+pub(crate) const MAX_EVAL_DEPTH: usize = super::EVALUATOR_EXPRESSION_LIMIT;
 const MAX_DEV_SHELL_PACKAGES: usize = 256;
 const MAX_PACKAGE_NAME_BYTES: usize = 128;
-const MAX_IMPORTS: usize = 64;
+const MAX_IMPORTS: usize = super::EVALUATOR_IMPORT_LIMIT;
 const MAX_PATH_BYTES: usize = 4_096;
 const MAX_STRING_PARTS: usize = 256;
-const MAX_STRING_BYTES: usize = 1 << 20;
+const MAX_STRING_BYTES: usize = super::EVALUATOR_STRING_BYTES;
 const MAX_DERIVATION_ARGS: usize = 256;
 const MAX_DERIVATION_ENV: usize = 256;
 const MAX_DERIVATION_INPUTS: usize = 256;
@@ -606,11 +606,35 @@ fn next_char_len(source: &str, position: usize) -> Result<usize, Error> {
 struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    depth: usize,
 }
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, position: 0 }
+        Self::new_at_depth(tokens, 0)
+    }
+
+    fn new_at_depth(tokens: Vec<Token>, depth: usize) -> Self {
+        Self {
+            tokens,
+            position: 0,
+            depth,
+        }
+    }
+
+    fn with_depth<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        if self.depth >= MAX_EVAL_DEPTH {
+            return Err(Error::ResourceLimit(format!(
+                "foreign flake parser exceeded {MAX_EVAL_DEPTH} nested expressions"
+            )));
+        }
+        self.depth += 1;
+        let result = parse(self);
+        self.depth -= 1;
+        result
     }
 
     fn parse(mut self) -> Result<Expr, Error> {
@@ -622,6 +646,10 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.expression_inner())
+    }
+
+    fn expression_inner(&mut self) -> Result<Expr, Error> {
         if let Some((pattern, body)) = self.try_lambda()? {
             return Ok(Expr::Lambda(pattern, Box::new(body)));
         }
@@ -629,6 +657,10 @@ impl Parser {
     }
 
     fn try_lambda(&mut self) -> Result<Option<(Pattern, Expr)>, Error> {
+        self.with_depth(|parser| parser.try_lambda_inner())
+    }
+
+    fn try_lambda_inner(&mut self) -> Result<Option<(Pattern, Expr)>, Error> {
         let saved = self.position;
         if let Token::Identifier(name) = self.peek().clone() {
             self.position += 1;
@@ -674,6 +706,10 @@ impl Parser {
     }
 
     fn equality(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.equality_inner())
+    }
+
+    fn equality_inner(&mut self) -> Result<Expr, Error> {
         let mut expression = self.merge()?;
         loop {
             let equal = match self.peek() {
@@ -692,6 +728,10 @@ impl Parser {
     }
 
     fn merge(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.merge_inner())
+    }
+
+    fn merge_inner(&mut self) -> Result<Expr, Error> {
         let mut expression = self.application()?;
         while matches!(self.peek(), Token::Merge) {
             self.position += 1;
@@ -701,6 +741,10 @@ impl Parser {
     }
 
     fn application(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.application_inner())
+    }
+
+    fn application_inner(&mut self) -> Result<Expr, Error> {
         let mut expression = self.selection()?;
         while self.starts_application() {
             expression = Expr::Apply(Box::new(expression), Box::new(self.selection()?));
@@ -709,6 +753,10 @@ impl Parser {
     }
 
     fn selection(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.selection_inner())
+    }
+
+    fn selection_inner(&mut self) -> Result<Expr, Error> {
         let mut expression = self.atom()?;
         while matches!(self.peek(), Token::Dot) {
             self.position += 1;
@@ -721,6 +769,10 @@ impl Parser {
     }
 
     fn atom(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.atom_inner())
+    }
+
+    fn atom_inner(&mut self) -> Result<Expr, Error> {
         match self.bump() {
             Token::String(value) => Ok(Expr::String(value)),
             Token::StringContext(parts) => self.string_context(parts),
@@ -745,6 +797,11 @@ impl Parser {
     }
 
     fn string_context(&self, parts: Vec<StringTokenPart>) -> Result<Expr, Error> {
+        let mut parser = Parser::new_at_depth(Vec::new(), self.depth);
+        parser.string_context_inner(parts)
+    }
+
+    fn string_context_inner(&mut self, parts: Vec<StringTokenPart>) -> Result<Expr, Error> {
         let mut expressions = Vec::with_capacity(parts.len());
         for part in parts {
             match part {
@@ -753,7 +810,7 @@ impl Parser {
                 }
                 StringTokenPart::Expression(source) => {
                     let tokens = Lexer::new(&source).tokenize()?;
-                    let expression = Parser::new(tokens).parse()?;
+                    let expression = Parser::new_at_depth(tokens, self.depth).parse()?;
                     expressions.push(StringPart::Expression(Box::new(expression)));
                 }
             }
@@ -762,6 +819,10 @@ impl Parser {
     }
 
     fn attrset(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.attrset_inner())
+    }
+
+    fn attrset_inner(&mut self) -> Result<Expr, Error> {
         let mut fields = Vec::new();
         while !matches!(self.peek(), Token::RightBrace) {
             let key = self.key_path()?;
@@ -778,6 +839,10 @@ impl Parser {
     }
 
     fn list(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.list_inner())
+    }
+
+    fn list_inner(&mut self) -> Result<Expr, Error> {
         let mut values = Vec::new();
         while !matches!(self.peek(), Token::RightBracket) {
             values.push(self.selection()?);
@@ -790,6 +855,10 @@ impl Parser {
     }
 
     fn let_expression(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.let_expression_inner())
+    }
+
+    fn let_expression_inner(&mut self) -> Result<Expr, Error> {
         let mut bindings = Vec::new();
         while !self.word("in") {
             let Token::Identifier(name) = self.bump() else {
@@ -807,6 +876,10 @@ impl Parser {
     }
 
     fn with_expression(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.with_expression_inner())
+    }
+
+    fn with_expression_inner(&mut self) -> Result<Expr, Error> {
         let scope = self.expression()?;
         if !matches!(self.peek(), Token::Semicolon) {
             return Err(Error::Syntax("with expression requires `;`".into()));
@@ -816,6 +889,10 @@ impl Parser {
     }
 
     fn if_expression(&mut self) -> Result<Expr, Error> {
+        self.with_depth(|parser| parser.if_expression_inner())
+    }
+
+    fn if_expression_inner(&mut self) -> Result<Expr, Error> {
         let condition = self.expression()?;
         if !self.word("then") {
             return Err(Error::Syntax("if expression requires `then`".into()));
@@ -1824,6 +1901,9 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                         "fixed-output fetchers require explicit fetch authority and verified bytes",
                     ),
                 ),
+                "getFlake" => Some(NativeFunction::Unsupported(
+                    "external flakes require explicit provider authority",
+                )),
                 "currentSystem" => return Ok(Some(Thunk::value(Value::String(
                     system,
                 )))),

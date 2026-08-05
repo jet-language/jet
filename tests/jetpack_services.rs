@@ -8,13 +8,19 @@
 //!     recognize is a clean E1262, both from `jetpack dev` and from
 //!     `jetpack services up` directly.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
 use std::sync::OnceLock;
+
+#[cfg(target_os = "linux")]
+use jet_env_model::ModuleEval::{DevServicePlan, PromptPathMode, PromptStripMode};
+#[cfg(target_os = "linux")]
+use jetpack::Shell::Env as ShellEnv;
 
 mod common;
 use common::jetpack_bin;
@@ -84,7 +90,7 @@ fn fake_systemd() -> &'static FakeSystemd {
         fs::create_dir_all(&state).unwrap();
         let systemd_run = r##"#!/bin/sh
 set -eu
-state=${JETPACK_FAKE_SYSTEMD_STATE:?}
+state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 unit=
 workdir=
 saw_user=0
@@ -129,17 +135,33 @@ exec "$@"
 
         let systemctl = r##"#!/bin/sh
 set -eu
-state=${JETPACK_FAKE_SYSTEMD_STATE:?}
+state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 signal=TERM
 unit=
+operation=kill
 for arg in "$@"; do
     case "$arg" in
+        is-active) operation=active ;;
         --signal=*) signal=${arg#--signal=} ;;
         *.scope) unit=$arg ;;
     esac
 done
 [ -n "$unit" ]
 pid=$(cat "$state/$unit.pid")
+if [ "$operation" = active ]; then
+    for stat in /proc/[0-9]*/stat; do
+        [ -r "$stat" ] || continue
+        line=$(cat "$stat") || continue
+        rest=${line##*)}
+        set -- $rest
+        state_code=$1
+        process_group=$3
+        if [ "$process_group" = "$pid" ] && [ "$state_code" != Z ]; then
+            exit 0
+        fi
+    done
+    exit 3
+fi
 kill "-$signal" -- "-$pid" 2>/dev/null || kill "-$signal" "$pid" 2>/dev/null || true
 exit 0
 "##;
@@ -233,6 +255,50 @@ fn services_up_health_logs_down_roundtrip() {
         .output()
         .unwrap();
     assert!(!health_after.status.success());
+}
+
+#[test]
+fn services_from_nested_project_directory_use_the_project_state_root() {
+    let proj = Scratch::new("nested-services");
+    let root = Scratch::new("nested-services-root");
+    let home = Scratch::new("nested-services-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sh", "-c", "echo nested-started; sleep 30"] }"#,
+        "fn run() {}\n",
+    );
+    let nested = proj.join("src/nested");
+    fs::create_dir_all(&nested).unwrap();
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&nested)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(proj.path.join(".jet/services/fixture/pid").is_file());
+    assert!(!nested.join(".jet/services/fixture/pid").exists());
+
+    let health = jetpack()
+        .args(["services", "health", "--no-color"])
+        .current_dir(&nested)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+
+    let down = jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&nested)
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
 }
 
 /// `jetpack dev` health-gates on its declared services (U19's `jetpack dev`
@@ -479,6 +545,23 @@ fn wait_for_file_lines(path: &std::path::Path, minimum: usize) {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn process_is_alive(pid: u32) -> bool {
+    if fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| stat.rsplit_once(')').map(|(_, rest)| rest.to_string()))
+        .and_then(|rest| rest.split_whitespace().next().map(str::to_string))
+        .as_deref()
+        == Some("Z")
+    {
+        return false;
+    }
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn wait_for_missing(path: &std::path::Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while path.exists() {
@@ -506,6 +589,343 @@ fn wait_for_file_contains(path: &std::path::Path, expected: &str) {
             path.display()
         );
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn write_executable(path: &std::path::Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, contents).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn catalog_tool_env(root: &std::path::Path, systemd_bin: Option<&std::path::Path>) -> ShellEnv {
+    let mut bin_dirs = vec![root.join("bin").display().to_string()];
+    if let Some(systemd_bin) = systemd_bin {
+        bin_dirs.push(systemd_bin.display().to_string());
+    }
+    ShellEnv {
+        bin_dirs,
+        vars: BTreeMap::new(),
+        unset_vars: Vec::new(),
+        refs: Vec::new(),
+        label: "catalog-test".to_string(),
+        prompt_path: PromptPathMode::Short,
+        prompt_strip: PromptStripMode::Off,
+        cache_leases: Vec::new(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn install_catalog_tools(root: &std::path::Path) {
+    fs::create_dir_all(root.join("bin")).unwrap();
+    let tool = r##"#!/bin/sh
+set -eu
+name=${0##*/}
+case "$name" in
+initdb)
+    data=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --pgdata) shift; data=$1 ;;
+            --pgdata=*) data=${1#--pgdata=} ;;
+        esac
+        shift
+    done
+    [ -n "$data" ]
+    mkdir -p "$data"
+    printf '16\n' > "$data/PG_VERSION"
+    ;;
+redis-server)
+    data=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --dir) shift; data=$1 ;;
+        esac
+        shift
+    done
+    [ -n "$data" ]
+    mkdir -p "$data"
+    : > "$data/.service-running"
+    exec sleep 30
+    ;;
+mysqld)
+    if [ "${1:-}" = "--initialize-insecure" ]; then
+        data=
+        for arg in "$@"; do
+            case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+        done
+        [ -n "$data" ]
+        mkdir -p "$data/mysql"
+    else
+        data=
+        for arg in "$@"; do
+            case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+        done
+        [ -n "$data" ]
+        : > "$data/.service-running"
+        exec sleep 30
+    fi
+    ;;
+mariadb-install-db)
+    data=
+    for arg in "$@"; do
+        case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+    done
+    [ -n "$data" ]
+    mkdir -p "$data/mysql"
+    ;;
+postgres)
+    data=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in -D) shift; data=$1 ;; esac
+        shift
+    done
+    [ -n "$data" ]
+    : > "$data/.service-running"
+    exec sleep 30
+    ;;
+mariadbd)
+    data=
+    for arg in "$@"; do
+        case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+    done
+    [ -n "$data" ]
+    : > "$data/.service-running"
+    exec sleep 30
+    ;;
+minio)
+    [ "${1:-}" = "server" ]
+    data=${2:-}
+    [ -n "$data" ]
+    : > "$data/.service-running"
+    exec sleep 30
+    ;;
+mailpit)
+    database=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --database) shift; database=$1 ;;
+        esac
+        shift
+    done
+    [ -n "$database" ]
+    : > "$(dirname "$database")/.service-running"
+    exec sleep 30
+    ;;
+adminer)
+    root=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --root) shift; root=$1 ;;
+        esac
+        shift
+    done
+    [ -n "$root" ]
+    : > "$root/.service-running"
+    exec sleep 30
+    ;;
+nginx)
+    prefix=
+    config=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -p) shift; prefix=$1 ;;
+            -c) shift; config=$1 ;;
+        esac
+        shift
+    done
+    [ -n "$prefix" ]
+    [ -f "$config" ]
+    grep -F 'listen 127.0.0.1:' "$config" >/dev/null
+    : > "$prefix/.service-running"
+    exec sleep 30
+    ;;
+pg_isready)
+    [ -f .jet/services/postgres/data/.service-running ]
+    ;;
+redis-cli)
+    [ -f .jet/services/redis/data/.service-running ]
+    ;;
+mysqladmin)
+    [ -f .jet/services/mysql/data/.service-running ]
+    ;;
+mariadb-admin)
+    [ -f .jet/services/mariadb/data/.service-running ]
+    ;;
+curl)
+    url=
+    for arg in "$@"; do url=$arg; done
+    case "$url" in
+        */minio/health/live) [ -f .jet/services/minio/data/.service-running ] ;;
+        */api/v1/info) [ -f .jet/services/mailpit/data/.service-running ] ;;
+        *)
+            healthy=1
+            matched=0
+            for service in nginx adminer; do
+                port=$(cat ".jet/services/$service/ports" 2>/dev/null || true)
+                [ -n "$port" ] || continue
+                case "$url" in *":$port/"*)
+                    matched=1
+                    if [ "$service" = nginx ]; then
+                        nginx_marker=
+                        for marker in .jet/services/nginx/data/nginx-*/.service-running; do
+                            [ -f "$marker" ] || continue
+                            nginx_marker=1
+                            break
+                        done
+                        [ -n "$nginx_marker" ] || healthy=0
+                    else
+                        [ -f .jet/services/adminer/data/.service-running ] || healthy=0
+                    fi
+                esac
+            done
+            [ "$matched" -eq 1 ]
+            [ "$healthy" -eq 1 ]
+            ;;
+    esac
+    ;;
+*)
+    exit 1
+    ;;
+esac
+"##;
+    for name in [
+        "initdb",
+        "redis-server",
+        "mysqld",
+        "mariadb-install-db",
+        "postgres",
+        "mariadbd",
+        "minio",
+        "mailpit",
+        "adminer",
+        "nginx",
+        "pg_isready",
+        "redis-cli",
+        "mysqladmin",
+        "mariadb-admin",
+        "curl",
+    ] {
+        write_executable(&root.join("bin").join(name), tool);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+fn production_catalog_service_worker() {
+    let project = PathBuf::from(std::env::var_os("JETPACK_CATALOG_PROJECT").unwrap());
+    let tools = PathBuf::from(std::env::var_os("JETPACK_CATALOG_TOOLS").unwrap());
+    let systemd_bin = PathBuf::from(std::env::var_os("JETPACK_CATALOG_SYSTEMD_BIN").unwrap());
+    let name = std::env::var("JETPACK_CATALOG_NAME").unwrap();
+    let plan = DevServicePlan {
+        name,
+        enable: true,
+        ports: vec![0],
+        ..Default::default()
+    };
+    let env = catalog_tool_env(&tools, Some(&systemd_bin));
+    jetpack::Services::up_one(&project, &env, &plan).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_catalog_services_prepare_state_and_pass_readiness() {
+    let proj = Scratch::new("catalog-production");
+    let tools = Scratch::new("catalog-production-tools");
+    install_catalog_tools(&tools.path);
+    let fake = fake_systemd();
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = format!(
+        "{}:{}",
+        fake.bin.display(),
+        current_path.to_string_lossy()
+    );
+    let env = catalog_tool_env(&tools.path, None);
+
+    for name in [
+        "redis",
+        "postgres",
+        "mysql",
+        "mariadb",
+        "nginx",
+        "minio",
+        "mailpit",
+        "adminer",
+    ] {
+        let plan = DevServicePlan {
+            name: name.to_string(),
+            enable: true,
+            ports: vec![0],
+            ..Default::default()
+        };
+        let supervisor = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "production_catalog_service_worker",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("JETPACK_CATALOG_PROJECT", &proj.path)
+            .env("JETPACK_CATALOG_TOOLS", &tools.path)
+            .env("JETPACK_CATALOG_SYSTEMD_BIN", &fake.bin)
+            .env("JETPACK_CATALOG_NAME", name)
+            .env("JETPACK_SERVICE_SUPERVISOR", "1")
+            .env("PATH", &path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let service_dir = proj.path.join(".jet/services").join(name);
+        wait_for_file_contains(&service_dir.join("pid"), "pid=");
+        assert!(
+            jetpack::Services::wait_healthy_with_env(
+                &proj.path,
+                Some(&env),
+                &plan,
+                Duration::from_secs(3),
+            ),
+            "catalog service `{name}` did not pass its production readiness command"
+        );
+
+        let data_dir = service_dir.join("data");
+        match name {
+            "redis" => assert!(data_dir.join(".service-running").is_file()),
+            "postgres" => assert!(data_dir.join("PG_VERSION").is_file()),
+            "mysql" | "mariadb" => assert!(data_dir.join("mysql").is_dir()),
+            "minio" | "mailpit" | "adminer" => {
+                assert!(data_dir.join(".service-running").is_file())
+            }
+            "nginx" => {
+                let port = fs::read_to_string(service_dir.join("ports"))
+                    .unwrap()
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .parse::<u16>()
+                    .unwrap();
+                let config = data_dir.join(format!("nginx-{port}/conf/nginx.conf"));
+                let config_text = fs::read_to_string(config).unwrap();
+                assert!(config_text.contains(&format!("listen 127.0.0.1:{port};")));
+            }
+            _ => unreachable!(),
+        }
+
+        fs::write(service_dir.join(".stopping"), b"test\n").unwrap();
+        let output = supervisor.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "catalog worker failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        wait_for_missing(&service_dir.join("pid"));
     }
 }
 
@@ -559,6 +979,120 @@ fn production_path_persists_linux_authority_and_dependency_lifecycle() {
     assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
     let stopped = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
     assert!(stopped.contains("phase=stopped"), "{stopped}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+/// The fake systemd authority checks the production flags and exercises the
+/// process-group cleanup path. A real systemd cgroup runtime is outside this
+/// fixture's host capability, so this proves descendant cleanup semantics.
+fn production_path_kills_descendants_in_the_supervisor_process_group() {
+    let proj = Scratch::new("authority-descendants");
+    let root = Scratch::new("authority-descendants-root");
+    let home = Scratch::new("authority-descendants-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"] }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+
+    let child_file = proj.path.join(".jet/services/fixture/data/child.pid");
+    wait_for_file_lines(&child_file, 1);
+    let child_pid = fs::read_to_string(&child_file)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    let service_pid = fs::read_to_string(proj.path.join(".jet/services/fixture/pid"))
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("pid=")?.parse::<u32>().ok())
+        .unwrap();
+    assert_ne!(child_pid, service_pid, "fixture must have a real descendant");
+    assert!(process_is_alive(child_pid), "descendant must be alive before down");
+
+    let down = jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while process_is_alive(child_pid) {
+        assert!(Instant::now() < deadline, "descendant survived systemd scope shutdown");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_supervisor_stops_descendants_after_leader_exit() {
+    let proj = Scratch::new("authority-leader-exit");
+    let root = Scratch::new("authority-leader-exit-root");
+    let home = Scratch::new("authority-leader-exit-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; while [ ! -f exit.flag ]; do sleep 0.01; done; exit 0"] }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&up.stderr);
+    assert!(up.status.success(), "{stderr}");
+
+    let service_dir = proj.path.join(".jet/services/fixture");
+    let child_file = service_dir.join("data/child.pid");
+    wait_for_file_lines(&child_file, 1);
+    let child_pid = fs::read_to_string(&child_file)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    assert!(process_is_alive(child_pid), "descendant must outlive the leader");
+    fs::write(service_dir.join("data/exit.flag"), b"exit\n").unwrap();
+
+    wait_for_file_contains(&service_dir.join("lifecycle"), "phase=failed");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while process_is_alive(child_pid) {
+        assert!(
+            Instant::now() < deadline,
+            "supervisor left a descendant alive after leader exit: child={child_pid}, lifecycle={}, pid_state={}",
+            fs::read_to_string(service_dir.join("lifecycle")).unwrap_or_default(),
+            fs::read_to_string(service_dir.join("pid")).unwrap_or_default(),
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while service_dir.join("pid").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "supervisor retained PID after cleanup: lifecycle={}",
+            fs::read_to_string(service_dir.join("lifecycle")).unwrap_or_default(),
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[cfg(target_os = "linux")]

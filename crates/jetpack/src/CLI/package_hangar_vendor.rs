@@ -236,6 +236,18 @@ fn cache_usage(theme: &Theme, what: &str, fix: &str) -> i32 {
 pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
     let sub = parsed.positional.first().map(String::as_str);
     match sub {
+        Some("path") => {
+            let path = Store::resolve().hangar_dir();
+            if parsed.flags.json {
+                println!(
+                    "{{\"path\":{}}}",
+                    crate::JSON::quote(&path.display().to_string())
+                );
+            } else {
+                println!("{}", path.display());
+            }
+            0
+        }
         Some("du") | None => {
             let roots = Store::resolve();
             let entries = Store::du(&roots);
@@ -301,8 +313,8 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         Some(other) => {
             theme.error(
                 &format!("`hangar {other}` is not a hangar command"),
-                "hangar subcommands: `du`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
-                "run `jetpack hangar du`.",
+                "hangar subcommands: `path`, `du`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
+                "run `jetpack hangar path`.",
             );
             2
         }

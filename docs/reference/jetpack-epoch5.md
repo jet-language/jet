@@ -32,7 +32,10 @@ failed composition never mutates the Package facts.
 
 `jet fmt` formats both `package.jet` and declared Config files through this
 typed model. Ordinary source files continue through the compiler formatter.
-Running the command twice is a no-op after the first pass.
+Typed Package and Config files containing comments fail closed until the typed
+formatter owns comment placement; Jet never reports them as clean after
+silently leaving them unchanged. Running the command twice is a no-op after
+the first pass for comment-free typed files.
 
 ## Registry delivery and provider facts
 
@@ -84,6 +87,35 @@ Language selections are typed records. Enabled records expand through the
 closed catalog into ordinary package references. Disabled records remain in
 the plan and in the trust fingerprint, but missing tools for a disabled pack do
 not block the environment.
+
+## Source-backed package profiles
+
+Package profiles are separate from shell environment profiles. A
+`profile.<name>` declaration names package refs, parent profiles, and exact
+path collision choices. `user.<name>` and JetOS use the same profile graph.
+
+```text
+module profile.base {
+    packages: [default.ripgrep]
+}
+
+module profile.dev {
+    extends: ["base"]
+    packages: [default.fd]
+    collisions: { "bin/editor": "fd@default" }
+}
+```
+
+Run `jet profile plan dev` to inspect the resolved profile. The plan keeps the
+raw package ref, source name, provider, channel, source module, and collision
+map. `--json` gives the same facts for tools. The command does not realize or
+change a generation.
+
+The resolver applies parent profiles first. It rejects missing parents, cycles,
+conflicting declarations, adapter packages, unsupported refs, and collision
+choices that do not name a package in the resolved profile. It records these
+facts in the environment trust identity so a source or collision change needs
+a new trust decision.
 
 The built-in catalog covers 58 language families: Ansible, C, Clojure,
 Cplusplus, Crystal, Cue, Dart, Deno, Dotnet, Elixir, Elm, Erlang, Fortran,
@@ -172,6 +204,20 @@ secrets or secret-bearing environment variables fail closed; use
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
+
+## Hangar path
+
+Jetpack uses one per-user Hangar. On Linux its path is
+XDG_DATA_HOME/jet/hangar or ~/.local/share/jet/hangar. On macOS it is
+~/Library/Application Support/Jet/Hangar. On Windows it is
+%LOCALAPPDATA%/Jet/Hangar. The resolved path is printed by:
+
+jet hangar path
+
+An old state-directory Hangar, or the retired root-owned Hangar, is copied
+through an atomic staging directory on first use. The old tree stays in place
+so the migration is reversible. An incomplete staging tree stops the command
+and must be inspected before retrying.
 
 ## Hangar external roots
 
@@ -366,7 +412,12 @@ the expected bytes. User-authored files added after a split are not consumed.
 
 Build hooks lower to a finite action graph. Fetches need exact hashes. Exec
 steps use declared tool paths. Install paths stay under the output root.
-Successful outputs publish atomically and failed stages are removed.
+Successful outputs publish atomically and failed stages are removed. An
+approval binds the package, provider/source, staged source digest, platform,
+exact recipe digest, and declared capabilities. A change in any of these facts
+needs a new approval; `--trust` is one-shot and CI accepts only an exact
+repository grant. Hook processes receive no caller environment or credentials,
+only the declared deterministic build values and the private output channel.
 
 Environment images project the same package and service facts into OCI
 metadata. Secret values and dotenv contents do not enter the image projection.
@@ -376,9 +427,24 @@ metadata. Secret values and dotenv contents do not enter the image projection.
 Environment modules may import typed first-party integrations such as
 `env.platform.android()`, `env.platform.apple()`,
 `env.security.certificates([...])`, `env.network.hosts({...})`, and
-`env.agent.codex(...)`. Each import lowers into the same package, file, secret,
+`env.agent.codex(...)`, `env.cloud.credentials([...])`, and
+`env.security.vault([...])`. Each import lowers into the same package, file, secret,
 host-check, provider, and grant facts used by the rest of Jetpack. SDK imports
-carry deterministic safe defaults and preserve expert options in the plan.
+carry deterministic safe defaults and preserve expert options in the plan. The
+Apple preset includes `apple-sdk@nixpkgs`, the `apple-sdk-check` task, the
+`nixpkgs` provider, an explicit `target:darwin-or-macos` host check, and the
+`policy-required` license fact. Realization rejects an unsupported `JET_TARGET`
+before package activation; the integration options and host meaning remain in
+the environment fingerprint. Certificate imports lower named secret references
+to the `vault` provider, the `certificate-store-check` task, and the separate
+`certificate.read` grant. Host mappings lower to `host-binding` and
+`host-binding-check`; host values stay ordinary plan options. The Codex agent
+preset uses the `mcp` provider, `mcp-agent-check`, and the separate `mcp.read`
+grant. The VS Code editor preset uses the ordinary `vscode@nixpkgs` package and
+the `nixpkgs` provider. Cloud credential names lower to the
+`credential-store-check` task, `credential-store` provider, and separate
+`credential.read` grant. Vault names lower to the `vault-check` task, `vault`
+provider, and separate `vault.read` grant.
 Secret values are never stored in the plan or its fingerprint. Secret names
 enter the ordinary environment secret check. Provider facts are checked against
 the closed preset mapping, and sensitive integration grants are separate

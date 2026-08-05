@@ -5445,6 +5445,31 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[v]);
                 Ok(self.b.inst_results(call)[0])
             }
+            "line_text" | "line_svg" if args.len() == 9 => {
+                let mut lowered = Vec::with_capacity(args.len());
+                for (index, arg) in args.iter().enumerate() {
+                    let value = self.lower_expr(arg)?;
+                    let value = match index {
+                        4 if self.b.func.dfg.value_type(value) != types::I64 => {
+                            self.b.ins().uextend(types::I64, value)
+                        }
+                        5 if self.b.func.dfg.value_type(value) == types::F64 => self
+                            .b
+                            .ins()
+                            .bitcast(types::I64, Self::scalar_bitcast_memflags(), value),
+                        _ => value,
+                    };
+                    lowered.push(value);
+                }
+                let host_id = if method == "line_text" {
+                    self.host.data.line_text
+                } else {
+                    self.host.data.line_svg
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &lowered);
+                Ok(self.b.inst_results(call)[0])
+            }
             "table" if args.len() == 1 => {
                 let rows = self.lower_expr(&args[0])?;
                 // DataTable { rows, missing: 0, plan: ["table"] }
@@ -12641,12 +12666,16 @@ impl LowerCtx<'_, '_> {
                     other => other.clone(),
                 };
                 // ProcessChild is an opaque resident handle, not a heap record.
-                // No resident terminal backend exists yet, so a child produced
-                // by this path has no TerminalSession. Option ABI: 0 = None.
+                // The host returns the child handle as the optional session
+                // payload when the child owns a PTY master; zero is None.
                 if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
                     && field == "terminal"
                 {
-                    return Ok(self.b.ins().iconst(types::I64, 0));
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_terminal, self.b.func);
+                    let call = self.b.ins().call(host, &[handle]);
+                    return Ok(self.b.inst_results(call)[0]);
                 }
                 let type_name = record_type_key(&record_ty)
                     .or_else(|| self.method_struct.clone());
@@ -13152,6 +13181,8 @@ impl LowerCtx<'_, '_> {
                             ("ProcessStreamMode", "Stream") => Some(0),
                             ("ProcessStreamMode", "Inherit") => Some(1),
                             ("ProcessStreamMode", "Capture") => Some(2),
+                            ("TerminalMode", "Raw") => Some(0),
+                            ("TerminalMode", "Cooked") => Some(1),
                             ("TextWidthAmbiguous", "Narrow") => Some(0),
                             ("TextWidthAmbiguous", "Wide") => Some(1),
                             ("TextWidthControls", "Zero") => Some(0),
@@ -17673,10 +17704,24 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 }
-                "kill" | "terminate" | "interrupt" if args.is_empty() => {
+                "kill" if args.is_empty() => {
                     let host = self
                         .module
                         .declare_func_in_func(self.host.process.child_kill, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "terminate" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_terminate, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "interrupt" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_interrupt, self.b.func);
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 }

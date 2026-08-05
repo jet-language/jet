@@ -15,7 +15,7 @@ use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1464,6 +1464,7 @@ pub(crate) fn realize_adapter(
     plan: &AdapterPlan,
     ctx: &Ctx,
     expected: &super::Store::CacheExpectation,
+    tools: &HashMap<String, PathBuf>,
 ) -> Result<Realized, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
         ProviderError::Adapter(format!(
@@ -1512,7 +1513,7 @@ pub(crate) fn realize_adapter(
     let build_ctx = BuildContext {
         source_dir: &staged,
         output_root: &out_dir,
-        tools: std::collections::HashMap::new(),
+        tools: tools.clone(),
         fetch_cache: &fetch_cache,
         offline: ctx.offline,
     };
