@@ -279,7 +279,15 @@ fn run() {
     if adapter == "snapshot" {
         services.set_state_snapshot(&tree, store, "app-state", 1) ?? panic("snapshot state")
     } else {
-        services.set_state_event_log(&tree, store, "app-state", 1) ?? panic("event state")
+        if adapter == "schema-drift" {
+            services.set_state_event_log(&tree, store, "other-events", 1) ?? panic("event state")
+        } else {
+            if adapter == "version-drift" {
+                services.set_state_event_log(&tree, store, "app-state", 2) ?? panic("event state")
+            } else {
+                services.set_state_event_log(&tree, store, "app-state", 1) ?? panic("event state")
+            }
+        }
     }
     services.worker(&tree, "worker", 1) ?? panic("worker")
     services.start(&tree) ?? panic("start")
@@ -355,6 +363,43 @@ fn state_adapters_survive_process_restart() {
         run_restart_process(&bin, &snapshot_reversed, "read", Some("snapshot")),
         "restored:state-v1\nrecommitted:state-v2\n"
     );
+
+    // A store written under one schema or version must not open under another,
+    // and a tail lost to a crash mid-append must fail closed rather than read
+    // as a shorter history.
+    let drift = dir.join("events-drift.log");
+    assert_eq!(
+        run_restart_process(&bin, &drift, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    for adapter in ["schema-drift", "version-drift"] {
+        assert!(
+            !restart_status(&bin, &drift, "read", adapter).success(),
+            "a store opened under a mismatched {adapter}"
+        );
+    }
+
+    let torn = dir.join("events-torn.log");
+    assert_eq!(
+        run_restart_process(&bin, &torn, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    let bytes = fs::read(&torn).unwrap();
+    fs::write(&torn, &bytes[..bytes.len() - 3]).unwrap();
+    assert!(
+        !restart_status(&bin, &torn, "read", "event-log").success(),
+        "a truncated state store was accepted"
+    );
+}
+
+fn restart_status(bin: &Path, store: &Path, phase: &str, id: &str) -> std::process::ExitStatus {
+    Command::new(bin)
+        .env("JET_SERVICE_AUTH_STORE", store)
+        .env("JET_SERVICE_AUTH_PHASE", phase)
+        .env("JET_SERVICE_AUTH_ID", id)
+        .output()
+        .unwrap()
+        .status
 }
 
 const WORKFLOW_RESTART_SOURCE: &str = r#"
