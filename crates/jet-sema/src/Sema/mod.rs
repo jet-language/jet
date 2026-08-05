@@ -560,7 +560,10 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
                 (p.convention, ty)
             })
             .collect(),
-        root_param: false,
+        // D-CALLDUAL1=E: foreign functions use the same first bare-read
+        // receiver contract as ordinary top-level functions. Keep the marker
+        // in the signature so dot-call lookup cannot silently discard it.
+        root_param: ef.params.first().is_some_and(|p| p.root),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),

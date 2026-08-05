@@ -109,6 +109,8 @@ pub fn is_lazy_adapter(method: &str) -> bool {
             | "indexed"
             | "indexes"
             | "zip"
+            | "zip_short"
+            | "zip_pad"
             | "take_while"
             | "skip_while"
             | "flat_map"
@@ -859,8 +861,9 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
         // D-RANGE-EXCL1=C: every valid Int index for this sequence.
         ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
-        // D-ITER1: zip([U]) → Iter<(a: T, b: U)>; sema refines `b` from arg type.
-        ("zip", 1) => {
+        // D-ZIPPAD1: the family is variadic; sema replaces the placeholder
+        // with the concrete row type after checking every input and fill.
+        ("zip" | "zip_short" | "zip_pad", _) => {
             // placeholder element type (Int for `b`); sema will correct via resolved_ret.
             Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int))))
         }
@@ -985,7 +988,9 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
         ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
         ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
-        ("zip", 1) => Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int)))),
+        ("zip" | "zip_short" | "zip_pad", _) => {
+            Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int))))
+        }
         ("unzip", 0) => list_method_return(inner, "unzip", 0),
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
         ("take_while" | "skip_while", 1) => Some(Some(iter_ty(inner.clone()))),
@@ -1956,7 +1961,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             // D-ITER1: non-closure adapters.
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
             "intersperse" => Some(vec![(**inner).clone()]),
-            "zip" => Some(vec![]),
+            "zip" | "zip_short" | "zip_pad" => Some(vec![]),
             "dedup" | "indexed" | "indexes" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
                 Some(vec![])
             }

@@ -23,8 +23,9 @@ export function ownerVerifyQueue(cards) {
     .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }));
 }
 
-export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', showClosed = false } = {}) {
+export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', showClosed = false, milestone = null } = {}) {
   if (card.phase === 'done' && !showClosed) return false;
+  if (milestone && card.milestoneId !== milestone) return false;
   if (priority !== 'all' && card.priority !== priority) return false;
   if (workflow !== 'all' && workflowRank(card) !== Number(workflow)) return false;
   const needle = text.trim().toLowerCase();
@@ -41,6 +42,7 @@ const value = (card, col, priorities) => {
   if (col === 'workOrder') return card.workOrder ?? Infinity;
   if (col === 'priority') return priorityRank(card, priorities);
   if (col === 'updated') return card.updated || '';
+  if (col === 'milestone') return card.milestoneId || '￿';  // unassigned sorts last
   if (col === 'lane') return card.lane?.label || '';
   if (col === 'num') return card.num ?? 0;
   return String(card[col] || '').toLowerCase();

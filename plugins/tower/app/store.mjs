@@ -687,6 +687,16 @@ function applyDoneGate(s, c, targetPhase, by) {
   return null;
 }
 
+// A needsAcceptance card parked in verify with every criterion verified is the
+// same owner handoff as asking for done — without this the owner's Accept
+// button stays disabled forever, because the ballot only minted on a `--phase
+// done` attempt and agents park in verify directly.
+function maybeMintAcceptance(s, c) {
+  const items = c.criteria || [];
+  if (c.needsAcceptance && c.phase === 'verify' && items.length && items.every(i => i.status === 'verified'))
+    mintAcceptance(s, c);
+}
+
 // #515 pass 2 (2026-07-12, owner directive): acceptance entries were too
 // long and demanded commands the owner can't run away from his computer.
 // `proof` is one short machine-evidence line per criterion (what already
@@ -806,6 +816,7 @@ export function updateCard(s, ref, patch, config) {
       else c[k] = patch[k];
     }
   }
+  if (oldPhase !== 'verify' && c.phase === 'verify') maybeMintAcceptance(s, c);
   if (c.assignee && c.assignee === patch.by) c.claimedAt = now();
   if (c.phase === 'done' || c.phase === 'frozen') {
     c.assignee = null;
@@ -864,6 +875,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   if (evidence != null) item.evidence = evidence;
   item.at = now();
   touchCard(c, by);
+  maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }

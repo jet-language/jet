@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
         if *convention != AccessConvention::Read {
             return false;
         }
-        param_ty == receiver_ty
+        (param_ty == receiver_ty || receiver_ty.numeric_widening_to(param_ty).is_some())
             || matches!(
                 param_ty,
                 Type::Named(name) if fn_params.iter().any(|param| param.name == *name)
@@ -248,6 +248,7 @@ impl<'a> Checker<'a> {
                 name_span: method_span,
                 type_args: type_args.to_vec(),
                 args: call_args,
+                resolved_ret: None,
                 range_checked: false,
             };
             let result = self.check_call(&mut call, true).flatten();
@@ -3854,6 +3855,21 @@ impl<'a> Checker<'a> {
                         *recv_type_out = Some(tn.clone());
                         return Some(ret);
                     }
+                }
+            }
+            // D-ZIPPAD1: the list/iter zip family has its own variadic type
+            // pack and fill-policy checker. It must run before the fixed-arity
+            // builtin table, which only has the historical binary placeholder.
+            if matches!(method.as_str(), "zip" | "zip_short" | "zip_pad") {
+                if let Some(ret) = self.check_zip_family_method(
+                    receiver,
+                    method,
+                    &recv_ty,
+                    args,
+                    span,
+                    resolved_ret_out,
+                ) {
+                    return Some(ret);
                 }
             }
             // D-HOLE1: `.zip` on `T?` pairs two optionals into `(a: T, b: U)?` — present

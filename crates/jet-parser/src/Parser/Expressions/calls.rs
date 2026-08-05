@@ -24,6 +24,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 type_args,
                 args,
+                resolved_ret: None,
                 range_checked: false,
             })
         }

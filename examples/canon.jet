@@ -35,9 +35,7 @@ struct Point {
 
     fn dist_sq(self) => Float = self.x * self.x + self.y * self.y
 
-    fn origin() => Point {
-        return Point.{x: 0.0, y: 0.0}
-    }
+    fn origin() => Point = .{x: 0.0, y: 0.0}
 }
 
 // --- enums & pattern matching --------------------------------------------
@@ -49,17 +47,17 @@ enum Light {
 }
 
 fn next(light: Light) => Light {
-    if light == {
-        .Red -> { return Light.Yellow }
-        .Yellow -> { return Light.Green }
-        .Green -> { return Light.Red }
+    return if light == {
+        .Red -> { .Yellow }
+        .Yellow -> { .Green }
+        .Green -> { .Red }
     }
 }
 
 fn day_kind(day: String) => String {
-    if day == {
-        "sat" | "sun" -> { return "weekend" }
-        else -> { return "weekday" }
+    return if day == {
+        "sat" | "sun" -> { "weekend" }
+        else -> { "weekday" }
     }
 }
 
@@ -69,7 +67,7 @@ enum ParseError {
 }
 
 fn parse_age(raw: String) => Int ? ParseError {
-    if raw == "" { return Err(ParseError.Empty) }
+    if raw == "" { return Err(.Empty) }
     return Ok(7)
 }
 
@@ -108,9 +106,9 @@ fn show_uninit() => Int {
 // --- inline contracts: `#Inline` / `#Inline(Always)` ----------------------
 // D-INLINE-PARAM1=A: `#Inline` is a soft hint; `#Inline(Always)` is a checked
 // promise the compiler proves or refuses to build.
-#Inline fn square(x: Int) => Int { return x * x }
+#Inline fn square(x: Int) => Int = x * x
 
-#Inline(Always) fn twice(x: Int) => Int { return x * 2 }
+#Inline(Always) fn twice(x: Int) => Int = x * 2
 
 // --- typed CLI args: `#CLI` struct + `#Doc(...)` fields -----------------
 // D-CLIFLAG1=A: an entry function's `#CLI` parameter type IS the CLI spec.
@@ -226,12 +224,8 @@ fn run() {
     print("day: {kind}")
     // errors
     if double_age("42") == {
-        .Ok(n) -> {
-            print("ok: {n}")
-        }
-        .Err(e) -> {
-            print("err: {e}")
-        }
+        .Ok(n) -> { print("ok: {n}") }
+        .Err(e) -> { print("err: {e}") }
     }
 
     fallback :: parse_age("") ?? 0

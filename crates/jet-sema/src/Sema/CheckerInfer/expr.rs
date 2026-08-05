@@ -85,6 +85,7 @@ impl<'a> Checker<'a> {
             name_span: span,
             type_args: Vec::new(),
             args,
+            resolved_ret: None,
             range_checked: false,
         });
         Some(Type::Named(type_name))
@@ -149,6 +150,7 @@ impl<'a> Checker<'a> {
                 label: None,
                 spread: false,
             }],
+            resolved_ret: None,
             range_checked: false,
         });
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))

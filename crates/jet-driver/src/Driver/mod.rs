@@ -3726,6 +3726,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         name_span: target.name_span,
         type_args: Vec::new(),
         args,
+        resolved_ret: None,
         range_checked: false,
     });
     let body = if target.return_type.is_some() {

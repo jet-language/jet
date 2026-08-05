@@ -12,8 +12,15 @@ use jet_foundation::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 
-fn semantic_hover(symbol: &jet_semindex::SemanticSymbol) -> String {
+fn semantic_hover(symbol: &jet_semindex::SemanticSymbol, requested_path: &str) -> String {
     let mut out = String::new();
+    if symbol.module_path != requested_path
+        && matches!(&symbol.kind, jet_semindex::SemanticSymbolKind::Function)
+    {
+        out.push_str("from module `");
+        out.push_str(&symbol.module_path);
+        out.push_str("`\n\n");
+    }
     if !symbol.summary.is_empty() {
         out.push_str(&symbol.summary);
         out.push_str("\n\n---\n\n");
@@ -41,7 +48,7 @@ pub(crate) fn compute_hover(
         );
     }
     if let Some(symbol) = db.symbols.at(path, offset) {
-        return Some(semantic_hover(symbol));
+        return Some(semantic_hover(symbol, path));
     }
     if let Some(reference) = db.refs.iter().find(|reference| {
         reference.module_path == path
@@ -53,7 +60,7 @@ pub(crate) fn compute_hover(
                 symbol.module_path == target.module_path
                     && symbol.span == Some(target.def_span)
             }) {
-                return Some(semantic_hover(symbol));
+                return Some(semantic_hover(symbol, path));
             }
         }
     }

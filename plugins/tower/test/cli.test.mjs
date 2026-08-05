@@ -49,6 +49,10 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   const list = JSON.parse(run(cwd, ['card', 'list', '--lane', 'decide', '--json']).out);
   assert.equal(list.length, 1);
 
+  // show without --json prints the record, not "null"
+  assert.match(run(cwd, ['card', 'show', '#1']).out, /"title": "Build it"/);
+  assert.match(run(cwd, ['decision', 'show', 'D-CLI1']).out, /"title": "Choose"/);
+
   run(cwd, ['decision', 'ratify', 'D-CLI1', '--outcome', 'B', '--by', 'owner']);
   run(cwd, ['card', 'update', '#1', '--phase', 'building', '--log', 'started', '--by', 'tester']);
   const next = JSON.parse(run(cwd, ['next', '--json']).out);

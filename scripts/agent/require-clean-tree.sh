@@ -14,7 +14,7 @@ process.stdin.on("end", () => {
   } catch {}
 });
 ' 2>/dev/null)
-case "$subagent_type" in
+case "${subagent_type##*:}" in # strip plugin prefix (caveman:cavecrew-reviewer)
   cavecrew-investigator|cavecrew-reviewer|jet-verify|jet-ballot|read-only|claude-code-guide|Explore|Plan)
     exit 0 ;;
 esac

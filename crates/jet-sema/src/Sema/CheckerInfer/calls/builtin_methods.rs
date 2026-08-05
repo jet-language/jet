@@ -1,14 +1,33 @@
-use crate::AST::{Expr, StrPart, Type};
+use crate::AST::{AccessConvention, Call, CallArg, Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::substitute_type;
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
-use crate::Sema::CheckerCoreLib::wrong_core_arity;
+use crate::Sema::CheckerCoreLib::{unit_ty, wrong_core_arity};
 use crate::Sema::Diagnostics::{suggest_field, type_fix_hint};
 use crate::Syntax;
 use std::collections::HashSet;
+
+fn zip_sequence_elem(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Tagged { inner, .. } => zip_sequence_elem(inner),
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+fn zip_assignable(got: &Type, want: &Type) -> bool {
+    got == want || got.numeric_widening_to(want).is_some()
+}
+
+fn zip_method_name(name: &str) -> bool {
+    matches!(name, "zip" | "zip_short" | "zip_pad")
+}
 
 fn cell_inner(ty: &Type) -> Type {
     match ty {
@@ -18,6 +37,316 @@ fn cell_inner(ty: &Type) -> Type {
 }
 
 impl<'a> Checker<'a> {
+        /// D-ZIPPAD1: check one free zip family call. The resolved result is
+        /// stored on the call node so tuple-shape collection can see the row.
+        pub(crate) fn check_zip_family_free(&mut self, call: &mut Call) -> Option<Option<Type>> {
+            if !zip_method_name(&call.name) {
+                return None;
+            }
+            let name = call.name.clone();
+            let mut elems = Vec::new();
+            let mut labels = Vec::new();
+            let mut common_fill = None;
+            let mut column_fills = None;
+
+            for arg in call.args.iter_mut() {
+                let label = arg.label.as_ref().map(|(name, _)| name.clone());
+                let is_fill = name == "zip_pad"
+                    && matches!(label.as_deref(), Some("fill" | "fills"));
+                let got = self.infer(&mut arg.expr);
+                if is_fill {
+                    match label.as_deref() {
+                        Some("fill") if common_fill.is_none() => {
+                            common_fill = got.map(|ty| (ty, arg.expr.span()));
+                        }
+                        Some("fills") if column_fills.is_none() => {
+                            column_fills = got.map(|ty| (ty, arg.expr.span()));
+                        }
+                        _ => self.diags.push(Diagnostic::error(
+                            "E0104",
+                            "zip_pad accepts one `fill:` or one `fills:` value".to_string(),
+                            "a padding policy must be unambiguous for every missing column"
+                                .to_string(),
+                            "remove the extra fill argument".to_string(),
+                            Some(arg.expr.span()),
+                        )),
+                    }
+                    continue;
+                }
+                labels.push(label);
+                match got.and_then(|ty| zip_sequence_elem(&ty)) {
+                    Some(elem) => elems.push(elem),
+                    None => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{name}` inputs must be lists or iterators"),
+                            "zip consumes one sequence per output column".to_string(),
+                            "pass a `[T]` or `Iter<T>` value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        elems.push(Type::Int);
+                    }
+                }
+            }
+
+            let fills = column_fills.and_then(|(ty, fill_span)| match ty {
+                Type::Tuple(fields) => Some((fields, fill_span)),
+                other => {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`fills:` must be a named tuple, not {}", other.show()),
+                        "per-column padding names each column and gives it one typed value"
+                            .to_string(),
+                        "write `fills: (first: value, second: value)`".to_string(),
+                        Some(fill_span),
+                    ));
+                    None
+                }
+            });
+            let ret = self.finish_zip_family(
+                &name,
+                elems,
+                labels,
+                common_fill,
+                fills,
+                call.name_span,
+            );
+            call.resolved_ret = Some(ret.clone());
+            Some(Some(ret))
+        }
+
+        /// D-ZIPPAD1: check the receiver form. The receiver is the first
+        /// column; `fill:`/`fills:` are policy arguments, not columns.
+        pub(crate) fn check_zip_family_method(
+            &mut self,
+            receiver: &Expr,
+            method: &str,
+            recv_ty: &Type,
+            args: &mut [CallArg],
+            span: Span,
+            resolved_ret_out: &mut Option<Type>,
+        ) -> Option<Type> {
+            if !zip_method_name(method) {
+                return None;
+            }
+            let Some(receiver_elem) = zip_sequence_elem(recv_ty) else {
+                return None;
+            };
+            let mut elems = vec![receiver_elem];
+            let mut labels = vec![None];
+            let mut common_fill = None;
+            let mut column_fills = None;
+            for arg in args.iter_mut() {
+                let label = arg.label.as_ref().map(|(name, _)| name.clone());
+                let is_fill = method == "zip_pad"
+                    && matches!(label.as_deref(), Some("fill" | "fills"));
+                let got = self.infer(&mut arg.expr);
+                if is_fill {
+                    match label.as_deref() {
+                        Some("fill") if common_fill.is_none() => {
+                            common_fill = got.map(|ty| (ty, arg.expr.span()));
+                        }
+                        Some("fills") if column_fills.is_none() => {
+                            column_fills = got.map(|ty| (ty, arg.expr.span()));
+                        }
+                        _ => self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`.{method}()` accepts one `fill:` or one `fills:` value"),
+                            "a padding policy must be unambiguous for every missing column"
+                                .to_string(),
+                            "remove the extra fill argument".to_string(),
+                            Some(arg.expr.span()),
+                        )),
+                    }
+                    continue;
+                }
+                labels.push(label);
+                match got.and_then(|ty| zip_sequence_elem(&ty)) {
+                    Some(elem) => elems.push(elem),
+                    None => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{method}` inputs must be lists or iterators"),
+                            "zip consumes one sequence per output column".to_string(),
+                            "pass a `[T]` or `Iter<T>` value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        elems.push(Type::Int);
+                    }
+                }
+            }
+            let fills = column_fills.and_then(|(ty, fill_span)| match ty {
+                Type::Tuple(fields) => Some((fields, fill_span)),
+                other => {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`fills:` must be a named tuple, not {}", other.show()),
+                        "per-column padding names each column and gives it one typed value"
+                            .to_string(),
+                        "write `fills: (first: value, second: value)`".to_string(),
+                        Some(fill_span),
+                    ));
+                    None
+                }
+            });
+            let ret = self.finish_zip_family(method, elems, labels, common_fill, fills, span);
+            *resolved_ret_out = Some(ret.clone());
+
+            let mut call_access = self.call_access_frame();
+            match Collections::builtin_receiver_borrow(recv_ty, method) {
+                Collections::BuiltinReceiverBorrow::TwoPhaseWrite => {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.record_call_receiver_reservation(receiver, span)
+                    });
+                }
+                Collections::BuiltinReceiverBorrow::EagerWrite => {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.record_call_receiver_access(receiver, AccessConvention::Write, span)
+                    });
+                }
+                Collections::BuiltinReceiverBorrow::Read => {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.record_call_receiver_access(receiver, AccessConvention::Read, span)
+                    });
+                }
+                Collections::BuiltinReceiverBorrow::Move => {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.record_call_receiver_access(receiver, AccessConvention::Move, span)
+                    });
+                }
+            }
+            if Collections::is_iter_type(recv_ty) {
+                self.consume_builtin_receiver(receiver, method);
+            }
+            self.activate_call_reservations(&call_access, span);
+            Some(ret)
+        }
+
+        fn finish_zip_family(
+            &mut self,
+            method: &str,
+            elems: Vec<Type>,
+            labels: Vec<Option<String>>,
+            common_fill: Option<(Type, Span)>,
+            column_fills: Option<(Vec<(String, Box<Type>)>, Span)>,
+            span: Span,
+        ) -> Type {
+            let mut field_names = Vec::with_capacity(elems.len());
+            let mut seen = HashSet::new();
+            for (index, label) in labels.into_iter().enumerate() {
+                let field = label.unwrap_or_else(|| match index {
+                    0 => "a".to_string(),
+                    1 => "b".to_string(),
+                    2 => "c".to_string(),
+                    3 => "d".to_string(),
+                    4 => "e".to_string(),
+                    5 => "f".to_string(),
+                    _ => format!("column_{index}"),
+                });
+                if !seen.insert(field.clone()) {
+                    self.diags.push(Diagnostic::error(
+                        "E0125",
+                        format!("zip row field `{field}` appears more than once"),
+                        "each output column needs one stable field name".to_string(),
+                        "rename the input label".to_string(),
+                        Some(span),
+                    ));
+                }
+                field_names.push(field);
+            }
+
+            let mut optional_padding = false;
+            if method == "zip_pad" {
+                if common_fill.is_some() && column_fills.is_some() {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        "zip_pad accepts `fill:` or `fills:`, not both".to_string(),
+                        "choose one common value or one value per output column".to_string(),
+                        "remove one padding argument".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Some((fill_ty, fill_span)) = &common_fill {
+                    for elem in &elems {
+                        if !zip_assignable(fill_ty, elem) {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!(
+                                    "common zip fill should be {}, not {}",
+                                    elem.show(),
+                                    fill_ty.show()
+                                ),
+                                "one common fill is used for every column".to_string(),
+                                "use a value accepted by every input column, or use `fills:`"
+                                    .to_string(),
+                                Some(*fill_span),
+                            ));
+                        }
+                    }
+                }
+                if let Some((fills, fill_span)) = &column_fills {
+                    for (field, elem) in field_names.iter().zip(&elems) {
+                        let Some((_, fill_ty)) = fills.iter().find(|(name, _)| name == field) else {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`fills:` has no value for zip field `{field}`"),
+                                "every output column needs one typed padding value".to_string(),
+                                format!("add `{field}: value` to `fills:`"),
+                                Some(*fill_span),
+                            ));
+                            continue;
+                        };
+                        if !zip_assignable(fill_ty, elem) {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!(
+                                    "fill for `{field}` should be {}, not {}",
+                                    elem.show(),
+                                    fill_ty.show()
+                                ),
+                                "a per-column fill must match that column's element type"
+                                    .to_string(),
+                                format!("pass a {} value for `{field}`", elem.show()),
+                                Some(*fill_span),
+                            ));
+                        }
+                    }
+                    for (field, _) in fills {
+                        if !field_names.iter().any(|name| name == field) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`fills:` names unknown zip field `{field}`"),
+                                "per-column fills must name output columns".to_string(),
+                                "remove the unknown fill field".to_string(),
+                                Some(*fill_span),
+                            ));
+                        }
+                    }
+                }
+                optional_padding = common_fill.is_none() && column_fills.is_none();
+            }
+
+            if elems.len() <= 1 {
+                return Collections::iter_ty(elems.into_iter().next().unwrap_or_else(unit_ty));
+            }
+            let fields = field_names
+                .into_iter()
+                .zip(elems)
+                .map(|(name, elem)| {
+                    let ty = if optional_padding {
+                        Type::Option(Box::new(elem))
+                    } else {
+                        elem
+                    };
+                    (name, Box::new(ty))
+                })
+                .collect();
+            Type::Apply {
+                name: Syntax::TYPE_ITER.to_string(),
+                args: vec![Type::Tuple(crate::AST::canonicalize_tuple_fields(fields))],
+            }
+        }
+
         fn para_type_is_transferable(&self, ty: &Type) -> bool {
             fn transferable(
                 checker: &Checker<'_>,

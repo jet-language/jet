@@ -1631,6 +1631,7 @@ impl<'a> Parser<'a> {
                         label: None,
                         spread: false,
                     }],
+                    resolved_ret: None,
                     range_checked: false,
                 })))
             }
@@ -1656,6 +1657,7 @@ impl<'a> Parser<'a> {
                     name_span: assert_span,
                     type_args: Vec::new(),
                     args,
+                    resolved_ret: None,
                     range_checked: false,
                 })))
             }

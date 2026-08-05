@@ -193,8 +193,11 @@ and `value.f(…)`. Dot-call lookup is limited to functions visible through the
 current module's imports; it is never a global search. A real method with the
 same name is an error, and more than one matching imported function is an
 ambiguity error. Resolution never uses the return type. `#Root` is not valid on
-a write or move parameter, on a later parameter, or on a method. Formatting
-preserves the declaration and never rewrites either call spelling.
+a write or move parameter, on a later parameter, or on a method. Foreign
+top-level declarations preserve the marker. Normal argument compatibility,
+including numeric widening, applies to the hidden receiver. Inspect and LSP
+show the module that supplied an imported `#Root` function. Formatting preserves
+the declaration and never rewrites either call spelling.
 
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.

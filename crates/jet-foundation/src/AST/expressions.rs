@@ -12,6 +12,11 @@ pub struct Call {
     /// free call (\`identity<Int>(value)\`). Empty means infer as usual.
     pub type_args: Vec<Type>,
     pub args: Vec<CallArg>,
+    /// D-ZIPPAD1: a built-in free zip call carries its resolved result so the
+    /// code generator can declare the concrete named row type before lowering.
+    /// Ordinary calls leave this unset; method calls already carry the same
+    /// fact on `Expr::MethodCall`.
+    pub resolved_ret: Option<Type>,
     /// D-RANGETYPE1: sema sets this on a range-constrained distinct
     /// constructor when it appears under postfix `?`. Codegen then emits the
     /// checked constructor as a `Result`, while the ordinary constructor form

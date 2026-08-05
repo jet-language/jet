@@ -667,7 +667,20 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Some(Type::Named(call.name.clone())));
             }
-    
+
+            // D-ZIPPAD1: free `zip`/`zip_short`/`zip_pad` calls are built-in
+            // sequence family calls when no user function shadows the name.
+            // Check them before ordinary function lookup so arbitrary input
+            // counts keep their concrete element types.
+            if self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+                && matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+            {
+                if let Some(result) = self.check_zip_family_free(call) {
+                    return Some(result);
+                }
+            }
+
             // D-DECIMAL1: `Decimal("12.34")` — exact base-10 parse.
             if self.funcs.get(&call.name).is_none()
                 && !self.registry.contains(&call.name)

@@ -381,3 +381,32 @@ test('a card parked in verify without the flag has no D-ACCEPT and is agent work
   assert.equal(card.lane.who, 'agent');
   assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-5'), undefined);
 });
+
+// #923/#1078 regression: agents park a needsAcceptance card in verify and then
+// verify criteria one by one. The ballot used to mint only on a `--phase done`
+// attempt, so those cards sat in verify forever with the owner's Accept button
+// disabled. Last verified criterion mints it; so does entering verify already
+// fully verified.
+test('needsAcceptance in verify mints D-ACCEPT when the last criterion is verified', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Parked', needsAcceptance: true }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'it works', 'builder'));
+  st.mutate((s) => db.updateCard(s, '#1', { phase: 'verify', by: 'builder' }, { kinds: [], tracks: [], priorities: [] }));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'targeted proof', by: 'builder' }));
+  assert.equal(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'), undefined, 'unverified criterion must not mint');
+  st.mutate((s) => db.verifyCriterion(s, '#1', 1, { evidence: 'reviewed', by: 'reviewer' }));
+  const ballot = st.load().decisions.find(d => d.id === 'D-ACCEPT-1');
+  assert.equal(ballot?.status, 'open');
+  assert.equal(st.load().cards[0].phase, 'verify');
+});
+
+test('needsAcceptance card entering verify already fully verified mints D-ACCEPT', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Late move', needsAcceptance: true }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'it works', 'builder'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'proof', by: 'builder' }));
+  st.mutate((s) => db.verifyCriterion(s, '#1', 1, { evidence: 'reviewed', by: 'reviewer' }));
+  assert.equal(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'), undefined, 'building card must not mint');
+  st.mutate((s) => db.updateCard(s, '#1', { phase: 'verify', by: 'builder' }, { kinds: [], tracks: [], priorities: [] }));
+  assert.equal(st.load().decisions.find(d => d.id === 'D-ACCEPT-1')?.status, 'open');
+});

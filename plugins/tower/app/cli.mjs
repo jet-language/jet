@@ -42,9 +42,11 @@ const readPayload = (flags) => {
 };
 
 const out = (flags, human, data) => {
-  if (flags.json) console.log(JSON.stringify(data ?? human, null, 2));
-  else if (typeof human === 'string') console.log(human);
-  else console.log(JSON.stringify(human, null, 2));
+  // `show` verbs pass human=null with the record in `data`; human output falls
+  // back to the record instead of printing "null".
+  const payload = flags.json ? data ?? human : human ?? data;
+  if (typeof payload === 'string') console.log(payload);
+  else console.log(JSON.stringify(payload, null, 2));
 };
 
 // One zero-dependency vocabulary shared by Tower's two human dashboard
