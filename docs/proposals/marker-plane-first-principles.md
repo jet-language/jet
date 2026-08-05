@@ -4,6 +4,43 @@
 the ground up. Status: awaiting owner review. Ballot rows at the end; nothing
 here is implemented yet.
 
+## Executive summary
+
+**Result of the audit.** The ratified marker design is sound: one sigil, one
+call grammar, one registry, bare single / bracket group. No surveyed language
+matches it. The problem is the implementation: the July "one registry" ruling
+was never migrated onto. About 30 of 79 markers bypass the registry as
+hand-parsed tokens with zero validation; a typo'd marker gets five different
+errors depending on position; the formatter rebuilds markers from 16 booleans;
+two retired markers still apply their effects; `#Authority` is registered but
+unparseable; tree-sitter still uses the retired `@` sigil. Two spellings are
+typeable but unratified: `#SQL<Row>` and the double-duty `#HTML`.
+
+**Owner law (2026-08-05).** Every marker MUST be a registry row. No marker may
+be parsed, checked, formatted, highlighted, or reflected outside the registry.
+No drift, no exceptions, no tolerance. Enforced structurally (one parse path —
+there is no other way to be a marker) and by CI drift guards that fail on any
+marker name-matching outside the registry and on any row without a working
+implementation.
+
+**Proposals.**
+
+1. **One placement law** replaces the five registered forms: a marker sits
+   immediately before its target; parens appear exactly when arguments are
+   written. Zero spelling changes. (Ballot 1)
+2. **Duplicate markers become an error**; rows that legitimately repeat
+   (`#Pre`, `#Post`) are marked repeatable. (Ballot 2)
+3. **`#Impure` requires a reason**, same as `#Unsafe`/`#Nondeterministic`.
+   (Ballot 3)
+4. **The two stray DSL spellings get registered**: `#SQL(Row)` through the
+   normal call grammar, and the `#HTML` file-pairing form takes its own name.
+   (Ballot 4 — the only user-visible rename in this proposal)
+5. **A 6-card migration** moves the compiler onto the registry for real: blind
+   parse keeping marker nodes, one validation pipeline at every site, consumers
+   read markers not flags, dead rows resolved, drift guards lock it down.
+
+Everything below is supporting evidence and detail.
+
 ## Glossary
 
 - **Marker** — a named, typed rule written `#Name` or `#Name(args)` that changes
@@ -145,6 +182,32 @@ proposes.
 
 ## The rebuilt model
 
+### Law zero: registration is mandatory
+
+Owner-directed, 2026-08-05: **a marker exists if and only if it is a registry
+row.** There is no second way to be a marker. Concretely:
+
+- The parser has exactly one marker reader. It never matches a marker name.
+  A hand-bumped token, a bespoke arg parser, or a name-matched special case in
+  parser, lexer, sema, formatter, LSP, or reflection is a defect, not a
+  shortcut — same severity as an invariant violation.
+- Every row must be fully alive: parsed, validated, interpreted, formatted,
+  highlighted, explained, and reflectable. A registered row with no working
+  behavior (`#Authority` today) is drift in the other direction and equally
+  banned — implement it or retire it.
+- Enforcement is deterministic, not reviewer vigilance:
+  - a drift-guard test scans compiler sources for marker-name string literals
+    outside the registry and its generated artifacts, and fails on any hit;
+  - a coverage test walks every registry row end to end (parse → validate →
+    format round-trip → highlight → reflect) and fails on any dead or
+    partially wired row;
+  - tree-sitter's grammar and highlight lists are generated from the registry,
+    never hand-edited.
+
+This law is what makes the rest of the proposal stick. The July overhaul
+ratified "one registry" and the compiler drifted anyway because nothing failed
+when it did. After this migration, drift fails CI.
+
 ### Grammar: one law
 
 > A marker — or one bracket group — is written immediately before its target.
@@ -273,8 +336,13 @@ name-collision law (D-MARKER-NAME-HYGIENE1=A).
 law (Ballot 2), `#Impure`'s optional reason (Ballot 3), the two unratified DSL
 spellings (Ballot 4).
 
+**Ruled by the owner in chat (2026-08-05, to be recorded as a verdict when the
+slate is minted):** mandatory registration — every marker is a registry row,
+no marker exists outside it, drift is CI-failing. See "Law zero".
+
 **Owed (implementation debt, cards, no ballot):** everything under
-"Implementation architecture" — it implements rulings that already exist.
+"Implementation architecture" — it implements rulings that already exist, and
+every bypass listed in the audit is now a Law-zero violation.
 
 ## Ballot rows
 
@@ -387,7 +455,11 @@ name that means two things, at the cost of one rename.
    #763's terms; retired rows stop applying effects; menu special cases
    (`#FFI`, `#RenameAll`, first-vs-last segment) become registry columns;
    `#Doc`-with-`#Job` coupling becomes row data.
-5. **Ballot outcomes** — form collapse (B1), duplicate law (B2), `#Impure`
+5. **Law-zero drift guards** — the name-literal scan, the per-row end-to-end
+   coverage test, and registry-generated tree-sitter grammar/highlighting.
+   These land last and gate the close: the migration is done when the guards
+   pass and stay in CI.
+6. **Ballot outcomes** — form collapse (B1), duplicate law (B2), `#Impure`
    (B3), DSL rows (B4), each landing as one registry + spec + snapshot
    migration.
 
