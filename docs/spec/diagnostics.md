@@ -455,6 +455,13 @@ renumbered, and no new `W` code may be allocated.
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
+| E0763 | parser | parameter-zone separator out of place: `/` before any parameter, `/` after `*`, a repeated `/` or `*`, or `*` with nothing after it (D-APILABEL1) |
+| E0764 | sema   | call argument labels a parameter the callee does not have (D-APILABEL1) |
+| E0765 | sema   | the same parameter is labelled twice in one call (D-APILABEL1) |
+| E0766 | sema   | a parameter with no default received no argument (D-APILABEL1) |
+| E0767 | sema   | a label was written for a positional-only parameter, declared before `/` (D-APILABEL1) |
+| E0768 | sema   | a bare argument follows a labelled one, so it names no parameter (D-APILABEL1) |
+| E0769 | sema   | a label-only parameter, declared after `*`, was passed by position (D-APILABEL1) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |

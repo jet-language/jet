@@ -143,9 +143,12 @@ pub(crate) fn bind_call_args(
                 // D-APILABEL1=A: once a label appears, every later argument
                 // must carry one — otherwise which parameter it fills depends
                 // on how many labels came before it.
-                if let Some(label_span) = first_label {
-                    let _ = label_span;
-                    diags.push(ambiguous_positional(callee, arg.span));
+                if first_label.is_some() {
+                    // One report per call: every later bare argument has the
+                    // same cause, and repeating it just buries the fix.
+                    if ok {
+                        diags.push(ambiguous_positional(callee, arg.span));
+                    }
                     ok = false;
                     continue;
                 }
