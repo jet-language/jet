@@ -1208,12 +1208,12 @@ impl EveryArg {
 /// between them accepts either form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParamZone {
-    /// Before `/` — a label here is forbidden (E0126).
+    /// Before `/` — a label here is forbidden (E0767).
     PositionalOnly,
     /// The unmarked default — positional or labelled.
     #[default]
     Either,
-    /// After `*` — the label is required (E0127).
+    /// After `*` — the label is required (E0769).
     LabelOnly,
 }
 

@@ -253,11 +253,14 @@ keep code readable from top to bottom. See
   types (E0112). A function with a return type must return on every path
   (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
 - **Named args and defaults (S61, D-NARG1):** parameters may carry a
-  default value (`fn f(x: Int =  0)`); call sites may use a label to
-  document intent (`f(x: 1)`). Labels must match the parameter name at
-  that position — they never reorder arguments. Trailing defaults fill
-  when omitted. Both rules apply equally to free functions **and methods**
-  (D-NARG1). `jet fmt` preserves call-site labels as written (D-NARG2).
+  default value (`fn f(x: Int =  0)`). A call-site label binds by NAME, so a
+  call may skip a default and write its labelled arguments in any order
+  (`f(x: 1)`). `/` closes the positional-only zone and `*` opens the
+  label-only zone; `timeout seconds: Int` publishes `timeout` while the body
+  reads `seconds`. Supplied expressions run left to right as written; unbound
+  defaults then run in declaration order. The same law covers free functions,
+  methods, constructors, generic calls and function values (D-APILABEL1=A).
+  `jet fmt` preserves call-site labels as written (D-NARG2).
   A positional `Bool` parameter on a `pub` fn or `pub` method triggers the
   advisory L2401 lint.
 - Definitions are unique (E0105), can't shadow built-ins (E0106), and

@@ -228,6 +228,11 @@ pub enum Type {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
+        /// D-APILABEL1=A: the declared call contract — public label and zone
+        /// per parameter, parallel to `params`. Part of callable identity, so
+        /// a `fn(*, force: Bool)` value rejects a positional call. `None` for
+        /// a bare structural `fn(Int) => Int`, which keeps its old meaning.
+        param_contract: Option<Vec<(String, super::ParamZone)>>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
         /// at parse time (names resolve then and are not kept on the type).
@@ -324,18 +329,31 @@ impl PartialEq for Type {
             (Option(a), Option(b)) => a == b,
             (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
             // D-EFF2: effect_bound deliberately excluded from the comparison.
+            // D-APILABEL1=A: the call contract — public labels and zones — IS
+            // callable identity, so `fn(*, force: Bool)` and `fn(Bool)` are
+            // different types. A type that declares no contract still matches
+            // one that does; only a declared contract constrains a caller.
             (
                 Fn {
                     params: p1,
                     ret: r1,
+                    param_contract: c1,
                     ..
                 },
                 Fn {
                     params: p2,
                     ret: r2,
+                    param_contract: c2,
                     ..
                 },
-            ) => p1 == p2 && r1 == r2,
+            ) => {
+                p1 == p2
+                    && r1 == r2
+                    && match (c1, c2) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => true,
+                    }
+            }
             (Named(a), Named(b)) => a == b,
             (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
             (TraitObject(a), TraitObject(b)) => a == b,
@@ -570,10 +588,11 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
+                param_contract: param_contract.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
@@ -1019,6 +1038,7 @@ mod tests {
                 err: Box::new(Type::String),
             })),
             effect_bound: None,
+            param_contract: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));

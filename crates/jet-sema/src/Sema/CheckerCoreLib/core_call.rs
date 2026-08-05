@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             // D-FRONTENDAPI1=A: the compiler surface is a read-only
             // compile-time value API. It is intentionally handled before the
@@ -628,6 +628,44 @@ impl<'a> Checker<'a> {
             } else {
                 resolved_core_fixed_sig(module, name)
             };
+            // D-APILABEL1=A: a Core function that publishes a call contract
+            // binds through the same binder as user code, so a caller can name
+            // the one policy it changes and skip the rest. Filling the skipped
+            // defaults here is also what stops each engine spelling its own
+            // fallback: every tier now receives the same argument.
+            if let Some(contract) = super::core_param_contract(module, name) {
+                let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| crate::Sema::CallBinder::BindParam {
+                        label: param.label,
+                        name: param.label,
+                        zone: param.zone,
+                        default: None,
+                        convention: sig
+                            .as_ref()
+                            .and_then(|(params, _)| params.get(index))
+                            .map(|(convention, _)| *convention)
+                            .unwrap_or(AccessConvention::Read),
+                        variadic: false,
+                        core_default: param.default,
+                    })
+                    .collect();
+                if crate::Sema::CallBinder::bind_call_args(
+                    name,
+                    &params,
+                    args,
+                    span,
+                    &mut self.diags,
+                )
+                .is_none()
+                {
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return sig.and_then(|(_, ret)| ret);
+                }
+            }
             match (module, name) {
                 ("core.vault", "current" | "versions" | "load" | "status"
                     | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
@@ -1400,6 +1438,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1440,6 +1479,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1487,6 +1527,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &key_fn, key_arg);
                     }
@@ -1496,6 +1537,7 @@ impl<'a> Checker<'a> {
                                 params: vec![row_ty],
                                 ret: Some(Box::new(Type::Float)),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             };
                             self.expect_core_arg(name, 2, &value_fn, value_arg);
                         }
@@ -1550,6 +1592,7 @@ impl<'a> Checker<'a> {
                             params: vec![left_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 2, &key_fn, left_key);
                     }
@@ -1558,6 +1601,7 @@ impl<'a> Checker<'a> {
                             params: vec![right_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 3, &key_fn, right_key);
                     }
@@ -1604,6 +1648,7 @@ impl<'a> Checker<'a> {
                                 params: vec![row_ty.clone()],
                                 ret: Some(Box::new(Type::String)),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             };
                             self.expect_core_arg(name, idx, &key_fn, arg);
                         }
@@ -1613,6 +1658,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty],
                             ret: Some(Box::new(Type::Float)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 3, &value_fn, value_arg);
                     }

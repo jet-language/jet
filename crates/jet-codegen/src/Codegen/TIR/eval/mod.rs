@@ -1684,6 +1684,7 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
                 effect_bound: None, return_view_provenance: None,
+                param_contract: None,
             },
         );
     }

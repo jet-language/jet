@@ -1376,7 +1376,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
     // (`lower_one_call_arg`). c109 Phase 23: a call-site LABEL (`Rect.new(width: 4.0)`,
-    // D-NARG1) is allowed — labels never reorder (D-NARG-D4) and codegen ignores them.
+    // D-APILABEL1=A) is allowed — sema binds by name and hands TIR declaration order.
     args.iter()
         .zip(sig.iter())
         .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))

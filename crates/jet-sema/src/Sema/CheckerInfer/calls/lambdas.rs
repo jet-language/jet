@@ -647,6 +647,7 @@ use std::collections::HashSet;
                 // carries no effect bound (D-EFF2 bounds ride callback *parameter*
                 // types, checked against this value at the call site).
                 effect_bound: None,
+                param_contract: None,
                 return_view_provenance: lambda_return_view_provenance,
             })
         }

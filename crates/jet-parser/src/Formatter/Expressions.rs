@@ -350,14 +350,47 @@ impl<'a> Fmt<'a> {
                 params,
                 ret,
                 effect_bound,
+                param_contract,
                 return_view_provenance,
             } => {
                 self.write("fn(");
+                // D-APILABEL1=A: reprint the declared call contract — the
+                // labels and the `/` and `*` zone separators — so a function
+                // type round-trips with its identity intact.
+                let contract = param_contract.as_deref().unwrap_or(&[]);
+                let mut written = 0usize;
+                let mut star_done = false;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 {
+                    let zone = contract.get(i).map(|(_, zone)| *zone);
+                    if zone == Some(crate::AST::ParamZone::LabelOnly) && !star_done {
+                        star_done = true;
+                        if written > 0 {
+                            self.write(", ");
+                        }
+                        self.write(Syntax::PARAM_ZONE_LABEL_ONLY);
+                        written += 1;
+                    }
+                    if written > 0 {
                         self.write(", ");
                     }
+                    if let Some((label, _)) = contract.get(i) {
+                        if !label.is_empty() {
+                            self.write(label);
+                            self.write(": ");
+                        }
+                    }
                     self.fmt_type(p);
+                    written += 1;
+                    let last_positional_only = zone
+                        == Some(crate::AST::ParamZone::PositionalOnly)
+                        && contract
+                            .get(i + 1)
+                            .is_none_or(|(_, next)| *next != crate::AST::ParamZone::PositionalOnly);
+                    if last_positional_only {
+                        self.write(", ");
+                        self.write(Syntax::PARAM_ZONE_POSITIONAL_ONLY);
+                        written += 1;
+                    }
                 }
                 self.write(")");
                 if let Some(bound) = effect_bound {

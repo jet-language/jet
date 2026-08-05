@@ -647,7 +647,8 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             len,
             len_symbol,
         },
-        Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
+Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
+                    param_contract: param_contract.clone(),
             params: params.into_iter().map(core_crypto_nominal).collect(),
             ret: ret.map(|ty| Box::new(core_crypto_nominal(*ty))),
             effect_bound,
@@ -1449,6 +1450,7 @@ mod tests {
                 ),
             ]))),
             effect_bound: None,
+            param_contract: param_contract.clone(),
             return_view_provenance: None,
         };
 

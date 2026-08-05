@@ -475,7 +475,7 @@ pub fn require_exact_labels(
             Some((actual, label_span)) => diags.push(Diagnostic::error(
                 "E0125",
                 format!("`{api}` has no `{actual}:` option at argument {}", index + 1),
-                format!("the ratified named form requires `{expected}:` at this position; labels never reorder arguments"),
+                format!("this Core named form publishes `{expected}:` as its label"),
                 format!("write `{expected}:` here"),
                 Some(*label_span),
             )),

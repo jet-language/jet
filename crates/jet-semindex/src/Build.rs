@@ -964,7 +964,16 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 ctx.db.hover.push(HoverEntry {
                     span: p.name_span,
                     module_path: mp.to_string(),
-                    text: format!("`{}`: {}", p.name, p.ty.name()),
+                    // D-APILABEL1=A: name the public label when it differs, so
+                    // hovering the local name still tells you what to type.
+                    text: match &p.public_label {
+                        Some((label, _)) => format!(
+                            "`{}`: {} — callers write `{label}:`",
+                            p.name,
+                            p.ty.name()
+                        ),
+                        None => format!("`{}`: {}", p.name, p.ty.name()),
+                    },
                 });
             }
             with_caller(
@@ -1565,12 +1574,38 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
 }
 
 fn hover_for_fn(f: &AST::Func) -> String {
-    let params: Vec<String> = f
+    // D-APILABEL1=A: hover and completion show the CALL contract, because that
+    // is what the reader has to type: the public label, and the `/` and `*`
+    // zone separators that decide whether a label is forbidden or required.
+    let mut params: Vec<String> = Vec::new();
+    let mut star_done = false;
+    let callable: Vec<&AST::Param> = f
         .params
         .iter()
         .filter(|p| p.name != Syntax::KW_SELF)
-        .map(|p| format!("{}: {}", p.name, p.ty.name()))
         .collect();
+    for (index, p) in callable.iter().enumerate() {
+        if p.zone == AST::ParamZone::LabelOnly && !star_done {
+            star_done = true;
+            params.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+        }
+        let head = match &p.public_label {
+            Some((label, _)) => format!("{label} {}", p.name),
+            None => p.name.clone(),
+        };
+        let default = match &p.default {
+            Some(_) => " = …",
+            None => "",
+        };
+        params.push(format!("{head}: {}{default}", p.ty.name()));
+        let last_positional_only = p.zone == AST::ParamZone::PositionalOnly
+            && callable
+                .get(index + 1)
+                .is_none_or(|next| next.zone != AST::ParamZone::PositionalOnly);
+        if last_positional_only {
+            params.push(Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+        }
+    }
     let arrow = if let Some((param, _)) = &f.effect_via {
         format!(" =[via {param}]=>")
     } else {

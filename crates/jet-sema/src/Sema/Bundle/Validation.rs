@@ -2507,6 +2507,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
+        param_contract: None,
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }

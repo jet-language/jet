@@ -232,11 +232,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
             // local). No special exclusion remains — the Box-coercion is total.
-            // c109 Phase 23: a call-site LABEL (`f(width: 4.0)`, S61/D-NARG1) is allowed.
-            // Labels are checked DOCUMENTATION (D-NARG-D4): sema validates each label names
-            // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
-            // and codegen never reads `CallArg.label` (`emit_call_args` is purely
-            // positional). So a labeled arg emits byte-identically to an unlabeled one.
+            // D-APILABEL1=A: a call-site LABEL is allowed. Sema binds labels by
+            // name and hands TIR an argument list already in declaration order,
+            // and the only lowering that reads `CallArg.label` is the D-ZIPPAD1
+            // zip family. So a labelled arg emits byte-identically to a bare one.
             (is_print
                 || is_zip_family
                 || is_drop

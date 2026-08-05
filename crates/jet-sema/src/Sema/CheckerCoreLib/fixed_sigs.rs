@@ -303,6 +303,7 @@ pub fn core_fixed_sig(
                     params: vec![],
                     ret: None,
                     effect_bound: None, return_view_provenance: None,
+                    param_contract: None,
                 },
             )],
             None,
@@ -2801,6 +2802,7 @@ pub fn core_fixed_sig(
                         params: vec![Type::Named("WebEvent".to_string())],
                         ret: None,
                         effect_bound: None, return_view_provenance: None,
+                        param_contract: None,
                     },
                 ),
             ],
@@ -2882,6 +2884,97 @@ pub fn core_fixed_sig(
         // spelled out at all.
         ("core.web.devserver", "app") => {
             Some((vec![], Some(Type::Named("DevServer".to_string()))))
+        }
+        _ => None,
+    }
+}
+
+/// D-APILABEL1=A: the public call contract of a Core library function.
+///
+/// The signature table above carries only conventions and types, so a Core
+/// parameter has no name for a label to bind to. This table gives the ones
+/// that need it a label, a zone, and — where the parameter is optional — the
+/// Jet expression its default is written as.
+///
+/// Declaring the default here is what lets `json.writer(^out, canonical: true)`
+/// work: the binder fills `limits` with a real argument, so every engine
+/// receives the same value instead of each spelling its own fallback.
+pub struct CoreParam {
+    /// The label a caller writes. A parameter with no entry here is
+    /// positional-only.
+    pub label: &'static str,
+    pub zone: crate::AST::ParamZone,
+    /// The default this parameter takes when a call skips it. `None` means the
+    /// parameter is required.
+    pub default: Option<CoreDefault>,
+}
+
+/// A Core parameter default, as a shape the binder builds into ordinary Jet
+/// AST. Core signatures are a table rather than Jet source, so there is no
+/// written expression to clone.
+#[derive(Clone, Copy)]
+pub enum CoreDefault {
+    Bool(bool),
+    /// A no-argument static call on a Core type, such as `EncodingLimits.safe()`.
+    /// The type name resolves without the caller importing its module.
+    StaticCall { type_name: &'static str, method: &'static str },
+}
+
+impl CoreDefault {
+    pub fn build(self, span: crate::Diagnostics::Span) -> crate::AST::Expr {
+        match self {
+            CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
+            CoreDefault::StaticCall { type_name, method } => crate::AST::Expr::MethodCall {
+                receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
+                method: method.to_string(),
+                method_span: span,
+                owner_type_args: Vec::new(),
+                type_args: Vec::new(),
+                args: Vec::new(),
+                recv_type: None,
+                resolved_ret: None,
+            },
+        }
+    }
+}
+
+const fn required(label: &'static str) -> CoreParam {
+    CoreParam { label, zone: crate::AST::ParamZone::PositionalOnly, default: None }
+}
+
+const fn optional(label: &'static str, default: CoreDefault) -> CoreParam {
+    CoreParam { label, zone: crate::AST::ParamZone::Either, default: Some(default) }
+}
+
+/// The bounded-encoding reader/writer family (D-ENCSTREAM-SURFACE1=A). The file
+/// handle is required and positional; the policy arguments are labelled so a
+/// call can name only the policy it changes.
+const ENCODING_LIMITS_DEFAULT: CoreDefault =
+    CoreDefault::StaticCall { type_name: "EncodingLimits", method: "safe" };
+
+pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
+    let normalized_module =
+        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    let module = normalized_module.as_str();
+    match (module, name) {
+        (
+            "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv"
+            | "core.encoding.cbor",
+            "reader",
+        ) => Some(vec![
+            required("source"),
+            optional("limits", ENCODING_LIMITS_DEFAULT),
+        ]),
+        ("core.encoding.json", "writer") => Some(vec![
+            required("target"),
+            optional("limits", ENCODING_LIMITS_DEFAULT),
+            optional("canonical", CoreDefault::Bool(false)),
+        ]),
+        ("core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "writer") => {
+            Some(vec![
+                required("target"),
+                optional("limits", ENCODING_LIMITS_DEFAULT),
+            ])
         }
         _ => None,
     }

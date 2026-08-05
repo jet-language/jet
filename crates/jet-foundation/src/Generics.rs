@@ -120,6 +120,7 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         },
         Type::Fn {
             params,
+            param_contract,
             ret,
             effect_bound,
             return_view_provenance,
@@ -129,6 +130,9 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             // D-EFF2: the callback effect bound is a plain annotation, not a
             // generic-substitutable type — carry it through unchanged.
             effect_bound: effect_bound.clone(),
+            // D-APILABEL1=A: the call contract is identity, not a substitutable
+            // type, so it survives instantiation unchanged.
+            param_contract: param_contract.clone(),
             return_view_provenance: return_view_provenance.clone(),
         },
         Type::Tuple(fields) => Type::Tuple(

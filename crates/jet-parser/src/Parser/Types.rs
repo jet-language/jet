@@ -770,24 +770,52 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LParen, "after `fn` in a function type")?;
         let mut params = Vec::new();
         let mut param_names: Vec<Option<String>> = Vec::new();
+        // D-APILABEL1=A: a function type reuses the parameter grammar, so it
+        // carries the same zone separators. Public labels and zones are part of
+        // callable identity; local names and default bodies are not.
+        let mut param_zones: Vec<crate::AST::ParamZone> = Vec::new();
+        let mut zone = crate::AST::ParamZone::Either;
+        let mut saw_slash = false;
+        let mut saw_star = false;
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let named = matches!(
-                    (&self.peek().kind, &self.peek2().kind),
-                    (TokKind::Ident(_), TokKind::Colon)
-                );
-                let name = if named {
-                    let TokKind::Ident(name) = self.bump().kind else {
-                        unreachable!("peek matched Ident");
-                    };
-                    self.expect(TokKind::Colon, "after a named function-type parameter")?;
-                    Some(name)
+                if matches!(self.peek().kind, TokKind::Slash) {
+                    let span = self.bump().span;
+                    if saw_slash || saw_star || params.is_empty() {
+                        self.diags.push(Self::fn_type_zone_error(span));
+                    } else {
+                        saw_slash = true;
+                        for slot in param_zones.iter_mut() {
+                            *slot = crate::AST::ParamZone::PositionalOnly;
+                        }
+                    }
+                } else if matches!(self.peek().kind, TokKind::Star) {
+                    let span = self.bump().span;
+                    if saw_star {
+                        self.diags.push(Self::fn_type_zone_error(span));
+                    } else {
+                        saw_star = true;
+                        zone = crate::AST::ParamZone::LabelOnly;
+                    }
                 } else {
-                    None
-                };
-                let (pty, _) = self.type_()?;
-                params.push(pty);
-                param_names.push(name);
+                    let named = matches!(
+                        (&self.peek().kind, &self.peek2().kind),
+                        (TokKind::Ident(_), TokKind::Colon)
+                    );
+                    let name = if named {
+                        let TokKind::Ident(name) = self.bump().kind else {
+                            unreachable!("peek matched Ident");
+                        };
+                        self.expect(TokKind::Colon, "after a named function-type parameter")?;
+                        Some(name)
+                    } else {
+                        None
+                    };
+                    let (pty, _) = self.type_()?;
+                    params.push(pty);
+                    param_names.push(name);
+                    param_zones.push(zone);
+                }
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -795,6 +823,21 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
+        if saw_star && !param_zones.contains(&crate::AST::ParamZone::LabelOnly) {
+            self.diags.push(Self::fn_type_zone_error(self.peek().span));
+        }
+        // Identity only exists when the type actually declares one; an
+        // unannotated `fn(Int) => Int` keeps its bare structural meaning.
+        let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash
+            || saw_star
+            || param_names.iter().any(Option::is_some))
+        .then(|| {
+            param_names
+                .iter()
+                .zip(param_zones.iter())
+                .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
+                .collect()
+        });
         let decorated = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
@@ -849,6 +892,7 @@ impl<'a> Parser<'a> {
             params,
             ret,
             effect_bound,
+            param_contract,
             return_view_provenance,
         })
     }
@@ -939,5 +983,25 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "to close the callback effect list")?;
         Ok(effects)
+    }
+}
+
+impl<'a> Parser<'a> {
+    /// D-APILABEL1=A: a function type's zone separators follow the same rule as
+    /// a declaration's — one `/`, one `*`, `/` before `*`, and neither may mark
+    /// an empty zone.
+    pub(in crate::Parser) fn fn_type_zone_error(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0763",
+            "this function type's parameter zones are out of order".to_string(),
+            "the zones read left to right: positional-only, then either, then label-only"
+                .to_string(),
+            format!(
+                "write at most one `{}` before at most one `{}`, each with parameters on its side",
+                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                Syntax::PARAM_ZONE_LABEL_ONLY
+            ),
+            Some(span),
+        )
     }
 }

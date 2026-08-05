@@ -34,6 +34,12 @@ fn note(label: String, value: Float) => Float {
     return value
 }
 
+// D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
+// are part of callable identity. `apply` only accepts a labelled call.
+fn apply(action: fn(*, force: Bool) => Int) => Int { return action(force: true) }
+
+fn saver(force: Bool) => Int = 7
+
 fn run() {
     r :: Rect.new(width: 4.0, height: 3.0)
     a :: r.area()
@@ -57,4 +63,7 @@ fn run() {
     // not in declaration order — so "eval h" prints before "eval w".
     both :: Rect.new(height: note("h", 2.0), width: note("w", 5.0))
     print("{both.area()}")
+
+    // A label-only parameter on a function TYPE.
+    print("{apply(saver)}")
 }

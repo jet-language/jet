@@ -2407,6 +2407,7 @@ pub(crate) fn lower_method_call(
                                 params,
                                 ret: expected_hook_result.clone().map(Box::new),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -2464,6 +2465,7 @@ pub(crate) fn lower_method_call(
                                 params,
                                 ret: None,
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             },
                             kind: TExprKind::Lambda(Box::new(tl)),
                         };
@@ -2937,6 +2939,7 @@ pub(crate) fn lower_method_call(
                                 params: params.clone(),
                                 ret: Some(Box::new(ret)),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lower_lambda_expecting_value(
                                 lam, cx, env, &params,
@@ -3264,6 +3267,7 @@ pub(crate) fn lower_method_call(
                             params: vec![inner],
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -3429,6 +3433,7 @@ pub(crate) fn lower_method_call(
                                 params: vec![inner],
                                 ret: Some(Box::new(ty)),
                                 effect_bound: None,
+                                param_contract: None,
                                 return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lowered)),
@@ -3455,6 +3460,7 @@ pub(crate) fn lower_method_call(
                                 params: vec![],
                                 ret: Some(Box::new(value_ty.clone())),
                                 effect_bound: None,
+                                param_contract: None,
                                 return_view_provenance: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lowered)),
@@ -3496,6 +3502,7 @@ pub(crate) fn lower_method_call(
                             params: vec![inner],
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }],
@@ -3634,6 +3641,7 @@ pub(crate) fn lower_method_call(
                             params: params.clone(),
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     };
@@ -3946,6 +3954,7 @@ pub(crate) fn lower_method_call(
                                     params: params.clone(),
                                     ret: Some(Box::new(Type::String)),
                                     effect_bound: None, return_view_provenance: None,
+                                    param_contract: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(
                                     lower_lambda_expecting_value(lam, cx, env, &params),
@@ -3967,6 +3976,7 @@ pub(crate) fn lower_method_call(
                                     params: params.clone(),
                                     ret: Some(Box::new(Type::Named("Unit".to_string()))),
                                     effect_bound: None,
+                                    param_contract: None,
                                     return_view_provenance: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(lowered)),
@@ -4754,6 +4764,7 @@ pub(crate) fn lower_method_call(
                             params: Vec::new(),
                             ret: None,
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     }

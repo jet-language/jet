@@ -1926,6 +1926,7 @@ impl<'a> Checker<'a> {
                             err: Box::new(Type::Named("HTTPError".to_string())),
                         })),
                         effect_bound: None, return_view_provenance: None,
+                        param_contract: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -2951,6 +2952,7 @@ impl<'a> Checker<'a> {
                             params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
                             ret: sig.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);

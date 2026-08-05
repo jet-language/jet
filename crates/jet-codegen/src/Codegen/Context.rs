@@ -1216,12 +1216,14 @@ impl Cx {
             Type::Fn {
                 params,
                 ret,
+                param_contract: _,
                 effect_bound,
                 return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
+                param_contract: None,
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
@@ -3112,6 +3114,7 @@ pub(crate) fn build_cx_items(
                             .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
+                        param_contract: None,
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
@@ -3237,6 +3240,7 @@ pub(crate) fn build_cx_items(
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                     );
                 }
@@ -3258,6 +3262,7 @@ pub(crate) fn build_cx_items(
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                     );
                 }
@@ -3388,6 +3393,7 @@ pub(crate) fn build_cx_items(
                                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                                     ret: f.return_type.clone().map(Box::new),
                                     effect_bound: None, return_view_provenance: None,
+                                    param_contract: None,
                                 },
                             );
                         }

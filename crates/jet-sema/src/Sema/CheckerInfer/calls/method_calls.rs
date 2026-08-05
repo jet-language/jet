@@ -2217,6 +2217,7 @@ impl<'a> Checker<'a> {
                                 params: vec![Type::Named("GameFrame".to_string())],
                                 ret: None,
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             };
                             let saved_esc = self.lambda_escapes;
                             let saved_exp = self.expected_type.clone();
@@ -2737,6 +2738,7 @@ impl<'a> Checker<'a> {
                                 err: Box::new(Type::Named("HTTPError".to_string())),
                             })),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                         &mut args[1],
                     );
@@ -2840,6 +2842,7 @@ impl<'a> Checker<'a> {
                             params: vec![Type::Named("Match".to_string())],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(method, 1, &cb, &mut args[1]);
                     }

@@ -593,6 +593,7 @@ impl CtValue {
                 params: Vec::new(),
                 ret: None,
                 effect_bound: None, return_view_provenance: None,
+                param_contract: None,
             },
         }
     }

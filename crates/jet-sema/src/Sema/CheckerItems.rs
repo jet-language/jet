@@ -558,6 +558,7 @@ impl<'a> Checker<'a> {
                     .map(|(convention, _)| *convention)
                     .unwrap_or(crate::AST::AccessConvention::Read),
                 variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
+                core_default: None,
             })
             .collect();
         let bound =

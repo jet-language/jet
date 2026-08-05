@@ -29,12 +29,24 @@ pub(crate) struct BindParam<'a> {
     /// D-VARIADIC1: a rest parameter. It collects the trailing arguments, so
     /// it is never "missing" and never carries a default.
     pub variadic: bool,
+    /// D-APILABEL1=A: a Core library parameter's declared default. Core
+    /// signatures are a table rather than Jet source, so the default is given
+    /// as a shape the binder builds rather than as a parsed expression.
+    pub core_default: Option<crate::Sema::CheckerCoreLib::CoreDefault>,
 }
 
 impl BindParam<'_> {
     /// True when a call may leave this parameter unbound.
     fn optional(&self) -> bool {
-        self.default.is_some() || self.variadic
+        self.default.is_some() || self.core_default.is_some() || self.variadic
+    }
+
+    /// The expression that fills this parameter when a call skips it.
+    fn default_expr(&self, span: Span) -> Option<crate::AST::Expr> {
+        if let Some(expr) = self.default {
+            return Some(expr.clone());
+        }
+        self.core_default.map(|default| default.build(span))
     }
 }
 
@@ -103,6 +115,7 @@ pub(crate) fn bind_params_from_sig(sig: &crate::AST::FuncSig) -> Vec<BindParam<'
                 .map(|(convention, _)| *convention)
                 .unwrap_or(crate::AST::AccessConvention::Read),
             variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
+            core_default: None,
         })
         .collect()
 }
@@ -245,7 +258,7 @@ fn rewrite(
                 sources.push(ArgSource::Written(*index));
             }
             None => {
-                let Some(default) = params[position].default else {
+                let Some(default) = params[position].default_expr(call_span) else {
                     // A variadic rest parameter, or a slot a diagnostic
                     // already covered. Nothing to place.
                     continue;
@@ -257,7 +270,7 @@ fn rewrite(
                     .collect();
                 args.push(CallArg {
                     convention: params[position].convention,
-                    expr: super::substitute_param_refs(default.clone(), &earlier, args),
+                    expr: super::substitute_param_refs(default, &earlier, args),
                     span: call_span,
                     flags: Default::default(),
                     label: None,

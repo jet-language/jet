@@ -205,7 +205,7 @@ renumbered, and no new `W` code may be allocated.
 | E0122 | sema  | `run` returns something other than nothing or `() ?` in run mode |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
-| E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
+| E0125 | sema  | a Core library named form was called without its required label, or with one it does not have (D-APILABEL1). User-defined calls use E0764-E0769 |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
 | E0127 | sema  | arithmetic on a distinct type without `#Numeric`, between noncommensurable distinct types, or an inexact/explicit-only cross-unit mix (D-DIST3, D-QUAL3, D-QUANTITY-CONVERT1) |
 | E0128 | sema  | implicit coercion between a distinct type and its base, including retired `Type(value)` conversion aliases (D-DIST3, D-SHAPE-CONVERT1) |
