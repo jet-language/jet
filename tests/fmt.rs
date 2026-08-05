@@ -3156,3 +3156,37 @@ fn fmt_output_callable_stability() {
     let twice = jet::format_source(&once).expect("formatted Output should reparse");
     assert_eq!(once, twice, "Output callable formatting must be byte-stable");
 }
+
+#[test]
+fn fmt_preserves_parameter_zones_and_public_labels() {
+    // D-APILABEL1=A: `/` closes the positional-only zone, `*` opens the
+    // label-only zone, and `timeout seconds: Int` splits the public call label
+    // from the local name. All three must round-trip byte-for-byte (fmt
+    // STABILITY — idempotence alone would not notice a dropped separator,
+    // because a dropped one stays dropped on the second pass).
+    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String = host\n";
+    let once = jet::format_source(src).expect("fmt should accept parameter zones");
+    for token in ["host: String", ", /,", ", *,", "timeout seconds: Int = 30", "tls: Bool = true"] {
+        assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("zoned parameters should re-fmt");
+    assert_eq!(once, twice, "parameter-zone formatting must be byte-stable");
+}
+
+#[test]
+fn fmt_keeps_reordered_and_skipped_argument_labels() {
+    // D-APILABEL1=A: a label binds by name, so fmt must never reorder a call
+    // back into declaration order nor add a label the author omitted.
+    let src = "fn run() {\n    a :: connect(\"db\", tls: false, timeout: 5)\n    b :: connect(\"db\", tls: false)\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept reordered labels");
+    assert!(
+        once.contains("connect(\"db\", tls: false, timeout: 5)"),
+        "fmt reordered or relabelled the call:\n{once}"
+    );
+    assert!(
+        once.contains("connect(\"db\", tls: false)"),
+        "fmt filled in a skipped default:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("labelled call should re-fmt");
+    assert_eq!(once, twice, "argument-label formatting must be byte-stable");
+}

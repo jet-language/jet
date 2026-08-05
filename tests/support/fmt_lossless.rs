@@ -113,6 +113,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/off_debug_doubled_attr.jet",
     "tests/ui/operator_foreign_guess.jet",
     "tests/ui/opt_chain_method.jet",
+    "tests/ui/param_zone_misplaced.jet",
     "tests/ui/params_not_yet.jet",
     "tests/ui/parse_pattern_adjacent_holes.jet",
     "tests/ui/perf_budget_unknown_role_field.jet",
