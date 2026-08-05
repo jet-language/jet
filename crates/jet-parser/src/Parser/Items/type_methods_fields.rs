@@ -11,6 +11,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LParen, "after the method name")?;
             let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
             self.reject_root_method_params(&params);
             // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `=[GPU]=>`
             // effect bound.

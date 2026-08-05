@@ -66,6 +66,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LParen, "after the function name")?;
             let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
             if external_type.is_some() {
                 self.reject_root_method_params(&params);
             }
@@ -640,6 +641,34 @@ impl<'a> Parser<'a> {
         }
     
         /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
+        /// D-APILABEL1=A: two parameters may not publish the same call label.
+        /// A label binds by name, so a repeat makes the second parameter
+        /// unreachable and turns every call into nonsense — the binder would
+        /// report the first one twice and the second one missing.
+        pub(super) fn validate_param_labels(&mut self, params: &[Param]) {
+            for (index, param) in params.iter().enumerate() {
+                if param.name == Syntax::KW_SELF {
+                    continue;
+                }
+                let label = param.call_label();
+                let clash = params
+                    .iter()
+                    .take(index)
+                    .find(|earlier| earlier.name != Syntax::KW_SELF && earlier.call_label() == label);
+                if let Some(earlier) = clash {
+                    let _ = earlier;
+                    self.diags.push(Diagnostic::error(
+                        "E0770",
+                        format!("two parameters both publish the label `{label}`"),
+                        "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called"
+                            .to_string(),
+                        format!("give one of them a different label, as in `{label}_2 {}: …`", param.name),
+                        Some(param.call_label_span()),
+                    ));
+                }
+            }
+        }
+
         pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
             for (i, p) in params.iter().enumerate() {
                 if p.variadic && i + 1 != params.len() {

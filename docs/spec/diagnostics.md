@@ -205,7 +205,6 @@ renumbered, and no new `W` code may be allocated.
 | E0122 | sema  | `run` returns something other than nothing or `() ?` in run mode |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
-| E0125 | sema  | a Core library named form was called without its required label, or with one it does not have (D-APILABEL1). User-defined calls use E0764-E0769 |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
 | E0127 | sema  | arithmetic on a distinct type without `#Numeric`, between noncommensurable distinct types, or an inexact/explicit-only cross-unit mix (D-DIST3, D-QUAL3, D-QUANTITY-CONVERT1) |
 | E0128 | sema  | implicit coercion between a distinct type and its base, including retired `Type(value)` conversion aliases (D-DIST3, D-SHAPE-CONVERT1) |
@@ -462,6 +461,7 @@ renumbered, and no new `W` code may be allocated.
 | E0767 | sema   | a label was written for a positional-only parameter, declared before `/` (D-APILABEL1) |
 | E0768 | sema   | a bare argument follows a labelled one, so it names no parameter (D-APILABEL1) |
 | E0769 | sema   | a label-only parameter, declared after `*`, was passed by position (D-APILABEL1) |
+| E0770 | parser | two parameters publish the same call label, so the second could never be called (D-APILABEL1) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |

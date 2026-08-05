@@ -89,7 +89,7 @@ impl<'a> Checker<'a> {
             for name in &names {
                 if !seen.insert(name.clone()) {
                     self.diags.push(Diagnostic::error(
-                        "E0125",
+                        "E0765",
                         format!("zip output field `{name}` is repeated"),
                         "each input column needs one distinct row-field name".to_string(),
                         "rename the repeated input label".to_string(),

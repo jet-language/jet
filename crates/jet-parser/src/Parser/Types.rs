@@ -826,6 +826,25 @@ impl<'a> Parser<'a> {
         if saw_star && !param_zones.contains(&crate::AST::ParamZone::LabelOnly) {
             self.diags.push(Self::fn_type_zone_error(self.peek().span));
         }
+        // D-APILABEL1=A: a label-only parameter needs a label to be called by,
+        // so an unnamed one after `*` could never receive an argument.
+        if param_names
+            .iter()
+            .zip(param_zones.iter())
+            .any(|(name, zone)| name.is_none() && *zone == crate::AST::ParamZone::LabelOnly)
+        {
+            self.diags.push(Diagnostic::error(
+                "E0763",
+                format!(
+                    "a parameter after `{}` in this function type has no label",
+                    Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
+                "a label-only parameter is reached by writing its label, so it has to have one"
+                    .to_string(),
+                "name it, as in `fn(*, force: Bool) => Int`".to_string(),
+                Some(self.peek().span),
+            ));
+        }
         // Identity only exists when the type actually declares one; an
         // unannotated `fn(Int) => Int` keeps its bare structural meaning.
         let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash

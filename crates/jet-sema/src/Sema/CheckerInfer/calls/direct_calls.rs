@@ -1111,7 +1111,6 @@ impl<'a> Checker<'a> {
                         _,
                         Type::Fn {
                             effect_bound: Some(b),
-                            param_contract: None,
                             ..
                         },
                     )) => Some(b.clone()),

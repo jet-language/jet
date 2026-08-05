@@ -590,7 +590,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     lower_one_call_arg(a, conv, env, cx)
                 })
                 .collect();
-            TExpr {
+            let lowered = TExpr {
                 ty: ret_ty,
                 kind: TExprKind::FnValue {
                     kind: TFnValueKind::Call {
@@ -598,6 +598,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         args: targs,
                     },
                 },
+            };
+            // D-APILABEL1=A: a function type may declare a call contract, so a
+            // call through the value can reorder just like a named one.
+            match source_arg_order(args) {
+                Some(order) => preserve_source_arg_order(lowered, &order, args.len(), e.span().start as u32),
+                None => lowered,
             }
         }
         Expr::Unary(op, inner, _) => {
@@ -983,7 +989,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         lower_one_call_arg(a, conv, env, cx)
                     })
                     .collect();
-                return TExpr {
+                let lowered = TExpr {
                     ty: ret_ty,
                     kind: TExprKind::FnValue {
                         kind: TFnValueKind::Call {
@@ -991,6 +997,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args: targs,
                         },
                     },
+                };
+                return match source_arg_order(&call.args) {
+                    Some(order) => preserve_source_arg_order(
+                        lowered, &order, call.args.len(), call.name_span.start as u32,
+                    ),
+                    None => lowered,
                 };
             }
             if call.name == Syntax::RESOURCE_CLOSE
@@ -3117,18 +3129,18 @@ fn effect_free(e: &TExpr) -> bool {
 
 /// Whether this argument may be hoisted into a temporary at all.
 ///
-/// A by-reference argument must not be: binding it with `let t = place` moves
-/// or copies the place, so the callee would write to the temporary and the
-/// caller's value would never change. Same for an argument emit decorates with
-/// `.clone()` or an `Fn` coercion — the decoration belongs on the original
-/// expression, not on a read of a temporary that already consumed it.
+/// What must never be hoisted is a **place**: binding `let t = bag` moves or
+/// copies it, so a `&bag` argument would have the callee write to the temporary
+/// and the caller's value would never change. That case is already excluded by
+/// `effect_free`, which is true of every place read — so a by-reference
+/// argument only reaches here when it is a computed value, and `&(t)` over a
+/// temporary holding that value is exactly right.
+///
+/// Only two decorations genuinely cannot move: an `Fn` coercion, whose `let`
+/// would be typed before the coercion rather than after, and a fixed-list
+/// widening, which emit applies to the original expression.
 fn hoistable(arg: &crate::Codegen::TIR::TCallArg) -> bool {
-    !arg.borrow
-        && !arg.mut_borrow
-        && !arg.clone
-        && !arg.arc_clone
-        && arg.fn_coerce.is_none()
-        && !arg.widen_to_vec
+    arg.fn_coerce.is_none() && !arg.widen_to_vec
 }
 
 /// The argument list of any TIR node that takes one, so the D-APILABEL1 order
@@ -3140,6 +3152,10 @@ fn call_args_mut(kind: &mut TExprKind) -> Option<&mut Vec<crate::Codegen::TIR::T
         | TExprKind::FnFieldCall { args, .. }
         | TExprKind::StaticCall { args, .. }
         | TExprKind::ModuleCall { args, .. } => Some(args),
+        // A call through a function value carries its arguments one level down.
+        TExprKind::FnValue { kind: crate::Codegen::TIR::TFnValueKind::Call { args, .. } } => {
+            Some(args)
+        }
         _ => None,
     }
 }

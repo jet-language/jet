@@ -633,12 +633,7 @@ impl<'a> Checker<'a> {
             // the one policy it changes and skip the rest. Filling the skipped
             // defaults here is also what stops each engine spelling its own
             // fallback: every tier now receives the same argument.
-            // Only a call that actually writes a label needs binding. A purely
-            // positional Core call already means what it says, and leaving it
-            // untouched keeps every existing lowering path exactly as it was.
-            if let Some(contract) = super::core_param_contract(module, name)
-                .filter(|_| args.iter().any(|arg| arg.label.is_some()))
-            {
+            if let Some(contract) = super::core_param_contract(module, name) {
                 let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
                     .iter()
                     .enumerate()
@@ -3732,14 +3727,14 @@ impl<'a> Checker<'a> {
                         match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
                             Some(("tls", _)) => {}
                             Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0764",
                                 format!("`bind` has no option named `{label}` here"),
                                 "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
                                 "write `tls: Server.tls(cert, key)`".to_string(),
                                 Some(label_span),
                             )),
                             None => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0769",
                                 "`bind` needs `tls:` before the third argument".to_string(),
                                 "the label makes the transport switch explicit at the call site".to_string(),
                                 "write `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
@@ -3779,14 +3774,14 @@ impl<'a> Checker<'a> {
                         match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
                             Some(("tls", _)) => {}
                             Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0764",
                                 format!("`serve` has no option named `{label}` here"),
                                 "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
                                 "write `tls: Server.tls(cert, key)`".to_string(),
                                 Some(label_span),
                             )),
                             None => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0769",
                                 "`serve` needs `tls:` before the third argument".to_string(),
                                 "the label makes the transport switch explicit at the call site".to_string(),
                                 "write `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
@@ -4289,9 +4284,9 @@ impl<'a> Checker<'a> {
                                 Some(label) => {
                                     let label_span = args[1].label.as_ref().map(|(_, s)| *s).unwrap_or(span);
                                     self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!("`display_width` has no `{label}:` option at argument 2"),
-                                        "this position accepts a `TextWidth` policy; labels document the positional shape and never reorder arguments".to_string(),
+                                        "E0764",
+                                        format!("`display_width` has no parameter labelled `{label}`"),
+                                        "this position accepts a `TextWidth` policy".to_string(),
                                         "write `policy:` here, or drop the label".to_string(),
                                         Some(label_span),
                                     ));

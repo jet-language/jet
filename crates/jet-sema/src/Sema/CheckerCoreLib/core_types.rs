@@ -993,9 +993,9 @@ pub(super) fn game_run_label_error(
     };
     let label_span = arg.label.as_ref().map(|(_, s)| *s).unwrap_or(span);
     diags.push(Diagnostic::error(
-        "E0125",
+        "E0764",
         format!("`game.run` has no `{label}:` option at argument {}", index + 1),
-        format!("this position accepts {expected}; labels document the positional shape and never reorder arguments"),
+        format!("this position accepts {expected}"),
         fix.to_string(),
         Some(label_span),
     ));

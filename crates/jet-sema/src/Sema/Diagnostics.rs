@@ -1450,7 +1450,7 @@ mod tests {
                 ),
             ]))),
             effect_bound: None,
-            param_contract: param_contract.clone(),
+            param_contract: None,
             return_view_provenance: None,
         };
 

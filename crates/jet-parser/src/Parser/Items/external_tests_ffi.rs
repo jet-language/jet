@@ -105,6 +105,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokKind::LParen, "after the property test name")?;
                 let params = self.parse_param_list()?;
                 self.validate_variadic_params(&params);
+                self.validate_param_labels(&params);
                 self.expect(TokKind::LBrace, "to open the property test body")?;
                 let body = self.block_stmts();
                 return Ok(crate::AST::TestDef {
@@ -735,6 +736,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LParen, "after the function name")?;
             let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
     
             let mut return_type = None;
             let mut return_type_span = None;

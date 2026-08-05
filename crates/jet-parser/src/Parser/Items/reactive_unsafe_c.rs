@@ -173,6 +173,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LParen, "after the function name")?;
             let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
             let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
             let mut return_type = None;
