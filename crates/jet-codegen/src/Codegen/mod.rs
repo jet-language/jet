@@ -711,13 +711,15 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.sketch.reservoir",
             "jet.db",
             "core.db",
-            // `core.fmt` lowers to the `jet_fmt_*` helpers that live in
-            // DataFmt.rs.  Without this a program that formats but never
-            // touches `core.data` emits calls to helpers it never included,
-            // and rustc rejects the generated file (I2).
-            "core.fmt",
         ],
     );
+    // DataFmt.rs holds the `jet_fmt_*` helpers behind `core.fmt` and the
+    // toml/yaml/csv text helpers behind `core.encoding`, not just the
+    // `core.data` surface it is filed under. Gate it on every surface that
+    // calls into it, or a program using only one of them emits calls to
+    // helpers the generated file never included and rustc rejects it (I2).
+    let needs_data_fmt =
+        needs_data || needs_encoding || core_usage_matches(used_core, &["core.fmt"]);
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
@@ -831,7 +833,11 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
     if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataPlot.rs"));
+    }
+    if needs_data_fmt {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+    }
+    if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }
     if needs_compute {
