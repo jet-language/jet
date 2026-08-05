@@ -17,6 +17,7 @@ operations. The excluded names stay counted so the exclusion cannot hide a gap.
 """
 
 import importlib
+import inspect
 import json
 import sys
 
@@ -34,12 +35,12 @@ BUILTIN_TYPES = {
 }
 
 STDLIB_MODULES = [
-    "asyncio", "base64", "binascii", "collections", "csv", "datetime",
-    "functools", "heapq", "http", "io", "itertools", "json", "logging",
-    "math", "os", "pathlib", "random", "re", "secrets", "socket", "sqlite3",
-    "ssl", "statistics", "struct", "subprocess", "tarfile", "tempfile",
-    "time", "tomllib", "unicodedata", "unittest", "urllib.parse", "uuid",
-    "zipfile",
+    "asyncio", "base64", "binascii", "builtins", "collections", "csv",
+    "datetime", "functools", "heapq", "http", "io", "itertools", "json",
+    "logging", "math", "os", "pathlib", "random", "re", "secrets", "socket",
+    "sqlite3", "ssl", "statistics", "struct", "subprocess", "sys", "tarfile",
+    "tempfile", "time", "tomllib", "types", "unicodedata", "unittest",
+    "urllib.parse", "uuid", "zipfile",
 ]
 
 
@@ -55,8 +56,10 @@ def main():
         "pythonVersion": ".".join(str(p) for p in sys.version_info[:3]),
         "scopeRule": (
             "Comparison points are callables and types. Module-level constant "
-            "values are excluded as configuration, not operations. Excluded "
-            "names remain counted so the exclusion is visible."
+            "values are excluded as configuration, not operations. Class "
+            "members such as socket.socket.recv are recorded and can satisfy a "
+            "Jet mapping, but they are not enumerated as gaps. Every excluded "
+            "name stays counted so no exclusion is hidden."
         ),
         "officialIndex": "https://docs.python.org/3/library/index.html",
         "builtinIndex": "https://docs.python.org/3/library/functions.html",
@@ -77,12 +80,21 @@ def main():
         names = public(exported if exported else dir(module))
         operations = []
         constants = []
+        # Most of a module's real surface hangs off its classes: socket.socket.recv,
+        # pathlib.Path.read_text, collections.deque.append. Recording only
+        # module-level names would understate Python and silently downgrade
+        # legitimate matches to "Jet has no counterpart".
+        types_members = {}
         for member in names:
             value = getattr(module, member, None)
             (operations if callable(value) else constants).append(member)
+            if inspect.isclass(value):
+                types_members[member] = public(dir(value))
         snapshot["stdlibModules"][name] = {
             "operations": operations,
             "operationCount": len(operations),
+            "types": types_members,
+            "typeMemberCount": sum(len(v) for v in types_members.values()),
             "excludedConstantCount": len(constants),
             "excludedConstants": constants,
         }
@@ -96,6 +108,9 @@ def main():
         ),
         "excludedConstants": sum(
             entry["excludedConstantCount"] for entry in snapshot["stdlibModules"].values()
+        ),
+        "moduleTypeMembers": sum(
+            entry["typeMemberCount"] for entry in snapshot["stdlibModules"].values()
         ),
     }
     totals["comparisonPoints"] = totals["builtinTypeMembers"] + totals["moduleOperations"]

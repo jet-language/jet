@@ -164,19 +164,15 @@ const PYTHON_MODULE_FOR_JET = {
   "core.url": "python.urllib.parse",
   "core.net": "python.socket",
   "core.tls": "python.ssl",
-  "jet.http": "python.http",
   "core.http": "python.http",
-  "jet.regex": "python.re",
   "core.regex": "python.re",
   "core.archive": "python.zipfile",
-  "jet.db": "python.sqlite3",
   "core.db": "python.sqlite3",
   "core.tasks": "python.asyncio",
   "core.testing": "python.unittest",
   "core.data": "python.statistics",
   "core.binary": "python.struct",
   "core.text": "python.types",
-  "jet.log": "python.logging",
   "core.log": "python.logging",
   "core.fmt": "python.builtins",
 };
@@ -185,10 +181,10 @@ const PYTHON_DIRECT = {
   "core.io.args": "sys.argv",
   "core.io.input": "builtins.input",
   "core.io.print": "builtins.print",
-  "core.io.eprint": "sys.stderr.write",
+  "core.io.eprint": "sys.stderr",
   "core.env.get": "os.getenv",
-  "core.env.set": "os.environ.__setitem__",
-  "core.env.unset": "os.environ.pop",
+  "core.env.set": "os.putenv",
+  "core.env.unset": "os.unsetenv",
   "core.env.vars": "os.environ",
   "core.env.current_dir": "os.getcwd",
   "core.env.home_dir": "pathlib.Path.home",
@@ -211,7 +207,6 @@ const PYTHON_DIRECT = {
   "core.encoding.hex.decode": "binascii.unhexlify",
   "core.encoding.base64.encode": "base64.b64encode",
   "core.encoding.base64.decode": "base64.b64decode",
-  "core.text.unicode.scalar_count": "unicodedata",
   "core.uuid.v4": "uuid.uuid4",
   "core.uuid.v7": "uuid.uuid7",
   "core.files.read": "pathlib.Path.read_text",
@@ -230,21 +225,11 @@ const PYTHON_DIRECT = {
   "core.net.tcp_read": "socket.socket.recv",
   "core.net.tcp_write": "socket.socket.send",
   "core.tls.client": "ssl.create_default_context",
-  "jet.http.get": "http.client",
-  "jet.http.serve": "http.server",
-  "jet.regex.compile": "re.compile",
-  "jet.regex.is_match": "re.fullmatch",
-  "jet.regex.find": "re.search",
-  "jet.regex.replace": "re.sub",
   "core.archive.zip_compress": "zipfile.ZipFile",
   "core.archive.zip_decompress": "zipfile.ZipFile",
   "core.archive.tar_add": "tarfile.TarFile.add",
-  "jet.db.open": "sqlite3.connect",
   "core.testing.temp_dir": "tempfile.TemporaryDirectory",
   "core.binary.Reader": "io.BytesIO",
-  "core.fmt.number": "format",
-  "core.fmt.bytes": "format",
-  "core.fmt.duration": "format",
 };
 
 const COLLECTION_PYTHON = {
@@ -263,8 +248,6 @@ const COLLECTION_PYTHON = {
 
 const COLLECTION_PYTHON_SPECIAL = {
   "List.len": "builtins.len",
-  "List.is_empty": "not bool",
-  "List.contains": "in",
   "List.index_of": "list.index",
   "List.push": "list.append",
   "List.extend": "list.extend",
@@ -274,16 +257,12 @@ const COLLECTION_PYTHON_SPECIAL = {
   "List.reverse": "list.reverse",
   "List.count": "list.count",
   "Map.len": "builtins.len",
-  "Map.is_empty": "not bool",
   "Map.get": "dict.get",
   "Map.remove": "dict.pop",
   "Map.keys": "dict.keys",
   "Map.values": "dict.values",
-  "Map.has_key": "in",
   "Map.clear": "dict.clear",
   "Set.len": "builtins.len",
-  "Set.is_empty": "not bool",
-  "Set.has": "set.__contains__",
   "Set.add": "set.add",
   "Set.remove": "set.remove",
   "Set.union": "set.union",
@@ -296,9 +275,7 @@ const COLLECTION_PYTHON_SPECIAL = {
   "Deque.pop_back": "collections.deque.pop",
   "PriorityQueue.push": "heapq.heappush",
   "PriorityQueue.pop": "heapq.heappop",
-  "PriorityQueue.peek": "heapq[0]",
   "String.len": "builtins.len",
-  "String.contains": "in",
   "String.starts_with": "str.startswith",
   "String.ends_with": "str.endswith",
   "String.split": "str.split",
@@ -387,22 +364,39 @@ function pythonBuiltinHas(type, member) {
 }
 
 function pythonModuleHas(module, member) {
-  return Boolean(PYTHON_SURFACE.stdlibModules[module]?.operations.includes(member));
+  const entry = PYTHON_SURFACE.stdlibModules[module];
+  if (!entry) return false;
+  return entry.operations.includes(member) || entry.excludedConstants.includes(member);
 }
 
-// "str.upper", "itertools.chain", "collections.deque.append", "urllib.parse.quote"
+// "str.upper", "itertools.chain", "collections.deque.append", "urllib.parse.quote".
+// Class members are recorded, so a nested name resolves instead of being
+// refused; refusing them downgraded real matches to "Jet has no counterpart".
 function pythonHas(dotted) {
   const parts = dotted.split(".");
-  for (let take = parts.length - 1; take >= 1; take -= 1) {
-    const head = parts.slice(0, take).join(".");
-    const rest = parts.slice(take);
-    if (rest.length !== 1) continue;
-    if (PYTHON_SURFACE.builtinTypes[head]) return pythonBuiltinHas(head, rest[0]);
-    if (PYTHON_SURFACE.stdlibModules[head]) return pythonModuleHas(head, rest[0]);
-  }
-  // Nested type members such as collections.deque.append are outside the
-  // snapshot's recorded comparison points; refuse the claim rather than guess.
+  const last = parts[parts.length - 1];
+  const head = parts.slice(0, -1).join(".");
+  if (!head) return pythonModuleHas("builtins", last);
+  if (PYTHON_SURFACE.builtinTypes[head]) return pythonBuiltinHas(head, last);
+  if (PYTHON_SURFACE.stdlibModules[head]) return pythonModuleHas(head, last);
+  // module.Class.member
+  const klass = parts[parts.length - 2];
+  const module = parts.slice(0, -2).join(".");
+  const entry = PYTHON_SURFACE.stdlibModules[module];
+  if (entry && entry.types && entry.types[klass]) return entry.types[klass].includes(last);
   return false;
+}
+
+// Resolve a Jet member against the Python module the ledger already maps it to,
+// by name, before concluding Python has no counterpart. Without this the
+// verdict is decided by whether a hand-written table happened to list the row,
+// which is the same absence-as-evidence defect in a new place.
+function pythonMemberByName(module, member) {
+  const doc = PYTHON_MODULE_FOR_JET[module];
+  if (!doc) return null;
+  const pythonModule = doc.slice("python.".length);
+  const candidate = pythonModule + "." + member;
+  return pythonHas(candidate) ? candidate : null;
 }
 
 function read(relativePath) {
@@ -724,8 +718,29 @@ function pythonMemberForCollection(type, method) {
 
 function pythonMemberForModule(module, member) {
   const mapped = PYTHON_DIRECT[module + "." + member];
-  if (!mapped) return null;
-  return pythonHas(mapped) ? mapped : null;
+  if (mapped) return pythonHas(mapped) ? mapped : null;
+  return pythonMemberByName(module, member);
+}
+
+// A curated mapping that resolves to nothing, or a mapping key naming a module
+// the compiler does not ship, is a silent hole. Both used to disappear without
+// a word: 45 of 105 mappings resolved to nothing and 11 keys named modules
+// (jet.regex, jet.db, jet.http) that do not exist.
+function mappingFaults(modules) {
+  const faults = [];
+  const shipped = new Set(modules.map(function (entry) { return entry.module; }));
+  for (const [key, value] of Object.entries(PYTHON_DIRECT)) {
+    const module = key.slice(0, key.lastIndexOf("."));
+    if (!shipped.has(module)) faults.push("mapping key names an unknown module: " + key);
+    else if (!pythonHas(value)) faults.push("mapping resolves to nothing: " + key + " -> " + value);
+  }
+  for (const [key, value] of Object.entries(COLLECTION_PYTHON_SPECIAL)) {
+    if (!pythonHas(value)) faults.push("collection mapping resolves to nothing: " + key + " -> " + value);
+  }
+  for (const module of Object.keys(PYTHON_MODULE_FOR_JET)) {
+    if (!shipped.has(module)) faults.push("comparator names an unknown module: " + module);
+  }
+  return faults;
 }
 
 function pythonReason(module, pythonMember) {
@@ -767,8 +782,8 @@ function rowForModule(entry, member, fixedOnly) {
     workflow: pythonMember
       ? "matched Python workflow: " + pythonMember
       : "typed Jet Core workflow for " + entry.module,
-    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "jet_only"),
-    ownerCard: loses ? 288 : null,
+    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "unadjudicated"),
+    ownerCard: loses ? 288 : (pythonMember ? null : UNADJUDICATED_OWNER),
     evidence: [
       "source:" + MODULE_ITEMS_PATH,
       "source:" + FIXED_SIGS_PATH,
@@ -800,8 +815,8 @@ function rowForCollection(entry, method) {
     workflow: pythonMember
       ? "matched collection workflow: " + pythonMember
       : "typed Jet collection workflow for " + type,
-    verdict: pythonMember ? "equal" : "jet_only",
-    ownerCard: null,
+    verdict: pythonMember ? "equal" : "unadjudicated",
+    ownerCard: pythonMember ? null : UNADJUDICATED_OWNER,
     evidence: [
       "source:" + COLLECTIONS_PATH,
       "python-surface:" + PYTHON_SURFACE.pythonVersion,
@@ -896,6 +911,7 @@ function sourceFiles() {
     POLICY_PATH,
     "crates/jet-foundation/src/Syntax.rs",
     SYNTAX_PATH,
+    "docs/reference/python-surface.json",
   ].map(function (path) {
     const source = read(path);
     return {
@@ -944,7 +960,7 @@ function buildLedger(previous) {
     schemaVersion: 1,
     title: "Jet Core surface ledger",
     sourceOfTruth: "docs/reference/core-surface-ledger.json",
-    generatedOn: previous?.generatedOn || new Date().toISOString().slice(0, 10),
+    generatedOn: new Date().toISOString().slice(0, 10),
     sourceFiles: sourceFiles(),
     pythonScope: {
       rule: "The ledger claims competition only for these Python built-in types and standard-library modules. Every Python claim resolves against the recorded surface; a constructed member name is never evidence.",
@@ -1134,6 +1150,13 @@ function loadCards(towerPath) {
 // Owner liveness depends on live board state, so it belongs to the closure
 // gate. Claim truth depends only on the ledger and the recorded surface, which
 // is what every commit must keep green.
+function validateMappings(modules) {
+  const faults = mappingFaults(modules);
+  if (faults.length) {
+    throw new Error("comparison mapping is broken:\n  " + faults.join("\n  "));
+  }
+}
+
 function validateOwners(ledger, cards) {
   for (const row of ledger.rows) {
     if (row.verdict !== "jet_loses" && row.verdict !== "unadjudicated") continue;
@@ -1160,7 +1183,7 @@ function validateRows(ledger, cards) {
     if (row.verdict !== "unadjudicated" && !row.jetSpelling) {
       throw new Error("incomplete row: " + row.id);
     }
-    if (!["jet_only", "equal", "jet_loses", "unadjudicated", "deliberately_declined"].includes(row.verdict)) {
+    if (!["equal", "jet_loses", "unadjudicated"].includes(row.verdict)) {
       throw new Error("invalid verdict in " + row.id + ": " + row.verdict);
     }
     // A row may not assert a Python member the recorded surface does not have.
@@ -1172,10 +1195,6 @@ function validateRows(ledger, cards) {
     }
     if ((row.verdict === "jet_loses" || row.verdict === "unadjudicated") && !row.ownerCard) {
       throw new Error("gap without an owner: " + row.id);
-    }
-    if (row.verdict === "deliberately_declined") {
-      if (!row.decisionId) throw new Error("decline without decision: " + row.id);
-      throw new Error("deliberate declines require a ratified decision check: " + row.id);
     }
     if (row.competitors?.status !== "unverified" && !row.competitors?.verifiedFrom) {
       throw new Error("competitor claim without a cited surface in " + row.id);
@@ -1243,10 +1262,13 @@ function refresh() {
 function check(args, withClosure) {
   const stored = loadJson(LEDGER_PATH);
   const expected = buildLedger(stored);
-  compareLedger(stored, expected);
+  // Order matters: a hand-edited fabrication must be reported as an unverified
+  // member, not masked by the drift hash that would otherwise fire first.
   validateCoverage(stored);
   validateRows(stored);
-  if (withClosure) validateOwners(stored, loadCards(towerPath(args)));
+  validateMappings(moduleInventory());
+  validateOwners(stored, loadCards(towerPath(args)));
+  compareLedger(stored, expected);
   process.stdout.write("core surface ledger: source-derived, verified against Python " +
     stored.pythonScope.pythonVersion + ", unique, and owner-current\n");
   process.stdout.write("modules=" + stored.summary.moduleCount +
