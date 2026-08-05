@@ -168,7 +168,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // D-APILABEL1=A: a method whose labels reordered its arguments keeps
         // the same source evaluation order as a free call.
         lowered_receiver = Some(match source_arg_order(args) {
-            Some(order) => preserve_source_arg_order(lowered, &order),
+            Some(order) => preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32),
             None => lowered,
         });
     }
@@ -1497,7 +1497,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             };
             match source_arg_order(&call.args) {
-                Some(order) => preserve_source_arg_order(lowered, &order),
+                Some(order) => preserve_source_arg_order(lowered, &order, call.args.len(), call.name_span.start as u32),
                 None => lowered,
             }
         }
@@ -3057,11 +3057,22 @@ pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize
     Some(slots)
 }
 
-pub(crate) fn preserve_source_arg_order(mut call: TExpr, order: &[usize]) -> TExpr {
+pub(crate) fn preserve_source_arg_order(
+    mut call: TExpr,
+    order: &[usize],
+    ast_arg_count: usize,
+    site: u32,
+) -> TExpr {
     let Some(args) = call_args_mut(&mut call.kind) else {
         return call;
     };
-    let mut stmts = bind_arg_temporaries(args, order);
+    // A `#Root` dot call (D-CALLDUAL1=E) lowers its receiver into slot 0 of the
+    // TIR argument list, while `order` was computed over the AST list the
+    // receiver was stripped from. Recovering the offset from the two lengths
+    // keeps this right for every node shape instead of special-casing one.
+    let offset = args.len().saturating_sub(ast_arg_count);
+    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    let mut stmts = bind_arg_temporaries(args, &order, site);
     if stmts.is_empty() {
         return call;
     }
@@ -3071,6 +3082,52 @@ pub(crate) fn preserve_source_arg_order(mut call: TExpr, order: &[usize]) -> TEx
         ty,
         kind: TExprKind::InlineBlock(stmts),
     }
+}
+
+/// D-APILABEL1=A: can evaluating this argument be *observed*? Reading a place,
+/// a literal, or a borrow of one cannot, so moving such an argument across
+/// another has no effect anyone can see — and hoisting it into a temporary
+/// would be actively wrong, because that moves the place instead of passing it.
+///
+/// Conservative: anything not recognised here is assumed to have an effect.
+fn effect_free(e: &TExpr) -> bool {
+    match &e.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(_)
+        | TExprKind::BoolLit(_)
+        | TExprKind::CharLit(_)
+        | TExprKind::Local(_)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::CtLit(_)
+        | TExprKind::ConstRef(_) => true,
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(inner, ..) => effect_free(inner),
+        }),
+        TExprKind::Field { recv, .. } => effect_free(recv),
+        TExprKind::Borrow { place, .. } => effect_free(place),
+        TExprKind::Clone(inner) | TExprKind::Deref(inner) => effect_free(inner),
+        TExprKind::Unary { operand, .. } => effect_free(operand),
+        TExprKind::Binary { lhs, rhs, .. } => effect_free(lhs) && effect_free(rhs),
+        _ => false,
+    }
+}
+
+/// Whether this argument may be hoisted into a temporary at all.
+///
+/// A by-reference argument must not be: binding it with `let t = place` moves
+/// or copies the place, so the callee would write to the temporary and the
+/// caller's value would never change. Same for an argument emit decorates with
+/// `.clone()` or an `Fn` coercion — the decoration belongs on the original
+/// expression, not on a read of a temporary that already consumed it.
+fn hoistable(arg: &crate::Codegen::TIR::TCallArg) -> bool {
+    !arg.borrow
+        && !arg.mut_borrow
+        && !arg.clone
+        && !arg.arc_clone
+        && arg.fn_coerce.is_none()
+        && !arg.widen_to_vec
 }
 
 /// The argument list of any TIR node that takes one, so the D-APILABEL1 order
@@ -3092,13 +3149,33 @@ fn call_args_mut(kind: &mut TExprKind) -> Option<&mut Vec<crate::Codegen::TIR::T
 fn bind_arg_temporaries(
     args: &mut [crate::Codegen::TIR::TCallArg],
     order: &[usize],
+    site: u32,
 ) -> Vec<TStmt> {
-    let mut stmts: Vec<TStmt> = Vec::with_capacity(order.len() + 1);
-    for (step, slot) in order.iter().enumerate() {
+    // Only the arguments that can actually be observed need pinning down. If at
+    // most one of them can, nothing can be observed out of order and the call
+    // stays a plain call.
+    let observable: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|slot| {
+            args.get(*slot)
+                .is_some_and(|arg| hoistable(arg) && !effect_free(&arg.value))
+        })
+        .collect();
+    if observable.len() < 2 {
+        return Vec::new();
+    }
+    let mut stmts: Vec<TStmt> = Vec::with_capacity(observable.len() + 1);
+    for (step, slot) in observable.iter().enumerate() {
         let Some(arg) = args.get_mut(*slot) else {
             continue;
         };
-        let temp = format!("__jet_arg{step}");
+        // The name has to be unique across nesting: a nested reordered call is
+        // lowered as the initialiser of one of these very temporaries, and the
+        // interpreter shares one scope with it. `site` is the call's source
+        // offset, so two calls can never collide and the name stays stable
+        // across runs.
+        let temp = format!("__jet_arg{site}_{step}");
         let ty = arg.value.ty.clone();
         let bound = std::mem::replace(
             &mut arg.value,

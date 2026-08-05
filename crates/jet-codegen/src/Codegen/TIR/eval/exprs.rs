@@ -1828,6 +1828,33 @@ impl<'a> EvalCtx<'a> {
                 let Some((tail, prefix)) = stmts.split_last() else {
                     return Ok(CtValue::Unit);
                 };
+                // AOT emits a real Rust block here and the JIT saves and
+                // restores its slots, so this block's own `let` bindings must
+                // not outlive it in the interpreter either. Restore exactly the
+                // names it introduces — a collecting loop still needs to write
+                // through to the enclosing scope, so a blanket child scope
+                // would be wrong.
+                let bound: Vec<(String, Option<CtValue>)> = prefix
+                    .iter()
+                    .filter_map(|stmt| match stmt {
+                        crate::Codegen::TIR::TStmt::Let { name, .. } => {
+                            Some((name.clone(), scope.get(name).cloned()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let restore = |scope: &mut HashMap<String, CtValue>| {
+                    for (name, prior) in &bound {
+                        match prior {
+                            Some(value) => {
+                                scope.insert(name.clone(), value.clone());
+                            }
+                            None => {
+                                scope.remove(name);
+                            }
+                        }
+                    }
+                };
                 match self.exec_stmts(prefix, scope)? {
                     Flow::Normal => {}
                     Flow::Return(value) => {
@@ -1840,9 +1867,11 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
-                    return self.exec_loop_value(label.as_deref(), body, scope);
+                    let value = self.exec_loop_value(label.as_deref(), body, scope);
+                    restore(scope);
+                    return value;
                 }
-                match tail {
+                let value = match tail {
                     crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr(value, scope),
                     crate::Codegen::TIR::TStmt::Return(value) => {
                         let value = match value {
@@ -1863,7 +1892,9 @@ impl<'a> EvalCtx<'a> {
                             Err(unsupported("pending loop control", self.span()))
                         }
                     },
-                }
+                };
+                restore(scope);
+                value
             }
             TExprKind::Uninit => match &expr.ty {
                 Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(*len as usize)),
