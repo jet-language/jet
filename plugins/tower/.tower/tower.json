@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1440,
-    "rev": 25414,
+    "nextNum": 1455,
+    "rev": 25503,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15,13 +15,12 @@
         "epoch:e6",
         "epoch:e4",
         "epoch:e5",
-        "board-ideas",
         "radar-cards",
-        "radar-sq",
-        "radar-remaining"
+        "radar-remaining",
+        "radar-frozen"
       ]
     },
-    "completionCursor": "2026-08-05T11:16:56.547Z"
+    "completionCursor": "2026-08-05T19:52:44.053Z"
   },
   "epochs": [
     {
@@ -77503,9 +77502,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:48.987Z",
-      "updated": "2026-08-05T16:24:53.536Z",
+      "updated": "2026-08-05T19:13:13.867Z",
       "updatedBy": "claude-e3-1393",
-      "claimedAt": "2026-08-05T16:24:53.536Z"
+      "claimedAt": "2026-08-05T19:13:13.867Z"
     },
     {
       "id": "c00sqr4z",
@@ -79780,14 +79779,20 @@
       "body": "Pick and implement one clear spelling for calling a function value that another call just returned. Raised from the owner review of D-AUTODIFF1, where compute.grad(loss)(w, x) read as foreign. Scope: parser rule, diagnostic with fix-it, sema member lookup, formatter, tree-sitter and tmGrammar highlighting, LSP completion, docs, examples, goldens. Gated on D-CALLVALUE1.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "fable",
+          "text": "Homed to e3 with its #1428-#1436 operator-slate siblings; unhomed epoch-track cards are now rejected at the store boundary (owner ruling 2026-08-05)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -79831,8 +79836,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T10:54:53.602Z",
-      "updated": "2026-08-05T10:57:38.717Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T19:02:33.237Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0kw5dh0",
@@ -80779,6 +80784,640 @@
       "created": "2026-08-05T17:23:16.931Z",
       "updated": "2026-08-05T17:24:54.556Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c0fhg5kf",
+      "num": 1440,
+      "title": "Exhaustive enum value dispatch still demands else (E0003 fires before sema E0307)",
+      "body": "Repro: examples/features/types/enum_dot.jet label() — a fn returning `if d == { .North -> … .West -> … }` with every Direction variant covered still errors E0003 (a value dispatch needs a final else arm). Ratified spec says otherwise: docs/spec/syntax-decisions.md:442 (D-IFDIST1) 'Exhaustive pattern arms may omit else'; docs/spec/spec.md:749 makes enum dispatch exhaustiveness a sema check (E0307). Root cause: parse_dispatch_expr (crates/jet-parser/src/Parser/Statements/conditionals.rs:966-985) desugars expression-position dispatch into a nested Expr::If chain at parse time and hard-requires else, so sema's E0307 coverage machinery (CheckerCore/switches.rs statement form) never sees the table. AST Expr::If has a mandatory else_value, so an else-less exhaustive table has no representation today. Fix direction: carry the arm-table shape into sema for expression position, run the same missing_pattern_coverage/E0307 proof, lower with the dead unreachable arm codegen already anticipates (TIR/lower/patterns.rs:376, jit/lower_ctx.rs:4434). Full I9 parity: parser, sema, TIR, AOT, JIT, interpreter, formatter round-trip, E0003 Why-text update, snapshots; drop the commented-out else in enum_dot.jet. Same gap exists for subjectless guard tables used as values (conditionals.rs:1057) — cover or explicitly exclude.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "fable",
+          "text": "Implemented at HEAD: parser NoElse marker for all-pattern else-less tables; sema coverage proof shared with the statement form (extracted note_pattern_coverage / check_pattern_coverage_complete — one policy, two entry shapes); diverging TExprKind::Unreachable across AOT/JIT/eval; fmt table rendering for pattern-headed value tables. Separate defects carded: #1444 union-subject expression dispatch ICE (predates this card, with-else spelling equally affected), #1445 stale snapshots from the epoch5 consolidation."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Expression-position if subject == { … } over a closed enum with every variant covered compiles without else, and AOT, default jet run, and interpreter deopt all print identical output for the enum_dot example.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "fresh-context diff review a104dd28f6e74171d: statement-form extraction byte-equivalent, chain checker sound (span-dedup correct, probe truncation safe), NoElse cannot leak, formatter guards hold — no findings; evidence commands inspected",
+          "at": "2026-08-05T19:47:43.597Z"
+        },
+        {
+          "n": 2,
+          "text": "A non-exhaustive else-less value dispatch emits E0307 naming the missing variants, snapshot-tested in tests/ui.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "fresh-context diff review a104dd28f6e74171d: statement-form extraction byte-equivalent, chain checker sound (span-dedup correct, probe truncation safe), NoElse cannot leak, formatter guards hold — no findings; evidence commands inspected",
+          "at": "2026-08-05T19:47:43.904Z"
+        },
+        {
+          "n": 3,
+          "text": "examples/features/types/enum_dot.jet drops the commented-out else arm and passes golden output tests.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "fresh-context diff review a104dd28f6e74171d: statement-form extraction byte-equivalent, chain checker sound (span-dedup correct, probe truncation safe), NoElse cannot leak, formatter guards hold — no findings; evidence commands inspected",
+          "at": "2026-08-05T19:47:44.206Z"
+        },
+        {
+          "n": 4,
+          "text": "Formatter round-trips the else-less value table (fmt stability test); the E0003 else-required text no longer claims pattern tables cannot prove coverage; touched UI snapshots updated.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "fresh-context diff review a104dd28f6e74171d: statement-form extraction byte-equivalent, chain checker sound (span-dedup correct, probe truncation safe), NoElse cannot leak, formatter guards hold — no findings; evidence commands inspected",
+          "at": "2026-08-05T19:47:44.522Z"
+        },
+        {
+          "n": 5,
+          "text": "Subjectless guard tables used as values are covered the same way or the exclusion is recorded on this card with rationale.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "fresh-context diff review a104dd28f6e74171d: statement-form extraction byte-equivalent, chain checker sound (span-dedup correct, probe truncation safe), NoElse cannot leak, formatter guards hold — no findings; evidence commands inspected",
+          "at": "2026-08-05T19:47:44.836Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T17:57:13.031Z",
+      "updated": "2026-08-05T19:47:45.203Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-05T19:47:45.203Z"
+    },
+    {
+      "id": "c05b0jhl",
+      "num": 1441,
+      "title": "Inferred .{…} literal rejected in single-expression fn body (= expr)",
+      "body": "Repro: fn mirror(p: Point) => Point = .{x: -p.x, y: p.y} fails with E0003 'expected a value, found .' while the block form return .{…} works. Root cause: the = expr body parses with expr_no_struct_lit() (crates/jet-parser/src/Parser/Items/functions_params.rs:105), and the D-DOTCTOR1 inferred-literal arm is gated on allow_struct_lit (crates/jet-parser/src/Parser/Expressions/binary_unary.rs:520). The gate contradicts its own comment — a leading dot immediately followed by { is unambiguous, so the no-struct-lit restriction (which exists for the dotless 'Type {' ambiguity) does not apply. Inconsistent with the adjacent ungated leading-dot enum arm: fn f() => Direction = .North parses, = .{…} does not. Same gate presumably blocks .{…} in other no-struct-lit positions (if/for heads, S61 param defaults at functions_params.rs:610) — audit those too. Fix direction: drop allow_struct_lit from the .{ arm; add UI snapshot + formatter round-trip proof; keep examples/features/types/dot_construction.jet's expression-bodied spelling as the executable spec once green.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "fable",
+          "text": "Fixed in b9dfb3515 + follow-up: dropped allow_struct_lit from both leading-dot dot-brace arms (bare .{…} and .Variant.{…}). Proven on JIT+AOT, param defaults, enum payloads; fmt round-trips. Reviewer finding (payload arm) fixed and rechecked. Note: fmt lossless corpus still fails on anonymous_unions.jet — owner edit blocked on #1440, not this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "fn name(...) => T = .{ field: val } parses, type-infers from the declared return type, and runs with identical output on AOT, default jet run, and interpreter deopt.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "independent diff review a774bd13f474d2a79/ac931c043d793464b: gate removal sound, sibling payload arm fixed, no meaning change for existing programs; evidence commands inspected",
+          "at": "2026-08-05T18:47:51.576Z"
+        },
+        {
+          "n": 2,
+          "text": "examples/features/types/dot_construction.jet uses the expression-bodied spelling and passes golden output tests.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "independent diff review a774bd13f474d2a79/ac931c043d793464b: gate removal sound, sibling payload arm fixed, no meaning change for existing programs; evidence commands inspected",
+          "at": "2026-08-05T18:47:51.878Z"
+        },
+        {
+          "n": 3,
+          "text": "Each remaining no-struct-lit position (if/for heads, S61 parameter defaults) either accepts .{ … } or its exclusion is recorded on this card with rationale.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "independent diff review a774bd13f474d2a79/ac931c043d793464b: gate removal sound, sibling payload arm fixed, no meaning change for existing programs; evidence commands inspected",
+          "at": "2026-08-05T18:47:52.185Z"
+        },
+        {
+          "n": 4,
+          "text": "Formatter round-trips the expression-bodied dot-construction form; parser and UI snapshot suites pass.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "cavecrew-reviewer",
+          "evidence": "independent diff review a774bd13f474d2a79/ac931c043d793464b: gate removal sound, sibling payload arm fixed, no meaning change for existing programs; evidence commands inspected",
+          "at": "2026-08-05T18:47:52.487Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T18:02:36.756Z",
+      "updated": "2026-08-05T18:47:52.843Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-05T18:47:52.843Z"
+    },
+    {
+      "id": "c00ms1om",
+      "num": 1442,
+      "title": "Core surface ledger against every competitor language",
+      "body": "Card #1398 gates release on Jet beating Python per workflow, but nothing enumerates the surface at method level, so gaps are found by accident. Owner ruling 2026-08-03: the bar is not Python — it is every language Jet competes with, and no missing feature or functionality is acceptable.\n\nBuild the ledger from the real tables, not from docs: crates/jet-foundation/src/Collections.rs (list, map, set, sorted set, deque, priority queue, cache, bitset method returns), crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs and fixed_sigs.rs (core module items and signatures).\n\nFor every Core type and module, record each competitor's operation, the Jet spelling, and one verdict: Jet wins, equal, Jet loses, or deliberately declined with its decision id. Compare against Python, Rust, Go, Swift, Kotlin, C#, TypeScript, Ruby, and Elixir at minimum; add Julia and R for the data and math surface. Deliberate declines are answers, not gaps — record the id so they stop resurfacing.\n\nEvery 'Jet loses' row leaves the ledger with a card. Known open rows already carded: #1404 Set algebra, #1409 String surface, #1410 List and Map, #1402 progress, #1403 plotting, #1400 zip. Card #288 already audits core.files against pathlib and should be folded in rather than duplicated.\n\nExit criteria: a durable ledger under docs covering every Core type and module; every 'Jet loses' row carrying a card or a decision id; #1398 able to read its gate from this document.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-ul3-core",
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "fable",
+          "text": "Restored from the epoch5 worktree .tower copy. This card was #1406 (id c0rfgh4h): added 2026-08-03, updated and claimed through 2026-08-04, then silently wiped from the live board by a file-level rollback with no card.delete event. Content, plan, criteria, refs, and tags are verbatim from the last surviving snapshot."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A source-derived closed inventory covers every Python builtin type and stdlib module Jet claims to compete with.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:24.037Z"
+        },
+        {
+          "n": 2,
+          "text": "Each row has a stable ID, Python member, Jet spelling, matched workflow, verdict, and evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:24.340Z"
+        },
+        {
+          "n": 3,
+          "text": "Every Jet-loses row links one live Tower owner. A design decline remains a loss; out-of-scope requires a ratified decision that narrows Jet's competition claim for that workflow.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:24.638Z"
+        },
+        {
+          "n": 4,
+          "text": "Deterministic checks fail on source-surface drift, an unmapped member, duplicate row, hidden exclusion, stale owner, or unratified scope exclusion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:24.943Z"
+        },
+        {
+          "n": 5,
+          "text": "The ledger is durable under docs and #1398 consumes it without a duplicate manual inventory.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:25.254Z"
+        },
+        {
+          "n": 6,
+          "text": "A fresh reviewer verifies closure against Jet's source tables and official Python documentation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T18:12:25.566Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-foundation/src/Collections.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs",
+        "docs/reference/prior-art.md"
+      ],
+      "tags": [
+        "python-parity",
+        "api",
+        "ergonomics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T18:12:13.321Z",
+      "updated": "2026-08-05T18:12:25.926Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0fmfiwg",
+      "num": 1443,
+      "title": "D-APILABEL1 remainder: extern and Core call ordering, and contract laundering",
+      "body": "Follow-ups from the second review of #1393. The label contract itself is shipped; these are the edges it does not yet cover.\n\nExtern and Core calls ignore the source evaluation order. TExprKind::ExternCall holds TExternArg and the Core call node holds TExpr, so call_args_mut in Codegen/TIR/lower/expressions.rs cannot reach either and preserve_source_arg_order silently does nothing. extern_to_sig publishes param_call, so an extern call does bind by label and then runs in declaration order.\n\nType::Fn PartialEq in crates/jet-foundation/src/AST/types.rs returns true whenever either side has no contract, so passing a contract-bearing function through an unannotated fn type and back drops the contract with no diagnostic. Symmetric equality cannot express this; it needs a directional assignability check where a contract-bearing type satisfies a contract-less parameter but not the reverse. expand_type_aliases in Codegen/Context.rs also hard-codes param_contract to None, so a type alias loses the contract.\n\nLabels on builtin methods are unchecked: the subset gate's label guards were removed and the only remaining check is the zip family, so [1, 2].map(bogus: f) compiles with the label ignored. The ratified rule says sema rejects an unknown label.\n\neffect_free treats Binary and Unary as pure, so a panicking division reorders against a real effect and is also excluded from the observable count.\n\nType::name() ignores param_contract, so a contract mismatch prints the same type on both sides and no snapshot covers that message.\n\nDone when each is fixed or carved out, with a UI snapshot per new diagnostic and AOT/JIT/interpreter parity proved for the ordering cases.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T19:13:28.636Z",
+      "updated": "2026-08-05T19:13:28.636Z",
+      "updatedBy": "claude-e3-1393"
+    },
+    {
+      "id": "c0998ql8",
+      "num": 1444,
+      "title": "Expression-position dispatch over a union subject ICEs (I2): union if-let conds not in TIR subset",
+      "body": "Repro: fn describe(value: Int | String) => String { return if value == { .Int(n) -> \"n={n}\" .String(s) -> \"s={s}\" else -> \"\" } } — jet build ICEs (exit 101) at Codegen/Items.rs:2270 'codegen reached a construct the typed IR does not cover', and quick-run reports E0956. Statement-position dispatch over the same union works (Stmt::Switch lowers via TExprKind::EnumMatch with union repr, subset/structs_enums.rs handles Type::Union). Root cause: the expression form desugars to an Expr::If chain whose conds are payload-binding PatternTests; if_cond_in_subset (subset/statements.rs:471-560) admits user-enum variants only via cx.variant_owner, which has no entry for structural union members, so the whole function leaves the TIR subset and R7 has no AST fallback — an ICE instead of a diagnostic (I2). The lowering side (lower_if_cond_atom, lower/control_flow.rs:428-460) already falls back to variant_binding_types for non-Named subjects; the gate and the pattern render for JetUnion reprs are the open work. Affects with-else and else-less spellings equally — predates card #1440 (an else-carrying repro has no NoElse node by construction). examples/features/types/anonymous_unions.jet (owner's expression-form edit, uncommitted) is the executable spec: it must run identically on AOT, default jet run, and interpreter deopt once fixed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T19:29:06.444Z",
+      "updated": "2026-08-05T19:29:06.444Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0om3ozr",
+      "num": 1445,
+      "title": "Stale UI snapshot: E1130_kernel_proof now emits a leading E0101 (no run function)",
+      "body": "cargo test --test diagnostic_snapshots fails: tests/ui/E1130_kernel_proof.jet now produces Error E0101 'this program has no run function' before the expected E1130 kernel-proof block. The fixture (4 lines, a #Kernel fn with no run) is untouched; the behavior change came from a recent runtime/entry commit (likely 12fc9ae76 'feat: complete epoch5 runtime paths' or the branch consolidation around it) making entry detection fire in this compile mode. Decide whether E0101-on-check is intended (then re-bless the snapshot after reading it against docs/spec/diagnostics.md) or a regression (then fix entry detection). Unrelated to cards #1440/#1441 — the fixture has no dispatch table and my diff doesn't touch entry detection.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "fable",
+          "text": "Second unrelated snapshot casualty, same class: fmt_lossless UI parser-validity pin says tests/ui/build_entry_conflict/pkg.jet parses clean, but top-level 'payload: {…}' now emits E0003 in Compiler::parse_source — likely the epoch5 package-member/manifest commits moved pkg.jet parsing; re-pin or fix after review. Masked until today because the corpus died earlier on anonymous_unions (now fixed by #1440)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T19:34:20.829Z",
+      "updated": "2026-08-05T19:40:39.950Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0uq2h91",
+      "num": 1446,
+      "title": "Entry model: run returns the program value",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:30:31.764Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:30:31.764Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:30:31.764Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:30:31.764Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "entry-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:15:42.731Z",
+      "updated": "2026-08-05T20:30:31.764Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0zvnp4f",
+      "num": 1447,
+      "title": "One App type across targets",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "web-ui",
+        "entry-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:15:43.042Z",
+      "updated": "2026-08-05T20:30:46.893Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c04zqxw1",
+      "num": 1448,
+      "title": "Unify job vs task naming on job",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "jobs"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:15:43.352Z",
+      "updated": "2026-08-05T20:30:58.915Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0a5nr50",
+      "num": 1449,
+      "title": "Built binaries expose jobs as subcommands",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "jobs"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:15:43.664Z",
+      "updated": "2026-08-05T20:37:48.638Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0f7fhoy",
+      "num": 1450,
+      "title": "Typed CLI args flow into the app entry",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "entry-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:15:43.969Z",
+      "updated": "2026-08-05T20:49:56.804Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0wk4xnv",
+      "num": 1451,
+      "title": "Command metaprograms are expert-overridable",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:36:56.527Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:36:56.527Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:36:56.527Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T20:36:56.527Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "entry-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:21:44.187Z",
+      "updated": "2026-08-05T20:36:56.527Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c01pwyjw",
+      "num": 1452,
+      "title": "Bench runner reaches parity with test runner",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "testing"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:21:44.499Z",
+      "updated": "2026-08-05T20:42:12.680Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0b6szun",
+      "num": 1453,
+      "title": "Arrow loop bodies in statement position",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "loops"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:24:56.629Z",
+      "updated": "2026-08-05T20:25:40.511Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ej2y7w",
+      "num": 1454,
+      "title": "One body rule: arrow expression or brace block",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "entry-model"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T20:47:48.204Z",
+      "updated": "2026-08-05T20:48:28.447Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -104621,6 +105260,766 @@
       "created": "2026-08-05T17:24:08.832Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-ENTRY-VALUE1",
+      "cardId": "c0uq2h91",
+      "group": "syntax",
+      "title": "How a file declares an app program",
+      "gist": "How a source file tells the toolchain it is an app to serve, not a script to run once.",
+      "lesson": "Today a web app is a function named `app` that returns `WebApp`. The toolchain sniffs for that name and splices in a hidden `run() { app().serve() }` entry. So the entry that actually runs is one you never wrote. Files can also hold `run`, `dev`, and `app` together, which forces a precedence table nobody should have to learn. This choice picks one visible rule for what an entry is.",
+      "explainer": "",
+      "story": "Mia builds her first site and `jet run site.jet` serves it, which feels great. Later she adds a plain `fn run()` to print a debug line. Her server silently stops serving, because the hidden rule says her new function now outranks `app`. Nothing in her file explains what happened.",
+      "inWild": "use core.web as web\n\nfn home() => WebPage = web.page(\"Home\", \"hi\")\n\n// This served the site yesterday.\nfn app() => WebApp {\n    return web.app().route(\"/\", home)\n}\n\n// Added today \"just to debug\" — and now the site no longer serves.\nfn run() { print(\"checking config...\") }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named builder function (today)",
+          "detail": "Keep `fn app() => WebApp` as a magic name. The toolchain detects it and synthesizes a hidden serving entry. You can also write `run` and `dev`, and a fixed precedence table decides which one wins. Gain: shipping code keeps working unchanged. Loss: three competing entry names, an invisible synthesized entry, and the silent-outranking trap in the story.",
+          "technical": "Detection is name plus return type. A file with `app` and no `run` gets `fn run() { app().serve() }` appended before load. `run` beats `app`, and `dev` beats both under `jet dev`.",
+          "code": "fn app() => WebApp {\n    return web.app().route(\"/\", home)\n}\n// jet run file.jet  → serves (via a hidden run() you never see)\n// add fn run() {}   → serving silently stops"
+        },
+        {
+          "key": "B",
+          "name": "The entry returns the program",
+          "detail": "One entry, `run`. Its return type says what the program is. No return means a script that executes and exits. Returning `App` means the value describes an application, and the runtime serves it. `jet dev` serves the same value with watch, reload, and hot swap added. An expert can still write `fn dev()` to replace the dev default entirely. Gain: one visible rule, no hidden entry, no precedence table. Loss: existing `fn app()` files migrate.",
+          "technical": "The runtime interprets the entry's returned value. Tooling such as `jet explain --web-graph` statically evaluates the returned builder chain, and reports a diagnostic when the chain is not statically known. `fn <command>()` remains the ratified override hook for a command's default metaprogram, today only `dev`.",
+          "code": "fn run() => App {\n    return web.app().route(\"/\", home)\n}\n// jet run file.jet  → serves it\n// jet dev file.jet  → same program, watch mode\n// fn run() { print(\"hi\") }  → still just a script"
+        },
+        {
+          "key": "C",
+          "name": "Marker on the entry",
+          "detail": "Keep one entry name but mark it: `#App fn run()`. The marker, not the type, declares the program kind. Gain: the declaration is loud and searchable. Loss: the marker duplicates what the return type already proves, so the two can disagree, and every new program kind needs a new marker ratified.",
+          "technical": "Sema must reconcile marker and return type and diagnose mismatch. The marker namespace grows one entry per program kind.",
+          "code": "#App\nfn run() => App {\n    return web.app().route(\"/\", home)\n}\n// E0xxx if #App is present but run returns Unit"
+        },
+        {
+          "key": "D",
+          "name": "No magic: call serve yourself",
+          "detail": "No detection at all. A server is a script that happens to call `.serve()` at the end. Gain: nothing is hidden, and the beginner rule is just \"programs run top to bottom\". Loss: the app description never escapes the entry, so `jet dev` cannot re-serve the same value in watch mode, and `jet explain` cannot read the graph without guessing where the chain is. Every command that wants the graph re-sniffs the body.",
+          "technical": "Static graph extraction must pattern-match a call chain inside an executed body, which breaks as soon as the chain is built through a variable or helper.",
+          "code": "fn run() {\n    web.app().route(\"/\", home).serve()\n}\n// jet run works, but dev/explain/deploy can't see the app as a value"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Elm",
+          "note": "The entry is a value of type Program. The runtime interprets it, and the same value drives dev tooling like the time-traveling debugger.",
+          "code": "main : Program () Model Msg\nmain = Browser.sandbox { init = init, update = update, view = view }"
+        },
+        {
+          "lang": "SwiftUI",
+          "note": "An app is a value conforming to App. The framework runs it, and previews reinterpret the same value without a second entry point.",
+          "code": "@main\nstruct MyApp: App {\n    var body: some Scene { WindowGroup { ContentView() } }\n}"
+        },
+        {
+          "lang": "Next.js",
+          "note": "Routes and pages are exported descriptions. `next dev` and `next build` reinterpret the same exports rather than asking for a second program.",
+          "code": "export default function Home() { return <h1>hi</h1> }"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "The signature the user writes is the whole rule. The return type separates a script from an app, and the same value feeds run, dev, build, and explain. New program kinds arrive as new types, which the language already knows how to extend.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It keeps a hidden synthesized entry, a name sniff, and a precedence table, and the story's silent-outranking trap stays in the product."
+          },
+          {
+            "key": "C",
+            "reason": "The marker restates what the return type already proves, which creates a disagreement case to diagnose and a marker to ratify per program kind."
+          },
+          {
+            "key": "D",
+            "reason": "Serving inside the body hides the app from every tool. Dev mode, graph explain, and deploy all need the description without executing it."
+          }
+        ],
+        "tradeoff": "The returned builder chain must be statically known for tooling to read the graph. A chain built through arbitrary runtime control flow gets a diagnostic asking for a static description."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared today's named builder with a value-returning entry and recommended the value form, because one visible signature replaces a hidden entry and a precedence table.",
+        "boilOcean": "The breadth pass added the marker form and the fully explicit serve-yourself form. A manifest-declared entry kind was folded into the marker option, since both restate what the type proves.",
+        "hybrid": "The hybrid pass tested marker plus value together and rejected it as two spellings of one fact. It kept one hybrid piece: the expert `fn dev()` override survives inside the recommended option.",
+        "cooperative": "The cooperative pass strengthened the explicit form with a documented chain-extraction convention and strengthened today's form by documenting its precedence. Both still hide the program from at least one tool.",
+        "adversarial": "The adversarial pass attacked static extraction with chains built via helpers and conditionals. The repair is a named diagnostic that asks for a statically known chain, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:16:37.881Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-APP-UNIFY1",
+      "cardId": "c0zvnp4f",
+      "group": "web-ui",
+      "title": "One App type or one type per target",
+      "gist": "Whether Jet has one App type for every target, or a separate type per platform.",
+      "lesson": "The app builder currently returns `WebApp`, a type whose name bakes in where the program runs. Native UI, and any future platform, would each need a sibling type. Where a program runs is already stated elsewhere, by the `#Target` marker or the package manifest's `target:` field. This choice decides whether the platform lives in the type name or stays where it is.",
+      "explainer": "",
+      "story": "Ravi ships a web dashboard as a `WebApp`. His team then wants the same product as a native desktop app. The program is the same routes, views, and actions, but the type name says web, so the retarget starts with a rename and a fork.",
+      "inWild": "// Same product, two spellings, because the platform lives in the type name.\nfn run() => WebApp {\n    return web.app().route(\"/\", home)\n}\n\n// The native build wants everything identical — except the type.\nfn run() => NativeApp {\n    return ui.app().window(home)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One type per target (today's path)",
+          "detail": "Keep `WebApp` and add siblings like `NativeApp` as platforms arrive. Gain: each type lists only what its platform supports, so misuse fails at the name. Loss: one product forks per venue, shared code needs a common wrapper, and every new platform mints a new type with its own builder surface.",
+          "technical": "Each target type carries its own builder methods and its own runtime interpretation. Cross-target code must be generic over an app trait or duplicated.",
+          "code": "fn run() => WebApp {\n    return web.app().route(\"/\", home).csr()\n}\n// desktop port: change the type, change the builder, fork the file"
+        },
+        {
+          "key": "B",
+          "name": "One App, target set by marker or manifest",
+          "detail": "One `App` type describes any application. The platform comes from the existing `#Target` marker or the manifest's `target:` field, never from the type. Using a capability the chosen target cannot honor is a compile-time diagnostic that names the target. Gain: one program retargets by changing one setting, and beginners learn one type. Loss: some misuse surfaces at target check rather than at the type name.",
+          "technical": "Sema checks the app value's capabilities against the resolved target and reports a registered diagnostic on mismatch, for example `.csr()` under a native target. `WebApp` is deleted, and in-repo examples migrate in the same change.",
+          "code": "#Target(Web)\nfn run() => App {\n    return web.app().route(\"/\", home).csr()\n}\n// switch #Target(Web) → #Target(Native): same type, same program\n// .csr() under Native → E0xxx: `csr` needs a web target"
+        },
+        {
+          "key": "C",
+          "name": "Target as a type parameter",
+          "detail": "One generic type, `App(Web)` or `App(Native)`, so the platform is visible in the signature but the type is shared. Gain: misuse still fails at the type, and shared code can be generic. Loss: the platform now threads through every signature that touches an app, and the same fact is stated twice once a `#Target` marker or manifest is present.",
+          "technical": "Capability methods constrain the parameter, so `.csr()` exists only on `App(Web)`. Sema must still reconcile the parameter with `#Target` and the manifest, and diagnose disagreement.",
+          "code": "fn run() => App(Web) {\n    return web.app().route(\"/\", home).csr()\n}\n// helper signatures grow the parameter:\nfn attach_admin(a: App(Web)) => App(Web) { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Flutter",
+          "note": "One app type runs on mobile, web, and desktop. The target is a build setting, not a type, and unsupported plugins fail per target at build time.",
+          "code": "void main() => runApp(const MyApp());\n// flutter build web | apk | macos — same MyApp"
+        },
+        {
+          "lang": ".NET MAUI",
+          "note": "One Application class, targets picked in the project file. Platform-only APIs are guarded per target rather than by separate app types.",
+          "code": "public partial class App : Application { }\n// <TargetFrameworks>net8.0-android;net8.0-ios;net8.0-maccatalyst</TargetFrameworks>"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "The platform is deployment information, and Jet already has a ratified home for it in `#Target` and the manifest. One App keeps one program retargetable by one setting, which is the one-mechanism rule applied to applications.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It forks the product per venue and mints a new type and builder surface for every future platform."
+          },
+          {
+            "key": "C",
+            "reason": "It states the target twice once a marker or manifest exists, and threads deployment info through every signature that touches an app."
+          }
+        ],
+        "tradeoff": "A target-only capability is caught by the target check instead of by the type name. The diagnostic must therefore name the capability, the target, and the fix plainly."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared per-target types with one marker-driven App and recommended one App, because the platform already lives in `#Target` and the manifest.",
+        "boilOcean": "The breadth pass added the generic `App(Target)` form and considered a structural capability-set type. The structural form was folded into the generic option, since both move deployment into signatures.",
+        "hybrid": "The hybrid pass tested one App with an optional visible parameter for experts. It was rejected as two spellings of one fact, which invites disagreement between parameter, marker, and manifest.",
+        "cooperative": "The cooperative pass strengthened per-target types with a shared app trait, and the generic form with parameter inference. Both still fork or thread the platform through code that never cares about it.",
+        "adversarial": "The adversarial pass attacked one App with capability misuse caught late and with mixed-target workspaces. Registered per-target diagnostics and the manifest's per-member target answer both, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:17:20.827Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-JOB-NAME1",
+      "cardId": "c04zqxw1",
+      "group": "tooling",
+      "title": "One word for named auxiliary entries",
+      "gist": "Pick one word for named auxiliary entry functions across the marker and the CLI.",
+      "lesson": "A named auxiliary entry is a function you can invoke by name, like a database migration. Today the marker says `#Job fn`, but the CLI says `jet run --task` and `jet tasks`. Two words for one thing means every user learns the pair and every doc explains it. This choice picks the single word.",
+      "explainer": "",
+      "story": "Priya writes `#Job fn migrate()` and then types `jet run --job migrate`, which fails. The flag is `--task`, and nothing connects the two words. She files it as a bug, but it is a naming split we shipped.",
+      "inWild": "#Job fn migrate() {\n    db.apply(\"schema.sql\")\n}\n\n// What the marker teaches:   jet run --job migrate app.jet   ← error today\n// What the CLI actually is:  jet run --task migrate app.jet\n// Listing them:              jet tasks",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unify on job",
+          "detail": "The marker stays `#Job fn`, and the CLI becomes `jet run --job <name>` and `jet jobs`. Gain: the word you write is the word you type, and it does not collide with anything else in the language. Loss: the two CLI spellings change, and shipped docs and muscle memory migrate once.",
+          "technical": "Rename `--task`/`--task=` to `--job`/`--job=` and `jet tasks` to `jet jobs`. Migrate help text, examples, snapshots, and docs in one change, with no alias left behind.",
+          "code": "#Job fn migrate() { db.apply(\"schema.sql\") }\n\n// jet run --job migrate app.jet\n// jet jobs   → lists migrate"
+        },
+        {
+          "key": "B",
+          "name": "Unify on task",
+          "detail": "The CLI stays, and the marker becomes `#Task fn`. Gain: the smaller diff, since only the marker changes. Loss: `Task` is already Jet's concurrency type, so `#Task fn` reads as an async declaration and the collision follows the word into docs, search, and teaching forever.",
+          "technical": "Rename the `#Job` marker to `#Task` and migrate examples and snapshots. The concurrency `Task` type keeps the same spelling in the same files.",
+          "code": "#Task fn migrate() { db.apply(\"schema.sql\") }\n\n// jet run --task migrate app.jet\n// but elsewhere in the same file:\nt := Task.spawn(fetch)   // same word, unrelated machinery"
+        },
+        {
+          "key": "C",
+          "name": "A fresh third word",
+          "detail": "Retire both words for something unclaimed, for example `#Op fn` with `jet run --op` and `jet ops`. Gain: no collision with anything, ever. Loss: both surfaces migrate, and the new word teaches nothing that `job` does not already teach.",
+          "technical": "Rename marker and CLI together and migrate all consumers. The word must be registered in Syntax.rs with this decision id.",
+          "code": "#Op fn migrate() { db.apply(\"schema.sql\") }\n\n// jet run --op migrate app.jet\n// jet ops   → lists migrate"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kubernetes",
+          "note": "A Job is a run-to-completion unit of work, distinct from long-running services. The word carries exactly this meaning to a large audience already.",
+          "code": "kind: Job\nmetadata:\n  name: migrate"
+        },
+        {
+          "lang": "Rust",
+          "note": "Cargo shipped `cargo check` and kept every verb aligned with its docs. Verb-flag drift is treated as a bug, not a style choice.",
+          "code": "cargo check\ncargo test"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Job matches the marker already in the language, reads as a schedulable unit of work, and collides with nothing. The word you write becomes the word you type everywhere.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Task is the concurrency type, so the same word would name two unrelated mechanisms in the same file."
+          },
+          {
+            "key": "C",
+            "reason": "A fresh word migrates both surfaces and buys nothing that job does not already deliver."
+          }
+        ],
+        "tradeoff": "The CLI flag and the list command change spelling once, and anything that memorized `--task` or `jet tasks` must relearn one word."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared unifying on job against unifying on task and recommended job, because task collides with the concurrency type.",
+        "boilOcean": "The breadth pass added the fresh-word option and considered keeping both words with aliases. Aliases were dropped as a standing greenfield violation rather than an option.",
+        "hybrid": "The hybrid pass tested job in the CLI with task kept as a doc synonym. It was rejected, since a sanctioned synonym recreates the split this ballot exists to close.",
+        "cooperative": "The cooperative pass strengthened task with its smaller diff and prior CLI familiarity, and the fresh word with a collision-free future. Both still lose on the type collision or on teaching cost.",
+        "adversarial": "The adversarial pass attacked job with the scheduling connotation of cron jobs. That connotation matches these entries, which can be scheduled or invoked by name, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:17:52.918Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-JOB-SUBCMD1",
+      "cardId": "c0a5nr50",
+      "group": "tooling",
+      "title": "Jobs as program subcommands, with a typed scope",
+      "gist": "Whether jobs become subcommands of the program itself, and which audience a bare `#Job` gets by default.",
+      "lesson": "A job is a named auxiliary entry, like a database migration. Under this design the job dispatcher is program semantics, not a build artifact. The same argv contract holds on every tier, so `jet run app.jet -- migrate` on plain source and `./myapp migrate` on the built binary hit identical routing. That retires the separate `--job` flag. The marker's argument is a real enum, `.Ship`, `.Dev`, or `.Internal`, so the audience is typed and extendable. The open choice is the default for a bare `#Job`.",
+      "explainer": "",
+      "story": "Sam deploys a compiled app, and release night needs the migration job. Meanwhile a teammate left `#Job fn wipe_test_data()` in the same package. Whether that second job silently ships as `./myapp wipe_test_data` is exactly the default this ballot picks.",
+      "inWild": "#Job fn migrate(dry: Bool = false) { db.apply(\"schema.sql\") }\n#Job fn seed_demo() { db.load(\"demo.sql\") }\n\nfn run() => App { return web.app().route(\"/\", home) }\n\n// same contract on every tier:\n//   source, no build:  jet run app.jet -- migrate --dry=true\n//   built binary:      ./myapp migrate --dry=true\n// the question: does seed_demo ship in ./myapp too?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Bare word table, everything ships",
+          "detail": "Every `#Job` becomes a subcommand on every tier, and hiding one uses an untyped marker word like `#Job(hidden)`. Gain: maximum magic, what works in dev works in production with zero extra marks. Loss: the word table is a closed compiler list rather than a type, and the teammate's wipe job ships unless someone remembers a word for it.",
+          "technical": "Marker arguments are bare identifiers validated against a compiler table. New audiences mean compiler changes, and tooling cannot complete or type-check them.",
+          "code": "#Job fn migrate() { ... }          // ships\n#Job(hidden) fn wipe_test_data() { ... }\n// forget the word → ./myapp wipe_test_data exists in production"
+        },
+        {
+          "key": "B",
+          "name": "Typed scope enum, ship by default",
+          "detail": "The audience is the enum, and a bare `#Job` means `.Ship`. Gain: the beginner's first job survives deploy with no extra marks, and the enum gives experts typed control. Loss: the default answers the story badly, since the wipe job ships unless its author remembered `.Dev`.",
+          "technical": "The scope is a Prelude-owned enum. Dispatch and `--help` derive from it identically on every tier under the parity rule.",
+          "code": "#Job fn migrate() { ... }             // = #Job(.Ship), ships\n#Job(.Dev) fn wipe_test_data() { ... } // author must remember this\n#Job(.Internal) fn tick() { ... }      // never a subcommand"
+        },
+        {
+          "key": "C",
+          "name": "Typed scope enum, dev by default",
+          "detail": "A bare `#Job` means `.Dev`, a subcommand everywhere the toolchain runs the program, but stripped from release builds. Shipping is the explicit act, `#Job(.Ship)`. The release build prints what it stripped and names the fix. Gain: full magic while developing, and a production binary whose surface is deliberate. Loss: the release-night migration needs `.Ship` on it, one mark, taught by the build output.",
+          "technical": "Dev tiers, `jet run`, `jet dev`, and debug builds, dispatch every job. Release builds dispatch `.Ship` jobs only and list stripped jobs in the build summary. `.Internal` jobs are callable from code and the scheduler, never from argv. The enum is Prelude-owned, so all tiers share one meaning.",
+          "code": "#Job(.Ship) fn migrate(dry: Bool = false) { ... }\n#Job fn seed_demo() { ... }            // = .Dev\n#Job(.Internal) fn tick() { ... }\n\n// jet run app.jet -- seed_demo   ✓ (dev tier)\n// jet build → \"stripped 1 dev job: seed_demo (mark #Job(.Ship) to include)\"\n// ./myapp seed_demo              → unknown command\n// ./myapp migrate --dry=true     ✓"
+        },
+        {
+          "key": "D",
+          "name": "Typed enum, no default",
+          "detail": "A bare `#Job` is a diagnostic, and every job states its scope. Gain: no default to argue about, and every audience is visible at the declaration. Loss: the very first job a beginner writes fails to compile until they learn an enum, which is ceremony the magic facet exists to avoid.",
+          "technical": "Sema rejects a scope-less `#Job` with a fix-it listing the three variants.",
+          "code": "#Job fn migrate() { ... }\n// error: `#Job` needs a scope — .Ship, .Dev, or .Internal"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Django",
+          "note": "Management commands ship with the deployed app and run in production, which teams rely on for migrations. Nothing separates dev-only commands, so they ship too.",
+          "code": "python manage.py migrate\npython manage.py wipe_test_data   # also there, forever"
+        },
+        {
+          "lang": "npm",
+          "note": "Scripts run from source with no build, and the runner strips nothing, so dev scripts ride into every environment that has the manifest.",
+          "code": "npm run migrate\nnpm run seed:demo"
+        },
+        {
+          "lang": "Rust",
+          "note": "Feature flags gate code out of release binaries explicitly, and cargo reports what a build included. Deliberate release surface is the norm.",
+          "code": "#[cfg(feature = \"dev-tools\")]\nfn wipe_test_data() { ... }"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "While you develop, every job just works from plain source with no build and no flags. What ships is exactly what was marked to ship, the build says what it stripped, and the enum keeps the whole surface typed and extendable.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "An untyped word table is a closed compiler list, and its ship-everything default sends the wipe job to production."
+          },
+          {
+            "key": "B",
+            "reason": "The typed enum is right, but ship-by-default still answers the story with an exposed wipe job."
+          },
+          {
+            "key": "D",
+            "reason": "Requiring a scope on the first job a beginner ever writes is ceremony before the first success."
+          }
+        ],
+        "tradeoff": "A production-needed job carries one explicit `.Ship` mark. The release build's stripped-jobs summary teaches that mark at exactly the moment it matters."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft exposed every job with an untyped hide word. Owner review reshaped it, a typed scope enum, tier-uniform argv dispatch, and a safe release default became the frame.",
+        "boilOcean": "The breadth pass compared ship-by-default, dev-by-default, and no-default over the enum, and kept the word-table form as the baseline. A per-package manifest allowlist was folded into dev-by-default, since the `.Ship` mark is that allowlist at the declaration.",
+        "hybrid": "The hybrid pass combined the enum with tier-uniform dispatch and the stripped-jobs build summary, which became the recommended option. It also merged the old dev-time flag path into program argv, retiring the second invocation spelling.",
+        "cooperative": "The cooperative pass strengthened ship-by-default with the zero-marks deploy story and no-default with total explicitness. One still ships the wipe job, and the other taxes the first job ever written.",
+        "adversarial": "The adversarial pass attacked dev-by-default with the forgotten `.Ship` on release night and with job names colliding with run flags. The build summary names the stripped job and its fix, and the dispatcher reserves job names before flag parsing, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T20:18:27.618Z"
+    },
+    {
+      "id": "D-APP-ARGS1",
+      "cardId": "c0f7fhoy",
+      "group": "tooling",
+      "title": "How CLI arguments reach an app entry",
+      "gist": "How command-line arguments flow into the parameters of an entry that returns an App.",
+      "lesson": "Script entries already turn their parameters into typed command-line flags, so `fn run(count: Int)` accepts `--count=3` with type checking. An app entry returns a program value instead of running to completion, which raises the question of whether the same parameter magic applies. This choice decides how a served app receives arguments, and what happens when an argument does not fit.",
+      "explainer": "",
+      "story": "Leah serves her app locally and wants it on another port. She expects `jet run site.jet -- --port=9000` to just work, the way flags already work on her scripts. If apps need a different ceremony for the same idea, that is the day the language stops feeling coherent to her.",
+      "inWild": "// Scripts already do this:\nfn run(count: Int = 1) {\n    loop _, 0..count { print(\"hi\") }\n}\n// jet run hello.jet -- --count=3   ✓ typed, checked\n\n// So why wouldn't this work?\nfn run(port: Int = 8080) => App {\n    return web.app().route(\"/\", home).port(port)\n}\n// jet run site.jet -- --port=9000   ← this ballot",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Parameters are flags, one rule for every entry",
+          "detail": "The script rule applies unchanged: app entry parameters become typed flags, values flow in before the value is built, and defaults keep the zero-argument path working. An incompatible argument is a launch-time diagnostic naming the flag, the expected type, and the fix. Experts customize names, validation, and help text with the ratified CLI field markers. Gain: one rule, no new ceremony. Loss: the signature becomes the binary's public flag surface.",
+          "technical": "Argument mapping runs before the entry is called, identically for Unit and App entries. The extraction of the static app graph is unaffected, since parameters only feed builder arguments. Field markers from the ratified CLI field-marker decision provide renames, validation, and docs.",
+          "code": "fn run(port: Int = 8080, host: String = \"0.0.0.0\") => App {\n    return web.app().route(\"/\", home).port(port).host(host)\n}\n\n// jet run site.jet -- --port=9000        ✓\n// ./site --port=nine                     → error: `--port` expects Int\n// ./site --help                          → lists port, host with defaults"
+        },
+        {
+          "key": "B",
+          "name": "The builder reads arguments explicitly",
+          "detail": "App entries take no parameters, and the value asks for arguments itself, for example `.port(args.get(\"port\"))`. Gain: the app value owns its whole configuration in one visible chain. Loss: apps and scripts follow different rules for the same idea, argument reads scatter through the chain untyped until checked by hand, and the beginner's expectation from the story breaks.",
+          "technical": "An `args` accessor is exposed to the builder chain. Type checking happens per read site, and there is no derived `--help` surface unless each read also declares metadata.",
+          "code": "fn run() => App {\n    return web.app()\n        .route(\"/\", home)\n        .port(args.int(\"port\", default: 8080))\n}\n// typo in \"port\" compiles fine and bites at runtime"
+        },
+        {
+          "key": "C",
+          "name": "Apps take no CLI arguments",
+          "detail": "Served programs configure through the manifest and environment variables only, never argv. Gain: deployment config lives in declarative files, which some platforms prefer. Loss: the quick local override in the story requires editing a file or exporting a variable, and scripts and apps split into two rules.",
+          "technical": "App entries must have an empty parameter list, enforced by a diagnostic. Config values arrive through the manifest's settings or the environment API.",
+          "code": "fn run() => App {\n    return web.app().route(\"/\", home)\n}\n// change the port: edit pkg.jet, or JET_PORT=9000 ./site\n// jet run site.jet -- --port=9000  → error: app entries take no flags"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Vite",
+          "note": "The dev server accepts direct flags for the quick path and a config file for the durable one. Users reach for the flag first.",
+          "code": "vite --port 9000"
+        },
+        {
+          "lang": "Python (uvicorn)",
+          "note": "Server config arrives as typed CLI flags on the runner, and the app object stays free of argv handling.",
+          "code": "uvicorn app:app --port 9000"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It is the rule users already learned on scripts, applied without exception. Compatible arguments flow in with types checked, incompatible ones fail with a named fix, and the expert path is the already-ratified field markers rather than new machinery.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It splits apps from scripts, moves type checking to each read site, and loses the derived help surface."
+          },
+          {
+            "key": "C",
+            "reason": "It removes the quick local override entirely and forces file edits or environment exports for a one-off port change."
+          }
+        ],
+        "tradeoff": "The entry signature is the binary's public flag surface, so renaming a parameter renames a flag. The field markers give experts stable names when the signature needs to move."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared extending the script flag rule against builder-owned reads and recommended the shared rule, because one mechanism should serve both entry kinds.",
+        "boilOcean": "The breadth pass added the no-argv option and considered a dedicated config-struct parameter. The struct form was folded into option A, since a struct parameter already works under the field markers.",
+        "hybrid": "The hybrid pass tested auto-mapped parameters plus a builder-side args accessor together. It was rejected, because two ways to read the same flag invite drift between them.",
+        "cooperative": "The cooperative pass strengthened builder reads with a typed accessor sketch and the no-argv form with twelve-factor deployment practice. Both still break the expectation the script rule already set.",
+        "adversarial": "The adversarial pass attacked flag-surface stability across refactors and collisions with job subcommand names. Field-marker renames and reserved-word checks in the dispatcher repair both, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:19:08.937Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-CMD-OVERRIDE1",
+      "cardId": "c0wk4xnv",
+      "group": "syntax",
+      "title": "Which commands an entry function can override",
+      "gist": "Whether test and bench, like dev, can be customized by writing a function named after the command.",
+      "lesson": "Each toolchain command runs a default metaprogram over your code. For `jet dev` that default is watch and hot swap, and a user-written `fn dev()` already replaces it. Test and bench have no such hook, so custom setup like starting a database before a suite means wrapper scripts outside the language. This choice decides how far the override rule extends, and what an override receives.",
+      "explainer": "",
+      "story": "Noor's integration tests need a database container running first. Today she wraps `jet test` in a shell script that every teammate and CI job must find and remember. The setup she wants is ten lines of Jet, with nowhere to put them.",
+      "inWild": "// What Noor writes today, outside the language:\n//   run_tests.sh: docker start pgtest && jet test src/ && docker stop pgtest\n\n// What she wants, in the language:\nfn test(suite: TestSuite) {\n    db := testdb.start()\n    suite.run()\n    db.stop()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dev only (today)",
+          "detail": "Keep the override hook for dev and nothing else. Gain: test and bench runs are always the stock harness, so a green run means the same thing everywhere. Loss: real setup and teardown needs live outside the language in wrapper scripts, and dev stays an unexplained special case.",
+          "technical": "No new detection. The dev override remains the single command hook.",
+          "code": "fn dev() { devserver.start(port: 4000) }   // works today\nfn test(suite: TestSuite) { ... }          // never called, silently dead"
+        },
+        {
+          "key": "B",
+          "name": "Every command overridable, bare replacement",
+          "detail": "Writing `fn test()` or `fn bench()` replaces that command's default entirely, the way `fn dev()` does. Gain: one uniform rule with full control. Loss: the override starts from nothing, so reaching the actual discovered tests means reimplementing discovery, and most overrides would rebuild the harness badly.",
+          "technical": "Detection matches the dev rule, name only. The override body receives nothing and must locate and execute blocks through library calls if it wants them.",
+          "code": "fn test() {\n    print(\"custom harness\")\n    // ...now what? The #Test blocks are not reachable from here.\n}"
+        },
+        {
+          "key": "C",
+          "name": "Every command overridable, suite handed in",
+          "detail": "Same uniform rule, but the override may declare a parameter and receive the command's discovered work as a value, a `TestSuite` or `BenchSuite`. Discovery, filtering, and reporting stay the compiler's job, and the override orchestrates around them. A no-parameter override still fully replaces the default. Gain: setup, teardown, custom order, and custom reporting become ordinary Jet code. Loss: a bad override can skip work and print green.",
+          "technical": "The suite value carries the discovered blocks after `--filter` is applied, with `run()`, iteration, and result access. `jet test --default` and `jet bench --default` ignore overrides, and verification contexts use that flag so an override can never mint CI green. Suite types are Prelude-owned under the I9 parity rule.",
+          "code": "fn test(suite: TestSuite) {\n    db := testdb.start()\n    results := suite.run()\n    db.stop()\n    report.junit(results, to: \"out/junit.xml\")\n}\n// jet test src/            → uses the override\n// jet test src/ --default  → stock harness, override ignored"
+        },
+        {
+          "key": "D",
+          "name": "Hooks instead of overrides",
+          "detail": "Keep the stock harness in charge and expose fixed extension points, like `#TestSetup fn` and `#TestTeardown fn`. Gain: the harness can never be skipped, so green stays trustworthy without a flag. Loss: every new customization needs a new ratified hook, and reordering or custom reporting never fits a fixed hook list.",
+          "technical": "Each hook is a new marker with its own detection and ordering rules. The hook set grows per use case and per command.",
+          "code": "#TestSetup fn before() { testdb.start() }\n#TestTeardown fn after() { testdb.stop() }\n// custom report order or JUnit output: no hook for that"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A crate can replace the default test harness per target, and most never do. The escape hatch existing does not corrupt ordinary runs.",
+          "code": "[[test]]\nname = \"integration\"\nharness = false"
+        },
+        {
+          "lang": "pytest",
+          "note": "conftest.py customizes collection, fixtures, and reporting in the language itself, which is a large reason teams standardize on it.",
+          "code": "def pytest_collection_modifyitems(items):\n    items.sort(key=lambda i: i.name)"
+        },
+        {
+          "lang": "Go",
+          "note": "TestMain receives the run as a value and wraps it with setup and teardown. Discovery stays the toolchain's job.",
+          "code": "func TestMain(m *testing.M) {\n    setup()\n    code := m.Run()\n    teardown()\n    os.Exit(code)\n}"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "It makes the override rule one sentence covering every command, and hands the override the discovered suite so orchestration is ordinary code. Discovery stays the compiler's job, and the default flag keeps verification honest.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It leaves real setup needs in wrapper scripts and keeps dev as an unexplained exception to its own rule."
+          },
+          {
+            "key": "B",
+            "reason": "A bare override cannot reach the discovered blocks, so any useful customization starts by reimplementing discovery."
+          },
+          {
+            "key": "D",
+            "reason": "Fixed hooks grow a marker per use case and still cannot express reordering or custom reporting."
+          }
+        ],
+        "tradeoff": "An override can skip the suite and print green. The `--default` flag exists for verification contexts, and a run under an override says so in its output."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared dev-only against a uniform override rule and recommended uniformity with a suite parameter, because setup needs are real and discovery should not be reimplemented.",
+        "boilOcean": "The breadth pass added bare replacement and fixed hooks. A manifest-declared harness path was folded into bare replacement, since both swap the whole runner without reaching the discovered blocks.",
+        "hybrid": "The hybrid pass produced the recommended option itself, combining uniform overrides with the suite value from the Go TestMain shape. Bare and hooked forms stayed as separate options.",
+        "cooperative": "The cooperative pass strengthened hooks with a minimal two-hook set and dev-only with its trustworthy-green property. Both still fail custom ordering and reporting, which the story generation needs.",
+        "adversarial": "The adversarial pass attacked false green from overrides that skip the suite. The `--default` flag, an override notice in output, and verification contexts pinning `--default` repair it, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:22:28.342Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-BENCH-PARITY1",
+      "cardId": "c01pwyjw",
+      "group": "tooling",
+      "title": "Bench runner parity with the test runner",
+      "gist": "Whether `jet bench` gains the same targets and selection that `jet test` already has.",
+      "lesson": "`jet test` accepts a file, a directory, or a project, walks directories recursively, and selects by name with `--filter`. `jet bench` accepts exactly one file, cannot walk a module, and cannot run a single region. The two markers were ratified as siblings, but their runners drifted apart. This choice decides whether and how the runner surfaces stay parallel.",
+      "explainer": "",
+      "story": "Owen keeps a bench block beside each hot function across a dozen files. Before merging an optimization he wants one number per region, but `jet bench` takes one file at a time. He writes a shell loop, loses the summary, and stops running benches at all.",
+      "inWild": "// works today:\njet test src/ --filter=parser        // every matching test under src/\n\n// the sibling, today:\njet bench src/                       // error: expects one file\njet bench src/lexer.jet              // all regions or nothing — no --filter",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Status quo, one file at a time",
+          "detail": "Keep bench as a single-file command. Gain: nothing moves. Loss: module-wide numbers need shell loops, one region cannot be run alone, and the sibling markers keep strangers for runners, which is drift and not a decision anyone made.",
+          "technical": "No change. The asymmetry stays undocumented behavior.",
+          "code": "for f in src/*.jet; do jet bench \"$f\"; done   # Owen's shell loop"
+        },
+        {
+          "key": "B",
+          "name": "Parity where meaning carries over",
+          "detail": "Bench accepts the same targets as test, a file, a directory walked recursively, or a project, and gains `--filter` for region names. Assertion-specific flags stay test-only, since coverage and snapshots have no bench meaning, and benches always run one at a time for timing integrity. A standing rule keeps future runner surface changes applied to both commands or explicitly carved out. Gain: the sibling promise becomes real and stays real. Loss: none beyond the migration itself.",
+          "technical": "Bench reuses the test runner's target resolution and recursive walk. `--filter` matches region names after discovery. `--shuffle`, `--coverage`, and `--update-snapshots` remain test-only. Multi-file output is one line per region plus a per-file heading, and `--json` emits one record per region.",
+          "code": "jet bench src/                       // every region under src/, serial\njet bench src/ --filter=\"fib\"        // just the fib regions\njet bench .                          // whole project, one summary"
+        },
+        {
+          "key": "C",
+          "name": "One command for both",
+          "detail": "Fold bench into test, for example `jet test --bench`, so one runner owns both modes. Gain: a single surface can never drift. Loss: the command stops matching the marker you wrote, and timing runs inherit test defaults like parallelism that corrupt measurements. It also reverses the direction to keep the two parallel.",
+          "technical": "One discovery pass tags blocks by kind, and a mode flag selects which kind executes. Timing integrity needs mode-conditional defaults inside one runner.",
+          "code": "jet test src/ --bench --filter=\"fib\"   // benches via the test command\njet test src/                           // tests only — flag decides meaning"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`cargo test` and `cargo bench` share the same target and filter grammar, so knowledge transfers between them with one word changed.",
+          "code": "cargo test parser::\ncargo bench parser::"
+        },
+        {
+          "lang": "Go",
+          "note": "One command runs both, with `-bench` selecting regions by regex. It works, but timing runs inherit test flags and the pairing confuses newcomers.",
+          "code": "go test -bench=Fib ./..."
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "The markers were ratified as siblings, so the runners should keep the same promise. Parity restores directory and project targets plus name selection, keeps timing-hostile test flags out, and pins the pair against future drift.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It keeps a shell loop where a command should be, and leaves the sibling promise broken by accident."
+          },
+          {
+            "key": "C",
+            "reason": "It reverses the direction to keep the two parallel, and timing runs inherit test defaults that corrupt measurements."
+          }
+        ],
+        "tradeoff": "Two commands must now evolve together, so every future runner change pays a small check against the parity rule or names an explicit carve-out."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the status quo with target-and-filter parity and recommended parity, because the single-file limit is drift rather than a ratified design.",
+        "boilOcean": "The breadth pass added folding bench into test and considered a shared lower-level runner command. The shared runner was folded into the merge option, since both trade the marker-matching command away.",
+        "hybrid": "The hybrid pass tested parity plus a merged discovery pass internally. It kept shared target resolution as an implementation note and rejected surfacing one command, which is the merge option.",
+        "cooperative": "The cooperative pass strengthened the status quo with scripting composability and the merge with a never-drifts guarantee. Neither survives the story or keeps timing defaults clean.",
+        "adversarial": "The adversarial pass attacked parity with long project-wide bench runs and filter-name collisions across files. Serial execution with per-file headings and path-qualified names in output repair both, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T20:23:15.553Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-LOOP-STMT-ARROW1",
+      "cardId": "c0b6szun",
+      "group": "syntax",
+      "title": "Arrow loop bodies in statement position",
+      "gist": "Whether a loop can take a `->` body as a statement, the way if arms already do.",
+      "lesson": "The arrow already gives lightweight bodies in two places. An if arm runs `-> expression` with or without braces, and a finite loop yields values with `loop x, xs -> expression`. But the loop form is legal only where the values are collected. A loop that just does something still requires braces, even for one call. This choice decides whether the arrow body also works as a plain statement, and on which loop headers.",
+      "explainer": "",
+      "story": "Dana writes `if hit -> score += 1` all day, so she types `loop pair, joined -> print(pair)` and gets an error. The braces she must add hold one statement. The language taught her a rule and then applied it to only half the constructs.",
+      "inWild": "// legal today — value position, values collected:\ndoubled :: loop value, values -> value * 2\n\n// legal today — if arm, statement position:\nif verbose -> print(\"joining...\")\n\n// illegal today — the same shape on a loop:\nloop pair, joined -> print(\"join: {pair.left.team} -> {pair.right.owner}\")\n\n// what the rule forces instead:\nloop pair, joined { print(\"join: {pair.left.team} -> {pair.right.owner}\") }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Status quo, braces for statement bodies",
+          "detail": "Arrow loops stay expression-only. Gain: the arrow on a loop always means values are being collected, one signal with one meaning. Loss: the one-statement loop keeps ceremony the if arm does not, and the story's inconsistency stays in the product.",
+          "technical": "No change. Statement-position arrow loops keep their current diagnostic.",
+          "code": "loop pair, joined { print(pair) }        // required\nloop pair, joined -> print(pair)         // error, today and after"
+        },
+        {
+          "key": "B",
+          "name": "Statement arrows on finite-source loops only",
+          "detail": "The arrow body becomes legal as a statement, but only on the loop headers that can already yield, finite sources. Gain: the statement form and the value form stay one grammar rule. Loss: condition-only and infinite loops still demand braces, so Dana's rule breaks again one construct later, on `loop running -> tick()`.",
+          "technical": "Statement position discards the body value. A non-unit body in statement position gets a lint naming the `::` collection form. Condition-only and bare infinite headers keep their brace requirement.",
+          "code": "loop pair, joined -> print(pair)     // ok\nloop n < 10 -> n += 1                // still an error\nloop running -> tick()               // still an error"
+        },
+        {
+          "key": "C",
+          "name": "Statement arrows on every loop header",
+          "detail": "In statement position, every loop header takes an arrow body, finite, condition-only, or bare infinite. Value position stays exactly as ratified, finite sources with non-unit yields. Gain: one sentence covers the arrow everywhere, a lightweight body for any control-flow construct. Loss: the same spelling collects in value position and discards as a statement, which one docs paragraph must teach.",
+          "technical": "The grammar allows `-> statement` after any loop header in statement position, with the body value discarded. A non-unit body in statement position gets a lint naming the `::` collection form. The infinite-yield bar stays for value position, since an infinite collection cannot terminate. Formatter emits the arrow form for single-statement bodies and round-trips both forms, with a stability test.",
+          "code": "loop pair, joined -> print(pair)     // finite source\nloop n < 10 -> n += 1                // condition-only\nloop running -> tick()               // bare infinite\n\n// value position: unchanged, still finite + non-unit\ndoubled :: loop v, values -> v * 2"
+        },
+        {
+          "key": "D",
+          "name": "A second separator for statement bodies",
+          "detail": "Keep the arrow for yields and add a different spelling for one-statement bodies, for example `loop pair, joined: print(pair)`. Gain: collecting and discarding never share a spelling. Loss: a new sigil to ratify and teach, two lightweight-body forms in one language, and the if arm already discards with the arrow, so the separation is not even consistent.",
+          "technical": "A new separator token enters the grammar, Syntax.rs, the formatter, and the teaching surface, duplicating the arrow's role.",
+          "code": "loop pair, joined: print(pair)       // new spelling\ndoubled :: loop v, values -> v * 2   // arrow kept for yields\nif hit -> score += 1                 // but if still discards with ->"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Match arms take one expression or a block after the arrow, in statement or value position alike, and the value is simply discarded when unused.",
+          "code": "match dir {\n    Up => y += 1,\n    Down => { y -= 1; log(y) }\n}"
+        },
+        {
+          "lang": "Python",
+          "note": "The one-line body after a colon works on every compound statement, if, for, and while, so the rule transfers between constructs.",
+          "code": "for pair in joined: print(pair)\nwhile running: tick()"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "It finishes the rule the if arm already teaches, a `->` body is the lightweight form of any control-flow body. Statement position discards, value position collects, and the ratified value-form restrictions stay untouched.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It keeps brace ceremony on one-statement loops and leaves the arrow rule applying to only half the constructs."
+          },
+          {
+            "key": "B",
+            "reason": "It moves the inconsistency one construct over, since condition-only and infinite loops still refuse the body form the user just learned."
+          },
+          {
+            "key": "D",
+            "reason": "A second separator duplicates the arrow's job and still disagrees with the if arm, which discards with the arrow today."
+          }
+        ],
+        "tradeoff": "One spelling collects in value position and discards in statement position. The discard lint on non-unit statement bodies keeps the accidental case loud, and one docs paragraph teaches the split."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the status quo with statement arrows on all headers and recommended all headers, because the if arm already set the discard rule.",
+        "boilOcean": "The breadth pass added the finite-only middle ground and a second-separator spelling. An expression-statement rule making bare arrow loops expressions everywhere was folded into option C, since discard-in-statement-position is that rule.",
+        "hybrid": "The hybrid pass tested finite-only statement arrows plus a separator for the infinite headers. It was rejected as two body spellings split by header kind, which is harder to teach than either pure option.",
+        "cooperative": "The cooperative pass strengthened the status quo as a one-signal reading of the arrow and the separator option with never-ambiguous collection. Both still contradict the if arm the user learned first.",
+        "adversarial": "The adversarial pass attacked the collect-versus-discard split and nested arrow chains like a loop feeding an if. The non-unit discard lint answers the split, nesting already parses in value position today, and the formatter stability test guards round-trips, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T20:25:40.511Z"
+    },
+    {
+      "id": "D-BODY-ARROW1",
+      "cardId": "c0ej2y7w",
+      "group": "syntax",
+      "title": "One body rule across functions and control flow",
+      "gist": "Whether function bodies join the arrow rule, so every body is `-> expression` or `{ statements }`.",
+      "lesson": "A body follows a head, a function signature, an if condition, a loop header, or a dispatch pattern. Control flow already spells the one-expression body with `->` and the statement body with braces. Functions alone spell the one-expression body with `=`, as in `fn f(x: Int) => Int = 3`. The rule is structural, one expression versus a block of statements, never line count, since a long expression may wrap. This choice decides whether the function exception stays.",
+      "explainer": "",
+      "story": "Ana learns `if hit -> score + 1` on day one, then writes `fn double(n: Int) => Int -> n * 2` and gets an error. The fix is a symbol she has seen only as assignment. She asks why a function body is different from an if body, and today's answer is history, not design.",
+      "inWild": "// today: two spellings for the same idea, one expression as a body\nfn fib(n: Int) => Int = if n < 2 -> n else -> fib(n - 1) + fib(n - 2)\n\nfn home() => WebPage = web.page(\"Home\", \"hello\")\n\n// control flow, same file, other spelling:\nif verbose -> print(\"computing...\")\nloop v, values -> v * 2",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the equation form (today)",
+          "detail": "Functions keep `= expression`, control flow keeps `->`. Gain: a one-expression function reads as a math equation, define f of x as this value, which is a beloved beginner reading. Loss: the body rule carries a permanent exception, and the same symbol means definition here and mutation elsewhere.",
+          "technical": "No change. `=` introduces function bodies and parameter defaults, and also spells reassignment.",
+          "code": "fn area(w: Int, h: Int) => Int = w * h\nfn fib(n: Int) => Int = if n < 2 -> n else -> fib(n - 1) + fib(n - 2)"
+        },
+        {
+          "key": "B",
+          "name": "One body rule, arrow everywhere",
+          "detail": "Every head takes `-> expression` or `{ statements }`, functions included. Gain: one sentence teaches every body in the language, and each symbol keeps one role, `=>` for types, `->` for bodies, `=` for values only. Loss: the equation reading disappears, and the return type and body arrows sit adjacent, as in `=> Int -> 3`.",
+          "technical": "The function grammar accepts `-> expression` where `= expression` stood, and `= expression` is deleted, with every in-repo consumer migrated in one change. Parameter defaults keep `=`, since a default is a value, not a body. The formatter emits the arrow form and round-trips it, with a stability test.",
+          "code": "fn area(w: Int, h: Int) => Int -> w * h\nfn fib(n: Int) => Int -> if n < 2 -> n else -> fib(n - 1) + fib(n - 2)\nfn greet() -> print(\"hi\")\n\n// the whole rule, everywhere:\n//   head -> expression\n//   head { statements }"
+        },
+        {
+          "key": "C",
+          "name": "Functions always take braces",
+          "detail": "Delete the one-expression function sugar entirely, so function bodies are always blocks. Gain: no exception and no adjacency, since only control flow has arrow bodies. Loss: the most common function shape, one expression, gains two braces and a return, which is ceremony the short form exists to remove.",
+          "technical": "The `= expression` form is deleted with no replacement, and in-repo one-liners migrate to blocks.",
+          "code": "fn area(w: Int, h: Int) => Int {\n    return w * h\n}\n// every one-liner in the codebase grows three lines"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "The equation form is exactly today's Jet spelling, and it is widely loved for one-liners. Kotlin accepts the exception this ballot weighs.",
+          "code": "fun area(w: Int, h: Int): Int = w * h"
+        },
+        {
+          "lang": "Rust",
+          "note": "Match arms take one expression or a block after the arrow, while functions always take blocks, so Rust lives with option C's ceremony on functions.",
+          "code": "match n {\n    0 => 1,\n    _ => { let r = n * 2; r }\n}"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "Arrow functions use one rule, an expression body or a brace body, and it transfers to every arrow the user ever writes.",
+          "code": "const area = (w, h) => w * h\nconst log = (m) => { console.log(m) }"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "One structural sentence then covers every body in Jet, and each symbol holds one meaning. The arrow says this head maps to this expression, which is what a one-expression function is.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It keeps a permanent exception in the body rule and overloads `=` as definition in one place and mutation in another."
+          },
+          {
+            "key": "C",
+            "reason": "It buys uniformity by taxing the most common function shape with braces and a return."
+          }
+        ],
+        "tradeoff": "The equation reading is given up, and `=> Int -> 3` places the type arrow and body arrow adjacent. The two arrows keep distinct constant roles, which is what makes the adjacency readable."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared keeping the equation form against extending the arrow rule to functions and recommended the arrow, because one structural rule then covers every body.",
+        "boilOcean": "The breadth pass added braces-only functions and tested unifying on `=` instead. The `=` direction was folded out, since `if c = a` collides with assignment and cannot be an arm spelling.",
+        "hybrid": "The hybrid pass tested accepting both `=` and `->` on functions with the formatter canonicalizing one. It was rejected as a standing alias, which greenfield policy forbids.",
+        "cooperative": "The cooperative pass strengthened the equation form with its math reading and Kotlin precedent, and braces-only with its symbol economy. One keeps the exception, and the other taxes every one-liner.",
+        "adversarial": "The adversarial pass attacked the arrow adjacency in `=> Int -> 3` and arrow chains through control bodies. Each arrow keeps one fixed role, chains already parse in arm position today, and the formatter stability test guards round-trips, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T20:48:28.447Z"
     }
   ],
   "questions": [
@@ -106019,16 +107418,710 @@
       "cardId": "c04zbobq"
     },
     {
-      "id": "bgwh550z",
-      "text": "Add Python Zip equivalent as NATIVE syntax to allow tuples for loops both in index position and list position",
+      "id": "b082ij7f",
+      "text": "Update jet fmt to try condensing to single line function defs. ex. ```fn mirror(p: Point) => Point = .{x: -p.x, y: p.y}``` rather than ```fn mirror(p: Point) => Point { return .{x: -p.x, y: p.y}}```",
       "note": "",
       "level": null,
       "tags": [],
       "status": "open",
-      "created": "2026-08-03T19:42:03.270Z"
+      "created": "2026-08-05T19:04:39.221Z"
+    },
+    {
+      "id": "b0ojdm2e",
+      "text": "Should ```alias Parsed<T> = T ? AppError``` be written as ```alias Parsed<T> :: T ? AppError```",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-05T19:24:15.679Z"
+    },
+    {
+      "id": "b1l5wrob",
+      "text": "Some kind of back-propogation from AST to simplify written code with special formatter flag. The goal being to auto \"fmt\" someone's code to give the simples, most concise written form to properly express their code",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-05T19:40:06.729Z"
+    },
+    {
+      "id": "b2e0ldeg",
+      "text": "Update Map syntax to be [K:V] rather than [K: V]",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-05T19:44:20.980Z"
+    },
+    {
+      "id": "b3uezxgj",
+      "text": "Allow following syntax change: ```    print(pick_str($[0, 1, 2, 3]$))``` to ```    print(pick_str($[0..3]$))```",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-05T19:47:55.297Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-05T20:49:56.804Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-APP-ARGS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-05T20:48:28.447Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-BODY-ARROW1",
+      "note": "One body rule across functions and control flow"
+    },
+    {
+      "at": "2026-08-05T20:47:48.204Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ej2y7w",
+      "note": "One body rule: arrow expression or brace block"
+    },
+    {
+      "at": "2026-08-05T20:42:12.680Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BENCH-PARITY1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-05T20:37:48.638Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-JOB-SUBCMD1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T20:36:56.527Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CMD-OVERRIDE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-05T20:36:56.527Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-05T20:36:56.527Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-05T20:36:56.527Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-05T20:36:56.527Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-05T20:30:58.915Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOB-NAME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-05T20:30:46.893Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-APP-UNIFY1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-05T20:30:31.764Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENTRY-VALUE1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-05T20:30:31.764Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-05T20:30:31.764Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-05T20:30:31.764Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-05T20:30:31.764Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-05T20:25:40.511Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LOOP-STMT-ARROW1",
+      "note": "Arrow loop bodies in statement position"
+    },
+    {
+      "at": "2026-08-05T20:24:56.629Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0b6szun",
+      "note": "Arrow loop bodies in statement position"
+    },
+    {
+      "at": "2026-08-05T20:23:15.553Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-BENCH-PARITY1",
+      "note": "Bench runner parity with the test runner"
+    },
+    {
+      "at": "2026-08-05T20:22:28.342Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CMD-OVERRIDE1",
+      "note": "Which commands an entry function can override"
+    },
+    {
+      "at": "2026-08-05T20:21:44.500Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c01pwyjw",
+      "note": "Bench runner reaches parity with test runner"
+    },
+    {
+      "at": "2026-08-05T20:21:44.188Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0wk4xnv",
+      "note": "Command metaprograms are expert-overridable"
+    },
+    {
+      "at": "2026-08-05T20:19:08.937Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-APP-ARGS1",
+      "note": "How CLI arguments reach an app entry"
+    },
+    {
+      "at": "2026-08-05T20:18:27.618Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-JOB-SUBCMD1",
+      "note": "Built binaries expose jobs as subcommands"
+    },
+    {
+      "at": "2026-08-05T20:17:52.919Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-JOB-NAME1",
+      "note": "One word for named auxiliary entries"
+    },
+    {
+      "at": "2026-08-05T20:17:20.827Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-APP-UNIFY1",
+      "note": "One App type or one type per target"
+    },
+    {
+      "at": "2026-08-05T20:16:37.881Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-ENTRY-VALUE1",
+      "note": "How a file declares an app program"
+    },
+    {
+      "at": "2026-08-05T20:15:43.969Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0f7fhoy",
+      "note": "Typed CLI args flow into the app entry"
+    },
+    {
+      "at": "2026-08-05T20:15:43.664Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0a5nr50",
+      "note": "Built binaries expose jobs as subcommands"
+    },
+    {
+      "at": "2026-08-05T20:15:43.352Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c04zqxw1",
+      "note": "Unify job vs task naming on job"
+    },
+    {
+      "at": "2026-08-05T20:15:43.043Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0zvnp4f",
+      "note": "One App type across targets"
+    },
+    {
+      "at": "2026-08-05T20:15:42.731Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0uq2h91",
+      "note": "Entry model: run returns the program value"
+    },
+    {
+      "at": "2026-08-05T19:52:44.053Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-05T19:52:44.053Z"
+    },
+    {
+      "at": "2026-08-05T19:47:55.297Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b3uezxgj",
+      "note": "Allow following syntax change: ```    print(pick_str($[0, 1,"
+    },
+    {
+      "at": "2026-08-05T19:47:45.203Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fhg5kf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-05T19:47:44.836Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fhg5kf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T19:47:44.522Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fhg5kf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T19:47:44.206Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fhg5kf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T19:47:43.904Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fhg5kf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T19:47:43.597Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fhg5kf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T19:47:43.287Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0fhg5kf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T19:47:42.983Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0fhg5kf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T19:47:42.670Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0fhg5kf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T19:47:42.366Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0fhg5kf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T19:47:42.047Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0fhg5kf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T19:44:20.980Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b2e0ldeg",
+      "note": "Update Map syntax to be [K:V] rather than [K: V]"
+    },
+    {
+      "at": "2026-08-05T19:41:05.387Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-05T19:41:05.387Z"
+    },
+    {
+      "at": "2026-08-05T19:40:39.950Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0om3ozr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T19:40:06.729Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b1l5wrob",
+      "note": "Some kind of back-propogation from AST to simplify written c"
+    },
+    {
+      "at": "2026-08-05T19:34:20.830Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0om3ozr",
+      "note": "Stale UI snapshot: E1130_kernel_proof now emits a leading E0101 (no run function)"
+    },
+    {
+      "at": "2026-08-05T19:29:06.444Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0998ql8",
+      "note": "Expression-position dispatch over a union subject ICEs (I2): union if-let conds not in TIR subset"
+    },
+    {
+      "at": "2026-08-05T19:24:15.679Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b0ojdm2e",
+      "note": "Should ```alias Parsed<T> = T ? AppError``` be written as ``"
+    },
+    {
+      "at": "2026-08-05T19:13:28.636Z",
+      "by": "claude-e3-1393",
+      "action": "card.add",
+      "ref": "c0fmfiwg",
+      "note": "D-APILABEL1 remainder: extern and Core call ordering, and contract laundering"
+    },
+    {
+      "at": "2026-08-05T19:13:13.867Z",
+      "by": "claude-e3-1393",
+      "action": "card.update",
+      "ref": "c0vvhs7e",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T19:08:58.233Z",
+      "by": "fable",
+      "action": "card.claim",
+      "ref": "c0fhg5kf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T19:04:39.221Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b082ij7f",
+      "note": "Update jet fmt to try condensing to single line function def"
+    },
+    {
+      "at": "2026-08-05T19:03:16.721Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "bgwh550z",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T19:02:33.237Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nnhbti",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-08-05T18:47:52.843Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05b0jhl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-05T18:47:52.487Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05b0jhl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T18:47:52.186Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05b0jhl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T18:47:51.879Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05b0jhl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T18:47:51.576Z",
+      "by": "cavecrew-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05b0jhl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T18:47:51.264Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05b0jhl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T18:47:50.946Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05b0jhl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T18:47:50.638Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05b0jhl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T18:47:50.332Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05b0jhl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T18:32:48.136Z",
+      "by": "claude-e3-1393",
+      "action": "papercut.add",
+      "ref": "pc0a81p0g",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T18:25:56.759Z",
+      "by": "fable",
+      "action": "card.claim",
+      "ref": "c05b0jhl",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T18:25:22.365Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05b0jhl",
+      "note": "#4 Formatter round-trips the expression-bodied dot-construction"
+    },
+    {
+      "at": "2026-08-05T18:25:22.047Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05b0jhl",
+      "note": "#3 Each remaining no-struct-lit position (if/for heads, S61 par"
+    },
+    {
+      "at": "2026-08-05T18:25:21.732Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05b0jhl",
+      "note": "#2 examples/features/types/dot_construction.jet uses the expres"
+    },
+    {
+      "at": "2026-08-05T18:25:21.434Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05b0jhl",
+      "note": "#1 fn name(...) => T = .{ field: val } parses, type-infers from"
+    },
+    {
+      "at": "2026-08-05T18:25:21.122Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05b0jhl",
+      "note": "epoch,phase,priority"
+    },
+    {
+      "at": "2026-08-05T18:25:20.755Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fhg5kf",
+      "note": "#5 Subjectless guard tables used as values are covered the same"
+    },
+    {
+      "at": "2026-08-05T18:25:20.458Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fhg5kf",
+      "note": "#4 Formatter round-trips the else-less value table (fmt stabili"
+    },
+    {
+      "at": "2026-08-05T18:25:20.150Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fhg5kf",
+      "note": "#3 examples/features/types/enum_dot.jet drops the commented-out"
+    },
+    {
+      "at": "2026-08-05T18:25:19.841Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fhg5kf",
+      "note": "#2 A non-exhaustive else-less value dispatch emits E0307 naming"
+    },
+    {
+      "at": "2026-08-05T18:25:19.523Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fhg5kf",
+      "note": "#1 Expression-position if subject == { … } over a closed enum w"
+    },
+    {
+      "at": "2026-08-05T18:25:19.198Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fhg5kf",
+      "note": "epoch,phase,priority"
+    },
+    {
+      "at": "2026-08-05T18:12:25.926Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-05T18:12:25.566Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#6 A fresh reviewer verifies closure against Jet's source table"
+    },
+    {
+      "at": "2026-08-05T18:12:25.255Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#5 The ledger is durable under docs and #1398 consumes it witho"
+    },
+    {
+      "at": "2026-08-05T18:12:24.944Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#4 Deterministic checks fail on source-surface drift, an unmapp"
+    },
+    {
+      "at": "2026-08-05T18:12:24.638Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#3 Every Jet-loses row links one live Tower owner. A design dec"
+    },
+    {
+      "at": "2026-08-05T18:12:24.341Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#2 Each row has a stable ID, Python member, Jet spelling, match"
+    },
+    {
+      "at": "2026-08-05T18:12:24.037Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c00ms1om",
+      "note": "#1 A source-derived closed inventory covers every Python builti"
+    },
+    {
+      "at": "2026-08-05T18:12:13.321Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c00ms1om",
+      "note": "Core surface ledger against every competitor language"
+    },
+    {
+      "at": "2026-08-05T18:02:36.756Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c05b0jhl",
+      "note": "Inferred .{…} literal rejected in single-expression fn body (= expr)"
+    },
+    {
+      "at": "2026-08-05T18:00:06.821Z",
+      "by": "fable",
+      "action": "papercut.add",
+      "ref": "pc09n9y05",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T18:00:06.499Z",
+      "by": "fable",
+      "action": "papercut.add",
+      "ref": "pc04bkdmd",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T17:59:41.984Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fhg5kf",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-05T17:57:13.031Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0fhg5kf",
+      "note": "Exhaustive enum value dispatch still demands else (E0003 fires before sema E0307)"
+    },
     {
       "at": "2026-08-05T17:24:54.556Z",
       "by": "owner",
@@ -108870,664 +110963,6 @@
       "action": "card.criteria-meet",
       "ref": "c0090v5u",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:46:57.554Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0kjro6g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T21:43:35.535Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0090v5u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T21:41:25.517Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0r5ttg9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:41:25.151Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0r5ttg9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:41:24.816Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0r5ttg9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:41:24.477Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0r5ttg9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:41:24.149Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0r5ttg9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:41:23.815Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0r5ttg9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:41:23.483Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:41:23.149Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:41:22.817Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:41:22.500Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:41:22.162Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0r5ttg9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:32:28.320Z",
-      "by": "fable-orchestrator",
-      "action": "papercut.add",
-      "ref": "pc00pgfyt",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T21:27:18.644Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T21:27:18.644Z"
-    },
-    {
-      "at": "2026-08-04T21:17:38.409Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0njvn7g",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:17:38.027Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0njvn7g",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:17:37.696Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0njvn7g",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:17:37.348Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0njvn7g",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:17:37.020Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0njvn7g",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:17:36.689Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0njvn7g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:17:36.366Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0njvn7g",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:17:36.031Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0njvn7g",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:17:35.695Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0njvn7g",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:17:35.358Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0njvn7g",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:17:35.017Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0njvn7g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:16:58.755Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0dhh1rb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:16:58.378Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0dhh1rb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:16:58.055Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0dhh1rb",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:16:57.733Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0dhh1rb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:16:57.398Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0dhh1rb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:16:57.071Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0dhh1rb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:16:56.746Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0dhh1rb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:16:56.401Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0dhh1rb",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:16:56.072Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0dhh1rb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:16:55.736Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0dhh1rb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:16:55.391Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0dhh1rb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:14:04.036Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:14:03.644Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:14:03.238Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:14:02.870Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:14:02.504Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:01:30.388Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T21:01:30.388Z"
-    },
-    {
-      "at": "2026-08-04T20:54:39.527Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c02naez8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T20:54:35.138Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T20:54:14.371Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T20:54:14.043Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T20:54:13.708Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T20:54:13.386Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T20:54:13.047Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c02naez8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T20:49:06.475Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c08gd2ol",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T20:48:56.291Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08gd2ol",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T20:48:55.946Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08gd2ol",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T20:48:55.604Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08gd2ol",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T20:48:55.266Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08gd2ol",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T20:48:54.939Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08gd2ol",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T20:48:44.403Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08gd2ol",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T20:48:44.088Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08gd2ol",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T20:48:43.673Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08gd2ol",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T20:48:43.357Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08gd2ol",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T20:48:43.004Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08gd2ol",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T20:18:52.740Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c02naez8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T20:18:52.415Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c02naez8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T20:18:52.086Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c02naez8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T20:18:51.745Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c02naez8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T20:18:51.388Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c02naez8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T20:17:37.076Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c08gd2ol",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T20:17:36.717Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c02naez8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T20:17:15.652Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-add",
-      "ref": "c08gd2ol",
-      "note": "#5 The example golden, core library reference, and D-COREIO1 sy"
-    },
-    {
-      "at": "2026-08-04T20:17:15.319Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-add",
-      "ref": "c08gd2ol",
-      "note": "#4 The focused progress example produces identical output in th"
-    },
-    {
-      "at": "2026-08-04T20:17:14.985Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-add",
-      "ref": "c08gd2ol",
-      "note": "#3 TTY output redraws one line; non-TTY output emits one line p"
-    },
-    {
-      "at": "2026-08-04T20:17:14.660Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-add",
-      "ref": "c08gd2ol",
-      "note": "#2 Progress updates account for actual source pulls through map"
-    },
-    {
-      "at": "2026-08-04T20:17:14.319Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-add",
-      "ref": "c08gd2ol",
-      "note": "#1 The public core.io.progress adapter accepts List<T> and Iter"
-    },
-    {
-      "at": "2026-08-04T19:41:01.608Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LIB-REUSE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-04T19:38:36.102Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0nwijdh",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-04T19:38:16.760Z",
-      "by": "claude",
-      "action": "decision.add",
-      "ref": "D-LIB-REUSE1",
-      "note": "Jet library reuse and linking model"
-    },
-    {
-      "at": "2026-08-04T19:37:17.430Z",
-      "by": "claude",
-      "action": "card.criteria-add",
-      "ref": "c0nwijdh",
-      "note": "#4 Compiler self-speed benchmark corpus reports clean and incre"
-    },
-    {
-      "at": "2026-08-04T19:37:17.128Z",
-      "by": "claude",
-      "action": "card.criteria-add",
-      "ref": "c0nwijdh",
-      "note": "#3 Sema and diagnostics run on every build even with a warm cac"
-    },
-    {
-      "at": "2026-08-04T19:37:16.842Z",
-      "by": "claude",
-      "action": "card.criteria-add",
-      "ref": "c0nwijdh",
-      "note": "#2 Changing compiler identity, target, or profile invalidates d"
-    },
-    {
-      "at": "2026-08-04T19:37:16.552Z",
-      "by": "claude",
-      "action": "card.criteria-add",
-      "ref": "c0nwijdh",
-      "note": "#1 Second clean build of a multi-dependency project restores al"
-    },
-    {
-      "at": "2026-08-04T19:37:16.261Z",
-      "by": "claude",
-      "action": "card.add",
-      "ref": "c0nwijdh",
-      "note": "Per-package compile actions with cached dependency artifacts"
-    },
-    {
-      "at": "2026-08-04T19:37:03.322Z",
-      "by": "claude",
-      "action": "card.add",
-      "ref": "c0pwzvbh",
-      "note": "Jet library reuse and linking model"
-    },
-    {
-      "at": "2026-08-04T19:29:30.337Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LOOP-GUARD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-04T19:29:30.337Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-04T19:29:30.337Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-04T19:29:30.337Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-04T19:29:30.337Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-04T19:28:41.173Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c08gd2ol",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T19:28:40.944Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c02naez8",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T19:13:01.678Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-LOOP-GUARD1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T19:07:56.662Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SUBJECT-CALL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-04T19:07:56.662Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-04T19:07:56.662Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-04T19:07:56.662Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
@@ -109559,6 +110994,30 @@
       "text": "tests/fmt fmt-lossless-corpus fails on master and on every branch: tests/ui/build_entry_conflict/pkg.jet does not parse but is absent from UI_PARSE_INVALID. Same config-detection family as the known examples/jetpack/epoch5/config/dev.jet fmt failure. The assert aborts the whole corpus scan at that file, so every later fixture goes unchecked.",
       "cardId": null,
       "created": "2026-08-05T16:16:23.539Z",
+      "status": "open"
+    },
+    {
+      "id": "pc04bkdmd",
+      "by": "fable",
+      "text": "tower card add silently ignores unknown flags (--text dropped, card created with empty body) — should error on unrecognized flags",
+      "cardId": null,
+      "created": "2026-08-05T18:00:06.498Z",
+      "status": "open"
+    },
+    {
+      "id": "pc09n9y05",
+      "by": "fable",
+      "text": "tower serve on port 7980 served a stale in-memory snapshot (nextNum 1426 while disk was at 1441) — CLI writes didn't reach the running server; needed manual restart",
+      "cardId": null,
+      "created": "2026-08-05T18:00:06.820Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0a81p0g",
+      "by": "claude-e3-1393",
+      "text": "Shared-tree collision: another session was editing this working tree concurrently (AGENTS.md tower-serve rule, a leading-dot struct-literal parser fix referencing card #1441, field-audit renumbering to #1442, and six examples/features/types/*.jet migrated to value-dispatch form). Their uncommitted example edits made my golden run look like a regression, and my cleanup reverted them. Recovered every file from a dangling stash and restored their versions. Two of my commits (bbd8531f8, 02527858b) still carry the reverted content in history; the working tree now has theirs.",
+      "cardId": null,
+      "created": "2026-08-05T18:32:48.136Z",
       "status": "open"
     }
   ]
