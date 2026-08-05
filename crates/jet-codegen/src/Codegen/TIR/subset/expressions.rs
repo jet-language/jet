@@ -81,7 +81,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 return c
                     .args
                     .iter()
-                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    .all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // `print` is the one builtin the subset covers (one or more args —
             // D-VERDICT-1321-1 lowers a multi-arg print to one joined Print).
@@ -173,7 +173,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 ) && c.args.len() == 1
                     && c.args
                         .iter()
-                        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                        .all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
@@ -798,7 +798,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             expr_in_subset(callee, cx, locals)
                 && args
                     .iter()
-                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
+                    .all(|a| expr_in_subset(&a.expr, cx, locals))
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
         // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
@@ -845,7 +845,7 @@ pub(crate) fn orfallback_rhs_in_subset(
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         OrFallback::Panic { args, .. } => {
-            args.len() == 1 && args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals)
+            args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals)
         }
         OrFallback::Break(_)
         | OrFallback::Continue(_)

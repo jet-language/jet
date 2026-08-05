@@ -15,7 +15,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             let Some(sig) = self.funcs.get(mangled).cloned() else {
                 self.diags.push(Diagnostic::error(
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             self.infer_import_call_with_warning(
                 mod_idx, name, alias_span, span, type_args, args, true,
@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
             warn_soft_public: bool,
         ) -> Option<Type> {
             let Some(mods) = self.modules else {
@@ -285,6 +285,27 @@ impl<'a> Checker<'a> {
                     self.diags.push(soft_public_use(name, span));
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                // D-APILABEL1=A: a call across a module boundary binds by the
+                // same law as a local one. Without this a label here was read
+                // positionally, so `other.schedule(delay: 1, task: 2)` bound
+                // the values the wrong way round and said nothing.
+                {
+                    let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+                    if crate::Sema::CallBinder::bind_call_args(
+                        name,
+                        &params,
+                        args,
+                        span,
+                        &mut self.diags,
+                    )
+                    .is_none()
+                    {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return sig.return_type.clone();
+                    }
+                }
                 let mut call_access = self.call_access_frame();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
                 let mut subst = HashMap::new();

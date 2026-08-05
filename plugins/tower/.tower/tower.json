@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1439,
-    "rev": 25410,
+    "nextNum": 1440,
+    "rev": 25414,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18,7 +18,6 @@
         "board-ideas",
         "radar-cards",
         "radar-sq",
-        "now-recent",
         "radar-remaining"
       ]
     },
@@ -80756,6 +80755,30 @@
       "created": "2026-08-05T17:15:58.572Z",
       "updated": "2026-08-05T17:15:58.572Z",
       "updatedBy": "claude-e3-1393"
+    },
+    {
+      "id": "c024dgns",
+      "num": 1439,
+      "title": "Rename the named Core container types to plain short words",
+      "body": "Pick one plain short name for each named Core container. Jargon names (Deque, Bag, BitSet, ByteBuffer) block beginners. Slate chosen in chat with the owner; ballot D-COLLNAME1 records the pick.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T17:23:16.931Z",
+      "updated": "2026-08-05T17:24:54.556Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -104506,6 +104529,98 @@
       "created": "2026-08-05T13:39:11.631Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-COLLNAME1",
+      "cardId": "c024dgns",
+      "group": "stdlib",
+      "title": "Plain short names for the named Core containers",
+      "gist": "What each named container type is called.",
+      "lesson": "Core ships eight named containers beside the bracket forms for list and map. Several names are computer-science jargon. Deque, Bag, BitSet, and ByteBuffer do not tell a new reader what the type does. This choice picks the one canonical name for each container. The names appear in code, docs, errors, and search results every day.",
+      "explainer": "",
+      "story": "Mia is new to programming. She needs a line of jobs where the first job in is the first job out. She scrolls the container list and stops at Deque. The name tells her nothing. She leaves the editor to search the web instead of writing the next line.",
+      "inWild": "// A build farm, written with the current names.\npending :: Deque.from(jobs)          // what is a Deque?\nurgent  := PriorityQueue.from(jobs)\nretries := Bag.from(failed_ids)      // a bag of what, kept how?\nflags   := BitSet.from(ports)\nwire    := ByteBuffer.from(packet)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Owner slate: Set, Rank, Queue, PriorityQueue, Tally, Cache, Bits, Bytes",
+          "detail": "Rename the jargon rows to one short word each. Deque becomes Queue. SortedSet becomes Rank. Bag becomes Tally. BitSet becomes Bits. ByteBuffer becomes Bytes. Set, Cache, and PriorityQueue keep their names. Every name is one common word except PriorityQueue. Queue names the both-ends structure, so it also covers last-on-first-off use without a separate Stack type.",
+          "technical": "Amends the D-COLLBREADTH1 and D-ITERTOOLS1 rosters. Type names only; no keyword or sigil change, so Syntax.rs is untouched. HashMap and BTreeMap stay reserved. One rename sweep across Prelude, sema, docs, examples, and snapshots.",
+          "code": "pending :: Queue.from(jobs)          // take front, add back\nurgent  := PriorityQueue.from(jobs)  // most important first\nscores  := Rank.from(results)        // unique, always in order\nretries := Tally.from(failed_ids)    // counts repeats\nflags   := Bits.from(ports)\nwire    := Bytes.from(packet)"
+        },
+        {
+          "key": "B",
+          "name": "Keep the current names",
+          "detail": "No change. Set, SortedSet, Deque, PriorityQueue, Bag, Cache, BitSet, ByteBuffer stay. Readers who know other languages find familiar words. Beginners keep hitting Deque, Bag, and ByteBuffer, which do not describe behavior in plain English.",
+          "code": "pending :: Deque.from(jobs)\nurgent  := PriorityQueue.from(jobs)\nscores  := SortedSet.from(results)\nretries := Bag.from(failed_ids)\nflags   := BitSet.from(ports)\nwire    := ByteBuffer.from(packet)"
+        },
+        {
+          "key": "C",
+          "name": "Descriptive slate: Roster, Rail, Priority, plus Queue and Stack aliases",
+          "detail": "SortedSet becomes Roster. Deque becomes Rail, with Queue and Stack as thin aliases that signal which ends you use. PriorityQueue becomes Priority. Tally, Bits, and Bytes as in option A. Beginners searching for a queue or a stack find those exact words. The cost is three names for one structure and one invented word, Rail.",
+          "technical": "Queue and Stack are transparent aliases of Rail with the same methods. Alias rows join the D-COLLBREADTH1 roster.",
+          "code": "pending :: Queue.from(jobs)     // alias of Rail\nundo    := Stack.from(edits)    // alias of Rail\nurgent  := Priority.from(jobs)\nscores  := Roster.from(results)"
+        },
+        {
+          "key": "D",
+          "name": "Industry slate: match Rust and Java spellings",
+          "detail": "Rename toward the names experienced developers already know. HashSet, BTreeSet, VecDeque, BinaryHeap, Multiset, Cache, BitSet, ByteBuffer. Zero learning cost for people arriving from Rust or Java. Maximum jargon for beginners, and several names describe the implementation rather than the behavior.",
+          "code": "pending :: VecDeque.from(jobs)\nurgent  := BinaryHeap.from(jobs)\nscores  := BTreeSet.from(results)\nretries := Multiset.from(failed_ids)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Ships jargon and plain names side by side: deque and heapq are jargon, while Counter is exactly option A's Tally.",
+          "code": "from collections import deque, Counter\nretries = Counter(failed_ids)"
+        },
+        {
+          "lang": "Rust",
+          "note": "Names containers after their implementation: VecDeque, BinaryHeap, BTreeSet. Precise for experts, opaque for beginners.",
+          "code": "let urgent: BinaryHeap<Job> = jobs.into_iter().collect();"
+        },
+        {
+          "lang": "Swift",
+          "note": "Keeps the surface tiny: Array, Set, Dictionary in the standard library; Deque and Heap live in a separate package.",
+          "code": "var seen: Set<Int> = [1, 2, 3]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Every renamed row becomes a word a beginner already knows: Queue, Rank, Tally, Bits, Bytes. Names that were already plain stay put, so the change is small and complete.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeps Deque, Bag, and ByteBuffer, the exact names that send new readers to a search engine instead of the next line of code."
+          },
+          {
+            "key": "C",
+            "reason": "Buys Stack discoverability at the price of three names for one structure and the invented word Rail, which explains nothing by itself."
+          },
+          {
+            "key": "D",
+            "reason": "Optimizes for people who already know another language and abandons the beginner facet that Jet leads with."
+          }
+        ],
+        "tradeoff": "Queue names a both-ends structure, so it also supports last-on-first-off use that a strict queue would not. PriorityQueue stays the one long compound name. Both accepted by the owner in chat on 2026-08-05."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the owner slate, the current names, and a descriptive slate, and recommended the owner slate for plain-word coverage.",
+        "boilOcean": "The breadth pass tested acronym names such as FIFO and FILO and an industry slate matching Rust and Java. FIFO cannot name the priority structure, so only the industry slate joined the menu as option D.",
+        "hybrid": "The hybrid pass tested Rail with Queue and Stack aliases on top of the owner slate. The owner rejected the extra aliases, so the hybrid stays recorded as option C rather than the recommendation.",
+        "cooperative": "The cooperative pass strengthened each option: B gained its familiarity argument, C its search-discoverability argument, D its zero-relearning argument for experienced arrivals.",
+        "adversarial": "The adversarial pass attacked Heap as a shorter PriorityQueue name, but its plain meaning is a disordered pile and it collides with memory vocabulary. The remaining Queue wrinkle is recorded in the tradeoff and survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-05T17:24:08.832Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-05"
     }
   ],
   "questions": [
@@ -105914,6 +106029,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-05T17:24:54.556Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-COLLNAME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-05T17:24:08.832Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-COLLNAME1",
+      "note": "Plain short names for the named Core containers"
+    },
+    {
+      "at": "2026-08-05T17:23:16.932Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c024dgns",
+      "note": "Rename the named Core container types to plain short words"
+    },
     {
       "at": "2026-08-05T17:15:58.572Z",
       "by": "claude-e3-1393",
@@ -109392,27 +109528,6 @@
       "action": "card.criteria-add",
       "ref": "c075z2hs",
       "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-04T19:07:56.662Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-04T19:06:45.742Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LOOP-SUBJECT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-04T19:06:45.742Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#4 snapshots re-blessed"
     }
   ],
   "nextNum": 368,
