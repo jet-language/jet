@@ -1437,8 +1437,12 @@ fn jet_services_send_durable(
             "durable service delivery needs its injected authority".to_string(),
         )
     })?;
+    // The state store is framed by adapter and read back with the adapter it
+    // declares. The durable delivery log has its own framing, so it gets its
+    // own file beside the state store, exactly as the workflow store does.
+    // Sharing one path let a durable send corrupt the typed state read.
     let runtime = JetServiceRuntime {
-        store: authority.store.clone(),
+        store: jet_services_delivery_store(&authority.store),
         retention_ms: 0,
     };
     if idempotency_key.is_empty()
@@ -2131,6 +2135,13 @@ fn jet_services_replay_events(tree: &JetServiceTree) -> String {
         }
     }
     events.join("|")
+}
+
+/// The durable delivery log lives beside the state store, never inside it.
+/// Both are append-only files with different framing, so one path cannot serve
+/// both without the typed state read failing on the other's records.
+fn jet_services_delivery_store(state_store: &str) -> String {
+    format!("{state_store}.delivery")
 }
 
 fn jet_services_workflow_authority(
