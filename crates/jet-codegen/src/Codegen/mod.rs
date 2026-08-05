@@ -711,6 +711,11 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.sketch.reservoir",
             "jet.db",
             "core.db",
+            // `core.fmt` lowers to the `jet_fmt_*` helpers that live in
+            // DataFmt.rs.  Without this a program that formats but never
+            // touches `core.data` emits calls to helpers it never included,
+            // and rustc rejects the generated file (I2).
+            "core.fmt",
         ],
     );
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
