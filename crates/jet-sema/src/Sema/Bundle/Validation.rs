@@ -1908,7 +1908,7 @@ pub(crate) fn check_module_bodies(
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
                     }],
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),

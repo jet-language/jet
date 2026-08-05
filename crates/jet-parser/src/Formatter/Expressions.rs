@@ -394,6 +394,8 @@ impl<'a> Fmt<'a> {
                             variadic: false,
                             variadic_bound_list: None,
                             declared_view_from_names: None,
+                            public_label: None,
+                            zone: crate::AST::ParamZone::Either,
                         })
                         .collect();
                     // Reuse Items helper via a local reprint of the empty-path form.

@@ -2,6 +2,7 @@ use super::super::{
     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
     TokKind, Type,
 };
+use crate::AST::ParamZone;
 
 impl<'a> Parser<'a> {
         #[allow(clippy::too_many_arguments)]
@@ -63,17 +64,7 @@ impl<'a> Parser<'a> {
             };
             let type_params = self.parse_opt_type_params()?;
             self.expect(TokKind::LParen, "after the function name")?;
-            let mut params = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    params.push(self.param()?);
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between parameters")?;
-                }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
+            let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
             if external_type.is_some() {
                 self.reject_root_method_params(&params);
@@ -401,6 +392,120 @@ impl<'a> Parser<'a> {
             )
         }
     
+        /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone
+        /// separators. `/` closes the positional-only zone — every parameter
+        /// written before it forbids a label. `*` opens the label-only zone —
+        /// every parameter after it requires one. Unmarked parameters between
+        /// them accept either call form.
+        ///
+        /// The caller has already consumed the `(`; this consumes through `)`.
+        pub(super) fn parse_param_list(&mut self) -> Result<Vec<Param>, Diagnostic> {
+            let mut params: Vec<Param> = Vec::new();
+            let mut zone = ParamZone::Either;
+            let mut slash: Option<Span> = None;
+            let mut star: Option<Span> = None;
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    match self.peek().kind {
+                        TokKind::Slash => {
+                            let span = self.bump().span;
+                            if let Some(first) = slash {
+                                self.diags.push(Self::repeated_param_zone("/", span, first));
+                            } else if let Some(star_span) = star {
+                                self.diags.push(Self::zone_out_of_order(span, star_span));
+                            } else if params.is_empty() {
+                                self.diags.push(Self::empty_param_zone(
+                                    "/",
+                                    "a positional-only zone needs at least one parameter before the `/`",
+                                    "write the positional-only parameters before `/`, or remove the `/`",
+                                    span,
+                                ));
+                            } else {
+                                slash = Some(span);
+                                for param in params.iter_mut() {
+                                    param.zone = ParamZone::PositionalOnly;
+                                }
+                            }
+                        }
+                        TokKind::Star => {
+                            let span = self.bump().span;
+                            if let Some(first) = star {
+                                self.diags.push(Self::repeated_param_zone("*", span, first));
+                            } else {
+                                star = Some(span);
+                                zone = ParamZone::LabelOnly;
+                            }
+                        }
+                        _ => {
+                            let mut param = self.param()?;
+                            param.zone = zone;
+                            params.push(param);
+                        }
+                    }
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between parameters")?;
+                    // A trailing comma closes the list; `*` still needs a
+                    // parameter after it, which the check below reports.
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                }
+            }
+            self.expect(TokKind::RParen, "to close the parameter list")?;
+            if let Some(span) = star {
+                if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
+                    self.diags.push(Self::empty_param_zone(
+                        "*",
+                        "a label-only zone needs at least one parameter after the `*`",
+                        "write the label-only parameters after `*`, or remove the `*`",
+                        span,
+                    ));
+                }
+            }
+            Ok(params)
+        }
+
+        fn repeated_param_zone(sigil: &str, span: Span, first: Span) -> Diagnostic {
+            let _ = first;
+            Diagnostic::error(
+                "E0763",
+                format!("`{sigil}` appears twice in this parameter list"),
+                "each parameter list has at most one positional-only `/` and one label-only `*`"
+                    .to_string(),
+                format!("remove the extra `{sigil}`"),
+                Some(span),
+            )
+        }
+
+        fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic {
+            let _ = star;
+            Diagnostic::error(
+                "E0763",
+                "`/` comes after `*` in this parameter list".to_string(),
+                "the zones read left to right: positional-only, then either, then label-only"
+                    .to_string(),
+                "move `/` before `*`".to_string(),
+                Some(slash),
+            )
+        }
+
+        fn empty_param_zone(
+            sigil: &str,
+            why: &str,
+            fix: &str,
+            span: Span,
+        ) -> Diagnostic {
+            Diagnostic::error(
+                "E0763",
+                format!("`{sigil}` marks an empty parameter zone"),
+                why.to_string(),
+                fix.to_string(),
+                Some(span),
+            )
+        }
+
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
             let root = if matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::CONTRACT_ROOT)
@@ -416,11 +521,25 @@ impl<'a> Parser<'a> {
                 false
             };
             let mut convention = self.parse_access_prefix();
-            let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
+            let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
                 let span = self.bump().span;
                 (Syntax::KW_SELF.to_string(), span)
             } else {
                 self.expect_ident("for a parameter name")?
+            };
+            // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
+            // split the public call label from the local parameter name. The
+            // first one parsed is the label; the second is what the body reads.
+            let public_label = if name != Syntax::KW_SELF
+                && matches!(self.peek().kind, TokKind::Ident(_))
+            {
+                let (local, local_span) = self.expect_ident("for the local parameter name")?;
+                let label = (name, name_span);
+                name = local;
+                name_span = local_span;
+                Some(label)
+            } else {
+                None
             };
             let (ty, ty_span, variadic, variadic_bound_list) =
                 if matches!(self.peek().kind, TokKind::Colon) {
@@ -501,6 +620,10 @@ impl<'a> Parser<'a> {
                 root,
                 name,
                 name_span,
+                public_label,
+                // `parse_param_list` assigns the real zone; a parameter parsed
+                // outside a zoned list keeps the unmarked default.
+                zone: ParamZone::default(),
                 ty,
                 ty_span,
                 default,

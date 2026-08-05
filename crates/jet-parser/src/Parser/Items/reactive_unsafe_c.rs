@@ -171,17 +171,7 @@ impl<'a> Parser<'a> {
             let (name, name_span) = self.expect_ident("after `fn`")?;
             let type_params = self.parse_opt_type_params()?;
             self.expect(TokKind::LParen, "after the function name")?;
-            let mut params = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    params.push(self.param()?);
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between parameters")?;
-                }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
+            let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
             let decorated_arrow = declared_effects.is_some() || effect_via.is_some();

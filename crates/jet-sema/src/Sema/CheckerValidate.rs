@@ -277,7 +277,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
     };
 
     let validate_func = Func {
