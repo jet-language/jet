@@ -67,6 +67,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
+            | ("core.io", "progress")
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
             // them from resolved_ret (I3).

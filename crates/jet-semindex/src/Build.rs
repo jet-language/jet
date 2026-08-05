@@ -770,7 +770,7 @@ fn definition_signature(def: &SymbolDef) -> String {
         SymbolKind::Function { params, ret } => format!(
             "({})->{};view_source={}",
             params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
-            ret.as_deref().unwrap_or("Void"),
+            ret.as_deref().unwrap_or("()"),
             def.view_provenance
                 .iter()
                 .map(|provenance| provenance.canonical())

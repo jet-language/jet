@@ -577,6 +577,50 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
     }
 }
 
+fn zip_integer_signed(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::Int => Some(true),
+        Type::IntN { signed, .. } => Some(*signed),
+        _ => None,
+    }
+}
+
+fn zip_fill_target(ty: &Type) -> &Type {
+    match ty {
+        Type::Option(inner) | Type::Tagged { inner, .. } => zip_fill_target(inner),
+        _ => ty,
+    }
+}
+
+fn emit_zip_fill_value(raw: String, source: &Type, target: Option<&Type>, cx: &Cx) -> String {
+    let Some(target) = target.map(zip_fill_target) else {
+        return format!("({raw}).clone()");
+    };
+    let source = zip_fill_target(source);
+    if source == target {
+        return format!("({raw}).clone()");
+    }
+    if source.numeric_widening_to(target).is_none() {
+        return format!("({raw}).clone()");
+    }
+    if let Some(source_signed) = zip_integer_signed(source) {
+        if matches!(target, Type::Float | Type::Float32) {
+            let target_f32 = matches!(target, Type::Float32);
+            let checked = format!(
+                "match jet_numeric_checked_widen(({raw}) as u64, {source_signed}, {target_f32}) {{ \
+                 Some(value) => value, None => jet_panic({:?}, 0, JET_NUMERIC_WIDEN_TRAP) }}",
+                cx.file
+            );
+            return if target_f32 {
+                format!("(({checked}) as f32)")
+            } else {
+                checked
+            };
+        }
+    }
+    format!("(({raw}) as {})", cx.rust_type(target))
+}
+
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
@@ -1059,13 +1103,35 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("({}).insert({} as usize, {})", recv, a(0), a(1))
                 }
                 TBuiltinOp::RemoveMap => format!("({}).remove(&({}).clone())", recv, a(0)),
-                TBuiltinOp::RemoveList { line } => format!(
-                    "jet_list_remove(&mut ({}), {}, {:?}, {})",
-                    recv,
-                    a(0),
-                    cx.file,
-                    line
-                ),
+                TBuiltinOp::RemoveList { line, mode } => match mode {
+                    crate::Codegen::TIR::ListRemoveMode::Value => format!(
+                        "jet_list_remove_value(&mut ({}), {}, {:?}, {})",
+                        recv,
+                        a(0),
+                        cx.file,
+                        line
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Slot => format!(
+                        "jet_list_remove_slot(&mut ({}), {}, {:?}, {})",
+                        recv,
+                        a(0),
+                        cx.file,
+                        line
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Dynamic => format!(
+                        "match ({}) {{ JetRemoveBy::Val => jet_list_remove_value(&mut ({}), {}, {:?}, {}), JetRemoveBy::Slot => jet_list_remove_slot(&mut ({}), {}, {:?}, {}) }}",
+                        a(1), recv, a(0), cx.file, line, recv, a(0), cx.file, line
+                    ),
+                },
+                TBuiltinOp::CountList => {
+                    format!("jet_list_count(&({}), &({}))", recv, a(0))
+                }
+                TBuiltinOp::ExtendList => {
+                    format!("({}).extend(({}).clone())", recv, a(0))
+                }
+                TBuiltinOp::ConcatList => {
+                    format!("jet_list_concat(&({}), &({}))", recv, a(0))
+                }
                 TBuiltinOp::GetMap => format!("({}).get(&({}).clone()).cloned()", recv, a(0)),
                 TBuiltinOp::GetList => format!("({}).get({} as usize).cloned()", recv, a(0)),
                 TBuiltinOp::First => format!("({}).first().cloned()", recv),
@@ -1180,12 +1246,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::TrimView => format!("jet_unicode_trim_view(&({}))", recv),
                 TBuiltinOp::AfterView => format!("jet_string_after_view(&({}), &{})", recv, a(0)),
                 TBuiltinOp::BeforeView => format!("jet_string_before_view(&({}), &{})", recv, a(0)),
-                TBuiltinOp::Keys => {
-                    format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
-                }
-                TBuiltinOp::Values => {
-                    format!("({}).values().cloned().collect::<Vec<_>>()", recv)
-                }
+                TBuiltinOp::Keys => format!("jet_map_keys(&({}))", recv),
+                TBuiltinOp::Values => format!("jet_map_values(&({}))", recv),
                 TBuiltinOp::ContainsKey => format!("({}).contains_key(&{})", recv, a(0)),
                 TBuiltinOp::ToString => format!("({}).jet_show()", recv),
                 // D-REGEXENGINE1=A: `Match.group(n)` on the std-only match value.
@@ -1438,20 +1500,152 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     // D-LOOPMAP1=B: enter the lazy pipeline plane.
                     format!("jet_iter_from_vec(({recv}).clone())")
                 }
-                TBuiltinOp::Zip { tuple_struct } => {
-                    let other_is_iter = args
-                        .first()
-                        .is_some_and(|e| crate::Collections::is_iter_type(&e.ty));
-                    let other = a(0);
-                    let other_iter = if other_is_iter {
-                        format!("({other})")
-                    } else {
-                        format!("jet_iter_from_vec(({other}).clone())")
+                TBuiltinOp::Zip {
+                    tuple_struct,
+                    mode,
+                    fields,
+                    flatten,
+                    input_count,
+                    fill_mode,
+                    field_types,
+                } => {
+                    if *input_count == 0 {
+                        let elem = crate::Collections::iter_elem(&e.ty)
+                            .map(|ty| cx.rust_type(ty))
+                            .unwrap_or_else(|| cx.rust_type(&e.ty));
+                        return format!("jet_iter_empty::<{elem}>()");
+                    }
+                    if *input_count == 1 {
+                        return as_iter;
+                    }
+                    let default_pad = matches!(
+                        (mode, fill_mode),
+                        (
+                            crate::Codegen::TIR::TZipMode::Pad,
+                            crate::Codegen::TIR::TZipFillMode::DefaultNone
+                        )
+                    );
+                    let mut iters = Vec::with_capacity(*input_count);
+                    iters.push(as_iter);
+                    for index in 0..(*input_count - 1) {
+                        let value = a(index);
+                        let is_iter = args
+                            .get(index)
+                            .is_some_and(|expr| crate::Collections::is_iter_type(&expr.ty));
+                        iters.push(if is_iter {
+                            format!("({value})")
+                        } else {
+                            format!("jet_iter_from_vec(({value}).clone())")
+                        });
+                    }
+                    if default_pad {
+                        for iter in &mut iters {
+                            *iter = format!("jet_iter_some({iter})");
+                        }
+                    }
+                    let fill_expr = |index: usize| -> String {
+                        match fill_mode {
+                            crate::Codegen::TIR::TZipFillMode::DefaultNone => "None".to_string(),
+                            crate::Codegen::TIR::TZipFillMode::Common => {
+                                args.get(*input_count - 1)
+                                    .map(|expr| {
+                                        emit_zip_fill_value(
+                                            emit_tir_expr(expr, cx),
+                                            &expr.ty,
+                                            field_types.get(index),
+                                            cx,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "None".to_string())
+                            }
+                            crate::Codegen::TIR::TZipFillMode::Columns => {
+                                let Some(tuple) = args.get(*input_count - 1) else {
+                                    return "()".to_string();
+                                };
+                                let field = fields
+                                    .get(index)
+                                    .map_or_else(|| format!("column_{index}"), |name| name.clone());
+                                let source_ty = match &tuple.ty {
+                                    Type::Tuple(tuple_fields) => tuple_fields
+                                        .iter()
+                                        .find(|(name, _)| name == &field)
+                                        .map(|(_, ty)| ty.as_ref()),
+                                    _ => None,
+                                };
+                                let raw = format!("({}).user_{field}", emit_tir_expr(tuple, cx));
+                                source_ty.map_or_else(
+                                    || format!("({raw}).clone()"),
+                                    |source_ty| {
+                                        emit_zip_fill_value(
+                                            raw.clone(),
+                                            source_ty,
+                                            field_types.get(index),
+                                            cx,
+                                        )
+                                    },
+                                )
+                            }
+                        }
                     };
-                    format!(
-                        "jet_iter_zip({as_iter}, {other_iter}, |x, y| {} {{ user_a: x, user_b: y }})",
-                        tuple_struct
-                    )
+                    let nested_fill = |count: usize| -> String {
+                        let mut value = fill_expr(0);
+                        for index in 1..count {
+                            value = format!("({}, {})", value, fill_expr(index));
+                        }
+                        value
+                    };
+                    let nested_value = |index: usize| -> String {
+                        let mut value = "x".to_string();
+                        let mut remaining = *input_count - 1;
+                        while remaining > 1 {
+                            if index < remaining - 1 {
+                                value.push_str(".0");
+                                remaining -= 1;
+                            } else {
+                                value.push_str(".1");
+                                break;
+                            }
+                        }
+                        value
+                    };
+                    let mut current = iters[0].clone();
+                    for stage in 0..(*input_count - 1) {
+                        let right = &iters[stage + 1];
+                        let last = stage + 1 == *input_count - 1;
+                        let body = if last {
+                            let mut assignments = Vec::with_capacity(*input_count);
+                            for index in 0..*input_count {
+                                let value = if index + 1 == *input_count {
+                                    "y".to_string()
+                                } else if *input_count == 2 && !*flatten {
+                                    if index == 0 { "x".to_string() } else { "y".to_string() }
+                                } else {
+                                    nested_value(index)
+                                };
+                                let field = fields
+                                    .get(index)
+                                    .map_or_else(|| format!("column_{index}"), |name| name.clone());
+                                assignments.push(format!("user_{field}: {value}"));
+                            }
+                            format!("{} {{ {} }}", tuple_struct, assignments.join(", "))
+                        } else {
+                            "(x, y)".to_string()
+                        };
+                        current = match mode {
+                            crate::Codegen::TIR::TZipMode::Short => {
+                                format!("jet_iter_zip({current}, {right}, |x, y| {body})")
+                            }
+                            crate::Codegen::TIR::TZipMode::Strict => {
+                                format!("jet_iter_zip_strict({current}, {right}, |x, y| {body})")
+                            }
+                            crate::Codegen::TIR::TZipMode::Pad => format!(
+                                "jet_iter_zip_pad({current}, {right}, {}, {}, |x, y| {body})",
+                                nested_fill(stage + 1),
+                                fill_expr(stage + 1)
+                            ),
+                        };
+                    }
+                    current
                 }
                 // D-HOLE1: `.zip` on `T?` — Rust's native `Option::zip`, wrapped into
                 // the named-tuple struct (present only when both operands are).
@@ -2083,10 +2277,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // Non-empty `[k: v, …]` becomes IfExpr + IndexAssign inserts.
         TExprKind::MapLit(entries) => {
             if entries.is_empty() {
-                "std::collections::BTreeMap::new()".to_string()
+                "JetMap::new()".to_string()
             } else {
                 // Defensive: should not appear after #779 lowering.
-                let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                let mut s = String::from("{ let mut _m = JetMap::new(); ");
                 for (k, v) in entries {
                     s.push_str(&format!(
                         "_m.insert(({}).clone(), {}); ",

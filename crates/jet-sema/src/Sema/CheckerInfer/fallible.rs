@@ -384,6 +384,7 @@ impl<'a> Checker<'a> {
                     type_args: Vec::new(),
                     args: std::mem::take(args),
                     range_checked: false,
+                    resolved_ret: None,
                 };
                 self.check_panic_call(&mut call);
                 *args = call.args;

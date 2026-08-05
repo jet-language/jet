@@ -385,6 +385,7 @@ impl<'a> Fmt<'a> {
                         .enumerate()
                         .map(|(index, ty)| crate::AST::Param {
                             convention: crate::AST::AccessConvention::Read,
+                            root: false,
                             name: format!("_{index}"),
                             name_span: crate::Diagnostics::Span::new(0, 0),
                             ty: ty.clone(),
@@ -432,6 +433,7 @@ impl<'a> Fmt<'a> {
                     let _ = synthetic;
                 }
             }
+            Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
             Type::Named(n) => self.write(n),
             // D-CAP9: the raw-pointer type renders as the canonical `*T`, never
             // the deprecated `Ptr<T>` alias.

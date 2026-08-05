@@ -89,6 +89,13 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && !c.args.is_empty();
+            // D-ZIPPAD1: free zip-family calls are resolved by sema into the
+            // call's `resolved_ret`; their labels name output columns or the
+            // padding policy rather than ordinary function parameters.
+            let is_zip_family = matches!(c.name.as_str(), "zip" | "zip_short" | "zip_pad")
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.resolved_ret.is_some();
             // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
             // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
             let is_drop = c.name == Syntax::BUILTIN_CONSUME
@@ -231,6 +238,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
             (is_print
+                || is_zip_family
                 || is_drop
                 || is_expect
                 || is_close
@@ -258,7 +266,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     // the Arc form (the FFI boundary takes a `(…).clone()`, not an Arc).
                     // Labels are sema-only (documentation), checked at their own position.
                     (!a.flags.shared_auto_clone || !is_extern)
-                        && arg_conv_in_subset(a)
+                        && (is_zip_family || arg_conv_in_subset(a))
                         && expr_in_subset(&a.expr, cx, locals)
                 })
         }
@@ -866,4 +874,3 @@ pub(crate) fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) 
             .all(|s| stmt_in_subset(s, cx, &mut body_locals)),
     }
 }
-

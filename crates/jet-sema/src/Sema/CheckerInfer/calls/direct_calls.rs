@@ -713,6 +713,14 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
+
+            // D-ZIPPAD1: free zip-family calls are compiler-owned variadic
+            // forms. Keep them ahead of the ordinary unknown-function error;
+            // a user declaration still wins through the shadowing check in
+            // `check_zip_family_free`.
+            if let Some(result) = self.check_zip_family_free(call) {
+                return Some(result);
+            }
     
             let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
                 let mut fix = format!(

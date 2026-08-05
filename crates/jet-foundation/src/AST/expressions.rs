@@ -17,6 +17,9 @@ pub struct Call {
     /// checked constructor as a `Result`, while the ordinary constructor form
     /// still stays infallible and is rejected for runtime values.
     pub range_checked: bool,
+    /// D-ZIPPAD1: sema stores a free zip family's concrete `Iter` row type so
+    /// TIR lowering and tuple-shape collection do not re-infer it.
+    pub resolved_ret: Option<Type>,
 }
 
 #[derive(Debug, Default, Clone)]

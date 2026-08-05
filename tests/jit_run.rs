@@ -21,6 +21,61 @@ use jet::Interpreter::dev_iteration;
 use jet_foundation::JitBackend::RunOutcome;
 
 #[test]
+fn root_receiver_calls_share_the_direct_call_path() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_root_receiver_calls");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("root_calls.jet");
+    fs::write(
+        &file,
+        r#"fn scale(#Root value: Int, factor: Int) => Int {
+    return value * factor
+}
+
+fn add_half(#Root value: Float) => Float {
+    return value + 0.5
+}
+
+fn run() {
+    total :: 3
+    print(total.scale(4))
+    print(scale(total, 4))
+    print(total.add_half())
+    total.print()
+}
+"#,
+    )
+    .unwrap();
+
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "#Root fixture diagnostics: {diagnostics:#?}");
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "#Root fixture must lower to TIR: {}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "#Root fixture must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+
+    let outcome = dev_iteration(file.to_str().unwrap(), false, false);
+    let stdout = match outcome {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("#Root fixture failed: {diags:?}"),
+    };
+    assert_eq!(stdout, "12\n12\n3.5\n3\n");
+    assert!(jet_jit::jit_executed_for_test(), "#Root fixture must execute in resident JIT");
+    assert!(!jet_jit::fallback_invoked_for_test(), "#Root fixture must not fall back to the interpreter");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn bounded_workers_example_has_total_tir() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/concurrency/bounded_workers.jet");

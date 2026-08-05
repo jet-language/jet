@@ -337,6 +337,21 @@ impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, 
         )
     }
 }
+impl<K: Ord + JetShow, V: JetShow> JetShow for JetMap<K, V> {
+    fn jet_show(&self) -> String {
+        jet_debug_map(self.iter().map(|(key, value)| (key.jet_show(), value.jet_show())))
+    }
+}
+impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for JetMap<K, V> {
+    fn jet_display(&self) -> String {
+        jet_debug_map(self.iter().map(|(key, value)| (key.jet_display(), value.jet_display())))
+    }
+}
+impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
+    fn jet_debug(&self) -> String {
+        jet_debug_map(self.iter().map(|(key, value)| (key.jet_debug(), value.jet_debug())))
+    }
+}
 impl<T: JetShow> JetShow for Option<T> {
     fn jet_show(&self) -> String {
         match self {

@@ -1720,7 +1720,7 @@ impl<'a> Interp<'a> {
 
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
-            "push", "pop", "insert", "add", "add_new", "remove", "clear", "reverse", "sort",
+            "push", "pop", "insert", "add", "add_new", "remove", "extend", "clear", "reverse", "sort",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
             let mut container = match evaluated_receiver.take() {
@@ -1741,11 +1741,16 @@ impl<'a> Interp<'a> {
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
                 }
+                let arg_labels = args
+                    .iter()
+                    .map(|a| a.label.as_ref().map(|(name, _)| name.clone()))
+                    .collect::<Vec<_>>();
                 if let Some(result) = sequence_parity::eval_sequence_method(
                     self,
                     &container,
                     method,
                     &argv,
+                    &arg_labels,
                     sequence_result_ty.as_ref(),
                     span,
                     scope,
@@ -1965,6 +1970,10 @@ impl<'a> Interp<'a> {
         for a in args {
             argv.push(self.eval(&a.expr, scope)?);
         }
+        let arg_labels = args
+            .iter()
+            .map(|a| a.label.as_ref().map(|(name, _)| name.clone()))
+            .collect::<Vec<_>>();
         match (&recv, method) {
             (
                 CtValue::Struct { type_name, fields },
@@ -2041,6 +2050,7 @@ impl<'a> Interp<'a> {
             &recv,
             method,
             &argv,
+            &arg_labels,
             sequence_result_ty.as_ref(),
             span,
             scope,

@@ -535,7 +535,25 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.io", "progress") => {
-            format!("{}(&({}))", helper("jet_std_io_progress"), arg(0))
+            if matches!(args.first().map(|a| &a.ty), Some(Type::String)) {
+                format!("{}(&({}))", helper("jet_std_io_progress"), arg(0))
+            } else {
+                let description = args
+                    .get(1)
+                    .map(|_| format!("&({})", arg(1)))
+                    .unwrap_or_else(|| "&\"Progress\".to_string()".to_string());
+                let format = args
+                    .get(2)
+                    .map(|_| format!("&({})", arg(2)))
+                    .unwrap_or_else(|| "&String::new()".to_string());
+                let helper_name = match args.first().map(|a| &a.ty) {
+                    Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER => {
+                        "jet_std_io_progress_iter"
+                    }
+                    _ => "jet_std_io_progress_list",
+                };
+                format!("{}({}, {}, {})", helper(helper_name), arg(0), description, format)
+            }
         }
         ("core.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
         ("core.env", "set") => format!(

@@ -4,7 +4,7 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> b
     matches!(
         ty,
         Type::Result { ok, err }
-            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
+            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
                     if n == Syntax::TYPE_ERROR
                         || (n == "CryptoError"
@@ -239,15 +239,15 @@ fn resolve_output_callable(
         _ => false,
     };
     let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
-        matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID)
+        matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
             || is_fallible_void_entry_return(ty, &states[target])
     });
     if !params_ok || !return_ok {
         diags.extend(contract_diags);
         let contract = if kind == crate::AST::OutputKind::Executable {
-            "an Executable takes zero or one typed CLI parameter and returns `Void` or `Void ?`"
+            "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
         } else {
-            "a Service or Check takes no parameters and returns `Void` or `Void ?`"
+            "a Service or Check takes no parameters and returns `()` or `() ?`"
         };
         diags.push(output_error(
             format!("Output entry `{source_name}` has the wrong callable contract"),

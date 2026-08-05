@@ -15,6 +15,31 @@ fn fixed_interpolation_selector_is_stable() {
 }
 
 #[test]
+fn fmt_preserves_root_receiver_declarations() {
+    let src = "fn show(#Root value: Int) { print(value) }\n";
+    let once = jet::format_source(src).expect("#Root declaration should format");
+    assert!(
+        once.contains("fn show(#Root value: Int)"),
+        "formatter dropped the #Root marker:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted #Root declaration should re-format");
+    assert_eq!(once, twice, "#Root formatting must be stable");
+}
+
+#[test]
+fn fmt_canonicalizes_unit_return_types() {
+    let src = "fn run() => () ? { return Err(\"boom\") }\n";
+    let once = jet::format_source(src).expect("unit return type should format");
+    assert!(once.contains("fn run() => () ?"), "formatter lost `()`:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted unit return should re-format");
+    assert_eq!(once, twice, "unit return formatting must be idempotent");
+    assert!(
+        jet::format_source("fn run() => Void ? { return Err(\"boom\") }\n").is_err(),
+        "retired Void must not be accepted by the formatter"
+    );
+}
+
+#[test]
 fn fmt_parallel_collection_adapters_are_stable() {
     let src = r#"fn run() {
     values := [1, 2, 3, 4]

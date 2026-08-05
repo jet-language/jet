@@ -179,7 +179,12 @@ pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_ERROR: &str = "Error";
-pub const TYPE_VOID: &str = "Void";
+/// D-VOID1: the public no-information result spelling is `()`.
+pub const TYPE_UNIT: &str = "()";
+/// Compiler-only name carried by the existing zero-sized runtime value.
+pub const INTERNAL_UNIT_TYPE: &str = "Unit";
+/// Retired source spelling. The parser reports the migration diagnostic.
+pub const RETIRED_TYPE_VOID: &str = "Void";
 
 /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert terminal-session
 /// controls stay on the one `ProcessSpec` / `ProcessChild` model.

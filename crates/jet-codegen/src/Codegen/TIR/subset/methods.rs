@@ -57,6 +57,20 @@ pub(crate) fn method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    // D-CALLDUAL1=E: sema has already resolved a receiver-first `#Root` call
+    // to one ordinary function, import, or Core print target. Keep this gate
+    // structural; the target's signature and capabilities were checked in
+    // sema, and lowering preserves them on the ordinary call node.
+    if recv_type.as_deref().is_some_and(|name| {
+        name == Syntax::INTERNAL_ROOT_CALL_LOCAL
+            || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
+            || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+    }) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
     // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves a method on a bounded
     // type parameter to the synthetic Reader/Writer/Driver contract and records
     // that type parameter in `recv_type`. Rust emits the real trait-bound call.
@@ -473,7 +487,9 @@ pub(crate) fn method_call_in_subset(
     // `recv_type`) to claim builtins first.
     if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
         // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
-        let labels_ok = if method == "merge" && args.len() == 2 {
+        let labels_ok = if matches!(method, "zip" | "zip_short" | "zip_pad") {
+            true
+        } else if method == "merge" && args.len() == 2 {
             args[0].label.is_none()
                 && matches!(
                     args[1].label.as_ref().map(|(n, _)| n.as_str()),
@@ -1392,7 +1408,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "sort_by" | "reduce"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
-        | "indexed" | "indexes" | "zip"
+        | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
         | "para_map" | "para_filter" | "para_partition" | "para_fold"

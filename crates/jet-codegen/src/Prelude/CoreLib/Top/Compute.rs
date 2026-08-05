@@ -1184,28 +1184,50 @@ fn jet_compute_binary(
     jet_compute_validate_tensor(a)?;
     jet_compute_validate_tensor(b)?;
     let shape = jet_compute_broadcast_shape(&a.shape, &b.shape)?;
-    let left = if a.shape == shape {
-        a.clone()
-    } else {
-        jet_compute_materialize_broadcast(a, &shape)?
-    };
-    let right = if b.shape == shape {
-        b.clone()
-    } else {
-        jet_compute_materialize_broadcast(b, &shape)?
-    };
     if !matches!(op, "sub" | "div" | "maximum" | "minimum" | "add" | "mul") {
         return Err(JetComputeError::Unsupported(format!(
             "unsupported binary compute operation `{op}`"
         )));
     }
+    // D-COMPUTE-FUSE1: broadcast indexing and the elementwise operation are
+    // one eager Prelude loop. Do not materialize either broadcast operand;
+    // this is the shared fusion path for AOT, comptime, and dev evaluation.
     let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
-    let left_values = jet_compute_tensor_values(&left);
-    let right_values = jet_compute_tensor_values(&right);
-    let mut data = Vec::with_capacity(left_values.len());
-    for (x, y) in left_values.iter().zip(right_values.iter()) {
-        let x = *x;
-        let y = *y;
+    let n = jet_compute_storage_len(&shape)?;
+    let mut data = Vec::with_capacity(n);
+    let rank = shape.len();
+    let left_rank_delta = rank - a.shape.len();
+    let right_rank_delta = rank - b.shape.len();
+    for flat in 0..n {
+        let mut rem = i64::try_from(flat).map_err(|_| {
+            JetComputeError::InvalidShape("broadcast index is too large".to_string())
+        })?;
+        let mut output_coords = vec![0i64; rank];
+        for axis in (0..rank).rev() {
+            let dim = shape[axis];
+            output_coords[axis] = if dim == 0 { 0 } else { rem % dim };
+            rem = if dim == 0 { 0 } else { rem / dim };
+        }
+        let left_coords = (0..a.shape.len())
+            .map(|axis| {
+                if a.shape[axis] == 1 {
+                    0
+                } else {
+                    output_coords[left_rank_delta + axis]
+                }
+            })
+            .collect::<Vec<_>>();
+        let right_coords = (0..b.shape.len())
+            .map(|axis| {
+                if b.shape[axis] == 1 {
+                    0
+                } else {
+                    output_coords[right_rank_delta + axis]
+                }
+            })
+            .collect::<Vec<_>>();
+        let x = jet_compute_get(a, &left_coords)?;
+        let y = jet_compute_get(b, &right_coords)?;
         if op == "div" && y == 0.0 {
             return Err(JetComputeError::Arithmetic(
                 "division by zero in compute operation".to_string(),

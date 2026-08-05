@@ -1317,7 +1317,10 @@ fn emit_tir_stmt(
                         // D-STREAMYIELD1: a `Stream<T>` (`Receiver<T>`) iterates BY
                         // VALUE directly — it already yields owned `T`, no `.iter()`.
                         let iter_form = if *by_value {
-                            format!("({})", collection_str)
+                            // A stride is an Iterator method. `for` can apply
+                            // IntoIterator implicitly, but a method chain cannot
+                            // call `step_by` directly on the JetIter wrapper.
+                            format!("({}).into_iter()", collection_str)
                         } else if *columnar {
                             format!("({}).iter_aos()", collection_str)
                         } else if matches!(

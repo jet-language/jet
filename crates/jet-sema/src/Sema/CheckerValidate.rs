@@ -270,6 +270,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         // call site, matching the ratified spelling) and hands back an
         // owned copy on success (`return Ok(copy value)`).
         convention: AccessConvention::Read,
+        root: false,
         name: VALUE_VAR.to_string(),
         name_span: span,
         ty: Type::Named(s.name.clone()),

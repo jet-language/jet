@@ -25,6 +25,7 @@ impl<'a> Parser<'a> {
                 type_args,
                 args,
                 range_checked: false,
+                resolved_ret: None,
             })
         }
     

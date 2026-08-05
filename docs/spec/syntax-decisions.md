@@ -132,11 +132,18 @@ fn load(path: String) =[FS]=> String {
 ```
 
 A returned block uses its final value. `return` remains the explicit early-exit
-form. A Void callable with no explicit effect ceiling needs no arrow.
+form. A unit-returning callable with no explicit effect ceiling needs no arrow.
 `->` is not a general operator.
 
+**D-VOID1=A — one no-information result spelling** *(ratified 2026-08-04,
+card #1411)*: user-facing no-information results use `()`. The compiler keeps
+the internal `Unit` value, but `Void` is retired and produces E0431 with a fix
+to `()`. This decision does not add or change tuple syntax. D-NEVER1=C keeps
+non-returning paths as a compiler-only bottom fact; Jet has no public `Never`
+type.
+
 **S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
-`fn run() => Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() => () ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/`#Doc("...")` markers, bracket form matching `#Codable`); an
@@ -185,6 +192,16 @@ directly imported module.
 type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
+
+**D-CALLDUAL1=E — marked receiver for reversible calls** *(ratified
+2026-08-03, card #1401)*: a top-level free function may mark its first
+bare-read parameter with `#Root`. The function then accepts both `f(value, …)`
+and `value.f(…)`. Dot-call lookup is limited to functions visible through the
+current module's imports; it is never a global search. A real method with the
+same name is an error, and more than one matching imported function is an
+ambiguity error. Resolution never uses the return type. `#Root` is not valid on
+a write or move parameter, on a later parameter, or on a method. Formatting
+preserves the declaration and never rewrites either call spelling.
 
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.
@@ -296,7 +313,7 @@ Commas separate loop header clauses. Semicolons remain statement boundaries only
 is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range step rule.
 
 A finite source loop may use `-> expression` or `-> { ... }`.
-Each accepted iteration yields one non-Void item. The result is an eager
+Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items. Multiple source
 clauses nest left to right and yield one flat List. An inner yielding loop
 preserves nesting. `next` omits the current item. Maps, Sets, and lazy
@@ -373,7 +390,7 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
 - Value form marks each selected value: `m :: if a > b -> a else -> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
-  expression position and yields `Void` or one unified value type (D-IFDIST1).
+  expression position and yields `()` or one unified value type (D-IFDIST1).
 - **Dispatch form** — a comparison between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed). Any of `== != < > <= >=`
   distributes over bare arm atoms (D-IFDIST1=A):
@@ -400,19 +417,19 @@ tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
 D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
 are allowed. Exhaustive pattern arms may omit `else`.
 
-**D-IFDIST1=A — distributed compare markers + Void-or-value tables** *(ratified
+**D-IFDIST1=A — distributed compare markers + ()-or-value tables** *(ratified
 2026-07-28, card #1305)*: amends D-IF3 / D-MATCHARM2 / S68. The dispatch marker
 is any comparison operator. Each bare atom desugars to `subject OP atom`; `|`
 is OR of those atoms (including for `!=`); `&&`/`||` combine further Bool
 heads. Pattern heads remain `==`-only. Statement and expression position share
-one table spelling; expression tables unify arm values or yield `Void`.
+one table spelling; expression tables unify arm values or yield `()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1)*: `if cond statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary
 would be ambiguous. The subjectless spelling is the same ordered arm-table
 model without a named subject, not a separate or lesser branching mechanism.
-It keeps `->` because each arrow selects one arm, including a Void arm. Each
+It keeps `->` because each arrow selects one arm, including an arm yielding `()`. Each
 head is an arbitrary `Bool` expression evaluated in order; the first true head
 wins. A value table requires a final `else` and all result types unify. A
 pattern binding under `&&` reaches the rest of that head and its body;
@@ -934,6 +951,17 @@ driving a consumed `Iter` twice is use-after-move (E0121).
 `indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `(idx: Int, item: T)`;
 there is no public `enumerate` adapter.
 
+**D-ZIPPAD1 (ratified on card #1400):** the zip family is one lazy iterator
+mechanism. Free calls and methods accept any number of sequence inputs and
+preserve every input type in named row fields. `zip` is strict and reports
+E0128 when lengths differ; `zip_short` stops at the shortest input; and
+`zip_pad` continues to the longest input. Zero free inputs produce an empty
+`Iter<Unit>` and one input is the identity sequence. Free row labels are
+preserved; methods use `a`, `b`, `c`, and so on. `zip_pad` without a fill uses
+`None` for each missing value, `fill: value` supplies one typed value for every
+column, and `fills: (field: value, ...)` supplies typed per-column values.
+Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
+
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
@@ -1041,7 +1069,7 @@ Rust `Result` (not surface syntax).
 
 **S80 — Error carrier & fallible `run`** *(D-ERR2, D-S80-RUN1)*: default `Error` carries
 message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn run() => Void ?` allowed;
+`Error.code(n)`, `Error.with_source(e)`). `fn run() => () ?` allowed;
 returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
 conversion is opt-in via the `Fallible` trait (`fn to_error(self) => Error`);
 prelude types implement it, unrelated enums never convert silently.
@@ -2637,6 +2665,10 @@ index, not a substitute for that law.
   Implemented Epoch 3 stream surface: `io.stdout()` / `io.stderr()` handles with
   `.write`, `.write_line`, `.write_bytes`, `.flush`, `.is_tty`,
   `io.terminal_width/height`, `io.style`, `io.style_force`, and `io.progress`;
+  `io.progress(source[, description[, format]])` wraps `List<T>` or `Iter<T>` and
+  reports percent, count, elapsed time, remaining estimate, and rate. TTY output
+  redraws one line; non-TTY output appends one line per update. `NO_COLOR` removes
+  ANSI sequences from custom formats.
   D-TERM1's `core.term` remains the direct raw-key bridge.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
@@ -2651,8 +2683,8 @@ index, not a substitute for that law.
   and `env_remove`, then passes raw entries to the OS. Jet mutations never
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
-  any non-Unicode entry. Existing editions keep `set => Void` and report
-  invalid input through E3001; its fallible `Void ? EnvError` signature waits
+  any non-Unicode entry. Existing editions keep `set => ()` and report
+  invalid input through E3001; its fallible `() ? EnvError` signature waits
   for a major release plus edition opt-in.
 - **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
   `core.process` mechanism. `ProcessSpec.terminal()` is an explicit opt-in;
@@ -3103,6 +3135,14 @@ alias, or priority rule.
 **D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
 
 **D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: ((K, V, V) => V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
+
+**D-LISTREMOVE1=F — value-first list removal** *(ratified by owner, card #1410)*:
+`List.remove(value)` removes the first equal item and returns `T?`; explicit
+`.Val` spells the same behavior. `List.remove(index, .Slot)` removes by
+position and retains the existing bounds diagnostic. The old one-argument index
+meaning is retired, and every in-repo caller uses `.Slot` where positional
+removal is intended. `RemoveBy.{Val, Slot}` is the closed selector type; no
+parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
 **D-FIELDDEF1=C — field defaults use `=`** *(ratified 2026-07-31, card #1367)*: `field: T = expr` covers wire/CLI absence and omitted `Type.{ … }` construction fields (same spelling as parameter defaults, S61). `#Default(expr)` is retired (E0375); defaults must be compile-time constants (E2414). Required fields are those without `=`.
 
@@ -5414,6 +5454,11 @@ reference cycle are rejected at sema (E0221). Expert intentional cycles use
 `.strong_count()` — and free when strong roots drop. One Shared mechanism (I8);
 full I9; no follow-on card. Flagship: `examples/features/memory/shared_weak_cycle.jet`.
 Card #1372.
+
+**2026-08-04 — D-ZIPPAD1:** `zip`, `zip_short`, and `zip_pad` share one
+variadic lazy sequence family with strict, shortest, and longest-length
+policies. Padding supports default `None`, one common `fill:`, or named
+per-column `fills:`. Implemented end to end on card #1400.
 
 **2026-07-26 — D-PIN1=A / D-PIN2=A / D-PIN3=A**: `mem.pin(&place) -> Pin<T>` is
 the reusable address-stability contract. `Pin<T>` is a tracked write window on

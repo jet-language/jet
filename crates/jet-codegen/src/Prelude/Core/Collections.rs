@@ -244,12 +244,12 @@ fn jet_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> {
     }
     out
 }
-fn jet_list_count_by<T, K: Ord, F, I>(xs: I, mut f: F) -> std::collections::BTreeMap<K, i64>
+fn jet_list_count_by<T, K: Ord + Clone, F, I>(xs: I, mut f: F) -> JetMap<K, i64>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    let mut m: std::collections::BTreeMap<K, i64> = std::collections::BTreeMap::new();
+    let mut m: JetMap<K, i64> = JetMap::new();
     for x in xs {
         let k = f(&x);
         *m.entry(k).or_insert(0) += 1;
@@ -669,6 +669,49 @@ where
 {
     JetIter(Box::new(a.0.zip(b.0).map(move |(x, y)| f(x, y))))
 }
+fn jet_iter_empty<T: 'static>() -> JetIter<T> {
+    JetIter(Box::new(std::iter::empty()))
+}
+fn jet_iter_some<T: 'static>(it: JetIter<T>) -> JetIter<Option<T>> {
+    JetIter(Box::new(it.0.map(Some)))
+}
+fn jet_iter_zip_strict<A: 'static, B: 'static, O: 'static, F: 'static>(
+    mut a: JetIter<A>,
+    mut b: JetIter<B>,
+    mut f: F,
+) -> JetIter<O>
+where
+    F: FnMut(A, B) -> O,
+{
+    JetIter(Box::new(std::iter::from_fn(move || {
+        match (a.0.next(), b.0.next()) {
+            (Some(x), Some(y)) => Some(f(x, y)),
+            (None, None) => None,
+            (None, Some(_)) | (Some(_), None) => {
+                jet_panic("<core.collections>", 0, "zip length mismatch")
+            }
+        }
+    })))
+}
+fn jet_iter_zip_pad<A: 'static + Clone, B: 'static + Clone, O: 'static, F: 'static>(
+    mut a: JetIter<A>,
+    mut b: JetIter<B>,
+    fill_a: A,
+    fill_b: B,
+    mut f: F,
+) -> JetIter<O>
+where
+    F: FnMut(A, B) -> O,
+{
+    JetIter(Box::new(std::iter::from_fn(move || {
+        match (a.0.next(), b.0.next()) {
+            (Some(x), Some(y)) => Some(f(x, y)),
+            (Some(x), None) => Some(f(x, fill_b.clone())),
+            (None, Some(y)) => Some(f(fill_a.clone(), y)),
+            (None, None) => None,
+        }
+    })))
+}
 
 // List-shaped helpers kept for non-Iter call sites / terminals that still
 // materialize; adapters above are the lazy path.
@@ -774,12 +817,12 @@ where
 {
     xs.into_iter().max_by_key(f)
 }
-fn jet_list_group_by<T, K: Ord, F, I>(xs: I, mut f: F) -> std::collections::BTreeMap<K, Vec<T>>
+fn jet_list_group_by<T: Clone, K: Ord + Clone, F, I>(xs: I, mut f: F) -> JetMap<K, Vec<T>>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    let mut m: std::collections::BTreeMap<K, Vec<T>> = std::collections::BTreeMap::new();
+    let mut m: JetMap<K, Vec<T>> = JetMap::new();
     for x in xs {
         let k = f(&x);
         m.entry(k).or_default().push(x);

@@ -152,6 +152,11 @@ pub(crate) struct Cx {
     pub(crate) computed_fields: HashMap<String, HashSet<String>>,
     pub(crate) src: String,
     pub(crate) file: String,
+    /// Rust module alias for this loaded source file, when it is emitted as a
+    /// file module.  TIR uses this only to keep the source package's internal
+    /// ABI calls distinct from calls into the package's public surface.
+    pub(crate) module_alias: String,
+    pub(crate) core_archive_source: bool,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     pub(crate) test_mode: bool,
     /// D-COV1: `jet test --coverage`. When true, every emitted user function head
@@ -290,7 +295,7 @@ pub(crate) struct Cx {
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, JetMap, JetRemoveBy, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_map_keys, jet_map_values, jet_list_remove_value, jet_list_remove_slot, jet_list_count, jet_list_concat, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_empty, jet_iter_some, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip, jet_iter_zip_strict, jet_iter_zip_pad};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -1055,7 +1060,8 @@ impl Cx {
                     format!("Vec<{}>", render(cx, inner, base))
                 }
                 Type::Map { key, value, .. } if cx.type_contains_view(ty) => format!(
-                    "std::collections::BTreeMap<{}, {}>",
+                    "{}JetMap<{}, {}>",
+                    cx.root_prefix,
                     render(cx, key, base),
                     render(cx, value, base)
                 ),
@@ -1261,7 +1267,8 @@ impl Cx {
             }
             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
             Type::Map { key, value, .. } => format!(
-                "std::collections::BTreeMap<{}, {}>",
+                "{}JetMap<{}, {}>",
+                self.root_prefix,
                 self.rust_type(key),
                 self.rust_type(value)
             ),
@@ -1290,9 +1297,14 @@ impl Cx {
                 name.clone()
             }
             Type::Named(name)
-                if (name == "Unit" || name == "Void") && !self.type_names.contains(name) =>
+                if (name == "Unit") && !self.type_names.contains(name) =>
             {
                 "()".to_string()
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_REMOVE_BY && !self.type_names.contains(name) =>
+            {
+                format!("{}JetRemoveBy", self.root_prefix)
             }
             // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
             // internal collector. The surface remains second-class.
@@ -1597,7 +1609,9 @@ impl Cx {
                 )
             }
             Type::Apply { name, args }
-                if name == "Tensor" && args.len() <= 1 && compute_handle_rust_type(name).is_some() =>
+                if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")
+                    && (name != "Tensor" || args.len() <= 1)
+                    && compute_handle_rust_type("Tensor").is_some() =>
             {
                 format!("{}JetTensor", self.root_prefix)
             }
@@ -2454,6 +2468,11 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         reexport_call_map, unqualified_import_maps,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
+    cx.module_alias = bundle.modules[module_idx].alias.clone();
+    cx.core_archive_source = bundle
+        .modules
+        .iter()
+        .any(|module| module.alias == "core_archive");
     cx.foreign_types = foreign_type_map(bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     cx.import_sigs = import_sig_map(bundle, module_idx);
@@ -2770,6 +2789,8 @@ pub(crate) fn build_cx_items(
         computed_fields: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
+        module_alias: String::new(),
+        core_archive_source: false,
         test_mode: false,
         coverage: false,
         debug_linemap: false,
@@ -3035,6 +3056,18 @@ pub(crate) fn build_cx_items(
             .insert(name.to_string(), Syntax::TYPE_ORDERING.to_string());
     }
     cx.cloneable.insert(Syntax::TYPE_ORDERING.to_string());
+    cx.enum_variants.insert(
+        Syntax::TYPE_REMOVE_BY.to_string(),
+        ["Val", "Slot"]
+            .into_iter()
+            .map(|name| (name.to_string(), VariantPayload::Unit))
+            .collect(),
+    );
+    for name in ["Val", "Slot"] {
+        cx.variant_owner
+            .insert(name.to_string(), Syntax::TYPE_REMOVE_BY.to_string());
+    }
+    cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
 
     for item in items {
         match item {

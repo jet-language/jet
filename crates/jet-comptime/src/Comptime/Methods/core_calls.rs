@@ -13,6 +13,10 @@ use super::repl_process::run_repl_process;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
+mod progress_semantics {
+    include!("../../../../jet-codegen/src/Prelude/Core/Progress.rs");
+}
+
 pub(in super::super) fn apply_core_pure_method(
     recv: &CtValue,
     method: &str,
@@ -2623,6 +2627,66 @@ pub fn apply_impure_core_call(
             let argv = super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
+        }
+        ("core.io", "progress") => {
+            let Some(source) = args.first() else {
+                return Err(unsupported("`core.io.progress` needs a source", span));
+            };
+            if let CtValue::Str(text) = source {
+                if args.len() != 1 {
+                    return Err(unsupported(
+                        "`core.io.progress` text form takes one argument",
+                        span,
+                    ));
+                }
+                if let Some(sink) = sink {
+                    sink.stdout.push_str(text);
+                    sink.stdout.push('\n');
+                }
+                return Ok(CtValue::Unit);
+            }
+            let CtValue::List(items) = source else {
+                return Err(unsupported(
+                    "`core.io.progress` expects a List or Iter source",
+                    span,
+                ));
+            };
+            let description = args
+                .get(1)
+                .map(|value| as_string(value, span))
+                .transpose()?
+                .unwrap_or("Progress")
+                .to_string();
+            let format = args
+                .get(2)
+                .map(|value| as_string(value, span))
+                .transpose()?
+                .unwrap_or("")
+                .to_string();
+            // Keep the adapter lazy in the TIR interpreter.  The loop evaluator
+            // unwraps this erased carrier and renders one update per pulled
+            // item.  Rendering here would report progress before the caller
+            // consumes anything and would diverge from AOT/JIT.
+            let started_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs_f64())
+                .unwrap_or(0.0);
+            Ok(CtValue::Struct {
+                type_name: "__JetProgressIter".to_string(),
+                fields: vec![
+                    ("items".to_string(), CtValue::List(items.clone())),
+                    ("description".to_string(), CtValue::Str(description)),
+                    ("format".to_string(), CtValue::Str(format)),
+                    ("started_at".to_string(), CtValue::Float(crate::AST::CtFloat::f64(started_at))),
+                    (
+                        "pulls".to_string(),
+                        CtValue::List(vec![CtValue::Int(1); items.len()]),
+                    ),
+                    ("tail".to_string(), CtValue::Int(0)),
+                    ("total".to_string(), CtValue::Int(items.len() as i64)),
+                    ("known_total".to_string(), CtValue::Bool(true)),
+                ],
+            })
         }
         // D-VERDICT-1321-1: variadic — each argument renders on its own line.
         ("core.io", "print") => {

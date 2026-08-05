@@ -1392,8 +1392,8 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Canonical vendored `core.archive` implementation, compiled both by
-/// `CoreProvider` and by the hidden bridge. Keeping one source prevents the
+/// Dependency-free `core.archive` ABI kernel used by the source package's
+/// internal boundary and the hidden bridge. Keeping one kernel prevents the
 /// offline ring package and direct `jet run` path from drifting apart.
 const ARCHIVE_SOURCE: &str =
     include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");

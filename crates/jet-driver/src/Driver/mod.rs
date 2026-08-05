@@ -3724,6 +3724,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         type_args: Vec::new(),
         args,
         range_checked: false,
+        resolved_ret: None,
     });
     let body = if target.return_type.is_some() {
         vec![Stmt::Return(Some(call), zero)]

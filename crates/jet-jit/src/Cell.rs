@@ -70,7 +70,7 @@ impl CellSchema {
 
     pub(crate) fn from_type(ty: &Type, meta: &JitMeta<'_>) -> Result<Self, String> {
         match ty {
-            Type::Named(name) if matches!(name.as_str(), "Unit" | "Void") => {
+            Type::Named(name) if name == "Unit" => {
                 Ok(Self::Unit)
             }
             Type::Int | Type::IntN { .. } => Ok(Self::Int),

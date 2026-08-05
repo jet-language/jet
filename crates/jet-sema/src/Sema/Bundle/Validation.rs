@@ -1905,6 +1905,7 @@ pub(crate) fn check_module_bodies(
                         ty: Type::Named(String::new()),
                         ty_span: ec.from_span,
                         convention: AccessConvention::Move,
+                        root: false,
                         default: None,
                         variadic: false,
                         variadic_bound_list: None, declared_view_from_names: None,

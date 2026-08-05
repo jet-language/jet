@@ -1169,6 +1169,9 @@ impl EveryArg {
 #[derive(Debug, Clone)]
 pub struct Param {
     pub convention: AccessConvention,
+    /// D-CALLDUAL1=E: `#Root` marks the first bare-read parameter that earns
+    /// the corresponding dot-call spelling.
+    pub root: bool,
     pub name: String,
     pub name_span: Span,
     pub ty: Type,

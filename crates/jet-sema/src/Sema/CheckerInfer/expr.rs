@@ -86,6 +86,7 @@ impl<'a> Checker<'a> {
             type_args: Vec::new(),
             args,
             range_checked: false,
+            resolved_ret: None,
         });
         Some(Type::Named(type_name))
     }
@@ -150,6 +151,7 @@ impl<'a> Checker<'a> {
                 spread: false,
             }],
             range_checked: false,
+            resolved_ret: None,
         });
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
     }
@@ -2661,10 +2663,11 @@ impl<'a> Checker<'a> {
             // window. Keep the range fact explicit so TIR can select the
             // owned-copy or mutable-view Prelude path; scalar indexing has no
             // one-axis result type and is not part of this surface.
-            Type::Named(name) if name == "Tensor" => {
+            Type::Named(name) if name == "Tensor"
+                || matches!(&base_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
-                    Some(Type::Named(name.clone()))
+                    Some(Type::Named("Tensor".to_string()))
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0505",

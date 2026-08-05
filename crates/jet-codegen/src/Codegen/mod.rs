@@ -56,6 +56,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/TypedText.rs"),
+    include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
@@ -467,9 +468,9 @@ fn push_corelib_prelude(
     used_core: &std::collections::HashSet<String>,
     force: bool,
 ) {
-    // `core.archive` is an explicit ABI bridge, not ordinary-Jet behavior
-    // source. Emit no compiler fragment, so no older template becomes a
-    // fallback implementation.
+    // `core.archive` is emitted as a reachable ordinary-Jet source module. Its
+    // internal ABI calls do not require a compiler prelude fragment, so no old
+    // template can become a fallback implementation.
     if !force && !core_needs_embedded_runtime(used_core) {
         return;
     }
@@ -2824,6 +2825,8 @@ pub fn emit_bundle_dbg(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
         // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
         // can't disambiguate which file N belongs to across modules.
@@ -2856,6 +2859,8 @@ pub fn emit_bundle_dbg(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.debug_linemap = debug_linemap;
     cx.active_os = active_os;
     cx.import_mods = import_mods;
@@ -3007,6 +3012,8 @@ pub fn emit_bundle_tests_cov(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -3036,6 +3043,8 @@ pub fn emit_bundle_tests_cov(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;
@@ -3208,6 +3217,8 @@ pub fn emit_bundle_fuzz(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
@@ -3236,6 +3247,8 @@ pub fn emit_bundle_fuzz(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
@@ -3467,6 +3480,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -3496,6 +3511,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;

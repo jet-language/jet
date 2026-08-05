@@ -572,6 +572,7 @@ const FIELD_SITE: &[RuleSite] = &[RuleSite::Field];
 const FIELD_OR_VARIANT_SITE: &[RuleSite] = &[RuleSite::Field, RuleSite::Variant];
 const CONST_SITE: &[RuleSite] = &[RuleSite::Constant];
 const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
+const PARAMETER_SITE: &[RuleSite] = &[RuleSite::Parameter];
 
 macro_rules! rule {
     ($name:expr, $sig:expr, $sites:expr, $form:ident) => {
@@ -727,6 +728,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test], Block),
     rule!("Bench", sig!(param!("name", String)), &[RuleSite::Bench], Block),
     rule!("Target", sig!(param!("target", Ident => "Target")), &[RuleSite::File, RuleSite::Module, RuleSite::Function], Call),
+    rule!("Root", sig!(), PARAMETER_SITE, Bare),
     rule!("HTML", sig!(param!("path", String)), FILE_SITE, Call),
     rule!("PubFile", sig!(), FILE_SITE, Bare),
     rule!("NoPrelude", sig!(), FILE_SITE, Bare),

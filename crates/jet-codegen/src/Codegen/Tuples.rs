@@ -147,6 +147,9 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             for a in &c.args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
             }
+            if let Some(ty) = &c.resolved_ret {
+                collect_tuple_shapes_from_type(ty, out);
+            }
         }
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }

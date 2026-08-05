@@ -1,0 +1,27 @@
+fn run() {
+    print(zip().to_list().len())
+    print(zip([1, 2, 3]).to_list())
+    print([1, 2, 3].zip([10, 20, 30]).unzip().a)
+    print([1, 2, 3].zip_short([10, 20]).unzip().b)
+    loop row, zip(a: [1, 2], b: ["x", "y"]) {
+        print(row.b)
+    }
+
+    loop row, zip(a: [1, 2], b: [10, 20], c: [100, 200], d: [1000, 2000]) {
+        print(row.d)
+    }
+    loop row, [1, 2, 3].zip_pad([10, 20]) {
+        print(row.b)
+    }
+    left :: [1, 2, 3].take(3)
+    right :: [10, 20].take(2)
+    loop row, left.zip_pad(right) {
+        print(row.b)
+    }
+    loop row, [1, 2, 3].zip_pad([10, 20], fill: 0) {
+        print(row.b)
+    }
+    loop row, zip_pad(a: [1, 2, 3], b: [10, 20], fills: (a: 0, b: 9)) {
+        print(row.b)
+    }
+}

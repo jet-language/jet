@@ -1072,7 +1072,7 @@ fn classify(score: Int) => Grade = if {
     else -> .C
 }
 
-fn notify(ready: Bool) =[Net]=> Void {
+fn notify(ready: Bool) =[Net]=> () {
     if ready send() else skip()
     loop item; items audit(item)
     outer :: loop {
@@ -1090,7 +1090,7 @@ fn notify(ready: Bool) =[Net]=> Void {
         let once = format_source(src).expect("canonical arrow/control syntax formats");
         assert!(once.contains("fn classify(score: Int) => Grade = if {"), "{once}");
         assert!(once.contains("score >= 90 -> .A"), "{once}");
-        assert!(once.contains("fn notify(ready: Bool) =[Net]=> Void"), "{once}");
+        assert!(once.contains("fn notify(ready: Bool) =[Net]=> ()"), "{once}");
         assert!(once.contains("if ready send() else skip()"), "{once}");
         assert!(once.contains("loop item; items audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");

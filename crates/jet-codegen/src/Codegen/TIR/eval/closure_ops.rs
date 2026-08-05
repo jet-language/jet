@@ -6,7 +6,215 @@ use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 
-use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
+use super::{
+    materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
+    progress_iter_value, progress_no_color, progress_now, unsupported, EvalCtx, Flow,
+};
+
+fn progress_parts(
+    value: &CtValue,
+) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetProgressIter" {
+        return None;
+    }
+    let items = fields.iter().find_map(|(name, value)| {
+        (name == "items").then(|| match value {
+            CtValue::List(items) => Some(items.clone()),
+            _ => None,
+        })
+    })??;
+    let description = fields.iter().find_map(|(name, value)| {
+        (name == "description").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let format = fields.iter().find_map(|(name, value)| {
+        (name == "format").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let started_at = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "started_at").then(|| match value {
+                CtValue::Float(value) => Some(value.as_f64()),
+                CtValue::Int(value) => Some(*value as f64),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or_else(progress_now);
+    let pulls = fields
+        .iter()
+        .find(|(name, _)| name == "pulls")
+        .and_then(|(_, value)| match value {
+            CtValue::List(values) => values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Int(value) => Some((*value).max(0) as usize),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        })
+        .unwrap_or_else(|| vec![1; items.len()]);
+    let tail = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "tail").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(0);
+    let total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "total").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(items.len());
+    let known_total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "known_total").then(|| match value {
+                CtValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(true);
+    Some((
+        items,
+        description,
+        format,
+        started_at,
+        pulls,
+        tail,
+        total,
+        known_total,
+    ))
+}
+
+fn progress_value(
+    items: Vec<CtValue>,
+    description: String,
+    format: String,
+    started_at: f64,
+    pulls: Vec<usize>,
+    tail: usize,
+    total: usize,
+    known_total: bool,
+) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetProgressIter".to_string(),
+        fields: vec![
+            ("items".to_string(), CtValue::List(items)),
+            ("description".to_string(), CtValue::Str(description)),
+            ("format".to_string(), CtValue::Str(format)),
+            ("started_at".to_string(), CtValue::Float(crate::AST::CtFloat::f64(started_at))),
+            (
+                "pulls".to_string(),
+                CtValue::List(pulls.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
+            ),
+            ("tail".to_string(), CtValue::Int(tail as i64)),
+            ("total".to_string(), CtValue::Int(total as i64)),
+            ("known_total".to_string(), CtValue::Bool(known_total)),
+        ],
+    }
+}
+
+mod progress_semantics {
+    include!("../../../Prelude/Core/Progress.rs");
+}
+
+fn emit_progress_raw(
+    sink: Option<&std::sync::Arc<std::sync::Mutex<crate::Comptime::DevSink>>>,
+    description: &str,
+    format: &str,
+    started_at: f64,
+    total: usize,
+    known_total: bool,
+    count: &mut usize,
+    raw_pulls: usize,
+) {
+    for _ in 0..raw_pulls {
+        *count = (*count).saturating_add(1);
+        let text = progress_semantics::jet_progress_render(
+            description,
+            format,
+            *count,
+            known_total.then_some(total),
+            progress_elapsed(started_at),
+            progress_no_color(),
+        );
+        progress_emit(sink, &text);
+    }
+}
+
+fn progress_passthrough(
+    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    output_len: usize,
+) -> (Vec<usize>, usize) {
+    let Some((_, _, _, _, pulls, tail, _, _)) = progress else {
+        return (Vec::new(), 0);
+    };
+    (pulls.iter().copied().take(output_len).collect(), *tail)
+}
+
+fn emit_progress_next(
+    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    sink: Option<&std::sync::Arc<std::sync::Mutex<crate::Comptime::DevSink>>>,
+    cursor: &mut usize,
+    count: &mut usize,
+) {
+    let Some((_, description, format, started_at, pulls, _, total, known_total)) = progress else {
+        return;
+    };
+    let raw = pulls.get(*cursor).copied().unwrap_or(1);
+    *cursor = (*cursor).saturating_add(1);
+    emit_progress_raw(
+        sink,
+        description,
+        format,
+        *started_at,
+        *total,
+        *known_total,
+        count,
+        raw,
+    );
+}
+
+fn emit_progress_finish(
+    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    sink: Option<&std::sync::Arc<std::sync::Mutex<crate::Comptime::DevSink>>>,
+    cursor: usize,
+    count: &mut usize,
+) {
+    let Some((_, description, format, started_at, pulls, tail, total, known_total)) = progress else {
+        return;
+    };
+    let raw = pulls[cursor..].iter().sum::<usize>() + *tail;
+    emit_progress_raw(
+        sink,
+        description,
+        format,
+        *started_at,
+        *total,
+        *known_total,
+        count,
+        raw,
+    );
+}
 
 impl<'a> EvalCtx<'a> {
     pub(super) fn eval_closure_method(
@@ -70,6 +278,71 @@ impl<'a> EvalCtx<'a> {
             return Ok(CtValue::ResOk(Box::new(CtValue::Unit)));
         }
         let mut recv_v = self.eval_expr(recv, scope)?;
+        let progress = progress_parts(&recv_v);
+        let iter = progress_iter_parts(&recv_v);
+        if let Some((items, _, _, _, _, _, _, _)) = &progress {
+            recv_v = CtValue::List(items.clone());
+        } else if let Some((items, _)) = &iter {
+            recv_v = CtValue::List(items.clone());
+        }
+        let wrap_list = |items: Vec<CtValue>, pulls: Vec<usize>, tail: usize| match &progress {
+            Some((_, description, format, started_at, _, _, total, known_total)) => {
+                progress_value(
+                    items,
+                    description.clone(),
+                    format.clone(),
+                    *started_at,
+                    pulls,
+                    tail,
+                    *total,
+                    *known_total,
+                )
+            }
+            None => match &iter {
+                Some(_) => progress_iter_value(items, false),
+                None => CtValue::List(items),
+            },
+        };
+        let lazy = matches!(
+            op,
+            TClosureOp::Map
+                | TClosureOp::MapMut
+                | TClosureOp::ViewMap
+                | TClosureOp::Filter
+                | TClosureOp::TakeWhile
+                | TClosureOp::SkipWhile
+                | TClosureOp::FlatMap
+                | TClosureOp::FilterMap
+                | TClosureOp::ParaMap
+                | TClosureOp::ParaFilter
+                | TClosureOp::Scan
+        );
+        let short_circuit = matches!(
+            op,
+            TClosureOp::Find
+                | TClosureOp::Any
+                | TClosureOp::BagAny
+                | TClosureOp::All
+                | TClosureOp::Position
+        );
+        if !lazy && !short_circuit {
+            if let Some((_, description, format, started_at, pulls, tail, total, known_total)) = &progress {
+                if matches!(&recv_v, CtValue::List(_)) {
+                    let raw_pulls = pulls.iter().sum::<usize>() + *tail;
+                    let mut count = 0;
+                    emit_progress_raw(
+                        self.sink.as_ref(),
+                        description,
+                        format,
+                        *started_at,
+                        *total,
+                        *known_total,
+                        &mut count,
+                        raw_pulls,
+                    );
+                }
+            }
+        }
         // ViewMut place-window → inclusive List for read-only map/fold.
         if let CtValue::Struct {
             type_name,
@@ -88,6 +361,8 @@ impl<'a> EvalCtx<'a> {
                 .ok_or_else(|| unsupported("closure method arg", this.span()))?;
             this.apply_callable(f, vec![item], scope)
         };
+        let mut progress_cursor = 0usize;
+        let mut progress_count = 0usize;
         match op {
             TClosureOp::EditDisjoint => unreachable!(),
             TClosureOp::Map | TClosureOp::MapMut | TClosureOp::ViewMap => {
@@ -98,20 +373,30 @@ impl<'a> EvalCtx<'a> {
                 for item in items {
                     out.push(call1(self, item)?);
                 }
-                Ok(CtValue::List(out))
+                let (pulls, tail) = progress_passthrough(&progress, out.len());
+                Ok(wrap_list(out, pulls, tail))
             }
             TClosureOp::Filter => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("filter receiver", self.span()));
                 };
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
                 let mut out = Vec::new();
-                for item in items {
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                for (index, item) in items.into_iter().enumerate() {
+                    pending += source_pulls.get(index).copied().unwrap_or(1);
                     let keep = call1(self, item.clone())?;
                     if as_bool(&keep, self.span())? {
                         out.push(item);
+                        out_pulls.push(pending);
+                        pending = 0;
                     }
                 }
-                Ok(CtValue::List(out))
+                Ok(wrap_list(out, out_pulls, pending + old_tail))
             }
             TClosureOp::Each | TClosureOp::EachMut | TClosureOp::EachRef => {
                 let CtValue::List(items) = recv_v else {
@@ -127,11 +412,23 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("find receiver", self.span()));
                 };
                 for item in items {
+                    emit_progress_next(
+                        &progress,
+                        self.sink.as_ref(),
+                        &mut progress_cursor,
+                        &mut progress_count,
+                    );
                     let keep = call1(self, item.clone())?;
                     if as_bool(&keep, self.span())? {
                         return Ok(CtValue::Some(Box::new(item)));
                     }
                 }
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
                 Ok(CtValue::None(crate::AST::Type::Named("Any".into())))
             }
             TClosureOp::Any | TClosureOp::BagAny => {
@@ -153,10 +450,22 @@ impl<'a> EvalCtx<'a> {
                     }
                 };
                 for item in items {
+                    emit_progress_next(
+                        &progress,
+                        self.sink.as_ref(),
+                        &mut progress_cursor,
+                        &mut progress_count,
+                    );
                     if as_bool(&call1(self, item)?, self.span())? {
                         return Ok(CtValue::Bool(true));
                     }
                 }
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
                 Ok(CtValue::Bool(false))
             }
             TClosureOp::All => {
@@ -164,10 +473,22 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("all receiver", self.span()));
                 };
                 for item in items {
+                    emit_progress_next(
+                        &progress,
+                        self.sink.as_ref(),
+                        &mut progress_cursor,
+                        &mut progress_count,
+                    );
                     if !as_bool(&call1(self, item)?, self.span())? {
                         return Ok(CtValue::Bool(false));
                     }
                 }
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
                 Ok(CtValue::Bool(true))
             }
             TClosureOp::Reduce | TClosureOp::Fold | TClosureOp::ViewFold => {
@@ -214,13 +535,25 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("take_while receiver", self.span()));
                 };
                 let mut out = Vec::new();
-                for item in items {
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                let mut stopped = false;
+                for (index, item) in items.into_iter().enumerate() {
+                    pending += source_pulls.get(index).copied().unwrap_or(1);
                     if !as_bool(&call1(self, item.clone())?, self.span())? {
+                        stopped = true;
                         break;
                     }
                     out.push(item);
+                    out_pulls.push(pending);
+                    pending = 0;
                 }
-                Ok(CtValue::List(out))
+                let tail = if stopped { pending } else { pending + old_tail };
+                Ok(wrap_list(out, out_pulls, tail))
             }
             TClosureOp::SkipWhile => {
                 let CtValue::List(items) = recv_v else {
@@ -228,7 +561,14 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut skipping = true;
                 let mut out = Vec::new();
-                for item in items {
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                for (index, item) in items.into_iter().enumerate() {
+                    pending += source_pulls.get(index).copied().unwrap_or(1);
                     if skipping {
                         if as_bool(&call1(self, item.clone())?, self.span())? {
                             continue;
@@ -236,45 +576,95 @@ impl<'a> EvalCtx<'a> {
                         skipping = false;
                     }
                     out.push(item);
+                    out_pulls.push(pending);
+                    pending = 0;
                 }
-                Ok(CtValue::List(out))
+                Ok(wrap_list(out, out_pulls, pending + old_tail))
             }
             TClosureOp::FlatMap => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("flat_map receiver", self.span()));
                 };
                 let mut out = Vec::new();
-                for item in items {
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                for (index, item) in items.into_iter().enumerate() {
+                    let source_pull = source_pulls.get(index).copied().unwrap_or(1);
                     match call1(self, item)? {
-                        CtValue::List(inner) => out.extend(inner),
-                        other => out.push(other),
+                        CtValue::List(inner) => {
+                            if inner.is_empty() {
+                                pending += source_pull;
+                            } else {
+                                let inner_len = inner.len();
+                                out_pulls.push(pending + source_pull);
+                                pending = 0;
+                                out.extend(inner);
+                                out_pulls.extend(std::iter::repeat(0).take(inner_len - 1));
+                            }
+                        }
+                        other => {
+                            out_pulls.push(pending + source_pull);
+                            pending = 0;
+                            out.push(other);
+                        }
                     }
                 }
-                Ok(CtValue::List(out))
+                Ok(wrap_list(out, out_pulls, pending + old_tail))
             }
             TClosureOp::FilterMap => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("filter_map receiver", self.span()));
                 };
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
                 let mut out = Vec::new();
-                for item in items {
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                for (index, item) in items.into_iter().enumerate() {
+                    pending += source_pulls.get(index).copied().unwrap_or(1);
                     match call1(self, item)? {
-                        CtValue::Some(v) | CtValue::ResOk(v) => out.push(*v),
+                        CtValue::Some(v) | CtValue::ResOk(v) => {
+                            out.push(*v);
+                            out_pulls.push(pending);
+                            pending = 0;
+                        }
                         CtValue::None(_) | CtValue::ResErr(_) => {}
-                        other => out.push(other),
+                        other => {
+                            out.push(other);
+                            out_pulls.push(pending);
+                            pending = 0;
+                        }
                     }
                 }
-                Ok(CtValue::List(out))
+                Ok(wrap_list(out, out_pulls, pending + old_tail))
             }
             TClosureOp::Position => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("position receiver", self.span()));
                 };
                 for (i, item) in items.into_iter().enumerate() {
+                    emit_progress_next(
+                        &progress,
+                        self.sink.as_ref(),
+                        &mut progress_cursor,
+                        &mut progress_count,
+                    );
                     if as_bool(&call1(self, item)?, self.span())? {
                         return Ok(CtValue::Some(Box::new(CtValue::Int(i as i64))));
                     }
                 }
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
                 Ok(CtValue::None(crate::AST::Type::Int))
             }
             TClosureOp::OptionMap => match recv_v {
@@ -290,20 +680,30 @@ impl<'a> EvalCtx<'a> {
                 for item in items {
                     out.push(call1(self, item)?);
                 }
-                Ok(CtValue::List(out))
+                let (pulls, tail) = progress_passthrough(&progress, out.len());
+                Ok(wrap_list(out, pulls, tail))
             }
             TClosureOp::ParaFilter => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("para_filter receiver", self.span()));
                 };
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
                 let mut out = Vec::new();
-                for item in items {
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                for (index, item) in items.into_iter().enumerate() {
+                    pending += source_pulls.get(index).copied().unwrap_or(1);
                     let keep = call1(self, item.clone())?;
                     if as_bool(&keep, self.span())? {
                         out.push(item);
+                        out_pulls.push(pending);
+                        pending = 0;
                     }
                 }
-                Ok(CtValue::List(out))
+                Ok(wrap_list(out, out_pulls, pending + old_tail))
             }
             TClosureOp::ParaFold => {
                 if args.len() < 2 {
@@ -410,7 +810,8 @@ impl<'a> EvalCtx<'a> {
                     acc = self.apply_callable(f, vec![acc, item], scope)?;
                     out.push(acc.clone());
                 }
-                Ok(CtValue::List(out))
+                let (pulls, tail) = progress_passthrough(&progress, out.len());
+                Ok(wrap_list(out, pulls, tail))
             }
             TClosureOp::GroupBy => {
                 let CtValue::List(items) = recv_v else {

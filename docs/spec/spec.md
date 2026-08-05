@@ -138,7 +138,7 @@ expr     = precedence climbing over:
   value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
-  `fn run() => Void ?` for top-level error propagation, or a single typed CLI
+  `fn run() => () ?` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
@@ -178,7 +178,7 @@ keep code readable from top to bottom. See
   matching or true head wins. Chained `else if` remains legal, but there should
   rarely be a reason to prefer it and it is not a canonical teaching form.
   Conventional effect-only branches have no arrow. Arm-table arrows select an
-  arm, including a Void arm. Value branches require `else` unless a closed
+  arm, including an arm yielding `()`. Value branches require `else` unless a closed
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
   conditional, source (`loop x, source [, stride]`), map-pair
@@ -204,7 +204,7 @@ keep code readable from top to bottom. See
   `next()`, `.next()`, and `fn next` are ordinary identifier uses, while a value
   named `next` after `??` needs parentheses: `value ?? (next)`.
 - A finite source or C-style loop may use `-> expression` or `-> { ... }`.
-  Each accepted iteration yields one non-Void value. The result is an eager
+  Each accepted iteration yields one non-unit value. The result is an eager
   List in iteration order. A header guard or `next` omits items. Multiple
   source clauses yield one flat List; an explicitly nested yielding loop
   preserves nesting. Maps and Sets use explicit terminals. Lazy work uses the
@@ -958,7 +958,7 @@ Cross-type **`?`** conversion supports two forms:
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** may stay bare for beginner programs. Use
-  **`fn run() => Void ?`** only when the entry itself propagates errors with
+  **`fn run() => () ?`** only when the entry itself propagates errors with
   **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
@@ -1941,7 +1941,7 @@ The lambda arrow is **`=>`**. **`->`** selects dispatch-arm values and finite-lo
 items.
 
 **Function types (S47):** `fn(T1, T2) => R` (no parameter names; the result may be
-omitted for `Void` callbacks). Their unmarked parameters always have plain
+omitted for `()` callbacks). Their unmarked parameters always have plain
 read access (D-MEM-PARAM1). Named `fn`s coerce to function values when referenced
 without a call only if every parameter also has plain read access. Functions with
 write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
@@ -1964,10 +1964,15 @@ non-function → **E0803**.
 `scan(init, f)`, `fold(init, f)`, `position(f)`, `min_by(f)`, `max_by(f)`, `group_by(f)`,
 `partition(f)` on `[T]`. No new grammar — all are library methods on the iterator
 protocol (D-EXT1 Tier 1). `take` is accepted in dot-method position even though `take`
-is also the lambda-capture keyword. `indexed()` and `zip(other)` return named tuples
-`(idx: Int, item: T)` and `(a: T, b: U)` respectively; `partition(f)` returns
-`(false_: [T], true_: [T])`. All lazy (evaluated at call site, allocation deferred to
-result use).
+is also the lambda-capture keyword. `indexed()` returns `(idx: Int, item: T)`.
+The zip family is variadic and named: strict `zip` requires equal lengths and
+reports E0128, `zip_short` stops at the shortest input, and `zip_pad` reaches the
+longest input. `zip_pad` uses `None` for omitted fills, one typed `fill:` value
+for all columns, or typed `fills: (field: value, ...)` per column. Free calls
+preserve labels; methods use `a`, `b`, `c`, and so on. Zero free inputs are an
+empty `Iter<Unit>` and one input is identity. `partition(f)` returns
+`(false_: [T], true_: [T])`. All are lazy (evaluated at call site, allocation
+deferred to result use).
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
 parse errors. Current lambda syntax is `(x) => …`. D-SHAPE-PIPE1=C assigns a
@@ -3191,15 +3196,15 @@ api: Output :: .Service.{ name: "todo-api", entry: serve };
 release: Output :: .Check.{ name: "release", entry: verify_release };
 
 fn launch() {}
-fn serve() => Void ? {}
-fn verify_release() => Void ? {}
+fn serve() => () ? {}
+fn verify_release() => () ? {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
 An Executable takes zero or one `#CLI`-derived parameter; Service and Check
-take none. All three return `Void` or `Void ?`. Sema resolves and validates the
+take none. All three return `()` or `() ?`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
 

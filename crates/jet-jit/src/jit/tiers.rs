@@ -208,7 +208,7 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
                 && f.params.len() == 1
                 && (f.ret.is_none()
                     || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
                             && matches!(err.as_ref(), Type::String | Type::Named(_))))
         })
     } else {
@@ -217,7 +217,7 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
                 && f.params.is_empty()
                 && (f.ret.is_none()
                     || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
                             && matches!(err.as_ref(), Type::String | Type::Named(_))))
         })
     };

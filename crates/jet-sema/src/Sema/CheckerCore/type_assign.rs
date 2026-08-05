@@ -281,7 +281,7 @@ impl<'a> Checker<'a> {
                     }
                     let is_core_generic = matches!(
                         name.as_str(),
-                        "Task" | "Channel" | "Sender" | "Ptr"
+                        "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
                             // D-COLLBREADTH1=A: Set<T> and Deque<T>.
                             | "Set" | "Bag" | "Deque"
                             // D-ITERTOOLS1=A: expanded generic collection handles.
@@ -307,6 +307,30 @@ impl<'a> Checker<'a> {
                             | Syntax::TYPE_SHARED_WEAK
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
                     ) || is_core_view_generic(ty);
+                    if matches!(name.as_str(), "Vec" | "Matrix") {
+                        let expected = if name == "Vec" { 1 } else { 2 };
+                        if args.len() != expected
+                            || args
+                                .iter()
+                                .any(|arg| arg.compute_dimension_value().is_none())
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                format!(
+                                    "`{name}` needs {expected} literal shape dimension{}",
+                                    if expected == 1 { "" } else { "s" }
+                                ),
+                                "compute aliases carry fixed dimensions that sema checks before codegen".to_string(),
+                                if name == "Vec" {
+                                    "write `Vec<N>` with one non-negative integer".to_string()
+                                } else {
+                                    "write `Matrix<M, N>` with two non-negative integers".to_string()
+                                },
+                                Some(span),
+                            ));
+                        }
+                        return;
+                    }
                     if name == "ExpiringSecret"
                         && (args.len() != 1
                             || !args.first().is_some_and(
@@ -563,6 +587,11 @@ impl<'a> Checker<'a> {
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
             if want == got {
                 return false;
+            }
+            if Type::compute_tensor_compatible(want, got) {
+                // The erased `Tensor` spelling is the storage boundary. A
+                // shaped alias remains exact when both sides carry shape.
+                return true;
             }
             if result_used_where_plain_expected(want, got) {
                 self.diags.push(Diagnostic::error(

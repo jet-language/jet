@@ -1632,6 +1632,7 @@ impl<'a> Parser<'a> {
                         spread: false,
                     }],
                     range_checked: false,
+                    resolved_ret: None,
                 })))
             }
             TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
@@ -1657,6 +1658,7 @@ impl<'a> Parser<'a> {
                     type_args: Vec::new(),
                     args,
                     range_checked: false,
+                    resolved_ret: None,
                 })))
             }
             TokKind::KwYield => {

@@ -120,7 +120,7 @@ fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallb
         jet::Sema::CompileMode::Run,
     );
     let v2 = checked_bundle(
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() => Void ? { return Err(\"selected boom\") }\n",
+        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() => () ? { return Err(\"selected boom\") }\n",
         "jet_output_resident_v2",
         jet::Sema::CompileMode::Run,
     );
@@ -355,7 +355,7 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "unit: Output :: .Check.{ name: \"unit\", entry: verify_unit };\nrelease: Output :: .Check.{ name: \"release\", entry: verify_release };\nfn verify_unit() {}\nfn verify_release() => Void ? { return Err(\"release blocked\") }\n",
+        "unit: Output :: .Check.{ name: \"unit\", entry: verify_unit };\nrelease: Output :: .Check.{ name: \"release\", entry: verify_release };\nfn verify_unit() {}\nfn verify_release() => () ? { return Err(\"release blocked\") }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -434,7 +434,7 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) => Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+        "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) => () ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
     )
     .unwrap();
     let file = dir.join("main.jet");

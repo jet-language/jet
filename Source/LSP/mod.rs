@@ -159,6 +159,36 @@ mod tests {
     }
 
     #[test]
+    fn hover_shows_source_module_for_imported_root_call() {
+        let project = TestProject::new();
+        std::fs::write(
+            project.root.join("library.jet"),
+            "pub fn render(#Root value: Int) => Int { return value }\n",
+        )
+        .expect("write imported root-call library");
+        let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
+        let (diagnostics, bundle, facts) = check_document_with_bundle(project.entry(), src);
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "imported root-call fixture should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("imported root-call bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            src.find("render").expect("root-call method name"),
+        )
+        .expect("imported root-call hover");
+        assert!(hover.contains("from module `"), "{hover}");
+        assert!(hover.contains("library.jet"), "{hover}");
+    }
+
+    #[test]
     fn compiler_layout_fact_lsp_surface_is_visible_and_fixed() {
         let src = "struct Packet { count: Int }\nderive T.LayoutFacts { info :: T.$layout }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);

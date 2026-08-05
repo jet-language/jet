@@ -270,7 +270,7 @@ fn run() {
 }
 "#;
 
-const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() => Void ? {
+const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() => () ? {
     print("start")
 }
 "#;
@@ -286,7 +286,7 @@ fn checked() => Int ? String {
     return Ok(n)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     #Unsafe("Canvas proof rail fixture") {
         marker := 1
     }

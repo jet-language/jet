@@ -1,10 +1,9 @@
 // core.archive's single audited ABI kernel (D-CORE-COMPRESS1=A, D-BFS1).
 //
-// This file is the canonical implementation consumed by the package build,
-// the AOT bridge, the JIT host, and the resident interpreter. It has no
-// filesystem, process, or host-tool access. The Jet package declaration is
-// the public boundary; moving these operations behind ordinary-Jet source is
-// still the owner-gated D-CORE-SOURCE-AUTHORITY1 slice.
+// This file is the dependency-free audited ABI kernel for the ordinary-Jet
+// package in archive.jet. It has no filesystem, process, or host-tool access.
+// Public calls reach this file only through the package source's internal ABI
+// boundary; it is not a compiler template or an engine-specific public path.
 
 use std::path::{Component, Path};
 

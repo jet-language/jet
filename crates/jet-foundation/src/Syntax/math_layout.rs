@@ -151,6 +151,9 @@ pub const TYPE_BIT_SET: &str = "BitSet";
 pub const TYPE_BYTE_BUFFER: &str = "ByteBuffer";
 /// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
 pub const TYPE_ITER: &str = "Iter";
+/// D-LISTREMOVE1/F: selector for the two List.remove meanings.  The default
+/// is `.Val`; `.Slot` opts into positional removal.
+pub const TYPE_REMOVE_BY: &str = "RemoveBy";
 /// D-RANGE-VALUE1=A: one nominal integer range for inclusive and half-open values.
 pub const TYPE_RANGE: &str = "Range";
 

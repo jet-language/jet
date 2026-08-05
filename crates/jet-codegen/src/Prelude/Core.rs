@@ -1782,8 +1782,46 @@ where
 {
     xs.iter().map(f).collect()
 }
+#[derive(Clone, PartialEq, Eq)]
+struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+
+impl<K, V> JetMap<K, V> {
+    fn new() -> Self {
+        Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
+    }
+}
+
+impl<K, V> std::ops::Deref for JetMap<K, V> {
+    type Target = std::collections::BTreeMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        std::sync::Arc::make_mut(&mut self.0)
+    }
+}
+
+impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = std::collections::btree_map::Iter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JetRemoveBy {
+    Val,
+    Slot,
+}
+
 fn jet_index_map<K: Ord + Clone, V: Clone>(
-    m: &std::collections::BTreeMap<K, V>,
+    m: &JetMap<K, V>,
     k: &K,
     file: &str,
     line: u32,
@@ -1793,15 +1831,15 @@ fn jet_index_map<K: Ord + Clone, V: Clone>(
         None => jet_panic(file, line, &format!("the map has no entry for this key")),
     }
 }
-fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: V) {
+fn jet_map_insert<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>, k: K, v: V) {
     m.insert(k, v);
 }
 
 /// D-MAP-MERGE1=E: merge `other` into a clone of `left`. Right wins on shared keys.
 fn jet_map_merge<K: Ord + Clone, V: Clone>(
-    left: &std::collections::BTreeMap<K, V>,
-    other: &std::collections::BTreeMap<K, V>,
-) -> std::collections::BTreeMap<K, V> {
+    left: &JetMap<K, V>,
+    other: &JetMap<K, V>,
+) -> JetMap<K, V> {
     let mut out = left.clone();
     for (k, v) in other {
         out.insert(k.clone(), v.clone());
@@ -1811,10 +1849,10 @@ fn jet_map_merge<K: Ord + Clone, V: Clone>(
 
 /// D-MAP-MERGE1=E: merge with an explicit conflict callback `(key, left, right) -> V`.
 fn jet_map_merge_with<K: Ord + Clone, V: Clone, F>(
-    left: &std::collections::BTreeMap<K, V>,
-    other: &std::collections::BTreeMap<K, V>,
+    left: &JetMap<K, V>,
+    other: &JetMap<K, V>,
     conflict: F,
-) -> std::collections::BTreeMap<K, V>
+) -> JetMap<K, V>
 where
     F: Fn(&K, V, V) -> V,
 {
@@ -1832,7 +1870,81 @@ where
     }
     out
 }
-fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> T {
+// D-LISTMAP1: the view owns the map's Arc and advances by key. This keeps the
+// iterator `'static` without copying the BTreeMap (or borrowing through a
+// short-lived local Arc). Each pull clones only the yielded item; the map stays
+// shared and untouched until a mutation triggers Arc::make_mut.
+struct JetMapKeys<K, V> {
+    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
+    last: Option<K>,
+}
+
+impl<K: Ord + Clone, V> Iterator for JetMapKeys<K, V> {
+    type Item = K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.last.as_ref() {
+            Some(last) => self
+                .map
+                .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
+                .next(),
+            None => self.map.iter().next(),
+        }?;
+        let key = next.0.clone();
+        self.last = Some(key.clone());
+        Some(key)
+    }
+}
+
+struct JetMapValues<K, V> {
+    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
+    last: Option<K>,
+}
+
+impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
+    type Item = V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.last.as_ref() {
+            Some(last) => self
+                .map
+                .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
+                .next(),
+            None => self.map.iter().next(),
+        }?;
+        let key = next.0.clone();
+        let value = next.1.clone();
+        self.last = Some(key);
+        Some(value)
+    }
+}
+
+fn jet_map_keys<K: Ord + Clone + 'static, V: 'static>(m: &JetMap<K, V>) -> JetIter<K> {
+    JetIter(Box::new(JetMapKeys {
+        map: std::sync::Arc::clone(&m.0),
+        last: None,
+    }))
+}
+
+fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>) -> JetIter<V> {
+    JetIter(Box::new(JetMapValues {
+        map: std::sync::Arc::clone(&m.0),
+        last: None,
+    }))
+}
+
+fn jet_list_remove_value<T: Clone + PartialEq>(
+    xs: &mut Vec<T>,
+    value: T,
+    _file: &str,
+    _line: u32,
+) -> Option<T> {
+    xs.iter()
+        .position(|item| *item == value)
+        .map(|index| xs.remove(index))
+}
+
+fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> Option<T> {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
         jet_panic(
@@ -1844,7 +1956,17 @@ fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> 
             ),
         );
     }
-    xs.remove(i as usize)
+    Some(xs.remove(i as usize))
+}
+
+fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+    xs.iter().filter(|item| *item == value).count() as i64
+}
+
+fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
+    let mut out = left.to_vec();
+    out.extend(right.iter().cloned());
+    out
 }
 fn jet_char_len(s: &String) -> i64 {
     s.chars().count() as i64
@@ -1987,7 +2109,7 @@ where
 {
     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
-fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, mut f: F)
+fn jet_map_each<K: Ord, V, F>(m: JetMap<K, V>, mut f: F)
 where
     F: FnMut(&K, &V),
 {

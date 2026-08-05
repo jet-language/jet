@@ -631,7 +631,7 @@ fn run() {
 
     let negative_digits = r#"
 #UnitFamily(Length, dimension, base: meter) { meter half(scale: 1/2) }
-fn run() => Void ? {
+fn run() => () ? {
     digits :: -1
     Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
 }

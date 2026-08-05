@@ -326,7 +326,7 @@ fn map_type(ty: &str) -> Result<String, String> {
         "float" => Ok("Float".into()),
         "str" => Ok("String".into()),
         "bool" => Ok("Bool".into()),
-        "None" => Ok("Void".into()),
+        "None" => Ok("()".into()),
         _ => Err(format!("Python type {ty} has no proven Jet mapping")),
     }
 }
@@ -370,7 +370,7 @@ fn translate_body(function: &Function) -> Result<Vec<String>, (usize, String)> {
             ));
         }
         let line = raw.trim();
-        if line == "pass" && function.result == "Void" {
+        if line == "pass" && function.result == "()" {
             continue;
         }
         if let Some(value) = line.strip_prefix("return ") {
@@ -380,7 +380,7 @@ fn translate_body(function: &Function) -> Result<Vec<String>, (usize, String)> {
             ));
             continue;
         }
-        if line == "return" && function.result == "Void" {
+        if line == "return" && function.result == "()" {
             output.push("return".into());
             continue;
         }
@@ -570,7 +570,7 @@ fn render_function(marker: &str, function: &Function, body: &[String]) -> String
         .map(|(name, ty)| format!("{name}: {ty}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let result = if function.result == "Void" {
+    let result = if function.result == "()" {
         String::new()
     } else {
         format!(" -> {}", function.result)
