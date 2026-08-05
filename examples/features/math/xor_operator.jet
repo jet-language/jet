@@ -1,0 +1,22 @@
+// Bitwise exclusive-or (D-XORSPELL1=A): infix `~|` keeps a bit where exactly
+// one side has it — the exclusive variant of `|`. The compound `~|=` updates
+// in place. The caret now means power (D-EXPOP1=A), so it is no longer xor.
+// Prefix `~` is still the copy sigil, and position tells the two apart.
+fn run() {
+    flags :: 12
+    mask :: 10
+    print(flags ~| mask)
+    // Same-width whole numbers only, so a U8 pair keeps its width.
+    left :: U8.{0b1100_0011}
+    right :: U8.{0b0101_0101}
+    print(left ~| right)
+    // `~|=` accumulates a running checksum.
+    checksum := 0
+    loop byte, [17, 42, 99, 8] {
+        checksum ~|= byte
+    }
+    print(checksum)
+    // Prefix copy beside infix exclusive-or on one line.
+    source :: 5
+    print(flags ~| ~source)
+}

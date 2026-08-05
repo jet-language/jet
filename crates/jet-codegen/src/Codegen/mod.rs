@@ -55,6 +55,9 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core.rs"),
+    // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
+    // (Codegen/Web.rs) so every tier runs one power.
+    include_str!("../Prelude/Core/Power.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/Collections.rs"),

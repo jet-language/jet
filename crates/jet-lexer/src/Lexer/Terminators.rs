@@ -140,6 +140,7 @@ fn suppresses_terminator(kind: &TokKind) -> bool {
             | TokKind::Amp
             | TokKind::Pipe
             | TokKind::Caret
+            | TokKind::TildePipe
             | TokKind::Shl
             | TokKind::Shr
             | TokKind::QuestionQuestion // S35/S71 fallback continues the expr

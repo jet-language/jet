@@ -76,6 +76,19 @@ pub fn eval_binop(
             .checked_rem(b)
             .map(Int)
             .ok_or_else(|| overflow("take the remainder of", span)),
+        // D-EXPSEM1=A: `^` on whole numbers is exact, and a result outside the
+        // range stops the build the way a multiplication does. A negative
+        // exponent has no whole-number answer; sema types a written one as
+        // Float, so one that reaches here came from a value it could not read.
+        (BinOp::Pow, Int(_), Int(b)) if b < 0 => Err(comptime_panic(
+            "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)",
+            span,
+        )),
+        (BinOp::Pow, Int(a), Int(b)) => u32::try_from(b)
+            .ok()
+            .and_then(|exponent| a.checked_pow(exponent))
+            .map(Int)
+            .ok_or_else(|| overflow("raise to a power", span)),
         (BinOp::BitAnd, Int(a), Int(b)) => Ok(Int(a & b)),
         (BinOp::BitOr, Int(a), Int(b)) => Ok(Int(a | b)),
         (BinOp::BitXor, Int(a), Int(b)) => Ok(Int(a ^ b)),
@@ -86,7 +99,7 @@ pub fn eval_binop(
         (BinOp::Shr, Int(_), Int(b)) if !(0..64).contains(&b) => Err(overflow("shift right", span)),
         (BinOp::Shl, Int(a), Int(b)) => Ok(Int(a << (b as u32))),
         (BinOp::Shr, Int(a), Int(b)) => Ok(Int(a >> (b as u32))),
-        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), Float(a), Float(b)) => a
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow), Float(a), Float(b)) => a
             .binop(op, b)
             .map(Float)
             .ok_or_else(|| unsupported("mixing float widths", span)),

@@ -1,0 +1,21 @@
+// Power grouping and result types (D-EXPSEM1=A), the way written mathematics
+// and Python read them.
+//   * `^` groups to the right, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`.
+//   * `^` binds tighter than a leading minus, so `-3 ^ 2` is `-(3 ^ 2)`.
+//   * a whole number raised to a whole power stays an exact whole number.
+//   * a written negative exponent gives a fraction, so the result is a Float.
+// The same rules at compile time: this power is folded while compiling.
+#Known folded :: 2 ^ 3 ^ 2
+
+fn run() {
+    print(2 ^ 3 ^ 2)
+    print(-3 ^ 2)
+    print(2 ^ 10)
+    print(2 ^ -1)
+    print(folded)
+    // Parentheses ask for the other grouping.
+    print((2 ^ 3) ^ 2)
+    print((-3) ^ 2)
+    // Any Float operand makes the whole power a Float.
+    print(2.0 ^ 10)
+}

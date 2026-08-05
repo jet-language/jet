@@ -62,8 +62,12 @@ pub enum BinOp {
     Mul,
     Div,
     Rem,
+    /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
+    /// the right side. Right-associative, binds tighter than unary minus.
+    Pow,
     BitAnd,
     BitOr,
+    /// D-XORSPELL1=A: bitwise exclusive-or is infix `~|`, because `^` is power.
     BitXor,
     Shl,
     Shr,
@@ -93,9 +97,10 @@ impl BinOp {
             BinOp::Mul => "*",
             BinOp::Div => "/",
             BinOp::Rem => "%",
+            BinOp::Pow => "^",
             BinOp::BitAnd => "&",
             BinOp::BitOr => "|",
-            BinOp::BitXor => "^",
+            BinOp::BitXor => "~|",
             BinOp::Shl => "<<",
             BinOp::Shr => ">>",
             BinOp::Eq => "==",
@@ -109,6 +114,20 @@ impl BinOp {
         }
     }
 
+    /// The Rust operator that carries this operation, for generated code.
+    /// It matches `spell` everywhere the two languages agree; `~|`
+    /// (D-XORSPELL1) is Rust's `^`, and `^` (D-EXPOP1) has no Rust operator
+    /// at all — codegen calls the Prelude power instead of asking here.
+    pub fn rust_spell(self) -> &'static str {
+        match self {
+            BinOp::BitXor => "^",
+            BinOp::Pow => {
+                unreachable!("D-EXPSEM1: `^` emits a Prelude power call, not a Rust operator")
+            }
+            other => other.spell(),
+        }
+    }
+
     /// S17 compound-assignment spelling for this binary op, when one exists.
     pub fn compound_spell(self) -> Option<&'static str> {
         match self {
@@ -117,9 +136,10 @@ impl BinOp {
             BinOp::Mul => Some("*="),
             BinOp::Div => Some("/="),
             BinOp::Rem => Some("%="),
+            BinOp::Pow => Some("^="),
             BinOp::BitAnd => Some("&="),
             BinOp::BitOr => Some("|="),
-            BinOp::BitXor => Some("^="),
+            BinOp::BitXor => Some("~|="),
             BinOp::Shl => Some("<<="),
             BinOp::Shr => Some(">>="),
             _ => None,

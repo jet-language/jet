@@ -324,9 +324,11 @@ impl<'a> Parser<'a> {
             )
         }
     
+        /// D-XORSPELL1=A: `~|` is bitwise exclusive-or, in the precedence slot
+        /// the old `^` spelling held.
         pub(in crate::Parser) fn expr_bitxor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut lhs = self.expr_bitand(allow_struct_lit)?;
-            while matches!(self.peek().kind, TokKind::Caret) {
+            while matches!(self.peek().kind, TokKind::TildePipe) {
                 let op_span = self.bump().span;
                 let rhs = self.expr_bitand(allow_struct_lit)?;
                 let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
@@ -673,8 +675,29 @@ impl<'a> Parser<'a> {
                         span: Span::new(dot_start, end),
                     })
                 }
-                _ => self.expr_postfix(allow_struct_lit),
+                _ => self.expr_pow(allow_struct_lit),
             }
+        }
+
+        /// D-EXPSEM1=A: infix `^` raises to a power. It binds tighter than
+        /// every other binary operator and tighter than unary minus, so
+        /// `-3 ^ 2` is `-(3 ^ 2)`. It is right-associative and its exponent
+        /// runs back through the unary level, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`
+        /// and `2 ^ -1` reads the negative exponent.
+        fn expr_pow(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+            let base = self.expr_postfix(allow_struct_lit)?;
+            if !matches!(self.peek().kind, TokKind::Caret) {
+                return Ok(base);
+            }
+            let op_span = self.bump().span;
+            let exponent = self.expr_unary(allow_struct_lit)?;
+            let span = Span::new(base.span().start, exponent.span().end.max(op_span.end));
+            Ok(Expr::Binary(
+                BinOp::Pow,
+                Box::new(base),
+                Box::new(exponent),
+                span,
+            ))
         }
 
         /// D-JPK-BUILDRECIPE1: build-step fields are deliberately finite

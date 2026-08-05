@@ -38,9 +38,9 @@ impl<'a> Parser<'a> {
         /// convention position doesn't take a copy sigil (D-SHAPE-PLACE1, place
         /// precedence at any position, is a separate pending ballot). Returns
         /// `None` when no sigil is present.
-        /// Position-disambiguated: infix `^` (xor) and `&` (BitAnd) are parsed
-        /// inside expressions and never reach the start of a parameter/argument or
-        /// a type. `*` (raw) is D-CAP9, handled apart.
+        /// Position-disambiguated: infix `^` (power, D-EXPOP1) and `&` (BitAnd) are
+        /// parsed inside expressions and never reach the start of a parameter or
+        /// argument, or a type. `*` (raw) is D-CAP9, handled apart.
         pub(in crate::Parser) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
             let cap = match self.peek().kind {
                 TokKind::Amp => AccessConvention::Write,

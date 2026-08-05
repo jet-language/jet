@@ -281,8 +281,9 @@ pub const OP_LAMBDA_ARROW: &str = OP_CALLABLE_ARROW;
 pub const LIT_TRUE: &str = "true";
 pub const LIT_FALSE: &str = "false";
 
-/// M1 (docs/spec/roadmap.md): arithmetic operators. `+ - * /` on Int and Float;
-/// `% & ^ << >>` on Int only. No `+` on String (S8: interpolate instead).
+/// M1 (docs/spec/roadmap.md): arithmetic operators. `+ - * / ^` on Int and
+/// Float; `% & ~| << >>` on Int only. No `+` on String (S8: interpolate
+/// instead).
 pub const OP_PLUS: &str = "+";
 pub const OP_MINUS: &str = "-";
 pub const OP_STAR: &str = "*";
@@ -292,7 +293,12 @@ pub const OP_AMP: &str = "&";
 /// D-PATO / D-SHAPE-PIPE1=C (ratified 2026-07-15): peer alternatives only.
 /// General expressions and reusable flows do not use a single bar.
 pub const OP_PIPE: &str = "|";
+/// D-EXPOP1=A (ratified 2026-08-05): infix `^` raises to a power. Prefix `^`
+/// stays the take sigil (D-MEM1); parser position tells them apart.
 pub const OP_CARET: &str = "^";
+/// D-XORSPELL1=A (ratified 2026-08-05): bitwise exclusive-or, the exclusive
+/// variant of `|`. Prefix `~` stays the copy sigil (D-SHAPE-COPY1).
+pub const OP_TILDE_PIPE: &str = "~|";
 pub const OP_SHL: &str = "<<";
 pub const OP_SHR: &str = ">>";
 
@@ -331,7 +337,10 @@ pub const OP_SLASH_EQ: &str = "/=";
 pub const OP_PERCENT_EQ: &str = "%=";
 pub const OP_AMP_EQ: &str = "&=";
 pub const OP_PIPE_EQ: &str = "|=";
+/// D-EXPOP1=A (ratified 2026-08-05): power-assign.
 pub const OP_CARET_EQ: &str = "^=";
+/// D-XORSPELL1=A (ratified 2026-08-05): exclusive-or-assign.
+pub const OP_TILDE_PIPE_EQ: &str = "~|=";
 pub const OP_SHL_EQ: &str = "<<=";
 pub const OP_SHR_EQ: &str = ">>=";
 

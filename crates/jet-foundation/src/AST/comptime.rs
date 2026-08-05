@@ -294,6 +294,8 @@ impl CtFloat {
                 BinOp::Sub => left - right,
                 BinOp::Mul => left * right,
                 BinOp::Div => left / right,
+                // D-EXPSEM1=A: `^` on floats is the floating-point power.
+                BinOp::Pow => left.powf(right),
                 _ => return None,
             })),
             (Self::F64(left), Self::F64(right)) => Some(Self::F64(match op {
@@ -301,6 +303,8 @@ impl CtFloat {
                 BinOp::Sub => left - right,
                 BinOp::Mul => left * right,
                 BinOp::Div => left / right,
+                // D-EXPSEM1=A: `^` on floats is the floating-point power.
+                BinOp::Pow => left.powf(right),
                 _ => return None,
             })),
             _ => None,

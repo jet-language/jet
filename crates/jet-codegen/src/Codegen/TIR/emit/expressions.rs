@@ -1700,7 +1700,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            if *overflow {
+            if *op == BinOp::Pow {
+                // D-EXPSEM1: Rust has no power operator, so `^` always calls the
+                // one Prelude helper. Whole numbers keep the exact, trapping
+                // rule; floats use the floating-point power.
+                let (file, line) = (&cx.file, *line);
+                if matches!(e.ty, Type::Float | Type::Float32) {
+                    format!("({}).jet_pow({})", ls, rs)
+                } else {
+                    format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
+                }
+            } else if *overflow {
                 // Trapping helper: source location was resolved at lowering, so
                 // the panic message matches the AST path exactly.
                 let (file, line) = (&cx.file, *line);
@@ -1726,7 +1736,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
             } else {
-                format!("(({}) {} ({}))", ls, op.spell(), rs)
+                format!("(({}) {} ({}))", ls, op.rust_spell(), rs)
             }
         }
         // D-CHAINCMP1: `0 <= sev < 10` — a Rust block expression binds each
@@ -1764,7 +1774,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             variant
                         )
                     } else {
-                        format!("(__jcc{} {} __jcc{})", i, op.spell(), i + 1)
+                        format!("(__jcc{} {} __jcc{})", i, op.rust_spell(), i + 1)
                     }
                 })
                 .collect();

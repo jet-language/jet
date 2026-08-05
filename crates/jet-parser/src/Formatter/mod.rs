@@ -299,8 +299,10 @@ enum Prec {
     Add = 9,
     Mul = 10,
     Unary = 11,
-    Postfix = 12,
-    Primary = 13,
+    /// D-EXPSEM1=A: `^` binds tighter than unary minus and looser than postfix.
+    Pow = 12,
+    Postfix = 13,
+    Primary = 14,
 }
 
 impl Prec {
@@ -315,6 +317,7 @@ impl Prec {
             BinOp::Shl | BinOp::Shr => Prec::Shift,
             BinOp::Add | BinOp::Sub => Prec::Add,
             BinOp::Mul | BinOp::Div | BinOp::Rem => Prec::Mul,
+            BinOp::Pow => Prec::Pow,
         }
     }
 }
@@ -934,7 +937,8 @@ impl Prec {
             Prec::Shift => Prec::Add,
             Prec::Add => Prec::Mul,
             Prec::Mul => Prec::Unary,
-            Prec::Unary => Prec::Postfix,
+            Prec::Unary => Prec::Pow,
+            Prec::Pow => Prec::Postfix,
             Prec::Postfix => Prec::Primary,
             Prec::Primary => Prec::Primary,
         }
@@ -992,9 +996,10 @@ fn compound_spell(op: BinOp) -> &'static str {
         BinOp::Mul => "*=",
         BinOp::Div => "/=",
         BinOp::Rem => "%=",
+        BinOp::Pow => "^=",
         BinOp::BitAnd => "&=",
         BinOp::BitOr => "|=",
-        BinOp::BitXor => "^=",
+        BinOp::BitXor => "~|=",
         BinOp::Shl => "<<=",
         BinOp::Shr => ">>=",
         _ => unreachable!("compound assignment uses arithmetic/bit ops only"),

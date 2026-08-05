@@ -877,17 +877,25 @@ impl<'a> Fmt<'a> {
             }
             Expr::Binary(op, lhs, rhs, _) => {
                 let op_prec = Prec::of_bin(*op);
+                // D-EXPSEM1=A: `^` is right-associative, so its operand slots
+                // mirror the left-associative ones — the base parses at postfix
+                // level and the exponent runs back through unary.
+                let (lhs_prec, rhs_prec) = if *op == BinOp::Pow {
+                    (Prec::Postfix, Prec::Unary)
+                } else {
+                    (op_prec, op_prec.add_rhs())
+                };
                 // Wrap only when the surrounding slot binds tighter than this
                 // operator (e.g. `(a + b).method()`, `(a + b) * c`); equal-prec
                 // right-hand nesting is handled by `add_rhs` on the rhs slot.
                 if prec > op_prec {
                     self.write("(");
                 }
-                self.fmt_expr(lhs, op_prec);
+                self.fmt_expr(lhs, lhs_prec);
                 self.write(" ");
                 self.write(op.spell());
                 self.write(" ");
-                self.fmt_expr(rhs, op_prec.add_rhs());
+                self.fmt_expr(rhs, rhs_prec);
                 if prec > op_prec {
                     self.write(")");
                 }

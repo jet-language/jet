@@ -2321,6 +2321,9 @@ pub enum TStmt {
         /// out of a shared reference (E0507); emitting `((*user_s)).clone()` is correct.
         /// Mirrors the `lower_enum_arg` clone predicate. False for scalars and owned values.
         clone_value: bool,
+        /// Source line of the assignment, so a compound operator that traps
+        /// (D-EXPSEM1: `^=`) can name the line the author wrote.
+        line: u32,
     },
     Return(Option<TExpr>),
     /// A call used for effect: `print(x);`, `helper(a);`.

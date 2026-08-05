@@ -554,6 +554,7 @@ fn emit_tir_stmt(
             op,
             value,
             clone_value,
+            line,
         } => {
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             // c150: append `.clone()` when the value is a borrowed non-scalar (computed
@@ -564,16 +565,33 @@ fn emit_tir_stmt(
             } else {
                 v
             };
+            // D-EXPSEM1: Rust has no `**=`, so `^=` reads the place, calls the
+            // one Prelude power, and writes the result back.
+            let pow_of = |target: &str| {
+                if matches!(value.ty, Type::Float | Type::Float32) {
+                    format!("({}).jet_pow({})", target, v)
+                } else {
+                    format!(
+                        "({}).jet_pow(({}) as i128, {:?}, {})",
+                        target, v, cx.file, line
+                    )
+                }
+            };
+            let is_pow = *op == Some(crate::AST::BinOp::Pow);
             if let TPlace::Local(local) = place {
                 if local.uninit_scalar {
                     let place = local.rust_place();
                     match op {
+                        Some(_) if is_pow => {
+                            let read = format!("({}).read().clone()", place);
+                            out.push_str(&format!("{}{}.write({});\n", pad, place, pow_of(&read)));
+                        }
                         Some(op) => out.push_str(&format!(
                             "{}{}.write(({}).read().clone() {} {});\n",
                             pad,
                             place,
                             place,
-                            op.spell(),
+                            op.rust_spell(),
                             v
                         )),
                         None => out.push_str(&format!("{}{}.write({});\n", pad, place, v)),
@@ -589,7 +607,11 @@ fn emit_tir_stmt(
             }
             let place = emit_tir_place(place, cx);
             match op {
-                Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v)),
+                Some(_) if is_pow => {
+                    let powered = pow_of(&place);
+                    out.push_str(&format!("{}{} = {};\n", pad, place, powered));
+                }
+                Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell(), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
             }
         }
@@ -1044,7 +1066,7 @@ fn emit_tir_stmt(
                 v = format!("({v}).clone()");
             }
             let operator = assign.op.map_or("=".to_string(), |op| {
-                format!("{}=", op.spell())
+                format!("{}=", op.rust_spell())
             });
             if assign.is_map {
                 out.push_str(&format!(

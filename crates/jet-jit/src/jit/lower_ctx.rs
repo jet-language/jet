@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use super::runtime_host::{
     HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
     INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
-    INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
+    INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
@@ -3093,7 +3093,7 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TStmt::Assign {
-                place, op, value, ..
+                place, op, value, line: assign_line, ..
             } => {
                 if let TPlace::Expr(place_expr) = place {
                     if let TExprKind::PoolSlot {
@@ -3126,7 +3126,7 @@ impl LowerCtx<'_, '_> {
                         let assigned = if let Some(op) = op {
                             let current =
                                 self.lower_record_field(record, &type_name, field, &field_ty)?;
-                            self.apply_binop_to_var(current, *op, rhs, &field_ty)?
+                            self.apply_binop_to_var(current, *op, rhs, &field_ty, *assign_line)?
                         } else {
                             rhs
                         };
@@ -3185,7 +3185,7 @@ impl LowerCtx<'_, '_> {
                         let assigned = if let Some(op) = op {
                             let current =
                                 self.lower_record_field(handle, &type_name, field, &field_ty)?;
-                            self.apply_binop_to_var(current, *op, rhs, &field_ty)?
+                            self.apply_binop_to_var(current, *op, rhs, &field_ty, *assign_line)?
                         } else {
                             rhs
                         };
@@ -3229,7 +3229,7 @@ impl LowerCtx<'_, '_> {
                                     field,
                                     &field_ty,
                                 )?;
-                                self.apply_binop_to_var(current, *op, rhs, &field_ty)?
+                                self.apply_binop_to_var(current, *op, rhs, &field_ty, *assign_line)?
                             } else {
                                 rhs
                             };
@@ -3314,7 +3314,7 @@ impl LowerCtx<'_, '_> {
                             let current = self.b.inst_results(call)[0];
                             self.emit_trap_check()?;
                             let rhs = self.lower_expr(value)?;
-                            self.apply_binop_to_var(current, *op, rhs, &elem_ty)?
+                            self.apply_binop_to_var(current, *op, rhs, &elem_ty, *assign_line)?
                         } else {
                             direct_value
                                 .ok_or("jit direct ViewMut assignment missing value")?
@@ -3343,7 +3343,7 @@ impl LowerCtx<'_, '_> {
                             );
                             let rhs = self.lower_expr(value)?;
                             let assigned = if let Some(op) = op {
-                                self.apply_binop_to_var(current, *op, rhs, &scalar_ty)?
+                                self.apply_binop_to_var(current, *op, rhs, &scalar_ty, *assign_line)?
                             } else {
                                 rhs
                             };
@@ -3384,7 +3384,7 @@ impl LowerCtx<'_, '_> {
                         .get(&key)
                         .cloned()
                         .unwrap_or_else(|| value.ty.clone());
-                    self.apply_binop_to_var(current, *op, rhs, &arithmetic_ty)?
+                    self.apply_binop_to_var(current, *op, rhs, &arithmetic_ty, *assign_line)?
                 } else {
                     self.lower_expr(value)?
                 };
@@ -3450,7 +3450,7 @@ impl LowerCtx<'_, '_> {
                         &assign.field,
                         &assign.field_ty,
                     )?;
-                    self.apply_binop_to_var(current, op, rhs, &assign.field_ty)?
+                    self.apply_binop_to_var(current, op, rhs, &assign.field_ty, assign.line as u32)?
                 } else {
                     rhs
                 };
@@ -7212,6 +7212,26 @@ impl LowerCtx<'_, '_> {
         result
     }
 
+    /// D-EXPSEM1=A: Cranelift has no power instruction, so `^` calls the host
+    /// power — the same exact, trapping rule every other tier runs.
+    fn lower_pow(&mut self, ty: &Type, base: Value, exponent: Value, line: u32) -> Result<Value, String> {
+        let host_id = match ty {
+            Type::Int => self.host.pow_i64,
+            Type::Float | Type::Float32 => self.host.pow_f64,
+            _ => return Err("jit power unsupported for this type".to_string()),
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = if matches!(ty, Type::Int) {
+            let line_const = self.b.ins().iconst(types::I32, line as i64);
+            self.b.ins().call(host_ref, &[base, exponent, line_const])
+        } else {
+            self.b.ins().call(host_ref, &[base, exponent])
+        };
+        let result = self.b.inst_results(call)[0];
+        self.emit_trap_check()?;
+        Ok(result)
+    }
+
     /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
     /// on `(BinOp, Type)` rather than a `TIR` enum, so the wildcard fallback
     /// here is a genuine combinatorial gap (unsupported operator/type pairs,
@@ -7224,8 +7244,12 @@ impl LowerCtx<'_, '_> {
         op: BinOp,
         rhs: Value,
         rhs_ty: &Type,
+        line: u32,
     ) -> Result<Value, String> {
         let rhs_ty = self.erase_distinct_ty(rhs_ty);
+        if op == BinOp::Pow {
+            return self.lower_pow(&rhs_ty, current, rhs, line);
+        }
         if let Type::IntN { signed, bits } = rhs_ty {
             return self.lower_intn_values(
                 op,
@@ -19638,6 +19662,7 @@ impl LowerCtx<'_, '_> {
             BinOp::BitXor => INTN_OP_BIT_XOR,
             BinOp::Shl => INTN_OP_SHL,
             BinOp::Shr => INTN_OP_SHR,
+            BinOp::Pow => INTN_OP_POW,
             _ => return Err("jit fixed-width integer operation unsupported".to_string()),
         };
         let args = [
@@ -19911,6 +19936,9 @@ impl LowerCtx<'_, '_> {
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
             });
+        }
+        if op == BinOp::Pow {
+            return self.lower_pow(&lhs_ty, l, r, line);
         }
         Ok(match (&lhs_ty, op) {
             (Type::Int, BinOp::Add) => self.b.ins().iadd(l, r),

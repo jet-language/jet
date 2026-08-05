@@ -246,6 +246,7 @@ fn jet_trap_overflow(op: &str) {
         "sub" => "this subtraction overflows the value's type (the result is outside its range)",
         "mul" => "this multiplication overflows the value's type (the result is outside its range)",
         "div" => "this division can't be done (dividing by zero, or overflow)",
+        "pow" => "this power overflows the value's type (the result is outside its range)",
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
     with_runtime_mut(|rt| rt.set_trap(msg));
@@ -261,6 +262,8 @@ pub(crate) const INTN_OP_BIT_OR: i64 = 6;
 pub(crate) const INTN_OP_BIT_XOR: i64 = 7;
 pub(crate) const INTN_OP_SHL: i64 = 8;
 pub(crate) const INTN_OP_SHR: i64 = 9;
+/// D-EXPSEM1=A: `^` on a fixed-width whole number.
+pub(crate) const INTN_OP_POW: i64 = 10;
 pub(crate) const INTN_MODE_TRAP: i64 = 0;
 pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
 pub(crate) const INTN_MODE_SATURATING: i64 = 2;
@@ -312,6 +315,28 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
     }
 }
 
+/// D-EXPSEM1=A: the same exact, trapping whole-number power the Prelude runs
+/// (`Prelude/Core/Power.rs`). A negative exponent has no whole-number result.
+extern "C" fn jet_jit_pow_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if b < 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_POWER_NEGATIVE));
+        return 0;
+    }
+    match u32::try_from(b).ok().and_then(|e| a.checked_pow(e)) {
+        Some(value) => value,
+        None => {
+            jet_trap_overflow("pow");
+            0
+        }
+    }
+}
+
+/// D-EXPSEM1=A: `^` on floats is the ordinary floating-point power.
+extern "C" fn jet_jit_pow_f64(a: f64, b: f64) -> f64 {
+    a.powf(b)
+}
+
 extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
@@ -349,6 +374,7 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_BIT_XOR => BinOp::BitXor,
         INTN_OP_SHL => BinOp::Shl,
         INTN_OP_SHR => BinOp::Shr,
+        INTN_OP_POW => BinOp::Pow,
         _ => {
             with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
             return 0;
@@ -1495,6 +1521,8 @@ pub(crate) struct HostFns {
     pub(crate) mul_i64: FuncId,
     pub(crate) div_i64: FuncId,
     pub(crate) rem_i64: FuncId,
+    pub(crate) pow_i64: FuncId,
+    pub(crate) pow_f64: FuncId,
     pub(crate) intn_binop: FuncId,
     pub(crate) intn_to_string: FuncId,
     pub(crate) print_i64: FuncId,
@@ -1643,6 +1671,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_mul_i64", jet_jit_mul_i64 as *const u8);
     builder.symbol("jet_jit_div_i64", jet_jit_div_i64 as *const u8);
     builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
+    builder.symbol("jet_jit_pow_i64", jet_jit_pow_i64 as *const u8);
+    builder.symbol("jet_jit_pow_f64", jet_jit_pow_f64 as *const u8);
     builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
     builder.symbol(
         "jet_jit_intn_to_string",
@@ -2086,6 +2116,10 @@ fn declare_host_fns(
     sig_bin_i64.params.push(AbiParam::new(types::I64));
     sig_bin_i64.params.push(AbiParam::new(types::I32));
     sig_bin_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_pow_f64 = Signature::new(cc);
+    sig_pow_f64.params.push(AbiParam::new(types::F64));
+    sig_pow_f64.params.push(AbiParam::new(types::F64));
+    sig_pow_f64.returns.push(AbiParam::new(types::F64));
     let mut sig_intn_binop = Signature::new(cc);
     for _ in 0..7 {
         sig_intn_binop.params.push(AbiParam::new(types::I64));
@@ -2308,6 +2342,8 @@ fn declare_host_fns(
         mul_i64: import("jet_jit_mul_i64", &sig_bin_i64)?,
         div_i64: import("jet_jit_div_i64", &sig_bin_i64)?,
         rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
+        pow_i64: import("jet_jit_pow_i64", &sig_bin_i64)?,
+        pow_f64: import("jet_jit_pow_f64", &sig_pow_f64)?,
         intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
         intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,

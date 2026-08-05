@@ -722,6 +722,15 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: OP_CARET_EQ,
         class: HighlightClass::Operator,
     },
+    // D-XORSPELL1=A: exclusive-or and its compound.
+    HighlightToken {
+        text: OP_TILDE_PIPE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_TILDE_PIPE_EQ,
+        class: HighlightClass::Operator,
+    },
     HighlightToken {
         text: OP_SHL_EQ,
         class: HighlightClass::Operator,
@@ -1051,7 +1060,7 @@ use super::{
     OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_MINUS_MINUS, OP_NAMED_CTOR, OP_NE, OP_NOT, OP_OPTIONAL_CHAIN,
     OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,
     OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_STAR,
-    OP_STAR_EQ, OP_TRY_SUFFIX, PROTO_CLIENT, PROTO_SERVER, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
+    OP_STAR_EQ, OP_TILDE_PIPE, OP_TILDE_PIPE_EQ, OP_TRY_SUFFIX, PROTO_CLIENT, PROTO_SERVER, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
     SIGIL_COPY, SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
     TYPE_BIGINT, TYPE_BIT_SET, TYPE_BOOL, TYPE_BTREE_MAP,
     TYPE_BUDGET, TYPE_BUDGET_APPLIES,

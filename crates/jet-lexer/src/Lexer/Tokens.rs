@@ -122,6 +122,10 @@ pub enum TokKind {
     /// `copy` verb; was retired by D-MEM1 as the D-CAP7 write sigil, since
     /// superseded by `&`).
     Tilde,
+    /// D-XORSPELL1=A: `a ~| b` is bitwise exclusive-or.
+    TildePipe,
+    /// D-XORSPELL1=A: `a ~|= b` is exclusive-or-assign.
+    TildePipeEq,
     /// Retired external-method connector. Longest-match before `~` so parser
     /// can teach E0325.
     TildeTilde,
@@ -175,7 +179,8 @@ impl TokKind {
             TokKind::PercentEq => Some(BinOp::Rem),
             TokKind::AmpEq => Some(BinOp::BitAnd),
             TokKind::PipeEq => Some(BinOp::BitOr),
-            TokKind::CaretEq => Some(BinOp::BitXor),
+            TokKind::CaretEq => Some(BinOp::Pow),
+            TokKind::TildePipeEq => Some(BinOp::BitXor),
             TokKind::ShlEq => Some(BinOp::Shl),
             TokKind::ShrEq => Some(BinOp::Shr),
             _ => None,
@@ -265,6 +270,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Pipe => "`|`".to_string(),
         TokKind::Caret => "`^`".to_string(),
         TokKind::Tilde => "`~`".to_string(),
+        TokKind::TildePipe => "`~|`".to_string(),
+        TokKind::TildePipeEq => "`~|=`".to_string(),
         TokKind::TildeTilde => "`~~`".to_string(),
         TokKind::Shl => "`<<`".to_string(),
         TokKind::Shr => "`>>`".to_string(),

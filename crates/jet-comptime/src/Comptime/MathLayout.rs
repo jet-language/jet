@@ -99,6 +99,10 @@ pub fn integer_remainder_overflows(
 
 pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
 pub const INTEGER_REMAINDER_ZERO: &str = "divided by zero";
+/// D-EXPSEM1=A: same wording the Prelude power trap uses
+/// (`Prelude/Core/Power.rs`), so every tier says one thing.
+pub const INTEGER_POWER_NEGATIVE: &str =
+    "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
 
 pub fn integer_remainder_trap(
     left: i64,
@@ -148,6 +152,12 @@ pub fn integer_binop(
         BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
         BinOp::Div => checked(a.checked_div(b), "divide"),
         BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
+        // D-EXPSEM1=A: exact whole-number power, trapping outside the range.
+        BinOp::Pow if b < 0 => Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
+        BinOp::Pow => checked(
+            u32::try_from(b).ok().and_then(|e| a.checked_pow(e)),
+            "raise to a power",
+        ),
         BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
         BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
         BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),

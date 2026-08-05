@@ -292,6 +292,11 @@ impl<'a> Lexer<'a> {
                 // lexed first so the parser can still emit the retired
                 // external-method connector diagnostic (E0325).
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
+                // D-XORSPELL1=A: `~|=` before `~|` before `~` (longest match).
+                '~' if next == '|' && next2 == '=' => {
+                    toks.push(simple(self, TokKind::TildePipeEq, 3))
+                }
+                '~' if next == '|' => toks.push(simple(self, TokKind::TildePipe, 2)),
                 '~' => toks.push(simple(self, TokKind::Tilde, 1)),
                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),
                 '&' if next == '=' => toks.push(simple(self, TokKind::AmpEq, 2)),

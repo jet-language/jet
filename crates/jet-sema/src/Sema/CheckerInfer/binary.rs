@@ -8,6 +8,21 @@ use crate::Generics::{substitute_type, COMPARABLE};
 use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
+/// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
+/// Only a spelled numeral counts. An exponent whose sign the checker cannot
+/// see keeps the whole-number result type, and the Prelude traps if the value
+/// turns out negative at run time.
+fn is_written_negative_int(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => is_written_negative_int(inner),
+        Expr::Int(value, _, _, _) => *value < 0,
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            matches!(inner.as_ref(), Expr::Int(value, _, _, _) if *value > 0)
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
     fn is_bare_integer_literal(expr: &Expr) -> bool {
         match expr {
@@ -556,6 +571,8 @@ impl<'a> Checker<'a> {
                 | BinOp::Sub
                 | BinOp::Mul
                 | BinOp::Div
+                // D-EXPSEM1=A: any Float operand makes the power a Float.
+                | BinOp::Pow
                 | BinOp::Eq
                 | BinOp::Ne
                 | BinOp::Lt
@@ -1131,6 +1148,23 @@ impl<'a> Checker<'a> {
         }
 
         match op {
+            // D-EXPSEM1=A: a whole-number base raised to a whole-number power
+            // stays exact. A written negative exponent gives a fraction, so
+            // both sides move to Float first. Any Float operand already made
+            // both sides Float in the numeric join above.
+            BinOp::Pow => {
+                if lt == rt && lt.is_integer() && is_written_negative_int(rhs) {
+                    self.widen_numeric_expr(lhs, &lt, &Type::Float);
+                    self.widen_numeric_expr(rhs, &rt, &Type::Float);
+                    return Some(Type::Float);
+                }
+                if lt == rt && lt.is_numeric() {
+                    Some(lt)
+                } else {
+                    self.op_mismatch(op, &lt, &rt, span);
+                    None
+                }
+            }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                 // D-VERDICT-1304-1: the widening join above rewrites both
                 // operands to one numeric type. Arithmetic keeps that type.

@@ -1835,6 +1835,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         "trait user_Display { fn display(&self) -> String; }\n\
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
+    out.push_str(WASM_POWER_PRELUDE);
     let need_packed_abi = |pred: &dyn Fn(&Type) -> bool| {
         wasm_funcs.iter().any(|f| {
             let export = f.marker == Some(WebPartitionMarker::WasmExport)
@@ -2619,12 +2620,22 @@ fn emit_wasm_body(
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, file_prefix, reconstructions)?)),
-            TIR::TStmt::Assign { place, op, value, .. } => {
+            TIR::TStmt::Assign { place, op, value, line, .. } => {
+                let value_ty = value.ty.clone();
                 let value = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+                // D-EXPSEM1=A: Rust has no `**=`, so `^=` reads the place, calls
+                // the shared Prelude power, and writes the result back.
+                let is_pow = *op == Some(crate::AST::BinOp::Pow);
                 match place {
                     TIR::TPlace::Local(local) if local.uninit_scalar => {
                         let place = local.rust_place();
                         match op {
+                            Some(_) if is_pow => {
+                                let read = format!("({place}).read().clone()");
+                                let powered =
+                                    wasm_pow_call(&read, &value, &value_ty, file_prefix, *line);
+                                out.push_str(&format!("{pad}{place}.write({powered});\n"));
+                            }
                             Some(op) => out.push_str(&format!(
                                 "{pad}{place}.write(({place}).read().clone() {} {value});\n",
                                 binop(op)
@@ -2639,6 +2650,12 @@ fn emit_wasm_body(
                             "{pad}{}.write_array({value});\n",
                             local.rust_place()
                         ));
+                    }
+                    _ if is_pow => {
+                        let target = wasm_tir_place(place)?;
+                        let powered =
+                            wasm_pow_call(&target, &value, &value_ty, file_prefix, *line);
+                        out.push_str(&format!("{pad}{target} = {powered};\n"));
                     }
                     _ => out.push_str(&format!(
                         "{pad}{} {}= {value};\n",
@@ -3144,6 +3161,20 @@ fn wasm_emit_expr(
                 wasm_storage_ty(ty).ok_or(())?
             ),
         },
+        // D-EXPSEM1=A: `^` calls the shared Prelude power (Prelude/Core/Power.rs),
+        // the same source the native build runs, because Rust has no power
+        // operator.
+        TIR::TExprKind::Binary {
+            op: crate::AST::BinOp::Pow,
+            lhs,
+            rhs,
+            line,
+            ..
+        } => {
+            let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
+            let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
+            wasm_pow_call(&l, &r, &expr.ty, file_prefix, *line)
+        }
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
             wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
@@ -4718,6 +4749,35 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
     funcs.iter().any(|f| f.key == name && f.marker == Some(WebPartitionMarker::WasmExport))
 }
 
+/// D-EXPOP1=A / D-EXPSEM1=A: the wasm module runs the same power source as the
+/// native Prelude. `jet_panic` is the only tier-local piece — the wasm module
+/// has no runtime reporter, so a trap is a wasm panic.
+const WASM_POWER_PRELUDE: &str = concat!(
+    "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
+    "    panic!(\"{}:{}: {}\", file, line, message)\n",
+    "}\n\n",
+    include_str!("../Prelude/Core/Power.rs"),
+    "\n"
+);
+
+/// D-EXPSEM1=A: one call shape for `^` in the wasm module — the whole-number
+/// power carries the source position so its trap can name the line; the float
+/// power needs no position because it never traps.
+fn wasm_pow_call(
+    lhs: &str,
+    rhs: &str,
+    ty: &Type,
+    file_prefix: Option<&str>,
+    line: u32,
+) -> String {
+    if matches!(ty, Type::Float | Type::Float32) {
+        format!("({lhs}).jet_pow({rhs})")
+    } else {
+        let file = file_prefix.unwrap_or_default();
+        format!("({lhs}).jet_pow(({rhs}) as i128, {file:?}, {line})")
+    }
+}
+
 fn binop(op: &crate::AST::BinOp) -> &'static str {
     use crate::AST::BinOp::*;
     match op {
@@ -4726,6 +4786,10 @@ fn binop(op: &crate::AST::BinOp) -> &'static str {
         Mul => "*",
         Div => "/",
         Rem => "%",
+        // D-EXPOP1=A: JavaScript spells the power `**`, and it is
+        // right-associative there too. The wasm Rust tier never reaches this
+        // table for `^` — it calls the shared Prelude power instead.
+        Pow => "**",
         BitAnd => "&",
         BitOr => "|",
         BitXor => "^",

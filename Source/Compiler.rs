@@ -1495,6 +1495,8 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::Pipe => "operator.alternative",
         TokKind::Caret => "operator.caret",
         TokKind::Tilde => "operator.tilde",
+        TokKind::TildePipe => "operator.tilde_pipe",
+        TokKind::TildePipeEq => "operator.tilde_pipe_assign",
         TokKind::TildeTilde => "operator.trait_attach",
         TokKind::Shl => "operator.shift_left",
         TokKind::Shr => "operator.shift_right",

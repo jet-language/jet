@@ -3200,3 +3200,27 @@ fn fmt_keeps_reordered_and_skipped_argument_labels() {
     let twice = jet::format_source(&once).expect("labelled call should re-fmt");
     assert_eq!(once, twice, "argument-label formatting must be byte-stable");
 }
+
+#[test]
+fn fmt_keeps_power_and_exclusive_or_spellings() {
+    // D-EXPOP1=A / D-XORSPELL1=A: `^` is the power, `~|` is exclusive-or, and
+    // both compounds must survive a round trip byte-for-byte (fmt STABILITY —
+    // idempotence alone would not notice a dropped sigil, because a dropped
+    // one stays dropped on the second pass).
+    let src = "fn run() {\n    a :: 2 ^ 3 ^ 2\n    b :: -3 ^ 2\n    c :: (2 ^ 3) ^ 2\n    d :: (-3) ^ 2\n    e :: 2 ^ -1\n    f :: 12 ~| 10\n    g := 2\n    g ^= 10\n    h := 12\n    h ~|= 10\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept power and exclusive-or");
+    for token in [
+        "2 ^ 3 ^ 2",
+        "-3 ^ 2",
+        "(2 ^ 3) ^ 2",
+        "(-3) ^ 2",
+        "2 ^ -1",
+        "12 ~| 10",
+        "g ^= 10",
+        "h ~|= 10",
+    ] {
+        assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("power and exclusive-or should re-fmt");
+    assert_eq!(once, twice, "power formatting must be byte-stable");
+}

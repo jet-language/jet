@@ -2261,6 +2261,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             op,
             value,
             clone_value,
+            ..
         } => {
             let compound = op.as_ref().is_none_or(|op| match &value.ty {
                 Type::Int | Type::IntN { .. } => matches!(
@@ -2275,9 +2276,14 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         | BinOp::BitXor
                         | BinOp::Shl
                         | BinOp::Shr
+                        // D-EXPSEM1=A: `^=` calls the host power.
+                        | BinOp::Pow
                 ),
                 Type::Float => {
-                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                    matches!(
+                        op,
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow
+                    )
                 }
                 _ => false,
             });

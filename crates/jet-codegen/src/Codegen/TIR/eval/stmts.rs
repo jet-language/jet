@@ -361,6 +361,7 @@ impl<'a> EvalCtx<'a> {
                 op,
                 value,
                 clone_value,
+                ..
             } => {
                 let mut rhs = self.eval_expr(value, scope)?;
                 if let Some(ret) = self.pending_return.take() {

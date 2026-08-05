@@ -5517,3 +5517,23 @@ Dropping the final pin ends the no-move loan. Unsafe construction stays inside
 a library (`#Unsafe("…") { … }` in a safe function body); callers use the safe
 `Pin<T>` API with no audited region. Spelling lives in Syntax.rs (`MEM_PIN`,
 `TYPE_PIN`). Flagship: `examples/features/memory/pin.jet`. Card #1200.
+
+**2026-08-05 — D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A**: infix `^` raises a
+number to a power, and `^=` raises in place — the spelling mathematics, MATLAB,
+Julia, R, and Excel all use. Power groups to the right (`2 ^ 3 ^ 2` is 512) and
+binds tighter than a leading minus (`-3 ^ 2` is -9), so it sits between the
+unary and postfix levels. A whole base with a non-negative whole exponent stays
+an exact whole number; a written negative exponent gives a Float; any Float
+operand makes the result a Float. An exponent whose sign the checker cannot
+read keeps the whole-number result and traps in the Prelude if it turns out
+negative. Bitwise exclusive-or gives up the caret and becomes infix `~|` with
+compound `~|=` — the exclusive variant of `|` — in the precedence slot the old
+`^` held, under the same D-SG9 same-width rule. Prefix `^` (take, D-MEM1) and
+prefix `~` (copy, D-SHAPE-COPY1) are untouched; parser position tells each from
+its infix neighbour. Semantics live in one Prelude file
+(`crates/jet-codegen/src/Prelude/Core/Power.rs`), shared verbatim by the native
+and wasm Rust tiers; the Cranelift host and the interpreter run the same rule.
+Spellings live in Syntax.rs (`OP_CARET`, `OP_CARET_EQ`, `OP_TILDE_PIPE`,
+`OP_TILDE_PIPE_EQ`). Flagships: `examples/features/math/power_operator.jet`,
+`examples/features/math/power_semantics.jet`,
+`examples/features/math/xor_operator.jet`. Cards #1428, #1429, #1430.

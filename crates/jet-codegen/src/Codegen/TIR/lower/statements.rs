@@ -1074,7 +1074,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
         }
         Stmt::Assign {
-            target, op, value, ..
+            target,
+            op,
+            op_span,
+            value,
         } => match target {
             LValue::Local { name, .. } => {
                 // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
@@ -1089,6 +1092,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     op: *op,
                     value: lower_expr(value, cx, env),
                     clone_value,
+                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
                 }
             }
             // c109 Phase 5: `coll[i] = v`. The `IndexKind` is resolved by sema; carry
@@ -1142,6 +1146,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         op: *op,
                         value: value_t,
                         clone_value: false,
+                        line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
                     };
                 }
                 TStmt::IndexAssign {
@@ -1288,6 +1293,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         op: *op,
                         value: lower_expr(value, cx, env),
                         clone_value,
+                        line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
                     };
                 }
                 let field_expr = Expr::Field(base.clone(), field.clone(), *span);
@@ -1304,6 +1310,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     op: *op,
                     value: lower_expr(value, cx, env),
                     clone_value,
+                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
                 }
             }
         },
