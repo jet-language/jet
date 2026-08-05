@@ -4135,6 +4135,12 @@ impl<'a> Checker<'a> {
             if let Some(args) = applied_args {
                 self.instantiate_method_sig(&type_name, &mut msig, args);
             }
+            // D-APILABEL1=A: bind before inference — see `bind_method_args`.
+            if !self.bind_method_args(method, &msig, args, span) {
+                let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
+                *resolved_ret_out = ret.clone();
+                return ret;
+            }
             let mut call_access = self.call_access_frame();
             let pre_inferred_method = self.instantiate_method_type_args(
                 &type_name,

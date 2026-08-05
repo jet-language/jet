@@ -74,6 +74,11 @@ pub(crate) struct MethodSig {
     /// D-APILABEL1=A: public call label and zone, parallel to `param_info`
     /// (so it also excludes `self`).
     pub(crate) param_call: Vec<(String, crate::AST::ParamZone)>,
+    /// D-VARIADIC1: parallel to `param_info` — true when that parameter is a
+    /// rest parameter. The binder needs it to know the parameter may be left
+    /// unbound; without it a labelled call to a variadic method reports a
+    /// missing argument that is not missing.
+    pub(crate) param_variadic: Vec<bool>,
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
@@ -494,6 +499,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .clone()
             .map(|p| (p.call_label().to_string(), p.zone))
             .collect(),
+        param_variadic: non_self_params.clone().map(|p| p.variadic).collect(),
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),

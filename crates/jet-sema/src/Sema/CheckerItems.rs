@@ -340,6 +340,9 @@ impl<'a> Checker<'a> {
             }
         }
         Self::instantiate_method_sig_from(&mut msig, &declared, owner_type_args);
+        if !self.bind_method_args(method, &msig, args, span) {
+            return msig.return_type.clone();
+        }
         let pre_inferred_method = self.instantiate_method_type_args(
             type_name,
             method,
@@ -510,6 +513,66 @@ impl<'a> Checker<'a> {
         Some(pre_inferred)
     }
 
+    /// D-APILABEL1=A: methods bind through the same one binder as free calls —
+    /// labels bind by name, zones decide whether a label is forbidden or
+    /// required, and skipped defaults are filled here.
+    ///
+    /// This runs **before** type-argument inference, not inside
+    /// `check_method_args`. Inference walks the argument list positionally and
+    /// hands back a `pre_inferred` vector indexed by position, so binding
+    /// afterwards would leave that vector describing the source order while
+    /// every later read assumed declaration order — which rejected correct
+    /// generic calls such as `s.put(value: 3, key: "k")`.
+    ///
+    /// Returns false when nothing could be bound and a diagnostic was reported.
+    pub(crate) fn bind_method_args(
+        &mut self,
+        method: &str,
+        sig: &MethodSig,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) -> bool {
+        if sig.param_info.is_empty() {
+            return true;
+        }
+        // `params` is self-first when there is a receiver; `param_info` already
+        // excludes it, so the conventions line up after the skip.
+        let self_offset = usize::from(sig.self_conv.is_some());
+        let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..sig.param_info.len())
+            .map(|index| crate::Sema::CallBinder::BindParam {
+                label: sig
+                    .param_call
+                    .get(index)
+                    .map(|(label, _)| label.as_str())
+                    .unwrap_or(sig.param_info[index].0.as_str()),
+                name: sig.param_info[index].0.as_str(),
+                zone: sig
+                    .param_call
+                    .get(index)
+                    .map(|(_, zone)| *zone)
+                    .unwrap_or(crate::AST::ParamZone::Either),
+                default: sig.defaults.get(index).and_then(|d| d.as_ref()),
+                convention: sig
+                    .params
+                    .get(index + self_offset)
+                    .map(|(convention, _)| *convention)
+                    .unwrap_or(crate::AST::AccessConvention::Read),
+                variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
+            })
+            .collect();
+        let bound =
+            crate::Sema::CallBinder::bind_call_args(method, &params, args, span, &mut self.diags);
+        if bound.is_none() {
+            // Nothing bound, so every later check would be about slots that do
+            // not exist. Report each argument's own problems only.
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn check_method_args(
         &mut self,
         type_name: &str,
@@ -528,52 +591,6 @@ impl<'a> Checker<'a> {
             sig.params.len()
         };
 
-        // D-APILABEL1=A: methods bind through the same one binder as free
-        // calls — labels bind by name, zones decide whether a label is
-        // forbidden or required, and skipped defaults are filled here.
-        let mut binding = None;
-        if !sig.param_info.is_empty() {
-            // `params` is self-first when there is a receiver; `param_info`
-            // already excludes it, so the conventions line up after the skip.
-            let self_offset = usize::from(sig.self_conv.is_some());
-            let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..sig
-                .param_info
-                .len())
-                .map(|index| crate::Sema::CallBinder::BindParam {
-                    label: sig
-                        .param_call
-                        .get(index)
-                        .map(|(label, _)| label.as_str())
-                        .unwrap_or(sig.param_info[index].0.as_str()),
-                    name: sig.param_info[index].0.as_str(),
-                    zone: sig
-                        .param_call
-                        .get(index)
-                        .map(|(_, zone)| *zone)
-                        .unwrap_or(crate::AST::ParamZone::Either),
-                    default: sig.defaults.get(index).and_then(|d| d.as_ref()),
-                    convention: sig
-                        .params
-                        .get(index + self_offset)
-                        .map(|(convention, _)| *convention)
-                        .unwrap_or(crate::AST::AccessConvention::Read),
-                    variadic: false,
-                })
-                .collect();
-            binding = crate::Sema::CallBinder::bind_call_args(
-                method, &params, args, span, &mut self.diags,
-            );
-            if binding.is_none() {
-                // Nothing bound, so the checks below would all be about slots
-                // that do not exist. Report each argument's own problems only.
-                for arg in args.iter_mut() {
-                    self.infer(&mut arg.expr);
-                }
-                return sig.return_type.clone();
-            }
-        }
-        let _ = &binding;
-
         let mut call_access = call_access.unwrap_or_else(|| self.call_access_frame());
         if let (Some(receiver), Some(convention)) = (receiver, sig.self_conv) {
             self.with_call_access(&mut call_access, |checker| {
@@ -585,13 +602,23 @@ impl<'a> Checker<'a> {
             });
         }
 
-        if args.len() != expected_args {
+        // D-VARIADIC1: a rest parameter collects the trailing arguments, so it
+        // may receive none at all and may receive many. Its slot is the last
+        // one, and everything before it is still exact.
+        let variadic_tail = sig.param_variadic.last().copied().unwrap_or(false);
+        let arity_ok = if variadic_tail {
+            args.len() + 1 >= expected_args
+        } else {
+            args.len() == expected_args
+        };
+        if !arity_ok {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`{}` expects {} argument{}, got {}",
+                    "`{}` expects {} {}argument{}, got {}",
                     method,
-                    expected_args,
+                    expected_args.saturating_sub(usize::from(variadic_tail)),
+                    if variadic_tail { "or more " } else { "" },
                     if expected_args == 1 { "" } else { "s" },
                     args.len()
                 ),
