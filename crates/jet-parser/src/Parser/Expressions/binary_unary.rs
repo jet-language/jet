@@ -516,8 +516,11 @@ impl<'a> Parser<'a> {
                 }
                 // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
                 // A leading `.` immediately followed by `{` is unambiguous — it is not
-                // valid as a field access (no receiver) or any other production.
-                TokKind::Dot if allow_struct_lit && matches!(self.peek2().kind, TokKind::LBrace) => {
+                // valid as a field access (no receiver) or any other production — so it
+                // is accepted even where `allow_struct_lit` is false: that restriction
+                // exists for the dotless `Type {` / block ambiguity, which has no
+                // leading-dot counterpart (card #1441).
+                TokKind::Dot if matches!(self.peek2().kind, TokKind::LBrace) => {
                     let dot_start = self.bump().span.start; // consume `.`
                     self.struct_lit_inferred(dot_start)
                 }
