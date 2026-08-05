@@ -378,3 +378,4 @@ fn jet_process_stream_next_line<R: std::io::Read>(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
 ) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
+}
